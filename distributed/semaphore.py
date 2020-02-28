@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function
-
 import uuid
 from collections import defaultdict, deque
 from functools import partial
@@ -15,7 +13,7 @@ from toolz.dicttoolz import valmap
 from .metrics import time
 
 
-class _Watch(object):
+class _Watch:
     def __init__(self, duration=None):
         self.duration = duration
         self.started_at = None
@@ -31,7 +29,7 @@ class _Watch(object):
             return max(0, self.duration - elapsed)
 
 
-class SemaphoreExtension(object):
+class SemaphoreExtension:
     """ An extension for the scheduler to manage Semaphores
 
     This adds the following routes to the scheduler
@@ -81,13 +79,14 @@ class SemaphoreExtension(object):
 
     async def _get_lease(self, client, name, identifier):
         # We should make sure that the client is already properly registered with the scheduler
-        # otherwise the lease validation will mop up every acquired lease immediately
+        # otherwise the lease validation will mop up every acquired lease immediately. That's mostly relevant for tests
         while client not in self.scheduler.clients:
-            print("wait")
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0)
 
         result = True
         if len(self.leases[name]) < self.max_leases[name]:
+            # naive: self.leases[resource] += 1
+            # not naive:
             self.leases[name].append(identifier)
             self.leases_per_client[client][name].append(identifier)
         else:
@@ -108,6 +107,7 @@ class SemaphoreExtension(object):
                 # is changed and helps to identify when it is worth to retry an acquire
                 self.events[name].clear()
 
+                # If we hit the timeout, this cancels the _get_lease
                 future = asyncio.wait_for(
                     self._get_lease(client, name, identifier), timeout=w.leftover()
                 )
@@ -158,25 +158,26 @@ class SemaphoreExtension(object):
     async def _validate_leases(self):
         if not self._validation_running:
             self._validation_running = True
-            known_clients = set(self.leases_per_client.keys())
+            known_clients_with_leases = set(self.leases_per_client.keys())
             scheduler_clients = set(self.scheduler.clients.keys())
-            for client in known_clients - scheduler_clients:
+            for dead_client in known_clients_with_leases - scheduler_clients:
                 client_has_leases = sum(
-                    valmap(len, self.leases_per_client[client]).values()
+                    valmap(len, self.leases_per_client[dead_client]).values()
                 )
                 if client_has_leases:
-                    self._release_client(client)
+                    self._release_client(dead_client)
             else:
                 self._validation_running = False
 
 
-class Semaphore(object):
+class Semaphore:
     def __init__(self, max_leases=1, name=None, client=None):
         self.client = client or _get_global_client() or get_worker().client
         self.id = uuid.uuid4().hex
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
 
+        # TODO: Good idea to create the resource in the init?
         if self.client.asynchronous:
             self._started = self.client.scheduler.semaphore_create(
                 name=self.name, max_leases=max_leases

@@ -1,28 +1,30 @@
-from __future__ import absolute_import, division, print_function
-
 import pickle
 from time import sleep
 
-import dask
-from distributed import Semaphore, get_client
+from distributed import Client, Semaphore, get_client
 from distributed.metrics import time
-from distributed.utils_test import cluster_fixture, client, gen_cluster, loop  # noqa F401
-from distributed import Client
+from distributed.utils_test import (
+    cluster,  # noqa F401
+    gen_cluster,
+)
+
+import dask
+from dask.distributed import Client
 
 
 @gen_cluster(client=True)
 async def test_semaphore(c, s, a, b):
-    semaphore = await Semaphore(max_leases=2, name="x")
+    semaphore = await Semaphore(max_leases=2, name="exasol_db")
 
-    result = await semaphore.acquire()
+    result = await semaphore.acquire()  # allowed_leases: 2 - 1 -> 1
     assert result is True
 
-    second = await semaphore.acquire()
+    second = await semaphore.acquire()  # allowed_leases: 1 - 1 -> 0
     assert second is True
     start = time()
-    result = await semaphore.acquire(timeout=0.1)
+    result = await semaphore.acquire(timeout=0.1)  # allowed_leases: 0 -> False
     stop = time()
-    assert stop - start < 0.3
+    assert stop - start < 0.2
     assert result is False
 
 
@@ -53,7 +55,6 @@ async def test_serializable(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_release_simple(c, s, a, b):
-
     def f(x, semaphore=None):
         with semaphore:
             assert semaphore.name == "x"
@@ -87,7 +88,6 @@ def test_timeout_sync(client):
 
 
 def test_lock_name_only(client):
-
     def f(x):
         with Semaphore(name="x"):
             client = get_client()
@@ -104,9 +104,9 @@ def test_lock_name_only(client):
 
 @gen_cluster(client=True)
 async def test_release_semaphore_after_timeout(c, s, a, b):
-    with dask.config.set({
-        "distributed.scheduler.locks.lease-validation-interval": "100ms"
-    }):
+    with dask.config.set(
+        {"distributed.scheduler.locks.lease-validation-interval": "100ms"}
+    ):
         sem = await Semaphore(name="x", max_leases=2)
         await sem.acquire()
         semY = Semaphore(name="y")
@@ -115,16 +115,16 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
             semB = await Semaphore(name="x", max_leases=2, client=clientB)
             semYB = await Semaphore(name="y", client=clientB)
 
-            assert (await semB.acquire())
-            assert (await semYB.acquire())
+            assert await semB.acquire()
+            assert await semYB.acquire()
 
             assert not (await sem.acquire(timeout=0))
             assert not (await semB.acquire(timeout=0))
             assert not (await semYB.acquire(timeout=0))
 
         # At this point, we should be able to acquire x and y once
-        assert (await sem.acquire())
-        assert (await semY.acquire())
+        assert await sem.acquire()
+        assert await semY.acquire()
 
         assert not (await semY.acquire(timeout=0))
         assert not (await sem.acquire(timeout=0))
@@ -136,3 +136,33 @@ async def test_async_ctx(s, a, b):
     async with sem:
         assert not await sem.acquire(timeout=0.001)
     assert await sem.acquire()
+
+
+def test_worker_dies():
+    with dask.config.set(
+        {"distributed.scheduler.locks.lease-validation-interval": 1000}
+    ):
+        with cluster() as (scheduler, workers):
+            with Client(scheduler["address"]) as client:
+                sem = Semaphore(name="x", max_leases=1)
+
+                def f(x, sem, kill_address):
+                    with sem:
+                        from distributed.worker import get_worker
+
+                        worker = get_worker()
+                        if worker.address == kill_address:
+                            import os
+
+                            os.kill(os.getpid(), 15)
+                        return x
+
+                futures = client.map(
+                    f, range(100), sem=sem, kill_address=workers[0]["address"]
+                )
+                results = client.gather(futures)
+
+                import ipdb
+
+                ipdb.set_trace()
+                assert sorted(results) == list(range(100))
