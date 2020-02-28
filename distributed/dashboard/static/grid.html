@@ -1,0 +1,149 @@
+<html>
+  <head>
+    <title>Dask: Grid Layout</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/gridstack@1.0.0/dist/gridstack.min.css"
+    />
+    <link rel="stylesheet" href="css/grid.css" />
+    <link rel="stylesheet" href="../statics/css/base.css" />
+  </head>
+
+  <body>
+    <div class="navbar" id="myTopnav">
+      <ul>
+        <li id="dask-logo">
+          <a href="https://dask.org/">
+            <img src="../statics/images/dask-logo.svg" />
+          </a>
+        </li>
+
+        <li>
+          <a href="../status">Status</a>
+        </li>
+
+        <li>
+          <a href="../workers">Workers</a>
+        </li>
+
+        <li>
+          <a href="../tasks">Tasks</a>
+        </li>
+
+        <li>
+          <a href="../system">System</a>
+        </li>
+
+        <li>
+          <a href="../profile">Profile</a>
+        </li>
+
+        <li>
+          <a href="../graph">Graph</a>
+        </li>
+
+        <li>
+          <a href="../info">Info</a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="grid-stack"></div>
+
+    <div id="add-plot">+</div>
+
+    <div id="plot-menu"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gridstack@1.0.0/dist/gridstack.all.js"></script>
+    <script type="text/javascript">
+      var grid = GridStack.init({ verticalMargin: 0 });
+      grid.enable();
+      var plots;
+
+      fetch("../individual-plots.json")
+        .then(response => {
+          return response.json();
+        })
+        .then(data => {
+          console.log(data);
+          plots = data;
+          plotNames = Object.keys(plots);
+          let menu = document.getElementById("plot-menu");
+          for (i = 0; i < plotNames.length; i++) {
+            console.log("Appending");
+            var newPlot = document.createElement("span");
+            newPlot.setAttribute("class", "plot-menu-item");
+            var newContent = document.createTextNode(
+              plotNames[i].replace("Individual ", "")
+            );
+            newPlot.appendChild(newContent);
+            menu.appendChild(newPlot);
+          }
+        });
+
+      function addWidget() {
+        let plot = randomProperty(plots);
+        var newWidget = document.createElement("div");
+        var newTab = document.createElement("div");
+        var newClose = document.createElement("div");
+        newTab.setAttribute("class", "tab grid-stack-item-content");
+        var newContent = document.createTextNode(
+          plot.replace("Individual ", "")
+        );
+        var newIframe = document.createElement("iframe");
+        newIframe.setAttribute("src", plots[plot]);
+        newIframe.setAttribute("class", "plot");
+        newTab.appendChild(newContent);
+        newWidget.appendChild(newTab);
+        newWidget.appendChild(newIframe);
+        let w = grid.addWidget(newWidget, 0, 0, 6, 5, true);
+        grid.movable(w, true);
+      }
+
+      function hide_plots() {
+        var x = document.getElementsByClassName("plot");
+        var i;
+        for (i = 0; i < x.length; i++) {
+          x[i].style.display = "none";
+        }
+      }
+
+      function show_plots(element) {
+        var x = document.getElementsByClassName("plot");
+        var i;
+        for (i = 0; i < x.length; i++) {
+          x[i].style.display = "block";
+          element.getElementsByTagName("IFRAME")[0].src += ""; // Reload iframe after resize in case plot doesn't handle dynamic resize
+        }
+      }
+
+      grid.on("resizestart", function(event, ui) {
+        hide_plots();
+      });
+
+      grid.on("gsresizestop", function(event, element) {
+        show_plots(element);
+      });
+
+      grid.on("dragstart", function(event, ui) {
+        hide_plots();
+      });
+
+      grid.on("dragstop", function(event, ui) {
+        show_plots(event.target);
+      });
+
+      var randomProperty = function(obj) {
+        var keys = Object.keys(obj);
+        return keys[(keys.length * Math.random()) << 0];
+      };
+
+      document.getElementById("add-plot").addEventListener("click", addWidget);
+    </script>
+  </body>
+</html>
