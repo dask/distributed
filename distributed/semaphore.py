@@ -56,8 +56,12 @@ class SemaphoreExtension:
         self.scheduler.extensions["semaphores"] = self
         self.pc_validate_leases = PeriodicCallback(
             self._validate_leases,
-            parse_timedelta(
-                dask.config.get("distributed.scheduler.locks.lease-validation-interval")
+            1000
+            * parse_timedelta(
+                dask.config.get(
+                    "distributed.scheduler.locks.lease-validation-interval"
+                ),
+                default="s",
             ),
             io_loop=self.scheduler.loop,
         )
