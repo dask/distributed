@@ -68,9 +68,8 @@ class SemaphoreExtension:
         self.pc_validate_leases.start()
         self._validation_running = False
 
-    async def create(
-        self, stream=None, name=None, client=None, timeout=None, max_leases=None
-    ):
+    # `comm` here is required by the handler interface
+    async def create(self, comm=None, name=None, max_leases=None):
         if name not in self.leases:
             assert isinstance(max_leases, int), max_leases
             self.max_leases[name] = max_leases
@@ -98,7 +97,7 @@ class SemaphoreExtension:
         return result
 
     async def acquire(
-        self, stream=None, name=None, client=None, timeout=None, identifier=None
+        self, comm=None, name=None, client=None, timeout=None, identifier=None
     ):
         with log_errors():
             if isinstance(name, list):
@@ -134,7 +133,7 @@ class SemaphoreExtension:
                         result = False
                 return result
 
-    async def release(self, stream=None, name=None, client=None, identifier=None):
+    async def release(self, comm=None, name=None, client=None, identifier=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)

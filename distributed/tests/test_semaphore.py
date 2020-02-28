@@ -19,7 +19,7 @@ async def test_semaphore(c, s, a, b):
     second = await semaphore.acquire()  # allowed_leases: 1 - 1 -> 0
     assert second is True
     start = time()
-    result = await semaphore.acquire(timeout=0.1)  # allowed_leases: 0 -> False
+    result = await semaphore.acquire(timeout=0.025)  # allowed_leases: 0 -> False
     stop = time()
     assert stop - start < 0.2
     assert result is False
@@ -42,17 +42,17 @@ async def test_serializable(c, s, a, b):
     assert res
 
     # Ensure that both objects access the same semaphore
-    res = await sem.acquire(timeout=0)
+    res = await sem.acquire(timeout=0.025)
 
     assert not res
-    res = await sem2.acquire(timeout=0)
+    res = await sem2.acquire(timeout=0.025)
 
     assert not res
 
 
 @gen_cluster(client=True)
 async def test_release_simple(c, s, a, b):
-    def f(x, semaphore=None):
+    def f(x, semaphore):
         with semaphore:
             assert semaphore.name == "x"
             return x + 1
@@ -63,19 +63,12 @@ async def test_release_simple(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_acquires_with_zero_timeout(c, s, a, b):
+async def test_acquires_with_timeout(c, s, a, b):
     sem = await Semaphore(1, "x")
-
-    assert await sem.acquire(timeout=0)
-
-    assert not await sem.acquire(timeout=0)
-
+    assert await sem.acquire(timeout=0.025)
+    assert not await sem.acquire(timeout=0.025)
     await sem.release()
-
-    assert await sem.acquire(timeout=1)
-    await sem.release()
-
-    assert await sem.acquire(timeout=1)
+    assert await sem.acquire(timeout=0.025)
     await sem.release()
 
 
@@ -83,8 +76,9 @@ def test_timeout_sync():
     with cluster() as (scheduler, workers):
         with Client(scheduler["address"]):
             s = Semaphore(name="x")
+            # Using the context manager already acquires a lease, so the line below won't be able to acquire another one
             with s:
-                assert s.acquire(timeout=0.05) is False
+                assert s.acquire(timeout=0.025) is False
 
 
 def test_lock_name_only():
@@ -100,44 +94,41 @@ def test_lock_name_only():
                     assert client.get_metadata("locked") is True
                     client.set_metadata("locked", False)
 
-            client.set_metadata("locked", False)
-            futures = client.map(f, range(10))
-            client.gather(futures)
 
-
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=20)
 async def test_release_semaphore_after_timeout(c, s, a, b):
     with dask.config.set(
         {"distributed.scheduler.locks.lease-validation-interval": "100ms"}
     ):
         sem = await Semaphore(name="x", max_leases=2)
-        await sem.acquire()
+        await sem.acquire()  # leases: 2 - 1 = 1
         semY = Semaphore(name="y")
 
         async with Client(s.address, asynchronous=True, name="ClientB") as clientB:
             semB = await Semaphore(name="x", max_leases=2, client=clientB)
             semYB = await Semaphore(name="y", client=clientB)
 
-            assert await semB.acquire()
+            assert await semB.acquire()  # leases: 1 - 1 = 0
             assert await semYB.acquire()
 
-            assert not (await sem.acquire(timeout=0))
-            assert not (await semB.acquire(timeout=0))
-            assert not (await semYB.acquire(timeout=0))
+            assert not (await sem.acquire(timeout=0.01))
+            assert not (await semB.acquire(timeout=0.01))
+            assert not (await semYB.acquire(timeout=0.01))
 
+        # `ClientB` goes out of scope, leases should be released
         # At this point, we should be able to acquire x and y once
         assert await sem.acquire()
         assert await semY.acquire()
 
-        assert not (await semY.acquire(timeout=0))
-        assert not (await sem.acquire(timeout=0))
+        assert not (await semY.acquire(timeout=0.01))
+        assert not (await sem.acquire(timeout=0.01))
 
 
 @gen_cluster()
 async def test_async_ctx(s, a, b):
     sem = await Semaphore(name="x")
     async with sem:
-        assert not await sem.acquire(timeout=0.001)
+        assert not await sem.acquire(timeout=0.025)
     assert await sem.acquire()
 
 
