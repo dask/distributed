@@ -609,7 +609,9 @@ class ObjectDictSerializer:
         return obj
 
 
-dask_deserialize.register(dict)(deserialize_object_with_dict)
+dask_object_with_dict_serializer = ObjectDictSerializer("dask")
+
+dask_deserialize.register(dict)(dask_object_with_dict_serializer.deserialize)
 
 
 def register_generic(cls):
@@ -644,5 +646,5 @@ def register_generic(cls):
     dask_serialize
     dask_deserialize
     """
-    dask_serialize.register(cls)(serialize_object_with_dict)
-    dask_deserialize.register(cls)(deserialize_object_with_dict)
+    dask_serialize.register(cls)(dask_object_with_dict_serializer.serialize)
+    dask_deserialize.register(cls)(dask_object_with_dict_serializer.deserialize)
