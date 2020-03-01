@@ -409,6 +409,7 @@ def test_local_directory(s):
             w = yield Nanny(s.address)
             assert w.local_directory.startswith(fn)
             assert "dask-worker-space" in w.local_directory
+            yield w.close()
 
 
 def _noop(x):
