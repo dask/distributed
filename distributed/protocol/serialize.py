@@ -614,8 +614,13 @@ dask_object_with_dict_serializer = ObjectDictSerializer("dask")
 dask_deserialize.register(dict)(dask_object_with_dict_serializer.deserialize)
 
 
-def register_generic(cls):
-    """ Register dask_(de)serialize to traverse through __dict__
+def register_generic(
+    cls,
+    serializer_name="dask",
+    serialize_func=dask_serialize,
+    deserialize_func=dask_deserialize,
+):
+    """ Register (de)serialize to traverse through __dict__
 
     Normally when registering new classes for Dask's custom serialization you
     need to manage headers and frames, which can be tedious.  If all you want
@@ -646,5 +651,6 @@ def register_generic(cls):
     dask_serialize
     dask_deserialize
     """
-    dask_serialize.register(cls)(dask_object_with_dict_serializer.serialize)
-    dask_deserialize.register(cls)(dask_object_with_dict_serializer.deserialize)
+    object_with_dict_serializer = ObjectDictSerializer(serializer_name)
+    serialize_func.register(cls)(object_with_dict_serializer.serialize)
+    deserialize_func.register(cls)(object_with_dict_serializer.deserialize)
