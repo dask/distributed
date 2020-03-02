@@ -385,6 +385,10 @@ def _scrub_ucx_config():
         net_devices = dask.config.get("ucx.net-devices")
         if net_devices is not None and net_devices != "":
             options["NET_DEVICES"] = net_devices
+    else:
+        raise ValueError(
+            "UCX Dask config not set.  Please define at least one: ucx.tcp, ucx.nvlink, ucx.infiniband"
+        )
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
     valid_ucx_keys = list(get_config().keys())
