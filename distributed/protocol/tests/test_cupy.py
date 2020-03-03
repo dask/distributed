@@ -1,6 +1,7 @@
-from distributed.protocol import serialize, deserialize
 import pickle
+
 import pytest
+from distributed.protocol import deserialize, serialize
 
 cupy = pytest.importorskip("cupy")
 numpy = pytest.importorskip("numpy")
