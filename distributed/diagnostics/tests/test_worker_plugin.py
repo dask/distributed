@@ -91,3 +91,14 @@ async def test_empty_plugin(c, s, w):
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_plugin_with_name_in_register(c, s, w):
+    plugin = MyPlugin(123)
+    await c.register_worker_plugin(plugin, "plugin_name")
+    assert plugin.name == "MyPlugin"
+
+    plugin = WorkerPlugin()
+    await c.register_worker_plugin(plugin, "plugin_name")
+    assert plugin.name == "plugin_name"
