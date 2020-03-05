@@ -81,7 +81,16 @@ def test_serialize_cupy_sparse(sparse_name, dtype, serializer):
 
     a_host = numpy.array([[0, 1, 0], [2, 0, 3], [0, 4, 0]], dtype=dtype)
     asp_host = scipy_sparse_type(a_host)
-    asp_dev = cupy_sparse_type(asp_host)
+    if sparse_name == "dia_matrix":
+        # CuPy `dia_matrix` cannot be created from SciPy one
+        # xref: https://github.com/cupy/cupy/issues/3158
+        asp_dev = cupy_sparse_type(
+            (asp_host.data, asp_host.offsets),
+            shape=asp_host.shape,
+            dtype=asp_host.dtype,
+        )
+    else:
+        asp_dev = cupy_sparse_type(asp_host)
 
     header, frames = serialize(asp_dev, serializers=[serializer])
     a2sp_dev = deserialize(header, frames)
