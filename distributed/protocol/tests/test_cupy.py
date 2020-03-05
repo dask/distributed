@@ -73,7 +73,7 @@ def test_serialize_cupy_from_rmm(size):
     "dtype", [numpy.dtype("<f4"), numpy.dtype("<f8"),],
 )
 @pytest.mark.parametrize("serializer", ["cuda", "dask",])
-def test_serialize_cupy_sparse_diag(sparse_type, dtype, serializer):
+def test_serialize_cupy_sparse_dia(sparse_type, dtype, serializer):
     data = numpy.array([[0, 1, 2], [3, 4, 5]], dtype)
     offsets = numpy.array([0, -1], "i")
     shape = (3, 4)
@@ -90,76 +90,27 @@ def test_serialize_cupy_sparse_diag(sparse_type, dtype, serializer):
     assert (a_host == a2_host).all()
 
 
-@pytest.mark.skip(reason="malloc_consolidate()")
 @pytest.mark.parametrize(
-    "sparse_type", [cupy_sparse.csr_matrix,],
+    "sparse_type",
+    [cupy_sparse.csr_matrix, cupy_sparse.csc_matrix, cupy_sparse.coo_matrix,],
 )
 @pytest.mark.parametrize(
     "dtype", [numpy.dtype("<f4"), numpy.dtype("<f8")],
 )
 @pytest.mark.parametrize("serializer", ["cuda", "dask",])
-def test_serialize_cupy_sparse_csr(sparse_type, dtype, serializer):
-    a_host = numpy.array([[0, 1, 0], [2, 0, 3], [0, 4, 0]], dtype=dtype)
-    a = cupy.asarray(a_host)
+def test_serialize_cupy_sparse(sparse_type, dtype, serializer):
+    data = cupy.array([0, 1, 2, 3], dtype)
+    indices = cupy.array([0, 1, 3, 2], "i")
+    indptr = cupy.array([0, 2, 3, 4], "i")
 
-    anz = a.nonzero()
-    acoo = cupy_sparse.coo_matrix((a[anz], anz))
-    asp = sparse_type(acoo)
-
-    header, frames = serialize(asp, serializers=[serializer])
-    asp2 = deserialize(header, frames)
-
-    a2 = asp2.todense()
-    a2_host = cupy.asnumpy(a2)
-
-    assert (a_host == a2_host).all()
-
-
-@pytest.mark.skip(reason="malloc_consolidate()")
-@pytest.mark.parametrize(
-    "sparse_type", [cupy_sparse.csc_matrix,],
-)
-@pytest.mark.parametrize(
-    "dtype", [numpy.dtype("<f4"), numpy.dtype("<f8"),],
-)
-@pytest.mark.parametrize("serializer", ["cuda", "dask",])
-def test_serialize_cupy_sparse_csc(sparse_type, dtype, serializer):
-    a_host = numpy.array([[0, 1, 0], [2, 0, 3], [0, 4, 0]], dtype=dtype)
-    a = cupy.asarray(a_host)
-
-    anz = a.nonzero()
-    acoo = cupy_sparse.coo_matrix((a[anz], anz))
-    asp = sparse_type(acoo)
+    if sparse_type is cupy_sparse.coo_matrix:
+        asp = sparse_type((data, (indices, indptr)))
+    else:
+        asp = sparse_type((data, indices, indptr))
 
     header, frames = serialize(asp, serializers=[serializer])
     asp2 = deserialize(header, frames)
 
-    a2 = asp2.todense()
-    a2_host = cupy.asnumpy(a2)
-
-    assert (a_host == a2_host).all()
-
-
-@pytest.mark.skip(reason="malloc_consolidate()")
-@pytest.mark.parametrize(
-    "sparse_type", [cupy_sparse.coo_matrix,],
-)
-@pytest.mark.parametrize(
-    "dtype", [numpy.dtype("<f4"), numpy.dtype("<f8"),],
-)
-@pytest.mark.parametrize("serializer", ["cuda", "dask",])
-def test_serialize_cupy_sparse_coo(sparse_type, dtype, serializer):
-    a_host = numpy.array([[0, 1, 0], [2, 0, 3], [0, 4, 0]], dtype=dtype)
-    a = cupy.asarray(a_host)
-
-    anz = a.nonzero()
-    acoo = cupy_sparse.coo_matrix((a[anz], anz))
-    asp = sparse_type(acoo)
-
-    header, frames = serialize(asp, serializers=[serializer])
-    asp2 = deserialize(header, frames)
-
-    a2 = asp2.todense()
-    a2_host = cupy.asnumpy(a2)
-
-    assert (a_host == a2_host).all()
+    for k in asp.__dict__.keys():
+        if isinstance(asp.__dict__[k], cupy.ndarray):
+            cupy.testing.assert_array_equal(asp.__dict__[k], asp2.__dict__[k])
