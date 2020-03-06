@@ -833,9 +833,9 @@ class ConnectionPool:
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
         self.timeout = timeout
+        self._n_connecting = 0
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
-        self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
