@@ -81,7 +81,7 @@ from distributed.cli.utils import check_python_3
     "--local-directory",
     default=None,
     type=click.Path(exists=True),
-    help="Directory to place workers and scheduler files.",
+    help="Directory to use on to all cluster nodes to place workers and scheduler files.",
 )
 @click.option(
     "--remote-python", default=None, type=str, help="Path to Python on remote nodes."
