@@ -75,6 +75,9 @@ each task will run in a separate process:
    futures = [client.submit(non_thread_safe_function, arg,
                             resources={'process': 1}) for arg in args]
 
+Note that tasks without the `process` resource may run simultaneously on the
+2nd thread of each worker, and so would be in competition with the non
+thread-safe task.
 
 Resources are Abstract
 ----------------------
