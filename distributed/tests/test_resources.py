@@ -393,3 +393,15 @@ def test_collections_get(client, optimize_graph, s, a, b):
     logs = client.run(g)
     assert logs[a["address"]]
     assert not logs[b["address"]]
+
+
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}}),],
+)
+def test_resources_do_not_block_all_threads(c, s, a):
+    constrained = c.submit(slowinc, 1, delay=0.2, resources={"A": 1})
+    unconstrained = c.submit(inc, 2)
+
+    # Fast, unconstrained work finished while slower, constrained is processing.
+    yield wait(unconstrained)
+    assert s.get_task_status(keys=[constrained.key]) == {constrained.key: "processing"}
