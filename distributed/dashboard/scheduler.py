@@ -292,7 +292,7 @@ class _PrometheusCollector:
         suspicious_tasks = CounterMetricFamily(
             "dask_scheduler_tasks_suspicious",
             "Total number of times a task has been marked suspicious",
-            labels=["name"],
+            labels=["task_name"],
         )
 
         suspicious_by_prefix = {
