@@ -78,7 +78,7 @@ distributed:
     interval: 1s         # Interval between scaling evaluations
     target-duration: 5s  # Time an entire graph calculation is desired to take ("1m", "30m")
     minimum: 0           # Minimum number of workers
-    maximum: 100000      # Maximum number of workers
+    maximum: .inf        # Maximum number of workers
     wait-count: 3        # Number of times a worker should be suggested for removal before removing it
 
   comm:
