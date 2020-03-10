@@ -709,6 +709,14 @@ class Client(Node):
             "erred": self._handle_task_erred,
         }
 
+        super(Client, self).__init__(
+            connection_args=self.connection_args,
+            io_loop=self.loop,
+            serializers=serializers,
+            deserializers=deserializers,
+            timeout=timeout,
+        )
+
         for ext in extensions:
             ext(self)
 
@@ -918,16 +926,7 @@ class Client(Node):
 
     async def _start(self, timeout=no_default, **kwargs):
 
-        # This __init__ needs to be called here instead of in Client.__init__
-        # so that the resulting ConnectionPool.semaphore created attaches to
-        # the Client's event loop
-        super(Client, self).__init__(
-            connection_args=self.connection_args,
-            io_loop=self.loop,
-            serializers=self._serializers,
-            deserializers=self._deserializers,
-            timeout=timeout,
-        )
+        await super().start()
 
         if timeout == no_default:
             timeout = self._timeout

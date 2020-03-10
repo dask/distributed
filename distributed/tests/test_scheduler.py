@@ -1877,6 +1877,7 @@ async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     s.rpc = FlakyConnectionPool(failing_connections=1)
+    await s.rpc.start()
     with mock.patch("distributed.utils_comm.retry_count", 1):
         res = await s.gather(keys=["x"])
     assert res["status"] == "OK"
@@ -1888,6 +1889,7 @@ async def test_gather_failing_cnn_error(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     s.rpc = FlakyConnectionPool(failing_connections=10)
+    await s.rpc.start()
     res = await s.gather(keys=["x"])
     assert res["status"] == "error"
     assert list(res["keys"]) == ["x"]
@@ -1939,6 +1941,7 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     z = c.submit(reducer, x, y)
 
     s.rpc = FlakyConnectionPool(failing_connections=4)
+    await s.rpc.start()
 
     with captured_logger(
         logging.getLogger("distributed.scheduler")

@@ -32,6 +32,7 @@ def test_subs_multiple():
 @gen_cluster(client=True)
 def test_gather_from_workers_permissive(c, s, a, b):
     rpc = ConnectionPool()
+    yield rpc.start()
     x = yield c.scatter({"x": 1}, workers=a.address)
 
     data, missing, bad_workers = yield gather_from_workers(

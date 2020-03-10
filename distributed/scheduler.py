@@ -1401,6 +1401,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
