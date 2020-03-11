@@ -1,4 +1,3 @@
-from collections import Counter
 from datetime import datetime
 from functools import partial
 import os
@@ -296,11 +295,7 @@ class _PrometheusCollector:
             labels=["task_name"],
         )
 
-        suspicious_by_prefix = Counter()
-        for task in self.server.tasks.values():
-            suspicious_by_prefix[task.prefix.name] += task.suspicious
-
-        for name, val in suspicious_by_prefix.items():
+        for name, val in self.server.suspicious_by_prefix.items():
             suspicious_tasks.add_metric([name], val)
         yield suspicious_tasks
 
