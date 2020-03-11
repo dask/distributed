@@ -71,6 +71,8 @@ class Adaptive(AdaptiveCore):
     resized. The default implementation checks if there are too many tasks
     per worker or too little memory available (see :meth:`Adaptive.needs_cpu`
     and :meth:`Adaptive.needs_memory`).
+    The values for interval, min, max, wait_count and target_duration can be
+    specified in the dask config under the distributed.adaptive key.
     '''
 
     def __init__(
