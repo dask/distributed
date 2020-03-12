@@ -51,17 +51,17 @@ def get_versions(packages=None):
 
 def get_system_info():
     (sysname, nodename, release, version, machine, processor) = platform.uname()
-    host = [
-        ("python", "%d.%d.%d.%s.%s" % sys.version_info[:]),
-        ("python-bits", struct.calcsize("P") * 8),
-        ("OS", "%s" % sysname),
-        ("OS-release", "%s" % release),
-        ("machine", "%s" % machine),
-        ("processor", "%s" % processor),
-        ("byteorder", "%s" % sys.byteorder),
-        ("LC_ALL", "%s" % os.environ.get("LC_ALL", "None")),
-        ("LANG", "%s" % os.environ.get("LANG", "None")),
-    ]
+    host = {
+        "python": "%d.%d.%d.%s.%s" % sys.version_info[:],
+        "python-bits": struct.calcsize("P") * 8,
+        "OS": "%s" % sysname,
+        "OS-release": "%s" % release,
+        "machine": "%s" % machine,
+        "processor": "%s" % processor,
+        "byteorder": "%s" % sys.byteorder,
+        "LC_ALL": "%s" % os.environ.get("LC_ALL", "None"),
+        "LANG": "%s" % os.environ.get("LANG", "None"),
+    }
 
     return host
 
@@ -113,7 +113,6 @@ def error_message(scheduler, workers, client, client_name="client"):
 
     # Collect all package versions
     packages = set()
-
     for node, info in nodes.items():
         if info is None or not (isinstance(info, dict)) or "packages" not in info:
             node_packages[node] = defaultdict(lambda: "UNKNOWN")
@@ -123,8 +122,7 @@ def error_message(scheduler, workers, client, client_name="client"):
                 node_packages[node][pkg] = version
                 packages.add(pkg)
             # Collect Python version for each node
-            python_version = info["host"][0][1]
-            node_packages[node]["python"] = python_version
+            node_packages[node]["python"] = info["host"]["python"]
             packages.add("python")
 
     errs = []

@@ -123,11 +123,8 @@ async def test_version_warning_in_cluster(s, a, b):
 @gen_cluster()
 async def test_python_version_mismatch_warning(s, a, b):
     # Set random Python version for one worker
-    orig = s.workers[a.address].versions["host"]
-    updated = list(map(list, orig))  # List is needed to be mutable
     random_version = uuid.uuid4().hex
-    updated[0][1] = random_version
-    s.workers[a.address].versions["host"] = updated
+    orig = s.workers[a.address].versions["host"]["python"] = random_version
 
     with pytest.warns(None) as record:
         async with Client(s.address, asynchronous=True) as client:
