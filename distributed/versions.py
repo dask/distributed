@@ -122,6 +122,10 @@ def error_message(scheduler, workers, client, client_name="client"):
             for pkg, version in info["packages"].items():
                 node_packages[node][pkg] = version
                 packages.add(pkg)
+            # Collect Python version for each node
+            python_version = info["host"][0][1]
+            node_packages[node]["python"] = python_version
+            packages.add("python")
 
     errs = []
     for pkg in sorted(packages):

@@ -1,4 +1,5 @@
 import re
+import uuid
 
 import pytest
 
@@ -117,3 +118,22 @@ async def test_version_warning_in_cluster(s, a, b):
         assert any(
             "0.0.0" in line.message and a.address in line.message for line in w.logs
         )
+
+
+@gen_cluster()
+async def test_python_version_mismatch_warning(s, a, b):
+    # Set random Python version for one worker
+    orig = s.workers[a.address].versions["host"]
+    updated = list(map(list, orig))  # List is needed to be mutable
+    random_version = uuid.uuid4().hex
+    updated[0][1] = random_version
+    s.workers[a.address].versions["host"] = updated
+
+    with pytest.warns(None) as record:
+        async with Client(s.address, asynchronous=True) as client:
+            pass
+
+    assert record
+    assert any("python" in str(r.message) for r in record)
+    assert any(random_version in str(r.message) for r in record)
+    assert any(a.address in str(r.message) for r in record)
