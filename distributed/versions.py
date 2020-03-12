@@ -45,7 +45,6 @@ def get_versions(packages=None):
             required_packages + optional_packages + list(packages)
         ),
     }
-
     return d
 
 
@@ -82,7 +81,7 @@ def version_of_package(pkg):
 def get_package_info(pkgs):
     """ get package versions for the passed required & optional packages """
 
-    pversions = []
+    pversions = [("python", ".".join(map(str, sys.version_info[:3])))]
     for pkg in pkgs:
         if isinstance(pkg, (tuple, list)):
             modname, ver_f = pkg

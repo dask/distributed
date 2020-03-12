@@ -1,4 +1,5 @@
 import re
+import sys
 
 import pytest
 
@@ -117,3 +118,9 @@ async def test_version_warning_in_cluster(s, a, b):
         assert any(
             "0.0.0" in line.message and a.address in line.message for line in w.logs
         )
+
+
+def test_python():
+    d = get_versions()
+    assert "python" in str(d)
+    assert ".".join(map(str, sys.version_info[:3])) in str(d)
