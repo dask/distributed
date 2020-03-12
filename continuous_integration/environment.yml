@@ -1,7 +1,7 @@
 name: testenv
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
   - zstandard
   - bokeh
