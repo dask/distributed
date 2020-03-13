@@ -5,7 +5,7 @@ import asyncio
 import dask
 import tornado.locks
 import tornado.queues
-from concurrent.futures import TimeoutError
+from asyncio import TimeoutError
 from .client import Client, _get_global_client
 from .utils import PeriodicCallback, log_errors, parse_timedelta
 from .worker import get_client, get_worker
