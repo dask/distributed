@@ -27,7 +27,7 @@ jobs:
         shell: bash -l {0}
         run: |
           if [[ "${{ matrix.python-version }}" = "3.8.1" ]]; then
-            conda install -c conda-forge --strict-channel-priority tornado=6.0.3
+            conda install -c conda-forge --strict-channel-priority tornado=6
           else
             conda install -c conda-forge --strict-channel-priority tornado=5
           fi
