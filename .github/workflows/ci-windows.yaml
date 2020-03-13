@@ -27,9 +27,9 @@ jobs:
         shell: bash -l {0}
         run: |
           if [[ "${{ matrix.python-version }}" = "3.8" ]]; then
-            conda install -c conda-forge --strict-channel-priority tornado=6
+            conda install -c conda-forge tornado=6
           else
-            conda install -c conda-forge --strict-channel-priority tornado=5
+            conda install -c conda-forge tornado=5
           fi
 
       - name: Install distributed from source
