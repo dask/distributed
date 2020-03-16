@@ -30,10 +30,7 @@ import asyncio
 from itertools import starmap
 from operator import add
 
-try:
-    from cytoolz import accumulate, cons, sliding_window
-except ImportError:
-    from toolz import accumulate, cons, sliding_window
+from tlz import accumulate, cons, sliding_window
 
 logger = logging.getLogger(__name__)
 
