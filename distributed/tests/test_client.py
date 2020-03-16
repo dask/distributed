@@ -18,7 +18,7 @@ import weakref
 import zipfile
 
 import pytest
-from toolz import identity, isdistinct, concat, pluck, valmap, partial, first, merge
+from tlz import identity, isdistinct, concat, pluck, valmap, partial, first, merge
 from tornado import gen
 
 import dask

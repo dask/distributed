@@ -7,7 +7,7 @@ import logging
 import random
 
 import dask
-from toolz import identity, partial
+from tlz import identity, partial
 
 try:
     import blosc

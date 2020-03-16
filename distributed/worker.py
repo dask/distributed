@@ -21,10 +21,7 @@ from dask.compatibility import apply
 from dask.utils import format_bytes, funcname
 from dask.system import CPU_COUNT
 
-try:
-    from cytoolz import pluck, partial, merge, first, keymap
-except ImportError:
-    from toolz import pluck, partial, merge, first, keymap
+from tlz import pluck, partial, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
 
