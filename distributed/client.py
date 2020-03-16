@@ -2669,6 +2669,7 @@ class Client(Node):
         fifo_timeout="60s",
         actors=None,
         traverse=True,
+        errors="raise",
         **kwargs
     ):
         """ Compute dask collections on cluster
@@ -2712,6 +2713,9 @@ class Client(Node):
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
+        errors: string
+            Either 'raise' or 'skip' if we should raise if a dask object has
+            erred or skip its inclusion in the output collection
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2797,7 +2801,7 @@ class Client(Node):
                 futures.append(arg)
 
         if sync:
-            result = self.gather(futures)
+            result = self.gather(futures, errors=errors)
         else:
             result = futures
 
