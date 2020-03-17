@@ -233,7 +233,9 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            self.root.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
+            self.root.xaxis.ticker = AdaptiveTicker(
+                mantissas=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], base=1024
+            )
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
             self.root.xaxis.minor_tick_line_alpha = 0
