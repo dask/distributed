@@ -12,8 +12,8 @@ from tornado import gen
 
 @gen_cluster(client=False)
 def test_publish_simple(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     data = yield c.scatter(range(3))
     out = yield c.publish_dataset(data=data)
@@ -38,8 +38,8 @@ def test_publish_simple(s, a, b):
 
 @gen_cluster(client=False)
 def test_publish_non_string_key(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     try:
         for name in [("a", "b"), 9.0, 8]:
@@ -54,14 +54,14 @@ def test_publish_non_string_key(s, a, b):
             assert name in datasets
 
     finally:
-        c.close()
-        f.close()
+        yield c.close()
+        yield f.close()
 
 
 @gen_cluster(client=False)
 def test_publish_roundtrip(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     data = yield c.scatter([0, 1, 2])
     yield c.publish_dataset(data=data)
@@ -156,8 +156,8 @@ def test_unpublish_multiple_datasets_sync(client):
 @gen_cluster(client=False)
 def test_publish_bag(s, a, b):
     db = pytest.importorskip("dask.bag")
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     bag = db.from_sequence([0, 1, 2])
     bagp = c.persist(bag)
@@ -228,7 +228,7 @@ def test_pickle_safe(c, s, a, b):
     try:
         yield c2.publish_dataset(x=[1, 2, 3])
         result = yield c2.get_dataset("x")
-        assert result == (1, 2, 3)
+        assert result == [1, 2, 3]
 
         with pytest.raises(TypeError):
             yield c2.publish_dataset(y=lambda x: x)

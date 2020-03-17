@@ -1,4 +1,6 @@
-from __future__ import print_function, division, absolute_import
+import datetime
+import tempfile
+import os
 
 try:
     import ssl
@@ -8,117 +10,206 @@ except ImportError:
 import dask
 
 
-_roles = ["client", "scheduler", "worker"]
-
-_tls_per_role_fields = ["key", "cert"]
-
-_tls_fields = ["ca_file", "ciphers"]
-
-_misc_fields = ["require_encryption"]
-
-_fields = set(
-    _misc_fields
-    + ["tls_%s" % field for field in _tls_fields]
-    + ["tls_%s_%s" % (role, field) for role in _roles for field in _tls_per_role_fields]
-)
+__all__ = ("Security",)
 
 
-def _field_to_config_key(field):
-    return field.replace("_", "-")
+class Security:
+    """Security configuration for a Dask cluster.
 
+    Default values are loaded from Dask's configuration files, and can be
+    overridden in the constructor.
 
-class Security(object):
+    Parameters
+    ----------
+    require_encryption : bool, optional
+        Whether TLS encryption is required for all connections.
+    tls_ca_file : str, optional
+        Path to a CA certificate file encoded in PEM format.
+    tls_ciphers : str, optional
+        An OpenSSL cipher string of allowed ciphers. If not provided, the
+        system defaults will be used.
+    tls_client_cert : str, optional
+        Path to a certificate file for the client, encoded in PEM format.
+    tls_client_key : str, optional
+        Path to a key file for the client, encoded in PEM format.
+        Alternatively, the key may be appended to the cert file, and this
+        parameter be omitted.
+    tls_scheduler_cert : str, optional
+        Path to a certificate file for the scheduler, encoded in PEM format.
+    tls_scheduler_key : str, optional
+        Path to a key file for the scheduler, encoded in PEM format.
+        Alternatively, the key may be appended to the cert file, and this
+        parameter be omitted.
+    tls_worker_cert : str, optional
+        Path to a certificate file for a worker, encoded in PEM format.
+    tls_worker_key : str, optional
+        Path to a key file for a worker, encoded in PEM format.
+        Alternatively, the key may be appended to the cert file, and this
+        parameter be omitted.
     """
-    An object to gather and pass around security configuration.
-    Default values are gathered from the global ``config`` object and
-    can be overriden by constructor args.
 
-    Supported fields:
-        - require_encryption
-        - tls_ca_file
-        - tls_ciphers
-        - tls_client_key
-        - tls_client_cert
-        - tls_scheduler_key
-        - tls_scheduler_cert
-        - tls_worker_key
-        - tls_worker_cert
-    """
-
-    __slots__ = tuple(_fields)
+    __slots__ = (
+        "require_encryption",
+        "tls_ca_file",
+        "tls_ciphers",
+        "tls_client_key",
+        "tls_client_cert",
+        "tls_scheduler_key",
+        "tls_scheduler_cert",
+        "tls_worker_key",
+        "tls_worker_cert",
+    )
 
     def __init__(self, **kwargs):
-        self._init_from_dict(dask.config.config)
-        for k, v in kwargs.items():
-            if v is not None:
-                setattr(self, k, v)
-        for k in _fields:
-            if not hasattr(self, k):
-                setattr(self, k, None)
+        extra = set(kwargs).difference(self.__slots__)
+        if extra:
+            raise TypeError("Unknown parameters: %r" % sorted(extra))
+        self._set_field(
+            kwargs, "require_encryption", "distributed.comm.require-encryption"
+        )
+        self._set_field(kwargs, "tls_ciphers", "distributed.comm.tls.ciphers")
+        self._set_field(kwargs, "tls_ca_file", "distributed.comm.tls.ca-file")
+        self._set_field(kwargs, "tls_client_key", "distributed.comm.tls.client.key")
+        self._set_field(kwargs, "tls_client_cert", "distributed.comm.tls.client.cert")
+        self._set_field(
+            kwargs, "tls_scheduler_key", "distributed.comm.tls.scheduler.key"
+        )
+        self._set_field(
+            kwargs, "tls_scheduler_cert", "distributed.comm.tls.scheduler.cert"
+        )
+        self._set_field(kwargs, "tls_worker_key", "distributed.comm.tls.worker.key")
+        self._set_field(kwargs, "tls_worker_cert", "distributed.comm.tls.worker.cert")
 
-    def _init_from_dict(self, d):
-        """
-        Initialize Security from nested dict.
-        """
-        self._init_fields_from_dict(d, "", _misc_fields, {})
-        self._init_fields_from_dict(d, "tls", _tls_fields, _tls_per_role_fields)
+    @classmethod
+    def temporary(cls):
+        """Create a new temporary Security object.
 
-    def _init_fields_from_dict(self, d, category, fields, per_role_fields):
-        if category:
-            d = d.get(category, {})
-            category_prefix = category + "_"
+        This creates a new self-signed key/cert pair suitable for securing
+        communication for all roles in a Dask cluster. These keys/certs exist
+        only in memory, and are stored in this object.
+
+        This method requires the library ``cryptography`` be installed.
+        """
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            from cryptography.x509.oid import NameOID
+        except ImportError:
+            raise ImportError(
+                "Using `Security.temporary` requires `cryptography`, please "
+                "install it using either pip or conda"
+            )
+        key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048, backend=default_backend()
+        )
+        key_contents = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+
+        dask_internal = x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, "dask-internal")]
+        )
+        altnames = x509.SubjectAlternativeName([x509.DNSName("dask-internal")])
+        now = datetime.datetime.utcnow()
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(dask_internal)
+            .issuer_name(dask_internal)
+            .add_extension(altnames, critical=False)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + datetime.timedelta(days=365))
+            .sign(key, hashes.SHA256(), default_backend())
+        )
+
+        cert_contents = cert.public_bytes(serialization.Encoding.PEM).decode()
+
+        return cls(
+            require_encryption=True,
+            tls_ca_file=cert_contents,
+            tls_client_key=key_contents,
+            tls_client_cert=cert_contents,
+            tls_scheduler_key=key_contents,
+            tls_scheduler_cert=cert_contents,
+            tls_worker_key=key_contents,
+            tls_worker_cert=cert_contents,
+        )
+
+    def _set_field(self, kwargs, field, config_name):
+        if field in kwargs:
+            out = kwargs[field]
         else:
-            category_prefix = ""
-        for field in fields:
-            k = _field_to_config_key(field)
-            if k in d:
-                setattr(self, "%s%s" % (category_prefix, field), d[k])
-        for role in _roles:
-            dd = d.get(role, {})
-            for field in per_role_fields:
-                k = _field_to_config_key(field)
-                if k in dd:
-                    setattr(self, "%s%s_%s" % (category_prefix, role, field), dd[k])
+            out = dask.config.get(config_name)
+        setattr(self, field, out)
 
     def __repr__(self):
-        items = sorted((k, getattr(self, k)) for k in _fields)
-        return (
-            "Security("
-            + ", ".join("%s=%r" % (k, v) for k, v in items if v is not None)
-            + ")"
-        )
+        keys = sorted(self.__slots__)
+        items = []
+        for k in keys:
+            val = getattr(self, k)
+            if val is not None:
+                if isinstance(val, str) and "\n" in val:
+                    items.append((k, "..."))
+                else:
+                    items.append((k, repr(val)))
+        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
 
     def get_tls_config_for_role(self, role):
         """
         Return the TLS configuration for the given role, as a flat dict.
         """
-        return self._get_config_for_role("tls", role, _tls_fields, _tls_per_role_fields)
-
-    def _get_config_for_role(self, category, role, fields, per_role_fields):
-        if role not in _roles:
+        if role not in {"client", "scheduler", "worker"}:
             raise ValueError("unknown role %r" % (role,))
-        d = {}
-        for field in fields:
-            k = "%s_%s" % (category, field)
-            d[field] = getattr(self, k)
-        for field in per_role_fields:
-            k = "%s_%s_%s" % (category, role, field)
-            d[field] = getattr(self, k)
-        return d
+        return {
+            "ca_file": self.tls_ca_file,
+            "ciphers": self.tls_ciphers,
+            "cert": getattr(self, "tls_%s_cert" % role),
+            "key": getattr(self, "tls_%s_key" % role),
+        }
 
     def _get_tls_context(self, tls, purpose):
         if tls.get("ca_file") and tls.get("cert"):
-            try:
-                ctx = ssl.create_default_context(purpose=purpose, cafile=tls["ca_file"])
-            except AttributeError:
-                raise RuntimeError("TLS functionality requires Python 2.7.9+")
+            ca = tls["ca_file"]
+            cert_path = cert = tls["cert"]
+            key_path = key = tls.get("key")
+
+            if "\n" in ca:
+                ctx = ssl.create_default_context(purpose=purpose, cadata=ca)
+            else:
+                ctx = ssl.create_default_context(purpose=purpose, cafile=ca)
+
+            cert_in_memory = "\n" in cert
+            key_in_memory = key is not None and "\n" in key
+            if cert_in_memory or key_in_memory:
+                with tempfile.TemporaryDirectory() as tempdir:
+                    if cert_in_memory:
+                        cert_path = os.path.join(tempdir, "dask.crt")
+                        with open(cert_path, "w") as f:
+                            f.write(cert)
+                    if key_in_memory:
+                        key_path = os.path.join(tempdir, "dask.pem")
+                        with open(key_path, "w") as f:
+                            f.write(key)
+                    ctx.load_cert_chain(cert_path, key_path)
+            else:
+                ctx.load_cert_chain(cert_path, key_path)
+
+            # Bidirectional authentication
             ctx.verify_mode = ssl.CERT_REQUIRED
+
             # We expect a dedicated CA for the cluster and people using
             # IP addresses rather than hostnames
             ctx.check_hostname = False
-            ctx.load_cert_chain(tls["cert"], tls.get("key"))
+
             if tls.get("ciphers"):
                 ctx.set_ciphers(tls.get("ciphers"))
+
             return ctx
 
     def get_connection_args(self, role):
@@ -126,23 +217,19 @@ class Security(object):
         Get the *connection_args* argument for a connect() call with
         the given *role*.
         """
-        d = {}
         tls = self.get_tls_config_for_role(role)
-        # Ensure backwards compatibility (ssl.Purpose is Python 2.7.9+ only)
-        purpose = ssl.Purpose.SERVER_AUTH if hasattr(ssl, "Purpose") else None
-        d["ssl_context"] = self._get_tls_context(tls, purpose)
-        d["require_encryption"] = self.require_encryption
-        return d
+        return {
+            "ssl_context": self._get_tls_context(tls, ssl.Purpose.SERVER_AUTH),
+            "require_encryption": self.require_encryption,
+        }
 
     def get_listen_args(self, role):
         """
         Get the *connection_args* argument for a listen() call with
         the given *role*.
         """
-        d = {}
         tls = self.get_tls_config_for_role(role)
-        # Ensure backwards compatibility (ssl.Purpose is Python 2.7.9+ only)
-        purpose = ssl.Purpose.CLIENT_AUTH if hasattr(ssl, "Purpose") else None
-        d["ssl_context"] = self._get_tls_context(tls, purpose)
-        d["require_encryption"] = self.require_encryption
-        return d
+        return {
+            "ssl_context": self._get_tls_context(tls, ssl.Purpose.CLIENT_AUTH),
+            "require_encryption": self.require_encryption,
+        }

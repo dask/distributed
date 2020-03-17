@@ -1,20 +1,18 @@
+import asyncio
 from collections import defaultdict, deque
-import datetime
 import logging
+import threading
 import weakref
 
-import tornado.locks
-from tornado import gen
-
-from .compatibility import finalize, get_thread_identity
 from .core import CommClosedError
-from .utils import sync
+from .metrics import time
+from .utils import sync, TimeoutError, ignoring
 from .protocol.serialize import to_serialize
 
 logger = logging.getLogger(__name__)
 
 
-class PubSubSchedulerExtension(object):
+class PubSubSchedulerExtension:
     """ Extend Dask's scheduler with routes to handle PubSub machinery """
 
     def __init__(self, scheduler):
@@ -74,7 +72,7 @@ class PubSubSchedulerExtension(object):
 
     def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
         if worker:
-            logger.debug("Add worker subscriber: %s %s", name, worker)
+            logger.debug("Remove worker subscriber: %s %s", name, worker)
             self.subscribers[name].remove(worker)
             for pub in self.publishers[name]:
                 self.scheduler.worker_send(
@@ -82,7 +80,7 @@ class PubSubSchedulerExtension(object):
                     {"op": "pubsub-remove-subscriber", "address": worker, "name": name},
                 )
         elif client:
-            logger.debug("Add client subscriber: %s %s", name, client)
+            logger.debug("Remove client subscriber: %s %s", name, client)
             self.client_subscribers[name].remove(client)
             if not self.client_subscribers[name]:
                 del self.client_subscribers[name]
@@ -117,7 +115,7 @@ class PubSubSchedulerExtension(object):
                 )
 
 
-class PubSubWorkerExtension(object):
+class PubSubWorkerExtension:
     """ Extend Dask's Worker with routes to handle PubSub machinery """
 
     def __init__(self, worker):
@@ -148,9 +146,9 @@ class PubSubWorkerExtension(object):
     def publish_scheduler(self, name=None, publish=None):
         self.publish_to_scheduler[name] = publish
 
-    def handle_message(self, name=None, msg=None):
+    async def handle_message(self, name=None, msg=None):
         for sub in self.subscribers.get(name, []):
-            sub._put(msg)
+            await sub._put(msg)
 
     def trigger_cleanup(self):
         self.worker.loop.add_callback(self.cleanup)
@@ -170,7 +168,7 @@ class PubSubWorkerExtension(object):
                 del self.publish_to_scheduler[name]
 
 
-class PubSubClientExtension(object):
+class PubSubClientExtension:
     """ Extend Dask's Client with handlers to handle PubSub machinery """
 
     def __init__(self, client):
@@ -180,9 +178,9 @@ class PubSubClientExtension(object):
         self.subscribers = defaultdict(weakref.WeakSet)
         self.client.extensions["pubsub"] = self  # TODO: circular reference
 
-    def handle_message(self, name=None, msg=None):
+    async def handle_message(self, name=None, msg=None):
         for sub in self.subscribers[name]:
-            sub._put(msg)
+            await sub._put(msg)
 
         if not self.subscribers[name]:
             self.client.scheduler_comm.send(
@@ -199,7 +197,7 @@ class PubSubClientExtension(object):
                 self.client.scheduler_comm.send(msg)
 
 
-class Pub(object):
+class Pub:
     """ Publish data with Publish-Subscribe pattern
 
     This allows clients and workers to directly communicate data between each
@@ -234,13 +232,19 @@ class Pub(object):
     disappear without notice.
 
     When using a Pub or Sub from a Client all communications will be routed
-    through the scheduler.  This can cause some performance degredation.  Pubs
-    an Subs only operate at top-speed when they are both on workers.
+    through the scheduler.  This can cause some performance degradation.  Pubs
+    and Subs only operate at top-speed when they are both on workers.
 
     Parameters
     ----------
     name: object (msgpack serializable)
-        The name of the group of Pubs and Subs on which to participate
+        The name of the group of Pubs and Subs on which to participate.
+    worker: Worker (optional)
+        The worker to be used for publishing data. Defaults to the value of
+        ```get_worker()```. If given, ``client`` must be ``None``.
+    client: Client (optional)
+        Client used for communication with the scheduler. Defaults to
+        the value of ``get_client()``. If given, ``worker`` must be ``None``.
 
     Examples
     --------
@@ -306,12 +310,11 @@ class Pub(object):
         if self.worker:
             pubsub = self.worker.extensions["pubsub"]
             self.loop.add_callback(pubsub.publishers[name].add, self)
-            finalize(self, pubsub.trigger_cleanup)
+            weakref.finalize(self, pubsub.trigger_cleanup)
 
-    @gen.coroutine
-    def _start(self):
+    async def _start(self):
         if self.worker:
-            result = yield self.scheduler.pubsub_add_publisher(
+            result = await self.scheduler.pubsub_add_publisher(
                 name=self.name, worker=self.worker.address
             )
             pubsub = self.worker.extensions["pubsub"]
@@ -344,8 +347,13 @@ class Pub(object):
         """ Publish a message to all subscribers of this topic """
         self.loop.add_callback(self._put, msg)
 
+    def __repr__(self):
+        return "<Pub: {}>".format(self.name)
 
-class Sub(object):
+    __str__ = __repr__
+
+
+class Sub:
     """ Subscribe to a Publish/Subscribe topic
 
     See Also
@@ -370,7 +378,6 @@ class Sub(object):
             self.loop = self.client.loop
         self.name = name
         self.buffer = deque()
-        self.condition = tornado.locks.Condition()
 
         if self.worker:
             pubsub = self.worker.extensions["pubsub"]
@@ -386,23 +393,37 @@ class Sub(object):
         else:
             raise Exception()
 
-        finalize(self, pubsub.trigger_cleanup)
+        weakref.finalize(self, pubsub.trigger_cleanup)
 
-    @gen.coroutine
-    def _get(self, timeout=None):
-        if timeout is not None:
-            timeout = datetime.timedelta(seconds=timeout)
-        start = datetime.datetime.now()
+    @property
+    def condition(self):
+        try:
+            return self._condition
+        except AttributeError:
+            self._condition = asyncio.Condition()
+            return self._condition
+
+    async def _get(self, timeout=None):
+        start = time()
         while not self.buffer:
             if timeout is not None:
-                timeout2 = timeout - (datetime.datetime.now() - start)
-                if timeout2.total_seconds() < 0:
-                    raise gen.TimeoutError()
+                timeout2 = timeout - (time() - start)
+                if timeout2 < 0:
+                    raise TimeoutError()
             else:
                 timeout2 = None
-            yield self.condition.wait(timeout=timeout2)
 
-        raise gen.Return(self.buffer.popleft())
+            async def _():
+                await self.condition.acquire()
+                await self.condition.wait()
+
+            try:
+                await asyncio.wait_for(_(), timeout2)
+            finally:
+                with ignoring(RuntimeError):  # Python 3.6 fails here sometimes
+                    self.condition.release()
+
+        return self.buffer.popleft()
 
     __anext__ = _get
 
@@ -410,7 +431,7 @@ class Sub(object):
         """ Get a single message """
         if self.client:
             return self.client.sync(self._get, timeout=timeout)
-        elif self.worker.thread_id == get_thread_identity():
+        elif self.worker.thread_id == threading.get_ident():
             return self._get()
         else:
             if self.buffer:  # fastpath
@@ -425,6 +446,12 @@ class Sub(object):
     def __aiter__(self):
         return self
 
-    def _put(self, msg):
+    async def _put(self, msg):
         self.buffer.append(msg)
-        self.condition.notify()
+        async with self.condition:
+            self.condition.notify()
+
+    def __repr__(self):
+        return "<Sub: {}>".format(self.name)
+
+    __str__ = __repr__

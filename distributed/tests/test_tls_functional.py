@@ -2,10 +2,6 @@
 Various functional tests for TLS networking.
 Most are taken from other test files and adapted.
 """
-
-from __future__ import print_function, division, absolute_import
-
-
 from tornado import gen
 
 from distributed import Nanny, worker_client, Queue
@@ -19,8 +15,8 @@ from distributed.utils_test import gen_tls_cluster, inc, double, slowinc, slowad
 def test_Queue(c, s, a, b):
     assert s.address.startswith("tls://")
 
-    x = Queue("x")
-    y = Queue("y")
+    x = yield Queue("x")
+    y = yield Queue("y")
 
     size = yield x.qsize()
     assert size == 0
@@ -82,7 +78,7 @@ def test_nanny(c, s, a, b):
         assert isinstance(n, Nanny)
         assert n.address.startswith("tls://")
         assert n.worker_address.startswith("tls://")
-    assert s.ncores == {n.worker_address: n.ncores for n in [a, b]}
+    assert s.nthreads == {n.worker_address: n.nthreads for n in [a, b]}
 
     x = c.submit(inc, 10)
     result = yield x
@@ -101,7 +97,7 @@ def test_rebalance(c, s, a, b):
     assert len(b.data) == 1
 
 
-@gen_tls_cluster(client=True, ncores=[("tls://127.0.0.1", 2)] * 2)
+@gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
 def test_work_stealing(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50, delay=0.1)
@@ -127,7 +123,7 @@ def test_worker_client(c, s, a, b):
     assert yy == 20 + 1 + (20 + 1) * 2
 
 
-@gen_tls_cluster(client=True, ncores=[("tls://127.0.0.1", 1)] * 2)
+@gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 1)] * 2)
 def test_worker_client_gather(c, s, a, b):
     a_address = a.address
     b_address = b.address

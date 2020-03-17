@@ -1,8 +1,9 @@
-from tornado import gen
+import asyncio
 import functools
+import threading
+from queue import Queue
 
 from .client import Future, default_client
-from .compatibility import get_thread_identity, Queue
 from .protocol import to_serialize
 from .utils import sync
 from .utils_comm import WrappedKey
@@ -102,7 +103,7 @@ class Actor(WrappedKey):
         if self._client:
             return self._client.asynchronous
         else:
-            return get_thread_identity() == self._worker.thread_id
+            return threading.get_ident() == self._worker.thread_id
 
     def _sync(self, func, *args, **kwargs):
         if self._client:
@@ -128,10 +129,9 @@ class Actor(WrappedKey):
 
             @functools.wraps(attr)
             def func(*args, **kwargs):
-                @gen.coroutine
-                def run_actor_function_on_worker():
+                async def run_actor_function_on_worker():
                     try:
-                        result = yield self._worker_rpc.actor_execute(
+                        result = await self._worker_rpc.actor_execute(
                             function=key,
                             actor=self.key,
                             args=[to_serialize(arg) for arg in args],
@@ -139,21 +139,20 @@ class Actor(WrappedKey):
                         )
                     except OSError:
                         if self._future:
-                            yield self._future
+                            await self._future
                         else:
                             raise OSError("Unable to contact Actor's worker")
-                    raise gen.Return(result["result"])
+                    return result["result"]
 
                 if self._asynchronous:
-                    return run_actor_function_on_worker()
+                    return asyncio.ensure_future(run_actor_function_on_worker())
                 else:
                     # TODO: this mechanism is error prone
                     # we should endeavor to make dask's standard code work here
                     q = Queue()
 
-                    @gen.coroutine
-                    def wait_then_add_to_queue():
-                        x = yield run_actor_function_on_worker()
+                    async def wait_then_add_to_queue():
+                        x = await run_actor_function_on_worker()
                         q.put(x)
 
                     self._io_loop.add_callback(wait_then_add_to_queue)
@@ -164,12 +163,11 @@ class Actor(WrappedKey):
 
         else:
 
-            @gen.coroutine
-            def get_actor_attribute_from_worker():
-                x = yield self._worker_rpc.actor_attribute(
+            async def get_actor_attribute_from_worker():
+                x = await self._worker_rpc.actor_attribute(
                     attribute=key, actor=self.key
                 )
-                raise gen.Return(x["result"])
+                return x["result"]
 
             return self._sync(get_actor_attribute_from_worker)
 
@@ -178,7 +176,7 @@ class Actor(WrappedKey):
         return self._future.client
 
 
-class ProxyRPC(object):
+class ProxyRPC:
     """
     An rpc-like object that uses the scheduler's rpc to connect to a worker
     """
@@ -188,16 +186,15 @@ class ProxyRPC(object):
         self._address = address
 
     def __getattr__(self, key):
-        @gen.coroutine
-        def func(**msg):
+        async def func(**msg):
             msg["op"] = key
-            result = yield self.rpc.proxy(worker=self._address, msg=msg)
-            raise gen.Return(result)
+            result = await self.rpc.proxy(worker=self._address, msg=msg)
+            return result
 
         return func
 
 
-class ActorFuture(object):
+class ActorFuture:
     """ Future to an actor's method call
 
     Whenever you call a method on an Actor you get an ActorFuture immediately

@@ -197,9 +197,9 @@ will run on the Worker's event loop thread rather than a separate thread.
 
 .. code-block:: python
 
-   def Waiter(object):
+   def Waiter:
        def __init__(self):
-           self.event = tornado.locks.Event()
+           self.event = asyncio.Event()
 
        async def set(self):
            self.event.set()

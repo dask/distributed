@@ -1,10 +1,8 @@
-from __future__ import absolute_import, division, print_function
-
 import os
 from time import sleep
 
 import pytest
-from toolz import frequencies
+from tlz import frequencies
 
 from distributed import get_task_stream
 from distributed.utils_test import gen_cluster, div, inc, slowinc
@@ -14,7 +12,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 def test_TaskStreamPlugin(c, s, *workers):
     es = TaskStreamPlugin(s)
     assert not es.buffer

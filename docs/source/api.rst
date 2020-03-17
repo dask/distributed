@@ -19,12 +19,12 @@ API
    Client.get_executor
    Client.get_metadata
    Client.get_scheduler_logs
-   Client.get_task_stream
    Client.get_worker_logs
+   Client.get_task_stream
    Client.has_what
    Client.list_datasets
    Client.map
-   Client.ncores
+   Client.nthreads
    Client.persist
    Client.publish_dataset
    Client.profile
@@ -148,6 +148,28 @@ Future
 .. autoclass:: Future
    :members:
 
+Cluster
+-------
+
+Classes relevant for cluster creation and management. Other libraries
+(like `dask-jobqueue`_, `dask-gateway`_, `dask-kubernetes`_, `dask-yarn`_ etc.)
+provide additional cluster objects.
+
+.. _dask-jobqueue: https://jobqueue.dask.org/
+.. _dask-gateway: https://gateway.dask.org/
+.. _dask-kubernetes: https://kubernetes.dask.org/
+.. _dask-yarn: https://yarn.dask.org/en/latest/
+
+.. autosummary::
+   LocalCluster
+   SpecCluster
+
+.. autoclass:: LocalCluster
+   :members:
+
+.. autoclass:: SpecCluster
+   :members:
+
 
 Other
 -----
@@ -167,6 +189,7 @@ Other
 .. autofunction:: distributed.get_client
 .. autofunction:: distributed.secede
 .. autofunction:: distributed.rejoin
+.. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
 
 .. autoclass:: Lock

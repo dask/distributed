@@ -1,8 +1,5 @@
-from __future__ import print_function, division, absolute_import
-
 from contextlib import contextmanager
 import socket
-import sys
 import threading
 from time import sleep
 
@@ -13,6 +10,7 @@ from distributed import Scheduler, Worker, Client, config, default_client
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
+    cleanup,
     cluster,
     gen_cluster,
     inc,
@@ -50,7 +48,7 @@ def test_gen_cluster(c, s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.ncores == {w.address: w.ncores for w in [a, b]}
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
 
 
 @pytest.mark.skip(reason="This hangs on travis")
@@ -74,13 +72,13 @@ def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
-    assert s.ncores == {w.address: w.ncores for w in [a, b]}
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
 
 
 @gen_cluster(
     client=True,
     scheduler="tls://127.0.0.1",
-    ncores=[("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)],
+    nthreads=[("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)],
     security=tls_only_security(),
 )
 def test_gen_cluster_tls(e, s, a, b):
@@ -90,7 +88,7 @@ def test_gen_cluster_tls(e, s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
         assert w.address.startswith("tls://")
-    assert s.ncores == {w.address: w.ncores for w in [a, b]}
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
 
 
 @gen_test()
@@ -175,12 +173,20 @@ def test_tls_cluster(tls_client):
     assert tls_client.security
 
 
-def test_tls_scheduler(security, loop):
-    s = Scheduler(security=security, loop=loop)
-    s.start("localhost")
-    assert s.address.startswith("tls")
-    s.close()
+@pytest.mark.asyncio
+async def test_tls_scheduler(security, cleanup):
+    async with Scheduler(security=security, host="localhost") as s:
+        assert s.address.startswith("tls")
 
 
-if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_utils_tst import *  # noqa: F401, F403
+@gen_cluster()
+async def test_gen_cluster_async(s, a, b):  # flake8: noqa
+    async with Client(s.address, asynchronous=True) as c:
+        future = c.submit(lambda x: x + 1, 1)
+        result = await future
+        assert result == 2
+
+
+@gen_test()
+async def test_gen_test_async():  # flake8: noqa
+    await gen.sleep(0.001)

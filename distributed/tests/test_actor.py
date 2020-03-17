@@ -11,7 +11,7 @@ from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 from distributed.metrics import time
 
 
-class Counter(object):
+class Counter:
     n = 0
 
     def __init__(self):
@@ -26,7 +26,7 @@ class Counter(object):
         return self.n
 
 
-class List(object):
+class List:
     L = []
 
     def __init__(self, dummy=None):
@@ -36,7 +36,7 @@ class List(object):
         self.L.append(x)
 
 
-class ParameterServer(object):
+class ParameterServer:
     def __init__(self):
         self.data = {}
 
@@ -156,7 +156,7 @@ def test_linear_access(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_exceptions_create(c, s, a, b):
-    class Foo(object):
+    class Foo:
         x = 0
 
         def __init__(self):
@@ -170,7 +170,7 @@ def test_exceptions_create(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_exceptions_method(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def throw(self):
             1 / 0
 
@@ -341,15 +341,15 @@ def test_many_computations(c, s, a, b):
     done = c.submit(lambda x: None, futures)
 
     while not done.done():
-        assert len(s.processing) <= a.ncores + b.ncores
+        assert len(s.processing) <= a.nthreads + b.nthreads
         yield gen.sleep(0.01)
 
     yield done
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 5)] * 2)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 5)] * 2)
 def test_thread_safety(c, s, a, b):
-    class Unsafe(object):
+    class Unsafe:
         def __init__(self):
             self.n = 0
 
@@ -378,7 +378,7 @@ def test_Actors_create_dependencies(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_load_balance(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __init__(self, x):
             pass
 
@@ -394,9 +394,9 @@ def test_load_balance(c, s, a, b):
     assert s.tasks[x.key].who_has != s.tasks[y.key].who_has  # second load balanced
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 5)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5)
 def test_load_balance_map(c, s, *workers):
-    class Foo(object):
+    class Foo:
         def __init__(self, x, y=None):
             pass
 
@@ -409,7 +409,7 @@ def test_load_balance_map(c, s, *workers):
     assert all(len(w.actors) == 2 for w in workers)
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 4, Worker=Nanny)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 def bench_param_server(c, s, *workers):
     import dask.array as da
     import numpy as np
@@ -506,11 +506,11 @@ def test_compute_sync(client):
 
 @gen_cluster(
     client=True,
-    ncores=[("127.0.0.1", 1)],
+    nthreads=[("127.0.0.1", 1)],
     config={"distributed.worker.profile.interval": "1ms"},
 )
 def test_actors_in_profile(c, s, a):
-    class Sleeper(object):
+    class Sleeper:
         def sleep(self, time):
             sleep(time)
 
@@ -530,7 +530,7 @@ def test_actors_in_profile(c, s, a):
 def test_waiter(c, s, a, b):
     from tornado.locks import Event
 
-    class Waiter(object):
+    class Waiter:
         def __init__(self):
             self.event = Event()
 

@@ -1,37 +1,35 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import bisect
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
+from collections.abc import MutableMapping
 from datetime import timedelta
+from functools import partial
 import heapq
+from inspect import isawaitable
 import logging
 import os
 from pickle import PicklingError
 import random
 import threading
 import sys
+import uuid
 import warnings
 import weakref
 
 import dask
 from dask.core import istask
 from dask.compatibility import apply
+from dask.utils import format_bytes, funcname
+from dask.system import CPU_COUNT
 
-try:
-    from cytoolz import pluck, partial, merge
-except ImportError:
-    from toolz import pluck, partial, merge
-from tornado.gen import Return
+from tlz import pluck, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
-from . import profile, comm
+from . import profile, comm, system
 from .batched import BatchedSend
-from .comm import get_address_host, get_local_address_for, connect
-from .comm.utils import offload
+from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
-from .compatibility import unicode, get_thread_identity, finalize, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .metrics import time
@@ -44,47 +42,35 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
-    funcname,
-    typename,
     get_ip,
+    typename,
     has_arg,
     _maybe_complex,
     log_errors,
     ignoring,
-    mp_context,
     import_file,
     silence_logging,
     thread_state,
     json_load_robust,
     key_split,
-    format_bytes,
-    DequeHandler,
+    offload,
     PeriodicCallback,
     parse_bytes,
     parse_timedelta,
     iscoroutinefunction,
     warn_on_duration,
+    LRU,
+    TimeoutError,
 )
-from .utils_comm import pack_data, gather_from_workers
+from .utils_comm import pack_data, gather_from_workers, retry_operation
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
-
-_ncores = mp_context.cpu_count()
+from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
-
-try:
-    import psutil
-
-    TOTAL_MEMORY = psutil.virtual_memory().total
-except ImportError:
-    logger.warning("Please install psutil to estimate worker memory use")
-    TOTAL_MEMORY = 8e9
-    psutil = None
-
 
 IN_PLAY = ("waiting", "ready", "executing", "long-running")
 PENDING = ("waiting", "ready", "constrained")
@@ -94,7 +80,11 @@ READY = ("ready", "constrained")
 
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
 
-_global_workers = []
+DEFAULT_METRICS = {}
+
+DEFAULT_STARTUP_INFORMATION = {}
+
+SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
 class Worker(ServerNode):
@@ -112,7 +102,7 @@ class Worker(ServerNode):
 
         $ dask-worker scheduler-ip:port
 
-    Use the ``--help`` flag to see more options
+    Use the ``--help`` flag to see more options::
 
         $ dask-worker --help
 
@@ -125,11 +115,11 @@ class Worker(ServerNode):
 
     These attributes don't change significantly during execution.
 
-    * **ncores:** ``int``:
-        Number of cores used by this worker process
+    * **nthreads:** ``int``:
+        Number of nthreads used by this worker process
     * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
         Executor used to perform computation
-    * **local_dir:** ``path``:
+    * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
         Location of scheduler.  See ``.ip/.port`` attributes.
@@ -225,7 +215,7 @@ class Worker(ServerNode):
         The exception caused by running a task if it erred
     * **tracebacks**: ``{key: traceback}``
         The exception caused by running a task if it erred
-    * **startstops**: ``{key: [(str, float, float)]}``
+    * **startstops**: ``{key: [{startstop}]}``
         Log of transfer, load, and compute times for a task
 
     * **priorities**: ``{key: tuple}``
@@ -242,15 +232,15 @@ class Worker(ServerNode):
     ip: str, optional
     data: MutableMapping, type, None
         The object to use for storage, builds a disk-backed LRU dict by default
-    ncores: int, optional
+    nthreads: int, optional
     loop: tornado.ioloop.IOLoop
-    local_dir: str, optional
+    local_directory: str, optional
         Directory where we place local resources
     name: str, optional
     memory_limit: int, float, string
         Number of bytes of memory that this worker should use.
         Set to zero for no limit.  Set to 'auto' to calculate
-        as TOTAL_MEMORY * min(1, ncores / total_cores)
+        as system.MEMORY_LIMIT * min(1, nthreads / total_cores)
         Use strings or numbers like 5GB or 5e9
     memory_target_fraction: float
         Fraction of memory to try to stay beneath
@@ -261,6 +251,18 @@ class Worker(ServerNode):
     executor: concurrent.futures.Executor
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
+    nanny: str
+        Address on which to contact nanny, if it exists
+    lifetime: str
+        Amount of time like "1 hour" after which we gracefully shut down the worker.
+        This defaults to None, meaning no explicit shutdown time.
+    lifetime_stagger: str
+        Amount of time like "5 minutes" to stagger the lifetime value
+        The actual lifetime will be selected uniformly at random between
+        lifetime +/- lifetime_stagger
+    lifetime_restart: bool
+        Whether or not to restart a worker after it has reached its lifetime
+        Default False
 
     Examples
     --------
@@ -280,14 +282,18 @@ class Worker(ServerNode):
     distributed.nanny.Nanny
     """
 
+    _instances = weakref.WeakSet()
+
     def __init__(
         self,
         scheduler_ip=None,
         scheduler_port=None,
         scheduler_file=None,
         ncores=None,
+        nthreads=None,
         loop=None,
-        local_dir="dask-worker-space",
+        local_dir=None,
+        local_directory=None,
         services=None,
         service_ports=None,
         service_kwargs=None,
@@ -304,14 +310,22 @@ class Worker(ServerNode):
         contact_address=None,
         memory_monitor_interval="200ms",
         extensions=None,
-        metrics=None,
+        metrics=DEFAULT_METRICS,
+        startup_information=DEFAULT_STARTUP_INFORMATION,
         data=None,
         interface=None,
         host=None,
         port=None,
         protocol=None,
         dashboard_address=None,
+        nanny=None,
+        plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
+        validate=None,
+        profile_cycle_interval=None,
+        lifetime=None,
+        lifetime_stagger=None,
+        lifetime_restart=None,
         **kwargs
     ):
         self.tasks = dict()
@@ -323,6 +337,7 @@ class Worker(ServerNode):
         self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
+        self.nanny = nanny
         self._lock = threading.Lock()
 
         self.data_needed = deque()  # TODO: replace with heap?
@@ -365,14 +380,15 @@ class Worker(ServerNode):
         self.executed_count = 0
         self.long_running = set()
 
-        self.batched_stream = None
         self.recent_messages_log = deque(
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
-        self.validate = kwargs.pop("validate", False)
+        if validate is None:
+            validate = dask.config.get("distributed.scheduler.validate")
+        self.validate = validate
 
         self._transitions = {
             ("waiting", "ready"): self.transition_waiting_ready,
@@ -397,21 +413,25 @@ class Worker(ServerNode):
             ("flight", "memory"): self.transition_dep_flight_memory,
         }
 
-        self.incoming_transfer_log = deque(maxlen=(100000))
+        self.incoming_transfer_log = deque(maxlen=100000)
         self.incoming_count = 0
-        self.outgoing_transfer_log = deque(maxlen=(100000))
+        self.outgoing_transfer_log = deque(maxlen=100000)
         self.outgoing_count = 0
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(
+            lambda: (0, 0)
+        )  # bw/count recent transfers
+        self.bandwidth_types = defaultdict(lambda: (0, 0))  # bw/count recent transfers
+        self.latency = 0.001
         self._client = None
 
-        profile_cycle_interval = kwargs.pop(
-            "profile_cycle_interval",
-            dask.config.get("distributed.worker.profile.cycle"),
-        )
+        if profile_cycle_interval is None:
+            profile_cycle_interval = dask.config.get("distributed.worker.profile.cycle")
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
 
-        self._setup_logging()
+        self._setup_logging(logger)
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -424,6 +444,16 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
 
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+
+        # Target interface on which we contact the scheduler by default
+        # TODO: it is unfortunate that we special-case inproc here
+        if not host and not interface and not scheduler_addr.startswith("inproc://"):
+            host = get_ip(get_address_host(scheduler_addr))
+
         self._start_address = address_from_user_args(
             host=host,
             port=port,
@@ -432,10 +462,14 @@ class Worker(ServerNode):
             security=security,
         )
 
-        self.ncores = ncores or _ncores
+        if ncores is not None:
+            warnings.warn("the ncores= parameter has moved to nthreads=")
+            nthreads = ncores
+
+        self.nthreads = nthreads or CPU_COUNT
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
-        self.death_timeout = death_timeout
+        self.death_timeout = parse_timedelta(death_timeout)
         self.preload = preload
         if self.preload is None:
             self.preload = dask.config.get("distributed.worker.preload")
@@ -449,6 +483,16 @@ class Worker(ServerNode):
         if silence_logs:
             silence_logging(level=silence_logs)
 
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            if not os.path.exists(local_directory):
+                os.makedirs(local_directory)
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+
         with warn_on_duration(
             "1s",
             "Creating scratch directories is taking a surprisingly long time. "
@@ -456,16 +500,16 @@ class Worker(ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_dir))
+            self._workspace = WorkSpace(os.path.abspath(local_directory))
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_dir = self._workdir.dir_path
+            self.local_directory = self._workdir.dir_path
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
         self.listen_args = self.security.get_listen_args("worker")
 
-        self.memory_limit = parse_memory_limit(memory_limit, self.ncores)
+        self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
         self.paused = False
 
@@ -500,8 +544,10 @@ class Worker(ServerNode):
             try:
                 from zict import Buffer, File, Func
             except ImportError:
-                raise ImportError("Please `pip install zict` for spill-to-disk workers")
-            path = os.path.join(self.local_dir, "storage")
+                raise ImportError(
+                    "Please `python -m pip install zict` for spill-to-disk workers"
+                )
+            path = os.path.join(self.local_directory, "storage")
             storage = Func(
                 partial(serialize_bytelist, on_error="raise"),
                 deserialize_bytes,
@@ -517,39 +563,41 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.status = None
-        self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(
-            self.ncores, thread_name_prefix="Dask-Worker-Threads'"
+            self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
         )
         self.actor_executor = ThreadPoolExecutor(
             1, thread_name_prefix="Dask-Actor-Threads"
         )
+        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = dict()
         self.heartbeat_active = False
         self._ipython_kernel = None
 
-        if self.local_dir not in sys.path:
-            sys.path.insert(0, self.local_dir)
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
 
         self.services = {}
-        self.service_ports = service_ports or {}
         self.service_specs = services or {}
 
         if dashboard_address is not None:
             try:
-                from distributed.bokeh.worker import BokehWorker
+                from distributed.dashboard import BokehWorker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("bokeh", dashboard_address)] = (
+                self.service_specs[("dashboard", dashboard_address)] = (
                     BokehWorker,
-                    (service_kwargs or {}).get("bokeh", {}),
+                    (service_kwargs or {}).get("dashboard", {}),
                 )
 
         self.metrics = dict(metrics) if metrics else {}
+        self.startup_information = (
+            dict(startup_information) if startup_information else {}
+        )
 
         self.low_level_profiler = low_level_profiler
 
@@ -560,7 +608,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "delete_data": self.delete_data,
-            "terminate": self.terminate,
+            "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "start_ipython": self.start_ipython,
@@ -572,6 +620,7 @@ class Worker(ServerNode):
             "versions": self.versions,
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
+            "plugin-add": self.plugin_add,
         }
 
         stream_handlers = {
@@ -599,6 +648,13 @@ class Worker(ServerNode):
 
         pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks["heartbeat"] = pc
+        pc = PeriodicCallback(
+            lambda: self.batched_stream.send({"op": "keep-alive"}),
+            60000,
+            io_loop=self.io_loop,
+        )
+        self.periodic_callbacks["keep-alive"] = pc
+
         self._address = contact_address
 
         if self.memory_limit:
@@ -634,7 +690,27 @@ class Worker(ServerNode):
         )
         self.periodic_callbacks["profile-cycle"] = pc
 
-        _global_workers.append(weakref.ref(self))
+        self.plugins = {}
+        self._pending_plugins = plugins
+
+        self.lifetime = lifetime or dask.config.get(
+            "distributed.worker.lifetime.duration"
+        )
+        lifetime_stagger = lifetime_stagger or dask.config.get(
+            "distributed.worker.lifetime.stagger"
+        )
+        self.lifetime_restart = lifetime_restart or dask.config.get(
+            "distributed.worker.lifetime.restart"
+        )
+        if isinstance(self.lifetime, str):
+            self.lifetime = parse_timedelta(self.lifetime)
+        if isinstance(lifetime_stagger, str):
+            lifetime_stagger = parse_timedelta(lifetime_stagger)
+        if self.lifetime:
+            self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
+            self.io_loop.call_later(self.lifetime, self.close_gracefully)
+
+        Worker._instances.add(self)
 
     ##################
     # Administrative #
@@ -642,52 +718,82 @@ class Worker(ServerNode):
 
     def __repr__(self):
         return (
-            "<%s: %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
             % (
                 self.__class__.__name__,
                 self.address,
+                self.name,
                 self.status,
                 len(self.data),
                 len(self.executing),
-                self.ncores,
+                self.nthreads,
                 len(self.ready),
                 len(self.in_flight_tasks),
                 len(self.waiting_for_data),
             )
         )
 
-    def _setup_logging(self):
-        self._deque_handler = DequeHandler(
-            n=dask.config.get("distributed.admin.log-length")
-        )
-        self._deque_handler.setFormatter(
-            logging.Formatter(dask.config.get("distributed.admin.log-format"))
-        )
-        logger.addHandler(self._deque_handler)
-        finalize(self, logger.removeHandler, self._deque_handler)
+    @property
+    def logs(self):
+        return self._deque_handler.deque
 
     @property
     def worker_address(self):
         """ For API compatibility with Nanny """
         return self.address
 
-    def get_metrics(self):
+    @property
+    def local_dir(self):
+        """ For API compatibility with Nanny """
+        warnings.warn(
+            "The local_dir attribute has moved to local_directory", stacklevel=2
+        )
+        return self.local_directory
+
+    async def get_metrics(self):
         core = dict(
             executing=len(self.executing),
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
+            bandwidth={
+                "total": self.bandwidth,
+                "workers": dict(self.bandwidth_workers),
+                "types": keymap(typename, self.bandwidth_types),
+            },
         )
-        custom = {k: metric(self) for k, metric in self.metrics.items()}
+        custom = {}
+        for k, metric in self.metrics.items():
+            try:
+                result = metric(self)
+                if isawaitable(result):
+                    result = await result
+                custom[k] = result
+            except Exception:  # TODO: log error once
+                pass
 
         return merge(custom, self.monitor.recent(), core)
+
+    async def get_startup_information(self):
+        result = {}
+        for k, f in self.startup_information.items():
+            try:
+                v = f(self)
+                if isawaitable(v):
+                    v = await v
+                result[k] = v
+            except Exception:  # TODO: log error once
+                pass
+
+        return result
 
     def identity(self, comm=None):
         return {
             "type": type(self).__name__,
             "id": self.id,
             "scheduler": self.scheduler.address,
-            "ncores": self.ncores,
+            "nthreads": self.nthreads,
+            "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
         }
 
@@ -695,128 +801,145 @@ class Worker(ServerNode):
     # External Services #
     #####################
 
-    @gen.coroutine
-    def _register_with_scheduler(self):
+    async def _register_with_scheduler(self):
+        self.periodic_callbacks["keep-alive"].stop()
         self.periodic_callbacks["heartbeat"].stop()
         start = time()
         if self.contact_address is None:
             self.contact_address = self.address
         logger.info("-" * 49)
         while True:
-            if self.death_timeout and time() > start + self.death_timeout:
-                yield self.close(timeout=1)
-                return
-            if self.status in ("closed", "closing"):
-                raise gen.Return
             try:
                 _start = time()
-                types = {k: typename(v) for k, v in self.data.items()}
-                comm = yield connect(
+                comm = await connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
-                yield comm.write(
+                await comm.write(
                     dict(
                         op="register-worker",
                         reply=False,
                         address=self.contact_address,
                         keys=list(self.data),
-                        ncores=self.ncores,
+                        nthreads=self.nthreads,
                         name=self.name,
                         nbytes=self.nbytes,
-                        types=types,
+                        types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
                         memory_limit=self.memory_limit,
-                        local_directory=self.local_dir,
+                        local_directory=self.local_directory,
                         services=self.service_ports,
+                        nanny=self.nanny,
                         pid=os.getpid(),
-                        metrics=self.get_metrics(),
+                        versions=get_versions(),
+                        metrics=await self.get_metrics(),
+                        extra=await self.get_startup_information(),
                     ),
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
-                if self.death_timeout:
-                    diff = self.death_timeout - (time() - start)
-                    if diff < 0:
-                        continue
-                    future = gen.with_timeout(timedelta(seconds=diff), future)
-                response = yield future
+
+                response = await future
+                if response.get("warning"):
+                    logger.warning(response["warning"])
+
                 _end = time()
                 middle = (_start + _end) / 2
+                self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
                 self.status = "running"
                 break
             except EnvironmentError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
-                yield gen.sleep(0.1)
-            except gen.TimeoutError:
+                await asyncio.sleep(0.1)
+            except TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
             raise ValueError("Unexpected response from register: %r" % (response,))
         else:
-            # Retrieve eventual init functions and run them
-            for function_bytes in response["worker-setups"]:
-                setup_function = pickle.loads(function_bytes)
-                if has_arg(setup_function, "dask_worker"):
-                    result = setup_function(dask_worker=self)
-                else:
-                    result = setup_function()
-                logger.info(
-                    "Init function %s ran: output=%s" % (setup_function, result)
-                )
+            await asyncio.gather(
+                *[
+                    self.plugin_add(plugin=plugin)
+                    for plugin in response["worker-plugins"]
+                ]
+            )
 
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.batched_stream.start(comm)
+        self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
-    @gen.coroutine
-    def heartbeat(self):
+    def _update_latency(self, latency):
+        self.latency = latency * 0.05 + self.latency * 0.95
+        if self.digests is not None:
+            self.digests["latency"].add(latency)
+
+    async def heartbeat(self):
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = yield self.scheduler.heartbeat_worker(
-                    address=self.contact_address, now=time(), metrics=self.get_metrics()
+                response = await retry_operation(
+                    self.scheduler.heartbeat_worker,
+                    address=self.contact_address,
+                    now=time(),
+                    metrics=await self.get_metrics(),
                 )
                 end = time()
                 middle = (start + end) / 2
 
+                self._update_latency(end - start)
+
                 if response["status"] == "missing":
-                    yield self._register_with_scheduler()
+                    for i in range(10):
+                        if self.status != "running":
+                            break
+                        else:
+                            await asyncio.sleep(0.05)
+                    else:
+                        await self._register_with_scheduler()
                     return
                 self.scheduler_delay = response["time"] - middle
                 self.periodic_callbacks["heartbeat"].callback_time = (
                     response["heartbeat-interval"] * 1000
                 )
+                self.bandwidth_workers.clear()
+                self.bandwidth_types.clear()
             except CommClosedError:
                 logger.warning("Heartbeat to scheduler failed")
+                if not self.reconnect:
+                    await self.close(report=False)
+            except IOError as e:
+                # Scheduler is gone. Respect distributed.comm.timeouts.connect
+                if "Timed out trying to connect" in str(e):
+                    await self.close(report=False)
+                else:
+                    raise e
             finally:
                 self.heartbeat_active = False
         else:
             logger.debug("Heartbeat skipped: channel busy")
 
-    @gen.coroutine
-    def handle_scheduler(self, comm):
+    async def handle_scheduler(self, comm):
         try:
-            yield self.handle_stream(
+            await self.handle_stream(
                 comm, every_cycle=[self.ensure_communicating, self.ensure_computing]
             )
         except Exception as e:
             logger.exception(e)
             raise
         finally:
-            if self.reconnect:
+            if self.reconnect and self.status == "running":
                 logger.info("Connection to scheduler broken.  Reconnecting...")
-                self.loop.add_callback(self._register_with_scheduler)
+                self.loop.add_callback(self.heartbeat)
             else:
-                yield self.close(report=False)
+                await self.close(report=False)
 
     def start_ipython(self, comm):
         """Start an IPython kernel
@@ -831,12 +954,11 @@ class Worker(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
-    @gen.coroutine
-    def upload_file(self, comm, filename=None, data=None, load=True):
-        out_filename = os.path.join(self.local_dir, filename)
+    async def upload_file(self, comm, filename=None, data=None, load=True):
+        out_filename = os.path.join(self.local_directory, filename)
 
         def func(data):
-            if isinstance(data, unicode):
+            if isinstance(data, str):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
@@ -846,28 +968,27 @@ class Worker(ServerNode):
         if len(data) < 10000:
             data = func(data)
         else:
-            data = yield offload(func, data)
+            data = await offload(func, data)
 
         if load:
             try:
                 import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
-                raise gen.Return({"status": "error", "exception": to_serialize(e)})
+                return {"status": "error", "exception": to_serialize(e)}
 
-        raise gen.Return({"status": "OK", "nbytes": len(data)})
+        return {"status": "OK", "nbytes": len(data)}
 
     def keys(self, comm=None):
         return list(self.data)
 
-    @gen.coroutine
-    def gather(self, comm=None, who_has=None):
+    async def gather(self, comm=None, who_has=None):
         who_has = {
             k: [coerce_to_address(addr) for addr in v]
             for k, v in who_has.items()
             if k not in self.data
         }
-        result, missing_keys, missing_workers = yield gather_from_workers(
+        result, missing_keys, missing_workers = await gather_from_workers(
             who_has, rpc=self.rpc, who=self.address
         )
         if missing_keys:
@@ -877,158 +998,132 @@ class Worker(ServerNode):
                 missing_workers,
                 who_has,
             )
-            raise Return({"status": "missing-data", "keys": missing_keys})
+            return {"status": "missing-data", "keys": missing_keys}
         else:
             self.update_data(data=result, report=False)
-            raise Return({"status": "OK"})
-
-    def get_logs(self, comm=None, n=None):
-        deque_handler = self._deque_handler
-        if n is None:
-            L = list(deque_handler.deque)
-        else:
-            L = deque_handler.deque
-            L = [L[-i] for i in range(min(n, len(L)))]
-        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+            return {"status": "OK"}
 
     #############
     # Lifecycle #
     #############
 
-    def start_services(self, default_listen_ip):
-        if default_listen_ip == "0.0.0.0":
-            default_listen_ip = ""  # for IPV6
-
-        for k, v in self.service_specs.items():
-            listen_ip = None
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            if isinstance(port, (str, unicode)):
-                port = port.split(":")
-
-            if isinstance(port, (tuple, list)):
-                listen_ip, port = (port[0], int(port[1]))
-
-            if isinstance(v, tuple):
-                v, kwargs = v
-            else:
-                kwargs = {}
-
-            self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen(
-                (listen_ip if listen_ip is not None else default_listen_ip, port)
-            )
-            self.service_ports[k] = self.services[k].port
-
-    @gen.coroutine
-    def _start(self, addr_or_port=0):
-        assert self.status is None
-        addr_or_port = addr_or_port or self._start_address
+    async def start(self):
+        if self.status and self.status.startswith("clos"):
+            return
+        assert self.status is None, self.status
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        # XXX Factor this out
-        if not addr_or_port:
-            # Default address is the required one to reach the scheduler
-            listen_host = get_address_host(self.scheduler.address)
-            self.listen(
-                get_local_address_for(self.scheduler.address),
-                listen_args=self.listen_args,
-            )
-            self.ip = get_address_host(self.address)
-        elif isinstance(addr_or_port, int):
-            # addr_or_port is an integer => assume TCP
-            listen_host = self.ip = get_ip(get_address_host(self.scheduler.address))
-            self.listen((listen_host, addr_or_port), listen_args=self.listen_args)
-        else:
-            self.listen(addr_or_port, listen_args=self.listen_args)
-            self.ip = get_address_host(self.address)
-            try:
-                listen_host = get_address_host(addr_or_port)
-            except ValueError:
-                listen_host = addr_or_port
+        await self.listen(self._start_address, listen_args=self.listen_args)
+        self.ip = get_address_host(self.address)
 
-        if "://" in listen_host:
-            protocol, listen_host = listen_host.split("://")
+        if self.name is None:
+            self.name = self.address
 
-        self.name = self.name or self.address
         preload_modules(
             self.preload,
             parameter=self,
-            file_dir=self.local_dir,
+            file_dir=self.local_directory,
             argv=self.preload_argv,
         )
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
-        self.start_services(listen_host)
+        self.start_services(self.ip)
 
         try:
-            listening_address = "%s%s:%d" % (
-                self.listener.prefix,
-                listen_host,
-                self.port,
-            )
+            listening_address = "%s%s:%d" % (self.listener.prefix, self.ip, self.port)
         except Exception:
-            listening_address = "%s%s" % (self.listener.prefix, listen_host)
+            listening_address = "%s%s" % (self.listener.prefix, self.ip)
 
         logger.info("      Start worker at: %26s", self.address)
         logger.info("         Listening to: %26s", listening_address)
         for k, v in self.service_ports.items():
-            logger.info("  %16s at: %26s" % (k, listen_host + ":" + str(v)))
+            logger.info("  %16s at: %26s" % (k, self.ip + ":" + str(v)))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
-        logger.info("              Threads: %26d", self.ncores)
+        logger.info("              Threads: %26d", self.nthreads)
         if self.memory_limit:
             logger.info("               Memory: %26s", format_bytes(self.memory_limit))
-        logger.info("      Local Directory: %26s", self.local_dir)
+        logger.info("      Local Directory: %26s", self.local_directory)
 
         setproctitle("dask-worker [%s]" % self.address)
 
-        yield self._register_with_scheduler()
+        await asyncio.gather(
+            *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
+        )
+        self._pending_plugins = ()
+
+        await self._register_with_scheduler()
 
         self.start_periodic_callbacks()
-        raise gen.Return(self)
-
-    def __await__(self):
-        return self._start().__await__()
-
-    def start(self, port=0):
-        self.loop.add_callback(self._start, port)
+        return self
 
     def _close(self, *args, **kwargs):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    @gen.coroutine
-    def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
+    async def close(
+        self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
+    ):
         with log_errors():
             if self.status in ("closed", "closing"):
+                await self.finished()
                 return
 
+            self.reconnect = False
             disable_gc_diagnosis()
 
             try:
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
+            if self.status not in ("running", "closing-gracefully"):
+                logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
+
+            if nanny and self.nanny:
+                with self.rpc(self.nanny) as r:
+                    await r.close_gracefully()
+
             setproctitle("dask-worker [closing]")
 
-            self.stop()
+            teardowns = [
+                plugin.teardown(self)
+                for plugin in self.plugins.values()
+                if hasattr(plugin, "teardown")
+            ]
+
+            await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+
             for pc in self.periodic_callbacks.values():
                 pc.stop()
-            with ignoring(EnvironmentError, gen.TimeoutError):
-                if report:
-                    yield gen.with_timeout(
-                        timedelta(seconds=timeout),
-                        self.scheduler.unregister(address=self.contact_address),
+            with ignoring(EnvironmentError, TimeoutError):
+                if report and self.contact_address is not None:
+                    await asyncio.wait_for(
+                        self.scheduler.unregister(
+                            address=self.contact_address, safe=safe
+                        ),
+                        timeout,
                     )
-            self.scheduler.close_rpc()
+            await self.scheduler.close_rpc()
+            self._workdir.release()
+
+            for k, v in self.services.items():
+                v.stop()
+
+            if (
+                self.batched_stream
+                and self.batched_stream.comm
+                and not self.batched_stream.comm.closed()
+            ):
+                self.batched_stream.send({"op": "close-stream"})
+
+            if self.batched_stream:
+                with ignoring(TimeoutError):
+                    await self.batched_stream.close(timedelta(seconds=timeout))
+
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
                 self.executor._work_queue.queue.clear()
@@ -1036,53 +1131,40 @@ class Worker(ServerNode):
             else:
                 self.executor.shutdown(wait=False)
             self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
-            self._workdir.release()
 
-            for k, v in self.services.items():
-                v.stop()
-
-            if self.batched_stream and not self.batched_stream.comm.closed():
-                self.batched_stream.send({"op": "close-stream"})
-
-            if self.batched_stream:
-                self.batched_stream.close()
-
-            if nanny and "nanny" in self.service_ports:
-                nanny_address = "%s%s:%d" % (
-                    self.listener.prefix,
-                    self.ip,
-                    self.service_ports["nanny"],
-                )
-                with self.rpc(nanny_address) as r:
-                    yield r.terminate()
-
-            self.rpc.close()
-            self._closed.set()
-            self._remove_from_global_workers()
+            self.stop()
+            await self.rpc.close()
 
             self.status = "closed"
-            yield ServerNode.close(self)
+            await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
+        return "OK"
 
-    def __del__(self):
-        self._remove_from_global_workers()
+    async def close_gracefully(self):
+        """ Gracefully shut down a worker
 
-    def _remove_from_global_workers(self):
-        for ref in list(_global_workers):
-            if ref() is self:
-                _global_workers.remove(ref)
-            if ref() is None:
-                _global_workers.remove(ref)
+        This first informs the scheduler that we're shutting down, and asks it
+        to move our data elsewhere.  Afterwards, we close as normal
+        """
+        if self.status.startswith("closing"):
+            await self.finished()
 
-    @gen.coroutine
-    def terminate(self, comm, report=True):
-        yield self.close(report=report)
-        raise Return("OK")
+        if self.status == "closed":
+            return
 
-    @gen.coroutine
-    def wait_until_closed(self):
-        yield self._closed.wait()
+        logger.info("Closing worker gracefully: %s", self.address)
+        self.status = "closing-gracefully"
+        await self.scheduler.retire_workers(workers=[self.address], remove=False)
+        await self.close(safe=True, nanny=not self.lifetime_restart)
+
+    async def terminate(self, comm, report=True, **kwargs):
+        await self.close(report=report, **kwargs)
+        return "OK"
+
+    async def wait_until_closed(self):
+        warnings.warn("wait_until_closed has moved to finished()")
+        await self.finished()
         assert self.status == "closed"
 
     ################
@@ -1094,13 +1176,12 @@ class Worker(ServerNode):
             bcomm = BatchedSend(interval="1ms", loop=self.loop)
             self.stream_comms[address] = bcomm
 
-            @gen.coroutine
-            def batched_send_connect():
-                comm = yield connect(
+            async def batched_send_connect():
+                comm = await connect(
                     address, connection_args=self.connection_args  # TODO, serialization
                 )
                 comm.name = "Worker->Worker"
-                yield comm.write({"op": "connection_stream"})
+                await comm.write({"op": "connection_stream"})
 
                 bcomm.start(comm)
 
@@ -1108,8 +1189,7 @@ class Worker(ServerNode):
 
         self.stream_comms[address].send(msg)
 
-    @gen.coroutine
-    def get_data(
+    async def get_data(
         self, comm, keys=None, who=None, serializers=None, max_connections=None
     ):
         start = time()
@@ -1125,11 +1205,25 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
+        if self.paused:
+            max_connections = 1
+            throttle_msg = " Throttling outgoing connections because worker is paused."
+        else:
+            throttle_msg = ""
+
         if (
             max_connections is not False
-            and self.outgoing_current_count > max_connections
+            and self.outgoing_current_count >= max_connections
         ):
-            raise gen.Return({"status": "busy"})
+            logger.debug(
+                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
+                self.address,
+                who,
+                self.outgoing_current_count,
+                max_connections,
+                throttle_msg,
+            )
+            return {"status": "busy"}
 
         self.outgoing_current_count += 1
         data = {k: self.data[k] for k in keys if k in self.data}
@@ -1149,8 +1243,8 @@ class Worker(ServerNode):
         start = time()
 
         try:
-            compressed = yield comm.write(msg, serializers=serializers)
-            response = yield comm.read(deserializers=serializers)
+            compressed = await comm.write(msg, serializers=serializers)
+            response = await comm.read(deserializers=serializers)
             assert response == "OK", response
         except EnvironmentError:
             logger.exception(
@@ -1182,7 +1276,7 @@ class Worker(ServerNode):
             }
         )
 
-        raise gen.Return("dont-reply")
+        return "dont-reply"
 
     ###################
     # Local Execution #
@@ -1210,8 +1304,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    @gen.coroutine
-    def delete_data(self, comm=None, keys=None, report=True):
+    async def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1225,13 +1318,12 @@ class Worker(ServerNode):
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
                 # TODO: this route seems to not exist?
-                yield self.scheduler.remove_keys(
+                await self.scheduler.remove_keys(
                     address=self.contact_address, keys=list(keys)
                 )
-        raise Return("OK")
+        return "OK"
 
-    @gen.coroutine
-    def set_resources(self, **resources):
+    async def set_resources(self, **resources):
         for r, quantity in resources.items():
             if r in self.total_resources:
                 self.available_resources[r] += quantity - self.total_resources[r]
@@ -1239,8 +1331,10 @@ class Worker(ServerNode):
                 self.available_resources[r] = quantity
             self.total_resources[r] = quantity
 
-        yield self.scheduler.set_resources(
-            resources=self.total_resources, worker=self.contact_address
+        await retry_operation(
+            self.scheduler.set_resources,
+            resources=self.total_resources,
+            worker=self.contact_address,
         )
 
     ###################
@@ -1253,7 +1347,7 @@ class Worker(ServerNode):
         function=None,
         args=None,
         kwargs=None,
-        task=None,
+        task=no_value,
         who_has=None,
         nbytes=None,
         priority=None,
@@ -1292,23 +1386,9 @@ class Worker(ServerNode):
                 return
 
             self.log.append((key, "new"))
-            try:
-                start = time()
-                self.tasks[key] = _deserialize(function, args, kwargs, task)
-                if actor:
-                    self.actors[key] = None
-                stop = time()
-
-                if stop - start > 0.010:
-                    self.startstops[key].append(("deserialize", start, stop))
-            except Exception as e:
-                logger.warning("Could not deserialize task", exc_info=True)
-                emsg = error_message(e)
-                emsg["key"] = key
-                emsg["op"] = "task-erred"
-                self.batched_stream.send(emsg)
-                self.log.append((key, "deserialize-error"))
-                return
+            self.tasks[key] = SerializedTask(function, args, kwargs, task)
+            if actor:
+                self.actors[key] = None
 
             self.priorities[key] = priority
             self.durations[key] = duration
@@ -1484,6 +1564,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
+        self._notify_transition(key, start, finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -1597,7 +1678,7 @@ class Worker(ServerNode):
                 if key in self.dep_state:
                     self.transition_dep(key, "memory")
 
-            if report and self.batched_stream:
+            if report and self.batched_stream and self.status == "running":
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -1808,7 +1889,9 @@ class Worker(ServerNode):
             self.data[key] = value
             stop = time()
             if stop - start > 0.020:
-                self.startstops[key].append(("disk-write", start, stop))
+                self.startstops[key].append(
+                    {"action": "disk-write", "start": start, "stop": stop}
+                )
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
@@ -1844,8 +1927,7 @@ class Worker(ServerNode):
 
         return deps, total_bytes
 
-    @gen.coroutine
-    def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
+    async def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
         if self.status != "running":
             return
         with log_errors():
@@ -1862,7 +1944,7 @@ class Worker(ServerNode):
                 logger.debug("Request %d keys", len(deps))
 
                 start = time()
-                response = yield get_data_from_worker(
+                response = await get_data_from_worker(
                     self.rpc, deps, worker, who=self.address
                 )
                 stop = time()
@@ -1876,15 +1958,17 @@ class Worker(ServerNode):
 
                 if cause:
                     self.startstops[cause].append(
-                        (
-                            "transfer",
-                            start + self.scheduler_delay,
-                            stop + self.scheduler_delay,
-                        )
+                        {
+                            "action": "transfer",
+                            "start": start + self.scheduler_delay,
+                            "stop": stop + self.scheduler_delay,
+                            "source": worker,
+                        }
                     )
 
                 total_bytes = sum(self.nbytes.get(dep, 0) for dep in response["data"])
-                duration = (stop - start) or 0.5
+                duration = (stop - start) or 0.010
+                bandwidth = total_bytes / duration
                 self.incoming_transfer_log.append(
                     {
                         "start": start + self.scheduler_delay,
@@ -1895,10 +1979,21 @@ class Worker(ServerNode):
                             dep: self.nbytes.get(dep, None) for dep in response["data"]
                         },
                         "total": total_bytes,
-                        "bandwidth": total_bytes / duration,
+                        "bandwidth": bandwidth,
                         "who": worker,
                     }
                 )
+                if total_bytes > 1000000:
+                    self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
+                    bw, cnt = self.bandwidth_workers[worker]
+                    self.bandwidth_workers[worker] = (bw + bandwidth, cnt + 1)
+
+                    types = set(map(type, response["data"].values()))
+                    if len(types) == 1:
+                        [typ] = types
+                        bw, cnt = self.bandwidth_types[typ]
+                        self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
+
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
@@ -1906,11 +2001,6 @@ class Worker(ServerNode):
                 self.incoming_count += 1
 
                 self.log.append(("receive-dep", worker, list(response["data"])))
-
-                if response["data"]:
-                    self.batched_stream.send(
-                        {"op": "add-keys", "keys": list(response["data"])}
-                    )
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
@@ -1956,10 +2046,10 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    yield gen.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
                     # See if anyone new has the data
-                    yield self.query_who_has(dep)
+                    await self.query_who_has(dep)
                     self.ensure_communicating()
 
     def bad_dep(self, dep):
@@ -1971,8 +2061,7 @@ class Worker(ServerNode):
             self.transition(key, "error")
         self.release_dep(dep)
 
-    @gen.coroutine
-    def handle_missing_dep(self, *deps, **kwargs):
+    async def handle_missing_dep(self, *deps, **kwargs):
         original_deps = list(deps)
         self.log.append(("handle-missing", deps))
         try:
@@ -1995,7 +2084,7 @@ class Worker(ServerNode):
                     self.suspicious_deps[dep],
                 )
 
-            who_has = yield self.scheduler.who_has(keys=list(deps))
+            who_has = await retry_operation(self.scheduler.who_has, keys=list(deps))
             who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             for dep in deps:
@@ -2015,7 +2104,7 @@ class Worker(ServerNode):
             retries = kwargs.get("retries", 5)
             self.log.append(("handle-missing-failed", retries, deps))
             if retries > 0:
-                yield self.handle_missing_dep(self, *deps, retries=retries - 1)
+                await self.handle_missing_dep(self, *deps, retries=retries - 1)
             else:
                 raise
         finally:
@@ -2027,12 +2116,11 @@ class Worker(ServerNode):
 
             self.ensure_communicating()
 
-    @gen.coroutine
-    def query_who_has(self, *deps):
+    async def query_who_has(self, *deps):
         with log_errors():
-            response = yield self.scheduler.who_has(keys=deps)
+            response = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(response)
-            raise gen.Return(response)
+            return response
 
     def update_who_has(self, who_has):
         try:
@@ -2060,7 +2148,7 @@ class Worker(ServerNode):
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
 
-        if state in ("ready", "waiting"):
+        if state in ("ready", "waiting", "constrained"):
             self.release_key(key)
 
     def release_key(self, key, cause=None, reason=None, report=True):
@@ -2240,8 +2328,38 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    @gen.coroutine
-    def actor_execute(self, comm=None, actor=None, function=None, args=(), kwargs={}):
+    async def plugin_add(self, comm=None, plugin=None, name=None):
+        with log_errors(pdb=False):
+            if isinstance(plugin, bytes):
+                plugin = pickle.loads(plugin)
+            if not name:
+                if hasattr(plugin, "name"):
+                    name = plugin.name
+                else:
+                    name = funcname(plugin) + "-" + str(uuid.uuid4())
+
+            assert name
+
+            if name in self.plugins:
+                return {"status": "repeat"}
+            else:
+                self.plugins[name] = plugin
+
+                logger.info("Starting Worker plugin %s" % name)
+                if hasattr(plugin, "setup"):
+                    try:
+                        result = plugin.setup(worker=self)
+                        if isawaitable(result):
+                            result = await result
+                    except Exception as e:
+                        msg = error_message(e)
+                        return msg
+
+                return {"status": "OK"}
+
+    async def actor_execute(
+        self, comm=None, actor=None, function=None, args=(), kwargs={}
+    ):
         separate_thread = kwargs.pop("separate_thread", True)
         key = actor
         actor = self.actors[key]
@@ -2249,9 +2367,9 @@ class Worker(ServerNode):
         name = key_split(key) + "." + function
 
         if iscoroutinefunction(func):
-            result = yield func(*args, **kwargs)
+            result = await func(*args, **kwargs)
         elif separate_thread:
-            result = yield self.executor_submit(
+            result = await self.executor_submit(
                 name,
                 apply_function_actor,
                 args=(
@@ -2267,7 +2385,7 @@ class Worker(ServerNode):
             )
         else:
             result = func(*args, **kwargs)
-        raise gen.Return({"status": "OK", "result": to_serialize(result)})
+        return {"status": "OK", "result": to_serialize(result)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
         value = getattr(self.actors[actor], attribute)
@@ -2282,23 +2400,55 @@ class Worker(ServerNode):
 
         return True
 
+    def _maybe_deserialize_task(self, key):
+        if not isinstance(self.tasks[key], SerializedTask):
+            return self.tasks[key]
+        try:
+            start = time()
+            function, args, kwargs = _deserialize(*self.tasks[key])
+            stop = time()
+
+            if stop - start > 0.010:
+                self.startstops[key].append(
+                    {"action": "deserialize", "start": start, "stop": stop}
+                )
+            return function, args, kwargs
+        except Exception as e:
+            logger.warning("Could not deserialize task", exc_info=True)
+            emsg = error_message(e)
+            emsg["key"] = key
+            emsg["op"] = "task-erred"
+            self.batched_stream.send(emsg)
+            self.log.append((key, "deserialize-error"))
+            raise
+
     def ensure_computing(self):
         if self.paused:
             return
         try:
-            while self.constrained and len(self.executing) < self.ncores:
+            while self.constrained and len(self.executing) < self.nthreads:
                 key = self.constrained[0]
                 if self.task_state.get(key) != "constrained":
                     self.constrained.popleft()
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
+                    try:
+                        # Ensure task is deserialized prior to execution
+                        self.tasks[key] = self._maybe_deserialize_task(key)
+                    except Exception:
+                        continue
                     self.transition(key, "executing")
                 else:
                     break
-            while self.ready and len(self.executing) < self.ncores:
+            while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
                 if self.task_state.get(key) in READY:
+                    try:
+                        # Ensure task is deserialized prior to execution
+                        self.tasks[key] = self._maybe_deserialize_task(key)
+                    except Exception:
+                        continue
                     self.transition(key, "executing")
         except Exception as e:
             logger.exception(e)
@@ -2308,10 +2458,9 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    @gen.coroutine
-    def execute(self, key, report=False):
+    async def execute(self, key, report=False):
         executor_error = None
-        if self.status in ("closing", "closed"):
+        if self.status in ("closing", "closed", "closing-gracefully"):
             return
         try:
             if key not in self.executing or key not in self.task_state:
@@ -2331,11 +2480,13 @@ class Worker(ServerNode):
                     from .actor import Actor  # TODO: create local actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, unicode))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
+            args2 = pack_data(args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
-                self.startstops[key].append(("disk-read", start, stop))
+                self.startstops[key].append(
+                    {"action": "disk-read", "start": start, "stop": stop}
+                )
                 if self.digests is not None:
                     self.digests["disk-load-duration"].add(stop - start)
 
@@ -2343,7 +2494,7 @@ class Worker(ServerNode):
                 "Execute key: %s worker: %s", key, self.address
             )  # TODO: comment out?
             try:
-                result = yield self.executor_submit(
+                result = await self.executor_submit(
                     key,
                     apply_function,
                     args=(
@@ -2366,7 +2517,9 @@ class Worker(ServerNode):
 
             result["key"] = key
             value = result.pop("result", None)
-            self.startstops[key].append(("compute", result["start"], result["stop"]))
+            self.startstops[key].append(
+                {"action": "compute", "start": result["start"], "stop": result["stop"]}
+            )
             self.threads[key] = result["thread"]
 
             if result["op"] == "task-finished":
@@ -2422,8 +2575,7 @@ class Worker(ServerNode):
     # Administrative #
     ##################
 
-    @gen.coroutine
-    def memory_monitor(self):
+    async def memory_monitor(self):
         """ Track this process's memory usage and act accordingly
 
         If we rise above 70% memory use, start dumping data to disk.
@@ -2439,32 +2591,44 @@ class Worker(ServerNode):
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
-        # Pause worker threads if above 80% memory use
-        if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-            # Try to free some memory while in paused state
-            self._throttled_gc.collect()
-            if not self.paused:
+        def check_pause(memory):
+            frac = memory / self.memory_limit
+            # Pause worker threads if above 80% memory use
+            if self.memory_pause_fraction and frac > self.memory_pause_fraction:
+                # Try to free some memory while in paused state
+                self._throttled_gc.collect()
+                if not self.paused:
+                    logger.warning(
+                        "Worker is at %d%% memory usage. Pausing worker.  "
+                        "Process memory: %s -- Worker memory limit: %s",
+                        int(frac * 100),
+                        format_bytes(memory),
+                        format_bytes(self.memory_limit)
+                        if self.memory_limit is not None
+                        else "None",
+                    )
+                    self.paused = True
+            elif self.paused:
                 logger.warning(
-                    "Worker is at %d%% memory usage. Pausing worker.  "
+                    "Worker is at %d%% memory usage. Resuming worker. "
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
-                    format_bytes(proc.memory_info().rss),
-                    format_bytes(self.memory_limit),
+                    format_bytes(memory),
+                    format_bytes(self.memory_limit)
+                    if self.memory_limit is not None
+                    else "None",
                 )
-                self.paused = True
-        elif self.paused:
-            logger.warning(
-                "Worker is at %d%% memory usage. Resuming worker. "
-                "Process memory: %s -- Worker memory limit: %s",
-                int(frac * 100),
-                format_bytes(proc.memory_info().rss),
-                format_bytes(self.memory_limit),
-            )
-            self.paused = False
-            self.ensure_computing()
+                self.paused = False
+                self.ensure_computing()
 
+        check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
+            logger.debug(
+                "Worker is at %d%% memory usage. Start spilling data to disk.",
+                int(frac * 100),
+            )
+            start = time()
             target = self.memory_limit * self.memory_target_fraction
             count = 0
             need = memory - target
@@ -2475,15 +2639,23 @@ class Worker(ServerNode):
                         "to store to disk.  Perhaps some other process "
                         "is leaking memory?  Process memory: %s -- "
                         "Worker memory limit: %s",
-                        format_bytes(proc.memory_info().rss),
-                        format_bytes(self.memory_limit),
+                        format_bytes(memory),
+                        format_bytes(self.memory_limit)
+                        if self.memory_limit is not None
+                        else "None",
                     )
                     break
                 k, v, weight = self.data.fast.evict()
                 del k, v
                 total += weight
                 count += 1
-                yield gen.moment
+                # If the current buffer is filled with a lot of small values,
+                # evicting one at a time is very slow and the worker might
+                # generate new data faster than it is able to evict. Therefore,
+                # only pass on control if we spent at least 0.5s evicting
+                if time() - start > 0.5:
+                    await asyncio.sleep(0)
+                    start = time()
                 memory = proc.memory_info().rss
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
@@ -2491,6 +2663,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
+            check_pause(memory)
             if count:
                 logger.debug(
                     "Moved %d pieces of data data and %s to disk",
@@ -2499,7 +2672,7 @@ class Worker(ServerNode):
                 )
 
         self._memory_monitoring = False
-        raise gen.Return(total)
+        return total
 
     def cycle_profile(self):
         now = time() + self.scheduler_delay
@@ -2542,12 +2715,17 @@ class Worker(ServerNode):
         if self.digests is not None:
             self.digests["profile-duration"].add(stop - start)
 
-    def get_profile(self, comm=None, start=None, stop=None, key=None):
+    async def get_profile(
+        self, comm=None, start=None, stop=None, key=None, server=False
+    ):
         now = time() + self.scheduler_delay
-        if key is None:
+        if server:
+            history = self.io_loop.profile
+        elif key is None:
             history = self.profile_history
         else:
             history = [(t, d[key]) for t, d in self.profile_keys_history if key in d]
+
         if start is None:
             istart = 0
         else:
@@ -2580,7 +2758,7 @@ class Worker(ServerNode):
 
         return prof
 
-    def get_profile_metadata(self, comm=None, start=0, stop=None):
+    async def get_profile_metadata(self, comm=None, start=0, stop=None):
         if stop is None:
             add_recent = True
         now = time() + self.scheduler_delay
@@ -2613,6 +2791,16 @@ class Worker(ServerNode):
 
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
+
+    def _notify_transition(self, key, start, finish, **kwargs):
+        for name, plugin in self.plugins.items():
+            if hasattr(plugin, "transition"):
+                try:
+                    plugin.transition(key, start, finish, **kwargs)
+                except Exception:
+                    logger.info(
+                        "Plugin '%s' failed with exception" % name, exc_info=True
+                    )
 
     ##############
     # Validation #
@@ -2819,7 +3007,7 @@ class Worker(ServerNode):
         --------
         get_worker
         """
-        return self.active_threads[get_thread_identity()]
+        return self.active_threads[threading.get_ident()]
 
 
 def get_worker():
@@ -2843,11 +3031,10 @@ def get_worker():
     try:
         return thread_state.execution_state["worker"]
     except AttributeError:
-        for ref in _global_workers[::-1]:
-            worker = ref()
-            if worker:
-                return worker
-        raise ValueError("No workers found")
+        try:
+            return first(w for w in Worker._instances if w.status == "running")
+        except StopIteration:
+            raise ValueError("No workers found")
 
 
 def get_client(address=None, timeout=3, resolve_address=True):
@@ -2959,24 +3146,26 @@ class Reschedule(Exception):
     pass
 
 
-def parse_memory_limit(memory_limit, ncores, total_cores=_ncores):
+def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
     if memory_limit is None:
         return None
+
     if memory_limit == "auto":
-        memory_limit = int(TOTAL_MEMORY * min(1, ncores / total_cores))
+        memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with ignoring(ValueError, TypeError):
-        x = float(memory_limit)
-        if isinstance(x, float) and x <= 1:
-            return int(x * TOTAL_MEMORY)
+        memory_limit = float(memory_limit)
+        if isinstance(memory_limit, float) and memory_limit <= 1:
+            memory_limit = int(memory_limit * system.MEMORY_LIMIT)
 
-    if isinstance(memory_limit, (unicode, str)):
-        return parse_bytes(memory_limit)
+    if isinstance(memory_limit, str):
+        memory_limit = parse_bytes(memory_limit)
     else:
-        return int(memory_limit)
+        memory_limit = int(memory_limit)
+
+    return min(memory_limit, system.MEMORY_LIMIT)
 
 
-@gen.coroutine
-def get_data_from_worker(
+async def get_data_from_worker(
     rpc,
     keys,
     worker,
@@ -3001,44 +3190,61 @@ def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    comm = yield rpc.connect(worker)
-    comm.name = "Ephemeral Worker->Worker for gather"
-    try:
-        response = yield send_recv(
-            comm,
-            serializers=serializers,
-            deserializers=deserializers,
-            op="get_data",
-            keys=keys,
-            who=who,
-            max_connections=max_connections,
-        )
+    async def _get_data():
+        comm = await rpc.connect(worker)
+        comm.name = "Ephemeral Worker->Worker for gather"
         try:
-            status = response["status"]
-        except KeyError:
-            raise ValueError("Unexpected response", response)
-        else:
-            if status == "OK":
-                yield comm.write("OK")
-    finally:
-        rpc.reuse(worker, comm)
+            response = await send_recv(
+                comm,
+                serializers=serializers,
+                deserializers=deserializers,
+                op="get_data",
+                keys=keys,
+                who=who,
+                max_connections=max_connections,
+            )
+            try:
+                status = response["status"]
+            except KeyError:
+                raise ValueError("Unexpected response", response)
+            else:
+                if status == "OK":
+                    await comm.write("OK")
+            return response
+        finally:
+            rpc.reuse(worker, comm)
 
-    raise gen.Return(response)
+    return await retry_operation(_get_data, operation="get_data_from_worker")
 
 
 job_counter = [0]
 
 
-def _deserialize(function=None, args=None, kwargs=None, task=None):
+cache_loads = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """ Load a function from bytes, cache bytes """
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
+
+
+def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
-        function = pickle.loads(function)
+        function = loads_function(function)
     if args:
         args = pickle.loads(args)
     if kwargs:
         kwargs = pickle.loads(kwargs)
 
-    if task is not None:
+    if task is not no_value:
         assert not function and not args and not kwargs
         function = execute_task
         args = (task,)
@@ -3064,24 +3270,22 @@ def execute_task(task):
         return task
 
 
-try:
-    # a 10 MB cache of deserialized functions and their bytes
-    from zict import LRU
+cache_dumps = LRU(maxsize=100)
 
-    cache = LRU(10000000, dict(), weight=lambda k, v: len(v))
-except ImportError:
-    cache = dict()
+_cache_lock = threading.Lock()
 
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cache[func]
+        with _cache_lock:
+            result = cache_dumps[func]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
-            cache[func] = result
-    except TypeError:
+            with _cache_lock:
+                cache_dumps[func] = result
+    except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
 
@@ -3158,7 +3362,7 @@ def apply_function(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
     thread_state.start_time = time()
@@ -3198,7 +3402,7 @@ def apply_function_actor(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
 
     with active_threads_lock:
         active_threads[ident] = key
@@ -3220,7 +3424,7 @@ def get_msg_safe_str(msg):
     ignoring them.
     """
 
-    class Repr(object):
+    class Repr:
         def __init__(self, f, val):
             self._f = f
             self._val = val
@@ -3279,8 +3483,7 @@ def weight(k, v):
     return sizeof(v)
 
 
-@gen.coroutine
-def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
     function = pickle.loads(function)
     if is_coro is None:
         is_coro = iscoroutinefunction(function)
@@ -3304,14 +3507,14 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
             result = function(*args, **kwargs)
         else:
             if wait:
-                result = yield function(*args, **kwargs)
+                result = await function(*args, **kwargs)
             else:
                 server.loop.add_callback(function, *args, **kwargs)
                 result = None
 
     except Exception as e:
         logger.warning(
-            " Run Failed\n" "Function: %s\n" "args:     %s\n" "kwargs:   %s\n",
+            "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
             str(funcname(function))[:1000],
             convert_args_to_str(args, max_len=1000),
             convert_kwargs_to_str(kwargs, max_len=1000),
@@ -3321,4 +3524,25 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
         response = error_message(e)
     else:
         response = {"status": "OK", "result": to_serialize(result)}
-    raise Return(response)
+    return response
+
+
+_global_workers = Worker._instances
+
+try:
+    from .diagnostics import nvml
+except Exception:
+    pass
+else:
+
+    @gen.coroutine
+    def gpu_metric(worker):
+        result = yield offload(nvml.real_time)
+        return result
+
+    DEFAULT_METRICS["gpu"] = gpu_metric
+
+    def gpu_startup(worker):
+        return nvml.one_time()
+
+    DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup

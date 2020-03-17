@@ -1,13 +1,10 @@
-from __future__ import print_function, division, absolute_import
-
-from datetime import timedelta
 from time import sleep
-import sys
+import asyncio
 
 import pytest
 from tornado import gen
 
-from distributed import Client, Queue, Nanny, worker_client, wait
+from distributed import Client, Queue, Nanny, worker_client, wait, TimeoutError
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, div
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
@@ -27,7 +24,7 @@ def test_queue(c, s, a, b):
     future2 = yield xx.get()
     assert future.key == future2.key
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield x.get(timeout=0.1)
 
     del future, future2
@@ -53,7 +50,7 @@ def test_queue_with_data(c, s, a, b):
 
     assert data == (1, "hello")
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield x.get(timeout=0.1)
 
 
@@ -113,9 +110,8 @@ def test_picklability_sync(client):
     assert q.get() == 11
 
 
-@pytest.mark.skipif(sys.version_info[0] == 2, reason="Multi-client issues")
 @pytest.mark.slow
-@gen_cluster(client=True, ncores=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
 def test_race(c, s, *workers):
     def f(i):
         with worker_client() as c:
@@ -185,8 +181,8 @@ def test_get_many(c, s, a, b):
     data = yield xx.get(batch=2)
     assert data == [1, 2]
 
-    with pytest.raises(gen.TimeoutError):
-        data = yield gen.with_timeout(timedelta(seconds=0.100), xx.get(batch=2))
+    with pytest.raises(TimeoutError):
+        data = yield asyncio.wait_for(xx.get(batch=2), 0.1)
 
 
 @gen_cluster(client=True)
@@ -225,7 +221,7 @@ def test_Future_knows_status_immediately(c, s, a, b):
 @gen_cluster(client=True)
 def test_erred_future(c, s, a, b):
     future = c.submit(div, 1, 0)
-    q = Queue()
+    q = yield Queue()
     yield q.put(future)
     yield gen.sleep(0.1)
     future2 = yield q.get()
@@ -238,10 +234,7 @@ def test_erred_future(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_close(c, s, a, b):
-    q = Queue()
-
-    while q.name not in s.extensions["queues"].queues:
-        yield gen.sleep(0.01)
+    q = yield Queue()
 
     q.close()
     q.close()
@@ -252,10 +245,10 @@ def test_close(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_timeout(c, s, a, b):
-    q = Queue("v", maxsize=1)
+    q = yield Queue("v", maxsize=1)
 
     start = time()
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield q.get(timeout=0.3)
     stop = time()
     assert 0.2 < stop - start < 2.0
@@ -263,7 +256,7 @@ def test_timeout(c, s, a, b):
     yield q.put(1)
 
     start = time()
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield q.put(2, timeout=0.3)
     stop = time()
     assert 0.1 < stop - start < 2.0

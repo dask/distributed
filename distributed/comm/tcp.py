@@ -1,10 +1,10 @@
-from __future__ import print_function, division, absolute_import
-
 import errno
 import logging
 import socket
 import struct
 import sys
+from tornado import gen
+import weakref
 
 try:
     import ssl
@@ -12,23 +12,14 @@ except ImportError:
     ssl = None
 
 import dask
-import tornado
-from tornado import gen, netutil
+from tornado import netutil
 from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
-from ..compatibility import finalize, PY3
+from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import (
-    ensure_bytes,
-    ensure_ip,
-    get_ip,
-    get_ipv6,
-    nbytes,
-    parse_timedelta,
-    shutting_down,
-)
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -39,16 +30,7 @@ from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concre
 logger = logging.getLogger(__name__)
 
 
-def get_total_physical_memory():
-    try:
-        import psutil
-
-        return psutil.virtual_memory().total / 2
-    except ImportError:
-        return 2e9
-
-
-MAX_BUFFER_SIZE = get_total_physical_memory()
+MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
 def set_tcp_timeout(stream):
@@ -141,12 +123,15 @@ def convert_stream_closed_error(obj, exc):
         raise CommClosedError("in %s: %s" % (obj, exc))
 
 
+def _do_nothing():
+    pass
+
+
 class TCP(Comm):
     """
     An established communication based on an underlying Tornado IOStream.
     """
 
-    _iostream_allows_memoryview = tornado.version_info >= (4, 5)
     # IOStream.read_into() currently proposed in
     # https://github.com/tornadoweb/tornado/pull/2193
     _iostream_has_read_into = hasattr(IOStream, "read_into")
@@ -157,12 +142,22 @@ class TCP(Comm):
         self._peer_addr = peer_addr
         self.stream = stream
         self.deserialize = deserialize
-        self._finalizer = finalize(self, self._get_finalizer())
+        self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra = {}
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+        # set a close callback, to make `self.stream.closed()` more reliable.
+        # Background: if `stream` is unused (e.g. because it's in `ConnectionPool.available`),
+        # the underlying fd is not watched for changes. In this case, even if the
+        # connection is actively closed by the remote end, `self.closed()` would still return `False`.
+        # Registering a closed callback will make tornado register the underlying fd
+        # for changes, and this would be reflected in `self.closed()` even without reading/writing.
+        #
+        # Use a global method (instead of a lambda) to avoid creating a reference
+        # to the local scope.
+        stream.set_close_callback(_do_nothing)
         self._read_extra()
 
     def _read_extra(self):
@@ -184,27 +179,26 @@ class TCP(Comm):
     def peer_address(self):
         return self._peer_addr
 
-    @gen.coroutine
-    def read(self, deserializers=None):
+    async def read(self, deserializers=None):
         stream = self.stream
         if stream is None:
             raise CommClosedError
 
         try:
-            n_frames = yield stream.read_bytes(8)
+            n_frames = await stream.read_bytes(8)
             n_frames = struct.unpack("Q", n_frames)[0]
-            lengths = yield stream.read_bytes(8 * n_frames)
+            lengths = await stream.read_bytes(8 * n_frames)
             lengths = struct.unpack("Q" * n_frames, lengths)
 
             frames = []
             for length in lengths:
                 if length:
-                    if PY3 and self._iostream_has_read_into:
+                    if self._iostream_has_read_into:
                         frame = bytearray(length)
-                        n = yield stream.read_into(frame)
+                        n = await stream.read_into(frame)
                         assert n == length, (n, length)
                     else:
-                        frame = yield stream.read_bytes(length)
+                        frame = await stream.read_bytes(length)
                 else:
                     frame = b""
                 frames.append(frame)
@@ -214,23 +208,22 @@ class TCP(Comm):
                 convert_stream_closed_error(self, e)
         else:
             try:
-                msg = yield from_frames(
+                msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
             except EOFError:
                 # Frames possibly garbled or truncated by communication error
                 self.abort()
                 raise CommClosedError("aborted stream on truncated data")
-            raise gen.Return(msg)
+            return msg
 
-    @gen.coroutine
-    def write(self, msg, serializers=None, on_error="message"):
+    async def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
         bytes_since_last_yield = 0
         if stream is None:
             raise CommClosedError
 
-        frames = yield to_frames(
+        frames = await to_frames(
             msg,
             serializers=serializers,
             on_error=on_error,
@@ -242,22 +235,20 @@ class TCP(Comm):
             length_bytes = [struct.pack("Q", len(frames))] + [
                 struct.pack("Q", x) for x in lengths
             ]
-            if PY3 and sum(lengths) < 2 ** 17:  # 128kiB
+            if sum(lengths) < 2 ** 17:  # 128kiB
                 b = b"".join(length_bytes + frames)  # small enough, send in one go
                 stream.write(b)
             else:
                 stream.write(b"".join(length_bytes))  # avoid large memcpy, send in many
 
-                for frame in frames:
+                for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
                     #   the previous future will be orphaned and will never resolve")
-                    if not self._iostream_allows_memoryview:
-                        frame = ensure_bytes(frame)
                     future = stream.write(frame)
-                    bytes_since_last_yield += nbytes(frame)
+                    bytes_since_last_yield += frame_bytes
                     if bytes_since_last_yield > 32e6:
-                        yield future
+                        await future
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
             stream = None
@@ -268,10 +259,13 @@ class TCP(Comm):
             else:
                 raise
 
-        raise gen.Return(sum(map(nbytes, frames)))
+        return sum(lengths)
 
     @gen.coroutine
     def close(self):
+        # We use gen.coroutine here rather than async def to avoid errors like
+        # Task was destroyed but it is pending!
+        # Triggered by distributed.deploy.tests.test_local::test_silent_startup
         stream, self.stream = self.stream, None
         if stream is not None and not stream.closed():
             try:
@@ -330,7 +324,7 @@ def _expect_tls_context(connection_args):
     return ctx
 
 
-class RequireEncryptionMixin(object):
+class RequireEncryptionMixin:
     def _check_encryption(self, address, connection_args):
         if not self.encrypted and connection_args.get("require_encryption"):
             # XXX Should we have a dedicated SecurityError class?
@@ -341,21 +335,17 @@ class RequireEncryptionMixin(object):
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    if PY3:  # see github PR #2403 discussion for more info
-        _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-        _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    else:
-        _resolver = None
+    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
     client = TCPClient(resolver=_resolver)
 
-    @gen.coroutine
-    def connect(self, address, deserialize=True, **connection_args):
+    async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = yield BaseTCPConnector.client.connect(
+            stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
 
@@ -371,8 +361,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             convert_stream_closed_error(self, e)
 
         local_address = self.prefix + get_stream_address(stream)
-        raise gen.Return(
-            self.comm_class(stream, local_address, self.prefix + address, deserialize)
+        return self.comm_class(
+            stream, local_address, self.prefix + address, deserialize
         )
 
 
@@ -407,7 +397,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = None
         self.bound_address = None
 
-    def start(self):
+    async def start(self):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))
@@ -431,6 +421,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                 break
         else:
             raise exc
+        self.get_host_port()  # trigger assignment to self.bound_address
 
     def stop(self):
         tcp_server, self.tcp_server = self.tcp_server, None
@@ -441,17 +432,16 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         if self.tcp_server is None:
             raise ValueError("invalid operation on non-started TCPListener")
 
-    @gen.coroutine
-    def _handle_stream(self, stream, address):
+    async def _handle_stream(self, stream, address):
         address = self.prefix + unparse_host_port(*address[:2])
-        stream = yield self._prepare_stream(stream, address)
+        stream = await self._prepare_stream(stream, address)
         if stream is None:
             # Preparation failed
             return
         logger.debug("Incoming connection from %r to %r", address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
-        yield self.comm_handler(comm)
+        await self.comm_handler(comm)
 
     def get_host_port(self):
         """
@@ -489,9 +479,8 @@ class TCPListener(BaseTCPListener):
     def _get_server_args(self, **connection_args):
         return {}
 
-    @gen.coroutine
-    def _prepare_stream(self, stream, address):
-        raise gen.Return(stream)
+    async def _prepare_stream(self, stream, address):
+        return stream
 
 
 class TLSListener(BaseTCPListener):
@@ -503,10 +492,9 @@ class TLSListener(BaseTCPListener):
         ctx = _expect_tls_context(connection_args)
         return {"ssl_options": ctx}
 
-    @gen.coroutine
-    def _prepare_stream(self, stream, address):
+    async def _prepare_stream(self, stream, address):
         try:
-            yield stream.wait_for_handshake()
+            await stream.wait_for_handshake()
         except EnvironmentError as e:
             # The handshake went wrong, log and ignore
             logger.warning(
@@ -516,7 +504,7 @@ class TLSListener(BaseTCPListener):
                 getattr(e, "real_error", None) or e,
             )
         else:
-            raise gen.Return(stream)
+            return stream
 
 
 class BaseTCPBackend(Backend):

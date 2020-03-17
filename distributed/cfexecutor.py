@@ -1,16 +1,12 @@
-from __future__ import print_function, division, absolute_import
-
 import concurrent.futures as cf
 import weakref
 
-import six
-
-from toolz import merge
+from tlz import merge
 
 from tornado import gen
 
 from .metrics import time
-from .utils import sync
+from .utils import sync, TimeoutError
 
 
 @gen.coroutine
@@ -29,7 +25,8 @@ def _cascade_future(future, cf_future):
         cf_future.set_running_or_notify_cancel()
     else:
         try:
-            six.reraise(*result)
+            typ, exc, tb = result
+            raise exc.with_traceback(tb)
         except BaseException as exc:
             cf_future.set_exception(exc)
 
@@ -138,7 +135,7 @@ class ClientExecutor(cf.Executor):
                     if timeout is not None:
                         try:
                             yield future.result(end_time - time())
-                        except gen.TimeoutError:
+                        except TimeoutError:
                             raise cf.TimeoutError
                     else:
                         yield future.result()

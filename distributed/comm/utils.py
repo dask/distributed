@@ -1,14 +1,13 @@
-from __future__ import print_function, division, absolute_import
-
-from concurrent.futures import ThreadPoolExecutor
 import logging
+import math
 import socket
 
-from tornado import gen
+import dask
+from dask.sizeof import sizeof
+from dask.utils import parse_bytes
 
 from .. import protocol
-from ..compatibility import finalize, PY3
-from ..utils import get_ip, get_ipv6, nbytes
+from ..utils import get_ip, get_ipv6, nbytes, offload
 
 
 logger = logging.getLogger(__name__)
@@ -17,23 +16,12 @@ logger = logging.getLogger(__name__)
 # Offload (de)serializing large frames to improve event loop responsiveness.
 # We use at most 4 threads to allow for parallel processing of large messages.
 
-FRAME_OFFLOAD_THRESHOLD = 10 * 1024 ** 2  # 10 MB
-
-try:
-    _offload_executor = ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="Dask-Offload"
-    )
-except TypeError:
-    _offload_executor = ThreadPoolExecutor(max_workers=1)
-finalize(_offload_executor, _offload_executor.shutdown)
+FRAME_OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
+if isinstance(FRAME_OFFLOAD_THRESHOLD, str):
+    FRAME_OFFLOAD_THRESHOLD = parse_bytes(FRAME_OFFLOAD_THRESHOLD)
 
 
-def offload(fn, *args, **kwargs):
-    return _offload_executor.submit(fn, *args, **kwargs)
-
-
-@gen.coroutine
-def to_frames(msg, serializers=None, on_error="message", context=None):
+async def to_frames(msg, serializers=None, on_error="message", context=None):
     """
     Serialize a message into a list of Distributed protocol frames.
     """
@@ -50,16 +38,18 @@ def to_frames(msg, serializers=None, on_error="message", context=None):
             logger.exception(e)
             raise
 
-    if PY3:
-        res = yield offload(_to_frames)
-    else:  # distributed/deploy/tests/test_adaptive.py::test_get_scale_up_kwargs fails on Py27.  Don't know why
-        res = _to_frames()
+    try:
+        msg_size = sizeof(msg)
+    except RecursionError:
+        msg_size = math.inf
 
-    raise gen.Return(res)
+    if FRAME_OFFLOAD_THRESHOLD and msg_size > FRAME_OFFLOAD_THRESHOLD:
+        return await offload(_to_frames)
+    else:
+        return _to_frames()
 
 
-@gen.coroutine
-def from_frames(frames, deserialize=True, deserializers=None):
+async def from_frames(frames, deserialize=True, deserializers=None):
     """
     Unserialize a list of Distributed protocol frames.
     """
@@ -79,12 +69,12 @@ def from_frames(frames, deserialize=True, deserializers=None):
             logger.error("truncated data stream (%d bytes): %s", size, datastr)
             raise
 
-    if deserialize and size > FRAME_OFFLOAD_THRESHOLD:
-        res = yield offload(_from_frames)
+    if deserialize and FRAME_OFFLOAD_THRESHOLD and size > FRAME_OFFLOAD_THRESHOLD:
+        res = await offload(_from_frames)
     else:
         res = _from_frames()
 
-    raise gen.Return(res)
+    return res
 
 
 def get_tcp_server_address(tcp_server):

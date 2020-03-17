@@ -1,14 +1,8 @@
-from __future__ import print_function, division, absolute_import
-
+from functools import reduce
 import logging
 import operator
 
 import msgpack
-
-try:
-    from cytoolz import reduce
-except ImportError:
-    from toolz import reduce
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import serialize, deserialize, Serialize, Serialized, extract_serialize
@@ -176,6 +170,7 @@ def loads_msgpack(header, payload):
     See Also:
         dumps_msgpack
     """
+    header = bytes(header)
     if header:
         header = msgpack.loads(header, use_list=False, **msgpack_opts)
     else:

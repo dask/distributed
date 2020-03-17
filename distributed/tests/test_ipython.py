@@ -1,9 +1,7 @@
-from __future__ import print_function, division, absolute_import
-
-import mock
+from unittest import mock
 
 import pytest
-from toolz import first
+from tlz import first
 import tornado
 
 from distributed import Client
@@ -88,7 +86,7 @@ def test_start_ipython_workers_magic(loop, zmq_ctx):
     with cluster(2) as (s, [a, b]):
 
         with Client(s["address"], loop=loop) as e, mock_ipython() as ip:
-            workers = list(e.ncores())[:2]
+            workers = list(e.nthreads())[:2]
             names = ["magic%i" % i for i in range(len(workers))]
             info_dict = e.start_ipython_workers(workers, magic_names=names)
 
@@ -116,7 +114,7 @@ def test_start_ipython_workers_magic_asterix(loop, zmq_ctx):
     with cluster(2) as (s, [a, b]):
 
         with Client(s["address"], loop=loop) as e, mock_ipython() as ip:
-            workers = list(e.ncores())[:2]
+            workers = list(e.nthreads())[:2]
             info_dict = e.start_ipython_workers(workers, magic_names="magic_*")
 
         expected = [
@@ -144,7 +142,7 @@ def test_start_ipython_remote(loop, zmq_ctx):
 
     with cluster(1) as (s, [a]):
         with Client(s["address"], loop=loop) as e, mock_ipython() as ip:
-            worker = first(e.ncores())
+            worker = first(e.nthreads())
             ip.user_ns["info"] = e.start_ipython_workers(worker)[worker]
             remote_magic("info 1")  # line magic
             remote_magic("info", "worker")  # cell magic
@@ -165,7 +163,7 @@ def test_start_ipython_qtconsole(loop):
         with mock.patch("distributed._ipython_utils.Popen", Popen), Client(
             s["address"], loop=loop
         ) as e:
-            worker = first(e.ncores())
+            worker = first(e.nthreads())
             e.start_ipython_workers(worker, qtconsole=True)
             e.start_ipython_workers(worker, qtconsole=True, qtconsole_args=["--debug"])
     assert Popen.call_count == 2

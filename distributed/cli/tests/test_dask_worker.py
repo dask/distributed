@@ -1,6 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import pytest
+from click.testing import CliRunner
 
 pytest.importorskip("requests")
 
@@ -9,15 +9,16 @@ import sys
 import os
 from time import sleep
 
-from distributed import Client
+import distributed.cli.dask_worker
+from distributed import Client, Scheduler
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
 from distributed.utils_test import popen, terminate_process, wait_for_port
-from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import loop, cleanup  # noqa: F401
 
 
 def test_nanny_worker_ports(loop):
-    with popen(["dask-scheduler", "--port", "9359", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
         with popen(
             [
                 "dask-worker",
@@ -28,7 +29,7 @@ def test_nanny_worker_ports(loop):
                 "9684",
                 "--nanny-port",
                 "5273",
-                "--no-bokeh",
+                "--no-dashboard",
             ]
         ) as worker:
             with Client("127.0.0.1:9359", loop=loop) as c:
@@ -40,16 +41,25 @@ def test_nanny_worker_ports(loop):
                     else:
                         assert time() - start < 5
                         sleep(0.1)
-                assert d["workers"]["tcp://127.0.0.1:9684"]["services"]["nanny"] == 5273
+                assert (
+                    d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
+                    == "tcp://127.0.0.1:5273"
+                )
 
 
 def test_memory_limit(loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--memory-limit", "2e3MB", "--no-bokeh"]
+            [
+                "dask-worker",
+                "127.0.0.1:8786",
+                "--memory-limit",
+                "2e3MB",
+                "--no-dashboard",
+            ]
         ) as worker:
             with Client("127.0.0.1:8786", loop=loop) as c:
-                while not c.ncores():
+                while not c.nthreads():
                     sleep(0.1)
                 info = c.scheduler_info()
                 [d] = info["workers"].values()
@@ -58,9 +68,9 @@ def test_memory_limit(loop):
 
 
 def test_no_nanny(loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--no-nanny", "--no-bokeh"]
+            ["dask-worker", "127.0.0.1:8786", "--no-nanny", "--no-dashboard"]
         ) as worker:
             assert any(b"Registered" in worker.stderr.readline() for i in range(15))
 
@@ -68,7 +78,7 @@ def test_no_nanny(loop):
 @pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_no_reconnect(nanny, loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         wait_for_port(("127.0.0.1", 8786))
         with popen(
             [
@@ -76,7 +86,7 @@ def test_no_reconnect(nanny, loop):
                 "tcp://127.0.0.1:8786",
                 "--no-reconnect",
                 nanny,
-                "--no-bokeh",
+                "--no-dashboard",
             ]
         ) as worker:
             sleep(2)
@@ -88,12 +98,12 @@ def test_no_reconnect(nanny, loop):
 
 
 def test_resources(loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
             [
                 "dask-worker",
                 "tcp://127.0.0.1:8786",
-                "--no-bokeh",
+                "--no-dashboard",
                 "--resources",
                 "A=1 B=2,C=3",
             ]
@@ -109,13 +119,13 @@ def test_resources(loop):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_local_directory(loop, nanny):
     with tmpfile() as fn:
-        with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+        with popen(["dask-scheduler", "--no-dashboard"]) as sched:
             with popen(
                 [
                     "dask-worker",
                     "127.0.0.1:8786",
                     nanny,
-                    "--no-bokeh",
+                    "--no-dashboard",
                     "--local-directory",
                     fn,
                 ]
@@ -133,8 +143,12 @@ def test_local_directory(loop, nanny):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_scheduler_file(loop, nanny):
     with tmpfile() as fn:
-        with popen(["dask-scheduler", "--no-bokeh", "--scheduler-file", fn]) as sched:
-            with popen(["dask-worker", "--scheduler-file", fn, nanny, "--no-bokeh"]):
+        with popen(
+            ["dask-scheduler", "--no-dashboard", "--scheduler-file", fn]
+        ) as sched:
+            with popen(
+                ["dask-worker", "--scheduler-file", fn, nanny, "--no-dashboard"]
+            ):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     start = time()
                     while not c.scheduler_info()["workers"]:
@@ -144,8 +158,8 @@ def test_scheduler_file(loop, nanny):
 
 def test_scheduler_address_env(loop, monkeypatch):
     monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", "tcp://127.0.0.1:8786")
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
-        with popen(["dask-worker", "--no-bokeh"]):
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
+        with popen(["dask-worker", "--no-dashboard"]):
             with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
                 start = time()
                 while not c.scheduler_info()["workers"]:
@@ -154,7 +168,7 @@ def test_scheduler_address_env(loop, monkeypatch):
 
 
 def test_nprocs_requires_nanny(loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
             ["dask-worker", "127.0.0.1:8786", "--nprocs=2", "--no-nanny"]
         ) as worker:
@@ -165,9 +179,9 @@ def test_nprocs_requires_nanny(loop):
 
 
 def test_nprocs_expands_name(loop):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "foo"]
+            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]
         ) as worker:
             with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2"]) as worker:
                 with Client("tcp://127.0.0.1:8786", loop=loop) as c:
@@ -178,7 +192,7 @@ def test_nprocs_expands_name(loop):
 
                     info = c.scheduler_info()
                     names = [d["name"] for d in info["workers"].values()]
-                    foos = [n for n in names if n.startswith("foo")]
+                    foos = [n for n in names if n.startswith("0-")]
                     assert len(foos) == 2
                     assert len(set(names)) == 4
 
@@ -191,13 +205,13 @@ def test_nprocs_expands_name(loop):
     "listen_address", ["tcp://0.0.0.0:39837", "tcp://127.0.0.2:39837"]
 )
 def test_contact_listen_address(loop, nanny, listen_address):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
             [
                 "dask-worker",
                 "127.0.0.1:8786",
                 nanny,
-                "--no-bokeh",
+                "--no-dashboard",
                 "--contact-address",
                 "tcp://127.0.0.2:39837",
                 "--listen-address",
@@ -205,7 +219,7 @@ def test_contact_listen_address(loop, nanny, listen_address):
             ]
         ) as worker:
             with Client("127.0.0.1:8786") as client:
-                while not client.ncores():
+                while not client.nthreads():
                     sleep(0.1)
                 info = client.scheduler_info()
                 assert "tcp://127.0.0.2:39837" in info["workers"]
@@ -225,12 +239,12 @@ def test_contact_listen_address(loop, nanny, listen_address):
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("host", ["127.0.0.2", "0.0.0.0"])
 def test_respect_host_listen_address(loop, nanny, host):
-    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", nanny, "--no-bokeh", "--host", host]
+            ["dask-worker", "127.0.0.1:8786", nanny, "--no-dashboard", "--host", host]
         ) as worker:
             with Client("127.0.0.1:8786") as client:
-                while not client.ncores():
+                while not client.nthreads():
                     sleep(0.1)
                 info = client.scheduler_info()
 
@@ -244,24 +258,128 @@ def test_respect_host_listen_address(loop, nanny, host):
                 assert all(host in v for v in listen_addresses.values())
 
 
-def test_bokeh_non_standard_ports(loop):
+def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
+    try:
+        import jupyter_server_proxy  # noqa: F401
 
-    with popen(["dask-scheduler", "--port", "3449", "--no-bokeh"]):
+        proxy_exists = True
+    except ImportError:
+        proxy_exists = False
+
+    with popen(["dask-scheduler", "--port", "3449"]) as s:
         with popen(
-            ["dask-worker", "tcp://127.0.0.1:3449", "--dashboard-address", ":4833"]
+            [
+                "dask-worker",
+                "tcp://127.0.0.1:3449",
+                "--dashboard-address",
+                ":4833",
+                "--host",
+                "127.0.0.1",
+            ]
         ) as proc:
             with Client("127.0.0.1:3449", loop=loop) as c:
+                c.wait_for_workers(1)
                 pass
 
-            start = time()
-            while True:
-                try:
-                    response = requests.get("http://127.0.0.1:4833/main")
+                response = requests.get("http://127.0.0.1:4833/status")
+                assert response.ok
+                redirect_resp = requests.get("http://127.0.0.1:4833/main")
+                redirect_resp.ok
+                # TEST PROXYING WORKS
+                if proxy_exists:
+                    url = "http://127.0.0.1:8787/proxy/4833/127.0.0.1/status"
+                    response = requests.get(url)
                     assert response.ok
-                    break
-                except Exception:
-                    sleep(0.5)
-                    assert time() < start + 20
+
         with pytest.raises(Exception):
             requests.get("http://localhost:4833/status/")
+
+
+def test_version_option():
+    runner = CliRunner()
+    result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("no_nanny", [True, False])
+def test_worker_timeout(no_nanny):
+    runner = CliRunner()
+    args = ["192.168.1.100:7777", "--death-timeout=1"]
+    if no_nanny:
+        args.append("--no-nanny")
+    result = runner.invoke(distributed.cli.dask_worker.main, args)
+    assert result.exit_code != 0
+
+
+def test_bokeh_deprecation():
+    pytest.importorskip("bokeh")
+
+    runner = CliRunner()
+    with pytest.warns(UserWarning, match="dashboard"):
+        try:
+            runner.invoke(distributed.cli.dask_worker.main, ["--bokeh"])
+        except ValueError:
+            # didn't pass scheduler
+            pass
+
+    with pytest.warns(UserWarning, match="dashboard"):
+        try:
+            runner.invoke(distributed.cli.dask_worker.main, ["--no-bokeh"])
+        except ValueError:
+            # didn't pass scheduler
+            pass
+
+
+@pytest.mark.asyncio
+async def test_integer_names(cleanup):
+    async with Scheduler(port=0) as s:
+        with popen(["dask-worker", s.address, "--name", "123"]) as worker:
+            while not s.workers:
+                await asyncio.sleep(0.01)
+            [ws] = s.workers.values()
+            assert ws.name == 123
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+async def test_worker_class(cleanup, tmp_path, nanny):
+    # Create module with custom worker class
+    WORKER_CLASS_TEXT = """
+from distributed.worker import Worker
+
+class MyWorker(Worker):
+    pass
+"""
+    tmpdir = str(tmp_path)
+    tmpfile = str(tmp_path / "myworker.py")
+    with open(tmpfile, "w") as f:
+        f.write(WORKER_CLASS_TEXT)
+
+    # Put module on PYTHONPATH
+    env = os.environ.copy()
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = tmpdir + ":" + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = tmpdir
+
+    async with Scheduler(port=0) as s:
+        async with Client(s.address, asynchronous=True) as c:
+            with popen(
+                [
+                    "dask-worker",
+                    s.address,
+                    nanny,
+                    "--worker-class",
+                    "myworker.MyWorker",
+                ],
+                env=env,
+            ) as worker:
+                await c.wait_for_workers(1)
+
+                def worker_type(dask_worker):
+                    return type(dask_worker).__name__
+
+                worker_types = await c.run(worker_type)
+                assert all(name == "MyWorker" for name in worker_types.values())

@@ -1,8 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
 from time import sleep
 
-from tornado import gen
+import pytest
 
 from distributed import Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
@@ -30,44 +28,30 @@ def test_text_progressbar(capsys, client):
 def test_TextProgressBar_error(c, s, a, b):
     x = c.submit(div, 1, 0)
 
-    progress = TextProgressBar(
-        [x.key], scheduler=(s.ip, s.port), start=False, interval=0.01
-    )
+    progress = TextProgressBar([x.key], scheduler=s.address, start=False, interval=0.01)
     yield progress.listen()
 
     assert progress.status == "error"
     assert progress.comm.closed()
 
-    progress = TextProgressBar(
-        [x.key], scheduler=(s.ip, s.port), start=False, interval=0.01
-    )
+    progress = TextProgressBar([x.key], scheduler=s.address, start=False, interval=0.01)
     yield progress.listen()
     assert progress.status == "error"
     assert progress.comm.closed()
 
 
-def test_TextProgressBar_empty(loop, capsys):
-    @gen.coroutine
-    def f():
-        s = Scheduler(loop=loop)
-        done = s.start(0)
-        a = Worker(s.ip, s.port, loop=loop, ncores=1)
-        b = Worker(s.ip, s.port, loop=loop, ncores=1)
-        yield [a._start(0), b._start(0)]
+@pytest.mark.asyncio
+async def test_TextProgressBar_empty(capsys):
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, nthreads=1) as a:
+            async with Worker(s.address, nthreads=1) as b:
+                progress = TextProgressBar(
+                    [], scheduler=s.address, start=False, interval=0.01
+                )
+                await progress.listen()
 
-        progress = TextProgressBar(
-            [], scheduler=(s.ip, s.port), start=False, interval=0.01
-        )
-        yield progress.listen()
-
-        assert progress.status == "finished"
-        check_bar_completed(capsys)
-
-        yield [a.close(), b.close()]
-        s.close()
-        yield done
-
-    loop.run_sync(f)
+                assert progress.status == "finished"
+                check_bar_completed(capsys)
 
 
 def check_bar_completed(capsys, width=40):
@@ -86,4 +70,12 @@ def test_progress_function(client, capsys):
     check_bar_completed(capsys)
 
     progress(f)
+    check_bar_completed(capsys)
+
+
+def test_progress_function_w_kwargs(client, capsys):
+    f = client.submit(lambda: 1)
+    g = client.submit(lambda: 2)
+
+    progress(f, interval="20ms")
     check_bar_completed(capsys)

@@ -1,19 +1,14 @@
-from __future__ import print_function, division, absolute_import
 from functools import partial
 import traceback
 
 import dask
 from dask.base import normalize_token
 
-try:
-    from cytoolz import valmap, get_in
-except ImportError:
-    from toolz import valmap, get_in
+from tlz import valmap, get_in
 
 import msgpack
 
 from . import pickle
-from ..compatibility import PY2
 from ..utils import has_keyword, typename
 from .compression import maybe_compress, decompress
 from .utils import (
@@ -137,6 +132,54 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
+    # Determine whether keys are safe to be serialized with msgpack
+    if type(x) is dict and len(x) <= 5:
+        try:
+            msgpack.dumps(list(x.keys()))
+        except Exception:
+            dict_safe = False
+        else:
+            dict_safe = True
+
+    if (
+        type(x) in (list, set, tuple)
+        and len(x) <= 5
+        or type(x) is dict
+        and len(x) <= 5
+        and dict_safe
+    ):
+        if isinstance(x, dict):
+            headers_frames = []
+            for k, v in x.items():
+                _header, _frames = serialize(
+                    v, serializers=serializers, on_error=on_error, context=context
+                )
+                _header["key"] = k
+                headers_frames.append((_header, _frames))
+        else:
+            headers_frames = [
+                serialize(
+                    obj, serializers=serializers, on_error=on_error, context=context
+                )
+                for obj in x
+            ]
+
+        frames = []
+        lengths = []
+        for _header, _frames in headers_frames:
+            frames.extend(_frames)
+            length = len(_frames)
+            lengths.append(length)
+
+        headers = [obj[0] for obj in headers_frames]
+        headers = {
+            "sub-headers": headers,
+            "is-collection": True,
+            "frame-lengths": lengths,
+            "type-serialized": type(x).__name__,
+        }
+        return headers, frames
+
     tb = ""
 
     for name in serializers:
@@ -180,6 +223,38 @@ def deserialize(header, frames, deserializers=None):
     --------
     serialize
     """
+    if "is-collection" in header:
+        headers = header["sub-headers"]
+        lengths = header["frame-lengths"]
+        cls = {"tuple": tuple, "list": list, "set": set, "dict": dict}[
+            header["type-serialized"]
+        ]
+
+        start = 0
+        if cls is dict:
+            d = {}
+            for _header, _length in zip(headers, lengths):
+                k = _header.pop("key")
+                d[k] = deserialize(
+                    _header,
+                    frames[start : start + _length],
+                    deserializers=deserializers,
+                )
+                start += _length
+            return d
+        else:
+            lst = []
+            for _header, _length in zip(headers, lengths):
+                lst.append(
+                    deserialize(
+                        _header,
+                        frames[start : start + _length],
+                        deserializers=deserializers,
+                    )
+                )
+                start += _length
+            return cls(lst)
+
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
         raise TypeError(
@@ -190,7 +265,7 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-class Serialize(object):
+class Serialize:
     """ Mark an object that should be serialized
 
     Example
@@ -223,7 +298,7 @@ class Serialize(object):
 to_serialize = Serialize
 
 
-class Serialized(object):
+class Serialized:
     """
     An object that is already serialized into header and frames
 
@@ -376,8 +451,6 @@ def serialize_bytelist(x, **kwargs):
 
 def serialize_bytes(x, **kwargs):
     L = serialize_bytelist(x, **kwargs)
-    if PY2:
-        L = [bytes(y) for y in L]
     return b"".join(L)
 
 
@@ -408,7 +481,7 @@ def register_serialization(cls, serialize, deserialize):
 
     Examples
     --------
-    >>> class Human(object):
+    >>> class Human:
     ...     def __init__(self, name):
     ...         self.name = name
 
@@ -471,7 +544,9 @@ def _deserialize_bytes(header, frames):
 def _is_msgpack_serializable(v):
     typ = type(v)
     return (
-        typ is str
+        v is None
+        or typ is str
+        or typ is bool
         or typ is int
         or typ is float
         or isinstance(v, dict)
@@ -482,59 +557,69 @@ def _is_msgpack_serializable(v):
     )
 
 
-def serialize_object_with_dict(est):
-    header = {
-        "serializer": "dask",
-        "type-serialized": pickle.dumps(type(est)),
-        "simple": {},
-        "complex": {},
-    }
-    frames = []
+class ObjectDictSerializer:
+    def __init__(self, serializer):
+        self.serializer = serializer
 
-    if isinstance(est, dict):
-        d = est
-    else:
-        d = est.__dict__
+    def serialize(self, est):
+        header = {
+            "serializer": self.serializer,
+            "type-serialized": pickle.dumps(type(est)),
+            "simple": {},
+            "complex": {},
+        }
+        frames = []
 
-    for k, v in d.items():
-        if _is_msgpack_serializable(v):
-            header["simple"][k] = v
+        if isinstance(est, dict):
+            d = est
         else:
-            if isinstance(v, dict):
-                h, f = serialize_object_with_dict(v)
+            d = est.__dict__
+
+        for k, v in d.items():
+            if _is_msgpack_serializable(v):
+                header["simple"][k] = v
             else:
-                h, f = serialize(v)
-            header["complex"][k] = {
-                "header": h,
-                "start": len(frames),
-                "stop": len(frames) + len(f),
-            }
-            frames += f
-    return header, frames
+                if isinstance(v, dict):
+                    h, f = self.serialize(v)
+                else:
+                    h, f = serialize(v, serializers=(self.serializer, "pickle"))
+                header["complex"][k] = {
+                    "header": h,
+                    "start": len(frames),
+                    "stop": len(frames) + len(f),
+                }
+                frames += f
+        return header, frames
+
+    def deserialize(self, header, frames):
+        cls = pickle.loads(header["type-serialized"])
+        if issubclass(cls, dict):
+            dd = obj = {}
+        else:
+            obj = object.__new__(cls)
+            dd = obj.__dict__
+        dd.update(header["simple"])
+        for k, d in header["complex"].items():
+            h = d["header"]
+            f = frames[d["start"] : d["stop"]]
+            v = deserialize(h, f)
+            dd[k] = v
+
+        return obj
 
 
-def deserialize_object_with_dict(header, frames):
-    cls = pickle.loads(header["type-serialized"])
-    if issubclass(cls, dict):
-        dd = obj = {}
-    else:
-        obj = object.__new__(cls)
-        dd = obj.__dict__
-    dd.update(header["simple"])
-    for k, d in header["complex"].items():
-        h = d["header"]
-        f = frames[d["start"] : d["stop"]]
-        v = deserialize(h, f)
-        dd[k] = v
+dask_object_with_dict_serializer = ObjectDictSerializer("dask")
 
-    return obj
+dask_deserialize.register(dict)(dask_object_with_dict_serializer.deserialize)
 
 
-dask_deserialize.register(dict)(deserialize_object_with_dict)
-
-
-def register_generic(cls):
-    """ Register dask_(de)serialize to traverse through __dict__
+def register_generic(
+    cls,
+    serializer_name="dask",
+    serialize_func=dask_serialize,
+    deserialize_func=dask_deserialize,
+):
+    """ Register (de)serialize to traverse through __dict__
 
     Normally when registering new classes for Dask's custom serialization you
     need to manage headers and frames, which can be tedious.  If all you want
@@ -565,5 +650,6 @@ def register_generic(cls):
     dask_serialize
     dask_deserialize
     """
-    dask_serialize.register(cls)(serialize_object_with_dict)
-    dask_deserialize.register(cls)(deserialize_object_with_dict)
+    object_with_dict_serializer = ObjectDictSerializer(serializer_name)
+    serialize_func.register(cls)(object_with_dict_serializer.serialize)
+    deserialize_func.register(cls)(object_with_dict_serializer.deserialize)

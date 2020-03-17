@@ -10,6 +10,10 @@ continuous_integration/hdfs-initialized
 *.lock
 .#*
 .idea/
+.vscode/
 .pytest_cache/
 dask-worker-space/
 .vscode/
+*.swp
+.ycm_extra_conf.py
+tags

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import struct
 import msgpack
 
@@ -11,6 +9,7 @@ BIG_BYTES_SHARD_SIZE = 2 ** 26
 msgpack_opts = {
     ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
 }
+msgpack_opts["strict_map_key"] = False
 
 try:
     msgpack.loads(msgpack.dumps(""), raw=False, **msgpack_opts)
@@ -90,7 +89,10 @@ def merge_frames(header, frames):
                 L.append(mv[:l])
                 frames.append(mv[l:])
                 l = 0
-        out.append(b"".join(map(ensure_bytes, L)))
+        if len(L) == 1:  # no work necessary
+            out.extend(L)
+        else:
+            out.append(b"".join(map(ensure_bytes, L)))
     return out
 
 

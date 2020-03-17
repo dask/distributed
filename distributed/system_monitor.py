@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from collections import deque
 import psutil
 
@@ -7,7 +5,7 @@ from .compatibility import WINDOWS
 from .metrics import time
 
 
-class SystemMonitor(object):
+class SystemMonitor:
     def __init__(self, n=10000):
         self.proc = psutil.Process()
 

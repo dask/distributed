@@ -24,8 +24,6 @@ We represent this tree as a nested dictionary with the following form:
                    'children': {...}}}
     }
 """
-from __future__ import print_function, division, absolute_import
-
 import bisect
 from collections import defaultdict, deque
 import linecache
@@ -33,11 +31,10 @@ import sys
 import threading
 from time import sleep
 
-import toolz
+import tlz as toolz
 
 from .metrics import time
 from .utils import format_time, color_of, parse_timedelta
-from .compatibility import get_thread_identity
 
 
 def identifier(frame):
@@ -233,7 +230,7 @@ def plot_data(state, profile_interval=0.010):
             x += width
 
     traverse(state, 0, 1, 0)
-    percentages = ["{:.2f}%".format(100 * w) for w in widths]
+    percentages = ["{:.1f}%".format(100 * w) for w in widths]
     return {
         "left": starts,
         "right": stops,
@@ -304,7 +301,7 @@ def watch(
     deque
     """
     if thread_id is None:
-        thread_id = get_thread_identity()
+        thread_id = threading.get_ident()
 
     log = deque(maxlen=maxlen)
 
@@ -426,7 +423,7 @@ def plot_figure(data, **kwargs):
             </div>
             <div>
                 <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                <span style="font-size: 10px; font-family: Monaco, monospace;">@width</span>
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
             </div>
             """,
     )

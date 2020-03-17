@@ -100,7 +100,7 @@ are the available options::
      --name TEXT            Alias
      --memory-limit TEXT    Maximum bytes of memory that this worker should use.
                             Use 0 for unlimited, or 'auto' for
-                            TOTAL_MEMORY * min(1, ncores / total_cores)
+                            TOTAL_MEMORY * min(1, nthreads / total_nthreads)
      --no-nanny
      --help                 Show this message and exit.
 
@@ -151,7 +151,7 @@ command line ``--memory-limit`` keyword or the ``memory_limit=`` Python
 keyword argument, which sets the memory limit per worker processes launched
 by dask-worker ::
 
-    $ dask-worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, ncores / total_cores)
+    $ dask-worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
     $ dask-worker tcp://scheduler:port --memory-limit=4e9  # four gigabytes per worker process.
 
 Workers use a few different heuristics to keep memory use beneath this limit:
@@ -231,6 +231,15 @@ At 95% memory load a worker's nanny process will terminate it.  This is to
 avoid having our worker job being terminated by an external job scheduler (like
 YARN, Mesos, SGE, etc..).  After termination the nanny will restart the worker
 in a fresh state.
+
+
+Nanny
+~~~~~
+
+Dask workers are by default launched, monitored, and managed by a small Nanny
+process.
+
+.. autoclass:: distributed.nanny.Nanny
 
 
 API Documentation

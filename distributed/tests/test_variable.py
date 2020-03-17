@@ -1,14 +1,15 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import random
 from time import sleep
 import sys
 
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 
-from distributed import Client, Variable, worker_client, Nanny, wait
+from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
 from distributed.metrics import time
+from distributed.compatibility import WINDOWS
 from distributed.utils_test import gen_cluster, inc, div
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 
@@ -84,24 +85,38 @@ def test_hold_futures(s, a, b):
 def test_timeout(c, s, a, b):
     v = Variable("v")
 
-    start = time()
-    with pytest.raises(gen.TimeoutError):
-        yield v.get(timeout=0.1)
-    stop = time()
-    assert 0.1 < stop - start < 2.0
+    start = IOLoop.current().time()
+    with pytest.raises(TimeoutError):
+        yield v.get(timeout=0.2)
+    stop = IOLoop.current().time()
+
+    if WINDOWS:  # timing is weird with asyncio and Windows
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
+
+    with pytest.raises(TimeoutError):
+        yield v.get(timeout=0.01)
 
 
 def test_timeout_sync(client):
     v = Variable("v")
-    start = time()
-    with pytest.raises(gen.TimeoutError):
-        v.get(timeout=0.1)
-    stop = time()
-    assert 0.1 < stop - start < 2.0
+    start = IOLoop.current().time()
+    with pytest.raises(TimeoutError):
+        v.get(timeout=0.2)
+    stop = IOLoop.current().time()
+
+    if WINDOWS:
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
+
+    with pytest.raises(TimeoutError):
+        yield v.get(timeout=0.01)
 
 
 @gen_cluster(client=True)
-def test_cleanup(c, s, a, b):
+async def test_cleanup(c, s, a, b):
     v = Variable("v")
     vv = Variable("v")
 
@@ -109,17 +124,17 @@ def test_cleanup(c, s, a, b):
     y = c.submit(lambda x: x + 1, 20)
     x_key = x.key
 
-    yield v.set(x)
+    await v.set(x)
     del x
-    yield gen.sleep(0.1)
+    await gen.sleep(0.1)
 
-    t_future = xx = vv._get()
-    yield gen.moment
-    v._set(y)
+    t_future = xx = asyncio.ensure_future(vv._get())
+    await gen.sleep(0)
+    asyncio.ensure_future(v.set(y))
 
-    future = yield t_future
+    future = await t_future
     assert future.key == x_key
-    result = yield future
+    result = await future
     assert result == 11
 
 
@@ -148,7 +163,7 @@ def test_timeout_get(c, s, a, b):
 
 @pytest.mark.skipif(sys.version_info[0] == 2, reason="Multi-client issues")
 @pytest.mark.slow
-@gen_cluster(client=True, ncores=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
 def test_race(c, s, *workers):
     NITERS = 50
 

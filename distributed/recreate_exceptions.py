@@ -1,7 +1,4 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
-from tornado import gen
 from .client import futures_of, wait
 from .utils import sync, tokey
 from .utils_comm import pack_data
@@ -10,7 +7,7 @@ from .worker import _deserialize
 logger = logging.getLogger(__name__)
 
 
-class ReplayExceptionScheduler(object):
+class ReplayExceptionScheduler:
     """ A plugin for the scheduler to recreate exceptions locally
 
     This adds the following routes to the scheduler
@@ -23,7 +20,7 @@ class ReplayExceptionScheduler(object):
         self.scheduler.handlers["cause_of_failure"] = self.cause_of_failure
         self.scheduler.extensions["exceptions"] = self
 
-    def cause_of_failure(self, *args, **kwargs):
+    def cause_of_failure(self, *args, keys=(), **kwargs):
         """
         Return details of first failed task required by set of keys
 
@@ -38,8 +35,6 @@ class ReplayExceptionScheduler(object):
         task: the definition of that key
         deps: keys that the task depends on
         """
-
-        keys = kwargs.pop("keys", [])
         for key in keys:
             if isinstance(key, list):
                 key = tuple(key)  # ensure not a list from msgpack
@@ -55,7 +50,7 @@ class ReplayExceptionScheduler(object):
                 }
 
 
-class ReplayExceptionClient(object):
+class ReplayExceptionClient:
     """
     A plugin for the client allowing replay of remote exceptions locally
 
@@ -79,20 +74,19 @@ class ReplayExceptionClient(object):
     def scheduler(self):
         return self.client.scheduler
 
-    @gen.coroutine
-    def _get_futures_error(self, future):
+    async def _get_futures_error(self, future):
         # only get errors for futures that errored.
         futures = [f for f in futures_of(future) if f.status == "error"]
         if not futures:
             raise ValueError("No errored futures passed")
-        out = yield self.scheduler.cause_of_failure(keys=[f.key for f in futures])
+        out = await self.scheduler.cause_of_failure(keys=[f.key for f in futures])
         deps, task = out["deps"], out["task"]
         if isinstance(task, dict):
             function, args, kwargs = _deserialize(**task)
-            raise gen.Return((function, args, kwargs, deps))
+            return (function, args, kwargs, deps)
         else:
             function, args, kwargs = _deserialize(task=task)
-            raise gen.Return((function, args, kwargs, deps))
+            return (function, args, kwargs, deps)
 
     def get_futures_error(self, future):
         """
@@ -124,16 +118,15 @@ class ReplayExceptionClient(object):
         """
         return self.client.sync(self._get_futures_error, future)
 
-    @gen.coroutine
-    def _recreate_error_locally(self, future):
-        yield wait(future)
-        out = yield self._get_futures_error(future)
+    async def _recreate_error_locally(self, future):
+        await wait(future)
+        out = await self._get_futures_error(future)
         function, args, kwargs, deps = out
         futures = self.client._graph_to_futures({}, deps)
-        data = yield self.client._gather(futures)
+        data = await self.client._gather(futures)
         args = pack_data(args, data)
         kwargs = pack_data(kwargs, data)
-        raise gen.Return((function, args, kwargs))
+        return (function, args, kwargs)
 
     def recreate_error_locally(self, future):
         """

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from time import time
 
 from dask import delayed
@@ -14,13 +12,13 @@ from distributed.utils_test import inc, gen_cluster, slowinc, slowadd
 from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
 
 
-@gen_cluster(client=True, ncores=[])
+@gen_cluster(client=True, nthreads=[])
 def test_resources(c, s):
     assert not s.worker_resources
     assert not s.resources
 
-    a = Worker(s.ip, s.port, loop=s.loop, resources={"GPU": 2})
-    b = Worker(s.ip, s.port, loop=s.loop, resources={"GPU": 1, "DB": 1})
+    a = Worker(s.address, loop=s.loop, resources={"GPU": 2})
+    b = Worker(s.address, loop=s.loop, resources={"GPU": 1, "DB": 1})
 
     yield [a, b]
 
@@ -37,7 +35,7 @@ def test_resources(c, s):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 5}}),
         ("127.0.0.1", 1, {"resources": {"A": 1, "B": 1}}),
     ],
@@ -55,7 +53,7 @@ def test_resource_submit(c, s, a, b):
 
     assert s.get_task_status(keys=[z.key]) == {z.key: "no-worker"}
 
-    d = yield Worker(s.ip, s.port, loop=s.loop, resources={"C": 10})
+    d = yield Worker(s.address, loop=s.loop, resources={"C": 10})
 
     yield wait(z)
     assert z.key in d.data
@@ -65,7 +63,7 @@ def test_resource_submit(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -80,7 +78,7 @@ def test_submit_many_non_overlapping(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -96,7 +94,7 @@ def test_move(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -114,7 +112,7 @@ def test_dont_work_steal(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -128,7 +126,7 @@ def test_map(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -147,7 +145,7 @@ def test_persist(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 11}}),
     ],
@@ -170,7 +168,7 @@ def test_compute(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -184,7 +182,7 @@ def test_get(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -202,9 +200,27 @@ def test_persist_tuple(c, s, a, b):
     assert not b.data
 
 
+@gen_cluster(client=True)
+def test_resources_str(c, s, a, b):
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+
+    yield a.set_resources(MyRes=1)
+
+    x = dd.from_pandas(pd.DataFrame({"A": [1, 2], "B": [3, 4]}), npartitions=1)
+    y = x.apply(lambda row: row.sum(), axis=1, meta=(None, "int64"))
+    yy = y.persist(resources={"MyRes": 1})
+    yield wait(yy)
+
+    ts_first = s.tasks[tokey(y.__dask_keys__()[0])]
+    assert ts_first.resource_restrictions == {"MyRes": 1}
+    ts_last = s.tasks[tokey(y.__dask_keys__()[-1])]
+    assert ts_last.resource_restrictions == {"MyRes": 1}
+
+
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 4, {"resources": {"A": 2}}),
         ("127.0.0.1", 4, {"resources": {"A": 1}}),
     ],
@@ -222,7 +238,7 @@ def test_submit_many_non_overlapping(c, s, a, b):
     assert b.total_resources == b.available_resources
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 4, {"resources": {"A": 2, "B": 1}})])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 4, {"resources": {"A": 2, "B": 1}})])
 def test_minimum_resource(c, s, a):
     futures = c.map(slowinc, range(30), resources={"A": 1, "B": 1}, delay=0.02)
 
@@ -234,7 +250,7 @@ def test_minimum_resource(c, s, a):
     assert a.total_resources == a.available_resources
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 2, {"resources": {"A": 1}})])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})])
 def test_prefer_constrained(c, s, a):
     futures = c.map(slowinc, range(1000), delay=0.1)
     constrained = c.map(inc, range(10), resources={"A": 1})
@@ -252,7 +268,7 @@ def test_prefer_constrained(c, s, a):
 @pytest.mark.skip(reason="")
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 2, {"resources": {"A": 1}}),
         ("127.0.0.1", 2, {"resources": {"A": 1}}),
     ],
@@ -266,7 +282,7 @@ def test_balance_resources(c, s, a, b):
     assert any(f.key in b.data for f in constrained)
 
 
-@gen_cluster(client=True, ncores=[("127.0.0.1", 2)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)])
 def test_set_resources(c, s, a):
     yield a.set_resources(A=2)
     assert a.total_resources["A"] == 2
@@ -285,7 +301,7 @@ def test_set_resources(c, s, a):
 
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -307,7 +323,7 @@ def test_persist_collections(c, s, a, b):
 @pytest.mark.skip(reason="Should protect resource keys from optimization")
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -328,7 +344,7 @@ def test_dont_optimize_out(c, s, a, b):
 @pytest.mark.xfail(reason="atop fusion seemed to break this")
 @gen_cluster(
     client=True,
-    ncores=[
+    nthreads=[
         ("127.0.0.1", 1, {"resources": {"A": 1}}),
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
@@ -362,8 +378,8 @@ def test_full_collections(c, s, a, b):
 def test_collections_get(client, optimize_graph, s, a, b):
     da = pytest.importorskip("dask.array")
 
-    def f(dask_worker):
-        dask_worker.set_resources(**{"A": 1})
+    async def f(dask_worker):
+        await dask_worker.set_resources(**{"A": 1})
 
     client.run(f, workers=[a["address"]])
 

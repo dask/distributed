@@ -1,11 +1,9 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 from collections import defaultdict
 import logging
 from timeit import default_timer
 
-from toolz import groupby, valmap
-from tornado import gen
+from tlz import groupby, valmap
 
 from .plugin import SchedulerPlugin
 from ..utils import key_split, key_split_group, log_errors, tokey
@@ -74,12 +72,11 @@ class Progress(SchedulerPlugin):
         self.status = None
         self.extra = {}
 
-    @gen.coroutine
-    def setup(self):
+    async def setup(self):
         keys = self.keys
 
         while not keys.issubset(self.scheduler.tasks):
-            yield gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         tasks = [self.scheduler.tasks[k] for k in keys]
 
@@ -163,12 +160,11 @@ class MultiProgress(Progress):
             self, keys, scheduler, minimum=minimum, dt=dt, complete=complete
         )
 
-    @gen.coroutine
-    def setup(self):
+    async def setup(self):
         keys = self.keys
 
         while not keys.issubset(self.scheduler.tasks):
-            yield gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         tasks = [self.scheduler.tasks[k] for k in keys]
 
@@ -250,7 +246,7 @@ class AllProgress(SchedulerPlugin):
 
         for ts in self.scheduler.tasks.values():
             key = ts.key
-            prefix = ts.prefix
+            prefix = ts.prefix.name
             self.all[prefix].add(key)
             self.state[ts.state][prefix].add(key)
             if ts.nbytes is not None:
@@ -260,7 +256,7 @@ class AllProgress(SchedulerPlugin):
 
     def transition(self, key, start, finish, *args, **kwargs):
         ts = self.scheduler.tasks[key]
-        prefix = ts.prefix
+        prefix = ts.prefix.name
         self.all[prefix].add(key)
         try:
             self.state[start][prefix].remove(key)
