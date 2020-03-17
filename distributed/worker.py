@@ -3,6 +3,7 @@ import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
+from functools import partial
 import heapq
 from inspect import isawaitable
 import logging
@@ -21,7 +22,6 @@ from dask.compatibility import apply
 from dask.utils import format_bytes, funcname
 from dask.system import CPU_COUNT
 
-from functools import partial
 from tlz import pluck, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop

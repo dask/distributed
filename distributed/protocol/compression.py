@@ -3,11 +3,11 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+from functools import partial
 import logging
 import random
 
 import dask
-from functools import partial
 from tlz import identity
 
 try:
