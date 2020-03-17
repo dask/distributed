@@ -92,7 +92,11 @@ def merge_frames(header, frames):
         if len(L) == 1:  # no work necessary
             out.extend(L)
         else:
-            out.append(b"".join(map(ensure_bytes, L)))
+            # do not convert cuda objects to bytes
+            if any([hasattr(f, "__cuda_array_interface__") for f in L]):
+                out.extend(L)
+            else:
+                out.append(b"".join(map(ensure_bytes, L)))
     return out
 
 
