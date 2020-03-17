@@ -15,7 +15,7 @@ _deserialize = deserialize
 logger = logging.getLogger(__name__)
 
 
-def dumps(msg, serializers=None, on_error="message", context=None):
+def dumps(msg, serializers=None, on_error="message", context=None, split_frames=True):
     """ Transform Python message to bytestream suitable for communication """
     try:
         data = {}
@@ -49,7 +49,9 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
             if "compression" not in head:
-                frames = frame_split_size(frames)
+                # splitting frames is not the default behavior for UCX
+                if split_frames:
+                    frames = frame_split_size(frames)
                 if frames:
                     compression, frames = zip(*map(maybe_compress, frames))
                 else:

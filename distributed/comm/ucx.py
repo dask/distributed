@@ -145,7 +145,7 @@ class UCX(Comm):
                     serializers = ("cuda", "dask", "pickle", "error")
                 # msg can also be a list of dicts when sending batched messages
                 frames = await to_frames(
-                    msg, serializers=serializers, on_error=on_error
+                    msg, serializers=serializers, on_error=on_error, split_frames=False
                 )
 
                 # Send meta data

@@ -21,7 +21,9 @@ if isinstance(FRAME_OFFLOAD_THRESHOLD, str):
     FRAME_OFFLOAD_THRESHOLD = parse_bytes(FRAME_OFFLOAD_THRESHOLD)
 
 
-async def to_frames(msg, serializers=None, on_error="message", context=None):
+async def to_frames(
+    msg, serializers=None, on_error="message", context=None, split_frames=True
+):
     """
     Serialize a message into a list of Distributed protocol frames.
     """
@@ -30,7 +32,11 @@ async def to_frames(msg, serializers=None, on_error="message", context=None):
         try:
             return list(
                 protocol.dumps(
-                    msg, serializers=serializers, on_error=on_error, context=context
+                    msg,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                    split_frames=split_frames,
                 )
             )
         except Exception as e:
