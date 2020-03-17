@@ -7,7 +7,8 @@ import logging
 import random
 
 import dask
-from tlz import identity, partial
+from functools import partial
+from tlz import identity
 
 try:
     import blosc
