@@ -1228,7 +1228,14 @@ class Worker(ServerNode):
             return {"status": "busy"}
 
         self.outgoing_current_count += 1
-        data = {k: self.data[k] for k in keys if k in self.data}
+        #data = {k: self.data[k] for k in keys if k in self.data}
+        data = {}
+        for k in keys:
+            if k in self.data:
+                if hasattr(self.data, "get_from_dev_or_host_buffer"):
+                    data[k] = self.data.get_from_dev_or_host_buffer(k)
+                else:
+                    data[k] = self.data[k]
 
         if len(data) < len(keys):
             for k in set(keys) - set(data):
