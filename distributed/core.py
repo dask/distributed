@@ -538,15 +538,6 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
         await comm.write(msg, serializers=serializers, on_error="raise")
         if reply:
             response = await comm.read(deserializers=deserializers)
-            try:
-                data = response["data"]
-                from dask_cuda import device_host_file
-            except:
-                pass
-            else:
-                for key in data.keys():
-                    if isinstance(data[key], device_host_file.DeviceSerialized):
-                        data[key] = device_host_file.host_to_device(data[key])
         else:
             response = None
     except EnvironmentError:
