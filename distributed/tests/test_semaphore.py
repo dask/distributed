@@ -1,17 +1,17 @@
 import pickle
-from time import sleep
-
-from distributed import Client, Semaphore, get_client
-from distributed.metrics import time
-from distributed.utils_test import cluster, gen_cluster  # noqa F401
 
 import dask
 from dask.distributed import Client
 
+from distributed import Semaphore
+from distributed.metrics import time
+from distributed.utils_test import cluster, gen_cluster
+from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
+
 
 @gen_cluster(client=True)
 async def test_semaphore(c, s, a, b):
-    semaphore = await Semaphore(max_leases=2, name="exasol_db")
+    semaphore = await Semaphore(max_leases=2, name="resource_we_want_to_limit")
 
     result = await semaphore.acquire()  # allowed_leases: 2 - 1 -> 1
     assert result is True
@@ -40,6 +40,7 @@ async def test_serializable(c, s, a, b):
 
     res = await sem2.acquire()
     assert res
+    assert len(s.extensions["semaphores"].leases["x"]) == 2
 
     # Ensure that both objects access the same semaphore
     res = await sem.acquire(timeout=0.025)
@@ -72,27 +73,11 @@ async def test_acquires_with_timeout(c, s, a, b):
     await sem.release()
 
 
-def test_timeout_sync():
-    with cluster() as (scheduler, workers):
-        with Client(scheduler["address"]):
-            s = Semaphore(name="x")
-            # Using the context manager already acquires a lease, so the line below won't be able to acquire another one
-            with s:
-                assert s.acquire(timeout=0.025) is False
-
-
-def test_lock_name_only():
-    with cluster() as (scheduler, workers):
-        with Client(scheduler["address"]) as client:
-
-            def f(x):
-                with Semaphore(name="x"):
-                    client = get_client()
-                    assert client.get_metadata("locked") is False
-                    client.set_metadata("locked", True)
-                    sleep(0.01)
-                    assert client.get_metadata("locked") is True
-                    client.set_metadata("locked", False)
+def test_timeout_sync(client):
+    s = Semaphore(name="x")
+    # Using the context manager already acquires a lease, so the line below won't be able to acquire another one
+    with s:
+        assert s.acquire(timeout=0.025) is False
 
 
 @gen_cluster(client=True, timeout=20)
@@ -102,7 +87,7 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
     ):
         sem = await Semaphore(name="x", max_leases=2)
         await sem.acquire()  # leases: 2 - 1 = 1
-        semY = Semaphore(name="y")
+        semY = await Semaphore(name="y")
 
         async with Client(s.address, asynchronous=True, name="ClientB") as clientB:
             semB = await Semaphore(name="x", max_leases=2, client=clientB)

@@ -3,8 +3,6 @@ from collections import defaultdict, deque
 from functools import partial
 import asyncio
 import dask
-import tornado.locks
-import tornado.queues
 from asyncio import TimeoutError
 from .client import Client, _get_global_client
 from .utils import PeriodicCallback, log_errors, parse_timedelta
@@ -42,7 +40,7 @@ class SemaphoreExtension:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.leases = defaultdict(deque)
-        self.events = defaultdict(tornado.locks.Event)
+        self.events = defaultdict(asyncio.Event)
         self.max_leases = dict()
         self.leases_per_client = defaultdict(partial(defaultdict, deque))
         self.scheduler.handlers.update(
@@ -70,7 +68,9 @@ class SemaphoreExtension:
 
     # `comm` here is required by the handler interface
     async def create(self, comm=None, name=None, max_leases=None):
-        if name not in self.leases:
+        # We use `self.max_leases.keys()` as the point of truth to find out if a semaphore with a specific
+        # `name` has been created.
+        if name not in self.max_leases:
             assert isinstance(max_leases, int), max_leases
             self.max_leases[name] = max_leases
         else:
@@ -84,7 +84,7 @@ class SemaphoreExtension:
         # We should make sure that the client is already properly registered with the scheduler
         # otherwise the lease validation will mop up every acquired lease immediately. That's mostly relevant for tests
         while client not in self.scheduler.clients:
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.0005)  # This value is set somewhat arbitrarily
 
         result = True
         if len(self.leases[name]) < self.max_leases[name]:
@@ -112,7 +112,7 @@ class SemaphoreExtension:
 
                 # If we hit the timeout, this cancels the _get_lease
                 future = asyncio.wait_for(
-                    self._get_lease(client, name, identifier), timeout=w.leftover()
+                    self._get_lease(client, name, identifier), timeout=w.leftover(),
                 )
 
                 try:
@@ -133,18 +133,20 @@ class SemaphoreExtension:
                         result = False
                 return result
 
-    async def release(self, comm=None, name=None, client=None, identifier=None):
+    def release(self, comm=None, name=None, client=None, identifier=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
             if name in self.leases and identifier in self.leases[name]:
-                self.scheduler.loop.add_callback(
-                    self._release_value, name, client, identifier
-                )
+                self._release_value(name, client, identifier)
             else:
-                raise ValueError("Semaphore released too many times.")
+                raise ValueError(
+                    f"Tried to release semaphore but it was already released: "
+                    f"client={client}, name={name}, identifier={identifier}"
+                )
 
-    async def _release_value(self, name, client, identifier):
+    def _release_value(self, name, client, identifier):
+        # Everything needs to be atomic here.
         self.leases_per_client[client][name].remove(identifier)
         self.leases[name].remove(identifier)
         self.events[name].set()
@@ -154,11 +156,9 @@ class SemaphoreExtension:
         for name in semaphore_names:
             ids = list(self.leases_per_client[client][name])
             for _id in list(ids):
-                self.scheduler.loop.add_callback(
-                    self._release_value, name=name, client=client, identifier=_id
-                )
+                self._release_value(name=name, client=client, identifier=_id)
 
-    async def _validate_leases(self):
+    def _validate_leases(self):
         if not self._validation_running:
             self._validation_running = True
             known_clients_with_leases = set(self.leases_per_client.keys())
@@ -175,12 +175,14 @@ class SemaphoreExtension:
 
 class Semaphore:
     def __init__(self, max_leases=1, name=None, client=None):
+        # NOTE: the `id` of the `Semaphore` instance will always be unique, even among different
+        # instances for the same resource. The actual attribute that identifies a specific resource is `name`,
+        # which will be the same for all instances of this class which limit the same resource.
         self.client = client or _get_global_client() or get_worker().client
         self.id = uuid.uuid4().hex
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
 
-        # TODO: Good idea to create the resource in the init?
         if self.client.asynchronous:
             self._started = self.client.scheduler.semaphore_create(
                 name=self.name, max_leases=max_leases
@@ -191,7 +193,7 @@ class Semaphore:
                 name=self.name,
                 max_leases=max_leases,
             )
-            self._started = True
+            self._started = asyncio.sleep(0)
 
     def __await__(self):
         async def create_semaphore():
@@ -207,6 +209,9 @@ class Semaphore:
         If the internal counter is greater than zero, decrement it by one and return True immediately.
         If it is zero, wait until a release() is called and return True.
         """
+        # TODO: This (may?) keep the HTTP request open until timeout runs out (forever if None).
+        #  Can do this in batches of smaller timeouts.
+        # TODO: what if connection breaks up?
         return self.client.sync(
             self.client.scheduler.semaphore_acquire,
             name=self.name,
@@ -223,6 +228,7 @@ class Semaphore:
         """
 
         """ Release the lock if already acquired """
+        # TODO: what if connection breaks up?
         return self.client.sync(
             self.client.scheduler.semaphore_release,
             name=self.name,
