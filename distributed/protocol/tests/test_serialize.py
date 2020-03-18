@@ -374,16 +374,3 @@ async def test_profile_nested_sizeof():
 
     msg = {"data": original}
     frames = await to_frames(msg)
-
-
-@pytest.mark.asyncio
-async def test_serialize_no_splitting():
-    cp = pytest.importorskip("cupy")
-    arr = [cp.ones((5, 8000000)), cp.arange(5)]
-    msg = {"msg": to_serialize(arr)}
-
-    len_split = len(await to_frames(msg, split_frames=True))
-
-    len_no_split = len(await to_frames(msg, split_frames=False))
-
-    assert len_no_split < len_split
