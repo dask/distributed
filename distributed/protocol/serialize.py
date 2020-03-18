@@ -436,7 +436,7 @@ def nested_deserialize(x):
 
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize(x, **kwargs)
-    frames = frame_split_size(frames)
+    frames = sum(map(frame_split_size, frames), [])
     if frames:
         compression, frames = zip(*map(maybe_compress, frames))
     else:

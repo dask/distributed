@@ -49,7 +49,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
             if "compression" not in head:
-                frames = frame_split_size(frames)
+                frames = sum(map(frame_split_size, frames), [])
                 if frames:
                     compression, frames = zip(*map(maybe_compress, frames))
                 else:
