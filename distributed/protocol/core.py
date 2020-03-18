@@ -15,6 +15,20 @@ _deserialize = deserialize
 logger = logging.getLogger(__name__)
 
 
+def _split_and_compress(header, frames):
+    """
+    Internal function for splitting and compressing frames
+    """
+
+    frames = frame_split_size(frames)
+    if frames:
+        compression, frames = zip(*map(maybe_compress, frames))
+    else:
+        compression = []
+    header["compression"] = compression
+    return header, frames
+
+
 def dumps(msg, serializers=None, on_error="message", context=None, split_frames=True):
     """ Transform Python message to bytestream suitable for communication """
     try:
@@ -48,15 +62,13 @@ def dumps(msg, serializers=None, on_error="message", context=None, split_frames=
         for key, (head, frames) in data.items():
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
-            if "compression" not in head:
-                # splitting frames is not the default behavior for UCX
-                if split_frames:
-                    frames = frame_split_size(frames)
-                if frames:
-                    compression, frames = zip(*map(maybe_compress, frames))
-                else:
-                    compression = []
-                head["compression"] = compression
+            # treat compression of collections homogenously
+            if "is-collection" in head:
+                if "compression" not in head["sub-headers"][0]:
+                    head, frames = _split_and_compress(head, frames)
+            elif "compression" not in head:
+                head, frames = _split_and_compress(head, frames)
+
             head["count"] = len(frames)
             header["headers"][key] = head
             header["keys"].append(key)

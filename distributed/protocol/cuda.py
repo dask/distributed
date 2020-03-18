@@ -18,7 +18,9 @@ def cuda_dumps(x):
     header, frames = dumps(x)
     header["type-serialized"] = pickle.dumps(type(x))
     header["serializer"] = "cuda"
-    header["compression"] = (None,) * len(frames)  # no compression for gpu data
+    # note: when compression is not set dask may split the frame into muliple chunks
+    # dumps() in dask/protocol/core.py
+    header["compression"] = False
     return header, frames
 
 

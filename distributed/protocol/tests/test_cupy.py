@@ -1,8 +1,7 @@
 import pickle
 
 import pytest
-from distributed.protocol import deserialize, serialize, to_serialize
-from distributed.comm.utils import to_frames
+from distributed.protocol import deserialize, serialize
 
 cupy = pytest.importorskip("cupy")
 numpy = pytest.importorskip("numpy")
@@ -100,15 +99,3 @@ def test_serialize_cupy_sparse(sparse_name, dtype, serializer):
     a2_host = a2sp_host.todense()
 
     assert (a_host == a2_host).all()
-
-
-@pytest.mark.asyncio
-async def test_serialize_no_splitting():
-    arr = [cupy.ones((5, 8000000)), cupy.arange(5)]
-    msg = {"msg": to_serialize(arr)}
-
-    len_split = len(await to_frames(msg, split_frames=True))
-
-    len_no_split = len(await to_frames(msg, split_frames=False))
-
-    assert len_no_split < len_split

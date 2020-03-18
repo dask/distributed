@@ -46,6 +46,9 @@ def cuda_serialize_cupy_ndarray(x):
         x = cupy.array(x, copy=True)
 
     header = x.__cuda_array_interface__.copy()
+    # note: when compression is not set dask may split the frame into muliple chunks
+    # dumps() in dask/protocol/core.py
+    header["compression"] = False
     header["strides"] = tuple(x.strides)
     frames = [
         cupy.ndarray(
