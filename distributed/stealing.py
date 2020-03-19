@@ -132,7 +132,7 @@ class WorkStealing(SchedulerPlugin):
         nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        split = ts.prefix
+        split = ts.prefix.name
         if split in fast_tasks:
             return None, None
         ws = ts.processing_on

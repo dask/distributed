@@ -5,6 +5,7 @@ import sys
 from time import sleep
 import weakref
 
+from unittest import mock
 import pytest
 from tlz import sliding_window, concat
 from tornado import gen
@@ -145,21 +146,49 @@ def test_steal_related_tasks(e, s, a, b, c):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
-def test_dont_steal_fast_tasks(c, s, *workers):
+async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     np = pytest.importorskip("numpy")
     x = c.submit(np.random.random, 10000000, workers=workers[0].address)
 
     def do_nothing(x, y=None):
         pass
 
-    yield wait(c.submit(do_nothing, 1))
+    # execute and meassure runtime once
+    await wait(c.submit(do_nothing, 1))
 
     futures = c.map(do_nothing, range(1000), y=x)
 
-    yield wait(futures)
+    await wait(futures)
 
     assert len(s.who_has[x.key]) == 1
     assert len(s.has_what[workers[0].address]) == 1001
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
+async def test_dont_steal_fast_tasks_blacklist(c, s, *workers):
+    import time
+
+    # create a dependency
+    x = c.submit(slowinc, 1)
+
+    def fast_blacklisted(x, y=None):
+        time.sleep(0.01)
+        pass
+
+    mmock = mock.MagicMock()
+    s.extensions["stealing"].move_task_request = mmock
+    import distributed.stealing
+
+    with mock.patch.object(
+        distributed.stealing, "fast_tasks", {fast_blacklisted.__name__}
+    ):
+
+        w = workers[0]
+        futures = c.map(fast_blacklisted, range(100), y=x)
+
+        await wait(futures)
+
+    mmock.assert_not_called()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=20)
