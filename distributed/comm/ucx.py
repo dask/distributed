@@ -221,7 +221,7 @@ class UCX(Comm):
                             frames.append(b"")
 
                 # It is necessary to first populate `frames` with CUDA arrays and synchronize
-                # the device before starting receiving to ensure buffers have been allocated
+                # the default stream before starting receiving to ensure buffers have been allocated
                 synchronize_stream(0)
                 for i, (is_cuda, size) in enumerate(zip(is_cudas.tolist(), sizes.tolist())):
                     if size > 0:
