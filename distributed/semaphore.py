@@ -206,10 +206,34 @@ class SemaphoreExtension:
 
 
 class Semaphore:
-    """
-    Note: dask executes functions by default assuming they are pure, when using semaphore acquire/releases inside
-    such a function, it must be noted that there *are* in-fact side-effects, thus, the function can no longer be
-    considered pure. If this is not taken into account, this could lead to some weirdly unexpected behavior.
+    """ Semaphore
+
+    Parameters
+    ----------
+    max_leases: int (optional)
+        The maximum amount of leases that may be granted at the same time. This
+        effectively sets an upper limit to the amount of parallel access to a specific resource.
+        Defaults to 1.
+    name: string (optional)
+        Name of the semaphore to acquire.  Choosing the same name allows two
+        disconnected processes to coordinate.  If not given, a random
+        name will be generated.
+    client: Client (optional)
+        Client to use for communication with the scheduler.  If not given, the
+        default global client will be used.
+
+    Examples
+    --------
+    >>> sem = Semaphore(max_leases=2, name='my_database')  # doctest: +SKIP
+    >>> sem.acquire(timeout=0.1)  # doctest: +SKIP
+    >>> # do things with protected resource
+    >>> sem.release()  # doctest: +SKIP
+
+    Notes
+    -----
+    dask executes functions by default assuming they are pure, when using semaphore acquire/releases inside
+    such a function, it must be noted that there *are* in fact side-effects, thus, the function can no longer be
+    considered pure. If this is not taken into account, this may lead to unexpected behavior.
     """
 
     def __init__(self, max_leases=1, name=None, client=None):
