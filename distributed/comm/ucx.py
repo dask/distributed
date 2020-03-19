@@ -170,7 +170,11 @@ class UCX(Comm):
                 )
                 # Send frames
 
-                # It is necessary to first synchronize the device before start sending
+                # It is necessary to first synchronize the default stream before start sending
+                # We synchronize the default stream because UCX is not stream-ordered and
+                #  syncing the default stream will wait for other non-blocking CUDA streams.
+                # Note this is only sufficient if the memory being sent is not currently in use on
+                # non-blocking CUDA streams. 
                 synchronize_stream(0)
 
                 for frame in frames:
