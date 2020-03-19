@@ -174,6 +174,12 @@ class SemaphoreExtension:
 
 
 class Semaphore:
+    """
+    Note: dask executes functions by default assuming they are pure, when using semaphore acquire/releases inside
+    such a function, it must be noted that there *are* in-fact side-effects, thus, the function can no longer be
+    considered pure. If this is not taken into account, this could lead to some weirdly unexpected behavior.
+    """
+
     def __init__(self, max_leases=1, name=None, client=None):
         # NOTE: the `id` of the `Semaphore` instance will always be unique, even among different
         # instances for the same resource. The actual attribute that identifies a specific resource is `name`,

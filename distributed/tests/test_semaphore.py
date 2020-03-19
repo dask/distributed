@@ -139,3 +139,36 @@ def test_worker_dies():
             results = client.gather(futures)
 
             assert sorted(results) == list(range(100))
+
+
+@gen_cluster(client=True)
+async def test_access_semaphore_by_name(c, s, a, b):
+    def f(x, release=True):
+        sem = Semaphore(name="x")
+        if not sem.acquire(timeout=0.02):
+            return False
+        if release:
+            sem.release()
+
+        return True
+
+    sem = await Semaphore(name="x")
+    futures = c.map(f, list(range(10)))
+    assert all(await c.gather(futures))
+
+    # Clean-up the state, otherwise we would get the same result when calling `f` with the same arguments
+    del futures
+
+    assert len(s.extensions["semaphores"].leases["x"]) == 0
+    assert await sem.acquire()
+    assert len(s.extensions["semaphores"].leases["x"]) == 1
+    futures = c.map(f, list(range(10)))
+    assert not any(await c.gather(futures))
+    await sem.release()
+
+    del futures
+
+    futures = c.map(f, list(range(10)), release=False)
+    result = await c.gather(futures)
+    assert result.count(True) == 1
+    assert result.count(False) == 9
