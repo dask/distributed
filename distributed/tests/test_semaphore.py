@@ -83,7 +83,7 @@ def test_timeout_sync(client):
 @gen_cluster(client=True, timeout=20)
 async def test_release_semaphore_after_timeout(c, s, a, b):
     with dask.config.set(
-        {"distributed.scheduler.locks.lease-validation-interval": "100ms"}
+        {"distributed.scheduler.locks.lease-validation-interval": "50ms"}
     ):
         sem = await Semaphore(name="x", max_leases=2)
         await sem.acquire()  # leases: 2 - 1 = 1
@@ -107,6 +107,8 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
 
         assert not (await semY.acquire(timeout=0.01))
         assert not (await sem.acquire(timeout=0.01))
+
+        assert clientB.id not in s.extensions["semaphores"].leases_per_client
 
 
 @gen_cluster()

@@ -7,7 +7,6 @@ from asyncio import TimeoutError
 from .client import Client, _get_global_client
 from .utils import PeriodicCallback, log_errors, parse_timedelta
 from .worker import get_client, get_worker
-from toolz.dicttoolz import valmap
 from .metrics import time
 
 
@@ -157,6 +156,7 @@ class SemaphoreExtension:
             ids = list(self.leases_per_client[client][name])
             for _id in list(ids):
                 self._release_value(name=name, client=client, identifier=_id)
+        del self.leases_per_client[client]
 
     def _validate_leases(self):
         if not self._validation_running:
@@ -164,11 +164,7 @@ class SemaphoreExtension:
             known_clients_with_leases = set(self.leases_per_client.keys())
             scheduler_clients = set(self.scheduler.clients.keys())
             for dead_client in known_clients_with_leases - scheduler_clients:
-                client_has_leases = sum(
-                    valmap(len, self.leases_per_client[dead_client]).values()
-                )
-                if client_has_leases:
-                    self._release_client(dead_client)
+                self._release_client(dead_client)
             else:
                 self._validation_running = False
 
