@@ -18,6 +18,7 @@ import weakref
 import dask
 from dask.core import istask
 from dask.compatibility import apply
+from dask.optimization import SubgraphCallable
 from dask.utils import format_bytes, funcname
 from dask.system import CPU_COUNT
 
@@ -3279,15 +3280,16 @@ _cache_lock = threading.Lock()
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
+    key = func if not isinstance(func, SubgraphCallable) else id(func)
     try:
         with _cache_lock:
-            result = cache_dumps[func]
+            result = cache_dumps[key]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
             with _cache_lock:
-                cache_dumps[func] = result
-    except TypeError:  # Unhashable function
+                cache_dumps[key] = result
+    except TypeError:  # Unhashable key
         result = pickle.dumps(func)
     return result
 

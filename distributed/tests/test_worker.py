@@ -13,6 +13,7 @@ import asyncio
 
 import dask
 from dask import delayed
+from dask.optimization import SubgraphCallable
 from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
@@ -34,7 +35,14 @@ from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+    dumps_function,
+    cache_dumps,
+)
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -1652,3 +1660,10 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                 else:
                     assert w.status == "closed"
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+def test_dumps_function_subgraphcallable_cached():
+    dsk = {"x": 1, "y": (slowinc, "x")}
+    func = SubgraphCallable(dsk, outkey="y", inkeys=())
+    dumps_function(func)
+    assert id(func) in cache_dumps
