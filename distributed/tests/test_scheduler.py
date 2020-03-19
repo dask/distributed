@@ -226,7 +226,7 @@ def test_remove_worker_by_name_from_scheduler(s, a, b):
 
 
 @gen_cluster()
-def test_remove_worker_triggers_suspicious(s, a, b):
+def test_remove_worker_increments_suspicious(s, a, b):
     dsk = {("x-%d" % i): (inc, i) for i in range(20)}
     s.update_graph(
         tasks=valmap(dumps_task, dsk),
@@ -234,8 +234,10 @@ def test_remove_worker_triggers_suspicious(s, a, b):
         dependencies={k: set() for k in dsk},
     )
     assert s.remove_worker(address=a.address) == "OK"
-    assert s.suspicious_by_prefix["x"] == sum(ts.suspicious for ts in s.tasks.values())
-    assert s.suspicious_by_prefix["x"] == 10
+    assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
+        ts.suspicious for ts in s.tasks.values()
+    )
+    assert s.task_prefixes["x"].suspicious == 10
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -800,7 +802,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     yield s.retire_workers(workers=[a.address])
 
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
-    assert all(count == 0 for prefix, count in s.suspicious_by_prefix.items())
+    assert all(tp.suspicious == 0 for tp in s.task_prefixes.values())
 
 
 @pytest.mark.slow

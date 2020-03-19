@@ -1,5 +1,5 @@
 import asyncio
-from collections import Counter, defaultdict, deque, OrderedDict
+from collections import defaultdict, deque, OrderedDict
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
@@ -789,6 +789,11 @@ class TaskPrefix:
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: suspicious: int
+
+       Numbers of tasks marked as suspicious with this prefix
+
+
     See Also
     --------
     TaskGroup
@@ -805,6 +810,7 @@ class TaskPrefix:
             )
         else:
             self.duration_average = None
+        self.suspicious = 0
 
     @property
     def states(self):
@@ -1001,8 +1007,6 @@ class Scheduler(ServerNode):
         Tasks currently known to the scheduler
     * **unrunnable:** ``{TaskState}``
         Tasks in the "no-worker" state
-    * **suspicious_by_prefix** ``Counter(prefix name: int)``
-        Numbers of tasks marked as suspicious by prefix
 
     * **workers:** ``{worker key: WorkerState}``
         Workers currently connected to the scheduler
@@ -1170,7 +1174,6 @@ class Scheduler(ServerNode):
         self._last_client = None
         self._last_time = 0
         self.unrunnable = set()
-        self.suspicious_by_prefix = Counter()
 
         self.n_tasks = 0
         self.task_metadata = dict()
@@ -2193,7 +2196,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts.suspicious += 1
-                    self.suspicious_by_prefix[ts.prefix.name] += 1
+                    ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
