@@ -7,6 +7,7 @@ from distributed import Semaphore
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
+import pytest
 
 
 @gen_cluster(client=True)
@@ -174,3 +175,29 @@ async def test_access_semaphore_by_name(c, s, a, b):
     result = await c.gather(futures)
     assert result.count(True) == 1
     assert result.count(False) == 9
+
+
+@gen_cluster(client=True)
+async def test_close_async(c, s, a, b):
+    sem = await Semaphore(name="test")
+
+    assert await sem.acquire()
+    with pytest.warns(
+        RuntimeWarning, match="Closing semaphore .* but client .* still has a lease"
+    ):
+        await sem.close()
+
+    assert await sem.acquire() is None
+
+    semaphore_object = s.extensions["semaphores"]
+    assert not semaphore_object.max_leases
+    assert not semaphore_object.leases
+    assert not semaphore_object.events
+    assert not any(semaphore_object.leases_per_client.values())
+
+
+def test_close_sync(client):
+    sem = Semaphore()
+    sem.close()
+
+    assert sem.acquire() is None

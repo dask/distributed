@@ -8,6 +8,10 @@ from .client import Client, _get_global_client
 from .utils import PeriodicCallback, log_errors, parse_timedelta
 from .worker import get_client, get_worker
 from .metrics import time
+import warnings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class _Watch:
@@ -47,6 +51,7 @@ class SemaphoreExtension:
                 "semaphore_create": self.create,
                 "semaphore_acquire": self.acquire,
                 "semaphore_release": self.release,
+                "semaphore_close": self.close,
             }
         )
 
@@ -95,10 +100,19 @@ class SemaphoreExtension:
             result = False
         return result
 
+    def _semaphore_exists(self, name):
+        if name not in self.max_leases:
+            logger.exception(f"Semaphore `{name}` not known or already closed.")
+            return False
+        return True
+
     async def acquire(
         self, comm=None, name=None, client=None, timeout=None, identifier=None
     ):
         with log_errors():
+            if not self._semaphore_exists(name):
+                return
+
             if isinstance(name, list):
                 name = tuple(name)
             w = _Watch(timeout)
@@ -111,7 +125,7 @@ class SemaphoreExtension:
 
                 # If we hit the timeout, this cancels the _get_lease
                 future = asyncio.wait_for(
-                    self._get_lease(client, name, identifier), timeout=w.leftover(),
+                    self._get_lease(client, name, identifier), timeout=w.leftover()
                 )
 
                 try:
@@ -134,6 +148,8 @@ class SemaphoreExtension:
 
     def release(self, comm=None, name=None, client=None, identifier=None):
         with log_errors():
+            if not self._semaphore_exists(name):
+                return
             if isinstance(name, list):
                 name = tuple(name)
             if name in self.leases and identifier in self.leases[name]:
@@ -167,6 +183,26 @@ class SemaphoreExtension:
                 self._release_client(dead_client)
             else:
                 self._validation_running = False
+
+    def close(self, comm=None, name=None):
+        """Hard close the semaphore without warning clients which still hold a lease."""
+        with log_errors():
+            if not self._semaphore_exists(name):
+                return
+
+            del self.max_leases[name]
+            if name in self.events:
+                del self.events[name]
+            if name in self.leases:
+                del self.leases[name]
+
+            for client, client_leases in self.leases_per_client.items():
+                if name in client_leases:
+                    warnings.warn(
+                        f"Closing semaphore `{name}` but client `{client}` still has a lease open.",
+                        RuntimeWarning,
+                    )
+                    del client_leases[name]
 
 
 class Semaphore:
@@ -264,4 +300,4 @@ class Semaphore:
         self.__init__(name=name, client=client, max_leases=max_leases)
 
     def close(self):
-        self.client.sync(self.client.scheduler.semaphore_close, name=self.name)
+        return self.client.sync(self.client.scheduler.semaphore_close, name=self.name)
