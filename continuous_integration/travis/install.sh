@@ -42,7 +42,6 @@ conda install -c conda-forge -q \
     jupyter_client \
     msgpack-python>=0.6.0 \
     netcdf4 \
-    openssl==1.1.1d \
     paramiko \
     prometheus_client \
     psutil \
