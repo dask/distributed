@@ -19,11 +19,18 @@ import weakref
 import psutil
 import sortedcontainers
 
-try:
-    from cytoolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-except ImportError:
-    from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-from toolz import valmap, second, compose, groupby
+from tlz import (
+    frequencies,
+    merge,
+    pluck,
+    merge_sorted,
+    first,
+    merge_with,
+    valmap,
+    second,
+    compose,
+    groupby,
+)
 from tornado.ioloop import IOLoop
 
 import dask
@@ -4649,7 +4656,7 @@ class Scheduler(ServerNode):
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
-            if ts.state == "forgotten":
+            if ts.state == "forgotten" and ts.group.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg = ts.group
                 if not any(tg.states.get(s) for s in ALL_TASK_STATES):

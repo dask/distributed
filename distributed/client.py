@@ -30,10 +30,8 @@ from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes, funcname
 
-try:
-    from cytoolz import first, groupby, merge, valmap, keymap
-except ImportError:
-    from toolz import first, groupby, merge, valmap, keymap
+from tlz import first, groupby, merge, valmap, keymap
+
 try:
     from dask.delayed import single_key
 except ImportError:
@@ -502,7 +500,7 @@ class Client(Node):
 
     It is also common to create a Client without specifying the scheduler
     address , like ``Client()``.  In this case the Client creates a
-    ``LocalCluster`` in the background and connects to that.  Any extra
+    :class:`LocalCluster` in the background and connects to that.  Any extra
     keywords are passed from Client to LocalCluster in this case.  See the
     LocalCluster documentation for more information.
 
@@ -569,7 +567,7 @@ class Client(Node):
     See Also
     --------
     distributed.scheduler.Scheduler: Internal scheduler
-    distributed.deploy.local.LocalCluster:
+    distributed.LocalCluster:
     """
 
     _instances = weakref.WeakSet()
@@ -1382,7 +1380,7 @@ class Client(Node):
         """ Shut down the connected scheduler and workers
 
         Note, this may disrupt other clients that may be using the same
-        scheudler and workers.
+        scheduler and workers.
 
         See also
         --------

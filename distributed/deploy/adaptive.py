@@ -66,11 +66,11 @@ class Adaptive(AdaptiveCore):
 
     Notes
     -----
-    Subclasses can override :meth:`Adaptive.should_scale_up` and
+    Subclasses can override :meth:`Adaptive.target` and
     :meth:`Adaptive.workers_to_close` to control when the cluster should be
     resized. The default implementation checks if there are too many tasks
-    per worker or too little memory available (see :meth:`Adaptive.needs_cpu`
-    and :meth:`Adaptive.needs_memory`).
+    per worker or too little memory available (see
+    :meth:`Scheduler.adaptive_target`).
     The values for interval, min, max, wait_count and target_duration can be
     specified in the dask config under the distributed.adaptive key.
     '''
@@ -124,6 +124,22 @@ class Adaptive(AdaptiveCore):
         return self.cluster.observed
 
     async def target(self):
+        """
+        Determine target number of workers that should exist.
+
+        Notes
+        -----
+        ``Adaptive.target`` dispatches to Scheduler.adaptive_target(),
+        but may be overridden in subclasses.
+
+        Returns
+        -------
+        Target number of workers
+
+        See Also
+        --------
+        Scheduler.adaptive_target
+        """
         return await self.scheduler.adaptive_target(
             target_duration=self.target_duration
         )
