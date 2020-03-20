@@ -1,33 +1,29 @@
 import itertools
-from operator import mul
 import random
 import sys
-from time import sleep
 import weakref
-
-from unittest import mock
-import pytest
-from tlz import sliding_window, concat
-from tornado import gen
+from operator import mul
+from time import sleep
 
 import dask
+import pytest
 from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
-    slowinc,
-    slowadd,
-    inc,
-    gen_cluster,
-    slowidentity,
     captured_logger,
+    gen_cluster,
+    inc,
+    nodebug_setup_module,
+    nodebug_teardown_module,
+    slowadd,
+    slowidentity,
+    slowinc,
 )
-from distributed.utils_test import nodebug_setup_module, nodebug_teardown_module
-
-import pytest
-
+from tlz import concat, sliding_window
+from tornado import gen
 
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
@@ -164,31 +160,41 @@ async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     assert len(s.has_what[workers[0].address]) == 1001
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
-async def test_dont_steal_fast_tasks_blacklist(c, s, *workers):
-    import time
-
+@gen_cluster(client=True)
+async def test_dont_steal_fast_tasks_blacklist(c, s, a, b):
     # create a dependency
-    x = c.submit(slowinc, 1)
+    x = c.submit(slowinc, 1, workers=[b.address])
+
+    # If the blacklist of fast tasks is tracked somewhere else, this needs to be
+    # changed. This test requies *any* key which is blacklisted.
+    from distributed.stealing import fast_tasks
+
+    blacklisted_key = next(iter(fast_tasks))
 
     def fast_blacklisted(x, y=None):
+        # The task should observe a certain computation time such that we can
+        # ensure that it is not stolen due to the blacklisting. If it is too
+        # fast, the standard mechansim shouldn't allow stealing
+        import time
+
         time.sleep(0.01)
-        pass
 
-    mmock = mock.MagicMock()
-    s.extensions["stealing"].move_task_request = mmock
-    import distributed.stealing
+    futures = c.map(
+        fast_blacklisted,
+        range(100),
+        y=x,
+        # Submit the task to one worker but allow it to be distributed else,
+        # i.e. this is not a task restriction
+        workers=[a.address],
+        allow_other_workers=True,
+        key=blacklisted_key,
+    )
 
-    with mock.patch.object(
-        distributed.stealing, "fast_tasks", {fast_blacklisted.__name__}
-    ):
+    await wait(futures)
 
-        w = workers[0]
-        futures = c.map(fast_blacklisted, range(100), y=x)
-
-        await wait(futures)
-
-    mmock.assert_not_called()
+    # The +1 is the dependency we initially submitted to worker B
+    assert len(s.has_what[a.address]) == 101
+    assert len(s.has_what[b.address]) == 1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=20)

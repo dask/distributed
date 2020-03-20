@@ -84,7 +84,7 @@ class WorkStealing(SchedulerPlugin):
         if start == "processing":
             self.remove_key_from_stealable(ts)
             if finish == "memory":
-                for tts in self.stealable_unknown_durations.pop(ts.prefix, ()):
+                for tts in self.stealable_unknown_durations.pop(ts.prefix.name, ()):
                     if tts not in self.in_flight and tts.state == "processing":
                         self.put_key_in_stealable(tts)
             else:
