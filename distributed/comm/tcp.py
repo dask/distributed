@@ -192,12 +192,10 @@ class TCP(Comm):
 
             frames = []
             for each_length in lengths:
+                each_frame = bytearray(each_length)
                 if each_length:
-                    each_frame = bytearray(each_length)
                     n = await stream.read_into(each_frame)
                     assert n == each_length, (n, each_length)
-                else:
-                    each_frame = bytearray(each_length)
                 frames.append(each_frame)
         except StreamClosedError as e:
             self.stream = None
