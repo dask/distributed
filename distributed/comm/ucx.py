@@ -147,6 +147,9 @@ class UCX(Comm):
                 frames = await to_frames(
                     msg, serializers=serializers, on_error=on_error
                 )
+                send_frames = [
+                    each_frame for each_frame in frames if len(each_frame) > 0
+                ]
 
                 # Send meta data
                 await self.ep.send(np.array([len(frames)], dtype=np.uint64))
@@ -159,11 +162,11 @@ class UCX(Comm):
                 await self.ep.send(
                     np.array([nbytes(f) for f in frames], dtype=np.uint64)
                 )
+
                 # Send frames
-                for each_frame in frames:
-                    if nbytes(each_frame) > 0:
-                        await self.ep.send(each_frame)
-                return sum(map(nbytes, frames))
+                for each_frame in send_frames:
+                    await self.ep.send(each_frame)
+                return sum(map(nbytes, send_frames))
             except (ucp.exceptions.UCXBaseException):
                 self.abort()
                 raise CommClosedError("While writing, the connection was closed")
@@ -195,9 +198,11 @@ class UCX(Comm):
                     else np.empty(each_size, dtype=np.uint8)
                     for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist())
                 ]
-                for each_frame in frames:
-                    if len(each_frame) > 0:
-                        await self.ep.recv(each_frame)
+                recv_frames = [
+                    each_frame for each_frame in frames if len(each_frame) > 0
+                ]
+                for each_frame in recv_frames:
+                    await self.ep.recv(each_frame)
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
