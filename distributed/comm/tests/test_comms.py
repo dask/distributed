@@ -9,7 +9,7 @@ import warnings
 import pkg_resources
 import pytest
 
-from tornado import ioloop, queues
+from tornado import ioloop
 from tornado.concurrent import Future
 
 import distributed
@@ -78,7 +78,7 @@ tls_kwargs = dict(
 
 @pytest.mark.asyncio
 async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
-    q = queues.Queue()
+    q = asyncio.Queue()
 
     async def handle_comm(comm):
         await q.put(comm)
@@ -883,7 +883,7 @@ async def test_inproc_many_listeners():
 
 
 async def check_listener_deserialize(addr, deserialize, in_value, check_out):
-    q = queues.Queue()
+    q = asyncio.Queue()
 
     async def handle_comm(comm):
         msg = await comm.read()
