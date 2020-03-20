@@ -868,6 +868,13 @@ class ConnectionPool:
             addr, self, serializers=self.serializers, deserializers=self.deserializers
         )
 
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
     async def start(self):
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
