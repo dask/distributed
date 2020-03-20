@@ -4,6 +4,10 @@ language: generic
 sudo: required
 dist: trusty
 
+addons:
+  hosts:
+    - localhost
+
 env:
   matrix:
     - PYTHON=3.6 TESTS=true COVERAGE=true PACKAGES="scikit-learn lz4" TORNADO=5 CRICK=true
