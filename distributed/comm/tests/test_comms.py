@@ -80,8 +80,8 @@ tls_kwargs = dict(
 async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
     q = queues.Queue()
 
-    def handle_comm(comm):
-        q.put(comm)
+    async def handle_comm(comm):
+        await q.put(comm)
 
     listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
     await listener.start()
