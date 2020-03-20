@@ -201,3 +201,40 @@ def test_close_sync(client):
     sem.close()
 
     assert sem.acquire() is None
+
+
+@gen_cluster(client=True)
+async def test_release_once_too_many(c, s, a, b):
+    sem = await Semaphore(name="x")
+    assert await sem.acquire()
+    await sem.release()
+
+    with pytest.raises(
+        ValueError, match="Tried to release semaphore but it was already released"
+    ):
+        await sem.release()
+
+    assert await sem.acquire()
+    await sem.release()
+
+
+@gen_cluster(client=True)
+async def test_release_once_too_many_resilience(c, s, a, b):
+    def f(x, sem):
+        sem.acquire()
+        sem.release()
+        with pytest.raises(
+            ValueError, match="Tried to release semaphore but it was already released"
+        ):
+            sem.release()
+        return x
+
+    sem = await Semaphore(max_leases=3, name="x")
+
+    inpt = list(range(20))
+    futures = c.map(f, inpt, sem=sem)
+    assert sorted(await c.gather(futures)) == inpt
+
+    assert not s.extensions["semaphores"].leases["x"]
+    await sem.acquire()
+    assert len(s.extensions["semaphores"].leases["x"]) == 1
