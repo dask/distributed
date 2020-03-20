@@ -160,9 +160,9 @@ class UCX(Comm):
                     np.array([nbytes(f) for f in frames], dtype=np.uint64)
                 )
                 # Send frames
-                for frame in frames:
-                    if nbytes(frame) > 0:
-                        await self.ep.send(frame)
+                for each_frame in frames:
+                    if nbytes(each_frame) > 0:
+                        await self.ep.send(each_frame)
                 return sum(map(nbytes, frames))
             except (ucp.exceptions.UCXBaseException):
                 self.abort()
@@ -190,17 +190,17 @@ class UCX(Comm):
             else:
                 # Recv frames
                 frames = []
-                for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
-                    if size > 0:
+                for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist()):
+                    if each_size > 0:
                         if is_cuda:
-                            frame = cuda_array(size)
+                            each_frame = cuda_array(each_size)
                         else:
-                            frame = np.empty(size, dtype=np.uint8)
-                        await self.ep.recv(frame)
-                        frames.append(frame)
+                            each_frame = np.empty(each_size, dtype=np.uint8)
+                        await self.ep.recv(each_frame)
+                        frames.append(each_frame)
                     else:
                         if is_cuda:
-                            frames.append(cuda_array(size))
+                            frames.append(cuda_array(each_size))
                         else:
                             frames.append(b"")
                 msg = await from_frames(
