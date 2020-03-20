@@ -193,12 +193,9 @@ class TCP(Comm):
             frames = []
             for each_length in lengths:
                 if each_length:
-                    if self._iostream_has_read_into:
-                        each_frame = bytearray(each_length)
-                        n = await stream.read_into(each_frame)
-                        assert n == each_length, (n, each_length)
-                    else:
-                        each_frame = await stream.read_bytes(each_length)
+                    each_frame = bytearray(each_length)
+                    n = await stream.read_into(each_frame)
+                    assert n == each_length, (n, each_length)
                 else:
                     each_frame = bytearray(each_length)
                 frames.append(each_frame)
