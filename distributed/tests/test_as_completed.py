@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator
 from operator import add
 import queue
@@ -7,7 +8,7 @@ from time import sleep
 import pytest
 from tornado import gen
 
-from distributed.client import _as_completed, as_completed, _first_completed
+from distributed.client import _as_completed, as_completed, _first_completed, wait
 from distributed.utils import CancelledError
 from distributed.utils_test import gen_cluster, inc, throws
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
@@ -254,3 +255,17 @@ def test_as_completed_with_results_no_raise_async(c, s, a, b):
     assert isinstance(dd[y][0], CancelledError)
     assert isinstance(dd[x][0][1], RuntimeError)
     assert dd[z][0] == 2
+
+
+@gen_cluster(client=True, timeout=None)
+async def test_clear(c, s, a, b):
+    futures = c.map(inc, range(3))
+    ac = as_completed(futures)
+    await wait(futures)
+    ac.clear()
+    with pytest.raises(StopAsyncIteration):
+        await ac.__anext__()
+    del futures
+
+    while s.tasks:
+        await asyncio.sleep(0.3)
