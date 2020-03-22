@@ -233,6 +233,19 @@ def test_as_completed_with_results_no_raise(client):
 
 
 @gen_cluster(client=True)
+async def test_str(c, s, a, b):
+    futures = c.map(inc, range(3))
+    ac = as_completed(futures)
+    assert "waiting=3" in str(ac)
+    assert "waiting=3" in repr(ac)
+    assert "done=0" in str(ac)
+    assert "done=0" in repr(ac)
+
+    await ac.__anext__()
+    assert "done=2" in str(ac)
+
+
+@gen_cluster(client=True)
 def test_as_completed_with_results_no_raise_async(c, s, a, b):
     x = c.submit(throws, 1)
     y = c.submit(inc, 5)
