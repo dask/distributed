@@ -202,7 +202,13 @@ class TCP(Comm):
                 else:
                     frame = b""
                 frames.append(frame)
-        except StreamClosedError as e:
+        except (StreamClosedError, ssl.SSLError) as e:
+            if isinstance(e, ssl.SSLError):
+                if "unexpected eof while reading" not in str(e):
+                    raise e
+                else:
+                    e = StreamClosedError(str(e))
+
             self.stream = None
             if not shutting_down():
                 convert_stream_closed_error(self, e)
