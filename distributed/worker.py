@@ -1836,7 +1836,7 @@ class Worker(ServerNode):
 
     def send_task_state_to_scheduler(self, key):
         if key in self.data or self.actors.get(key):
-            nbytes = self.nbytes[key]
+            nbytes = self.nbytes.get(key)
             typ = self.types.get(key)
             if nbytes is None or typ is None:
                 try:
