@@ -105,9 +105,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "cluster is on a shared network file system.",
 )
 @click.option(
-    "--local-directory", default="", type=str, help="Directory to place scheduler files"
-)
-@click.option(
     "--preload",
     type=str,
     multiple=True,
