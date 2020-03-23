@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator
 from operator import add
 import queue
@@ -8,6 +9,7 @@ import pytest
 from tornado import gen
 
 from distributed.client import _as_completed, as_completed, _first_completed
+from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import gen_cluster, inc, throws
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
@@ -242,7 +244,11 @@ async def test_str(c, s, a, b):
     assert "done=0" in repr(ac)
 
     await ac.__anext__()
-    assert "done=2" in str(ac)
+
+    start = time()
+    while "done=2" not in str(ac):
+        await asyncio.sleep(0.01)
+        assert time() < start + 2
 
 
 @gen_cluster(client=True)
