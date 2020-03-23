@@ -17,7 +17,7 @@ from dask.optimization import SubgraphCallable
 from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
-from toolz import pluck, sliding_window, first
+from tlz import pluck, sliding_window, first
 import tornado
 from tornado import gen
 
