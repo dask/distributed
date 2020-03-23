@@ -225,19 +225,20 @@ def test_remove_worker_by_name_from_scheduler(s, a, b):
     s.validate_state()
 
 
-@gen_cluster()
-def test_remove_worker_increments_suspicious(s, a, b):
-    dsk = {("x-%d" % i): (inc, i) for i in range(20)}
-    s.update_graph(
-        tasks=valmap(dumps_task, dsk),
-        keys=list(dsk),
-        dependencies={k: set() for k in dsk},
-    )
-    assert s.remove_worker(address=a.address) == "OK"
+@gen_cluster(client=True, Worker=Nanny)
+def test_remove_worker_increments_suspicious(client, s, a, b):
+    def killer(x):
+        import sys
+
+        sys.exit()
+
+    futures = client.map(killer, range(20))
+    while len(s.workers) == 2:
+        yield gen.sleep(0.01)
     assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
         ts.suspicious for ts in s.tasks.values()
     )
-    assert s.task_prefixes["x"].suspicious == 10
+    assert 10 <= s.task_prefixes["killer"].suspicious <= 30
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
