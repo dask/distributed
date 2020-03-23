@@ -1,0 +1,123 @@
+name: Linux CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.6", "3.7", "3.8"]
+        include:
+          - python-version: "3.6"
+            packages: "scikit-learn lz4"
+            coverage: "true"
+            tornado: "5"
+            crick: "true"
+          - python-version: "3.7"
+            packages: "scikit-learn python-snappy python-blosc"
+            coverage: "false"
+            tornado: "6"
+            crick: "false"
+          - python-version: "3.8"
+            packages: "scikit-learn python-snappy python-blosc"
+            coverage: "false"
+            tornado: "6"
+            crick: "false"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v2
+
+      - name: Setup Conda Environment
+        uses: goanpeca/setup-miniconda@v1
+        with:
+          miniconda-version: "latest"
+          python-version: ${{ matrix.python-version }}
+          environment-file: continuous_integration/environment.yml
+          activate-environment: testenv
+          auto-activate-base: false
+
+      - name: Setup SSH
+        run: |
+          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" -q
+          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+
+      - name: Install
+        run: |
+          # Install dependencies
+          conda install -c conda-forge -q \
+              asyncssh \
+              bokeh \
+              click \
+              coverage \
+              dask \
+              flake8 \
+              h5py \
+              ipykernel \
+              ipywidgets \
+              joblib \
+              jupyter_client \
+              msgpack-python>=0.6.0 \
+              netcdf4 \
+              paramiko \
+              prometheus_client \
+              psutil \
+              pytest>=4 \
+              pytest-timeout \
+              python=${{ matrix.python-version }} \
+              requests \
+              scipy \
+              tblib>=1.5.0 \
+              toolz \
+              tornado=${{ matrix.tornado }} \
+              zstandard \
+              ${{ matrix.packages }}
+          python -m pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
+
+          python -m pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
+          python -m pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
+          python -m pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
+          python -m pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
+          python -m pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
+          python -m pip install -q sortedcollections --no-deps
+          python -m pip install -q keras --upgrade --no-deps
+
+      - name: Install stacktrace
+        # stacktrace is not currently avaiable for Python 3.8.
+        # Remove the version check block below when it is avaiable.
+        if: matrix.python-version != "3.8"
+        run: |
+          # For low-level profiler, install libunwind and stacktrace from conda-forge
+          # For stacktrace we use --no-deps to avoid upgrade of python
+          conda install -c defaults -c conda-forge libunwind
+          conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
+
+      - name: Install crick
+        if: matrix.crick == "true"
+        run: |
+          conda install -q cython
+          python -m pip install -q git+https://github.com/jcrist/crick.git
+
+      - name: Install Distributed from source
+        run: python -m pip install --no-deps -e .
+
+      - name: Print debugging info
+        run: |
+          echo -e "--\n--Conda Environment\n--"
+          conda list
+
+          echo -e "--\n--Pip Environment\n--"
+          python -m pip list --format=columns
+
+          echo -e "--\n--Soft Limits\n--"
+          ulimit -a -S
+
+          echo -e "--\n--Hard Limits\n--"
+          ulimit -a -H
+
+      - name: Run tests
+        run: |
+          py.test -m "not avoid_travis" distributed -r s --timeout-method=thread --timeout=300 --durations=20
+          # TODO Add coverage
