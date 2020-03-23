@@ -87,7 +87,7 @@ jobs:
       - name: Install stacktrace
         # stacktrace is not currently avaiable for Python 3.8.
         # Remove the version check block below when it is avaiable.
-        if: matrix.python-version != "3.8"
+        if: matrix.python-version != '3.8'
         run: |
           # For low-level profiler, install libunwind and stacktrace from conda-forge
           # For stacktrace we use --no-deps to avoid upgrade of python
@@ -95,7 +95,7 @@ jobs:
           conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
 
       - name: Install crick
-        if: matrix.crick == "true"
+        if: matrix.crick == 'true'
         run: |
           conda install -q cython
           python -m pip install -q git+https://github.com/jcrist/crick.git
