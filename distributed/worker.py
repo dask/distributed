@@ -1846,7 +1846,10 @@ class Worker(ServerNode):
     def send_task_state_to_scheduler(self, key):
         if key in self.data or self.actors.get(key):
             try:
-                value = self.data[key]
+                if hasattr(self.data, "get_from_dev_or_host_buffer"):
+                    value = self.data.get_from_dev_or_host_buffer(key)
+                else:
+                    value = self.data[key]
             except KeyError:
                 value = self.actors[key]
             nbytes = self.nbytes[key] or sizeof(value)
