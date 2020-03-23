@@ -791,7 +791,7 @@ class TaskPrefix:
 
     .. attribute:: suspicious: int
 
-       Numbers of tasks marked as suspicious with this prefix
+       Numbers of times a task was marked as suspicious with this prefix
 
 
     See Also
