@@ -1228,7 +1228,6 @@ class Worker(ServerNode):
             return {"status": "busy"}
 
         self.outgoing_current_count += 1
-        #data = {k: self.data[k] for k in keys if k in self.data}
         data = {}
         for k in keys:
             if k in self.data:
