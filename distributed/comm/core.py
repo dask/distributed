@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod, abstractproperty
 import asyncio
+import inspect
 import logging
 import weakref
 
@@ -160,7 +161,9 @@ class Listener(ABC):
         return self
 
     async def __aexit__(self, *exc):
-        self.stop()
+        future = self.stop()
+        if inspect.isawaitable(future):
+            await future
 
     def __await__(self):
         async def _():
@@ -209,6 +212,10 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         )
         raise IOError(msg)
 
+    backoff = 0.01
+    if timeout and timeout / 20 < backoff:
+        backoff = timeout / 20
+
     # This starts a thread
     while True:
         try:
@@ -228,8 +235,10 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await asyncio.sleep(0.01)
-                logger.debug("sleeping on connect")
+                logger.debug("Could not connect, waiting before retrying")
+                await asyncio.sleep(backoff)
+                backoff *= 1.5
+                backoff = min(backoff, 1)  # wait at most one second
             else:
                 _raise(error)
         else:
