@@ -71,7 +71,7 @@ class SemaphoreExtension:
         self._validation_running = False
 
     # `comm` here is required by the handler interface
-    async def create(self, comm=None, name=None, max_leases=None):
+    def create(self, comm=None, name=None, max_leases=None):
         # We use `self.max_leases.keys()` as the point of truth to find out if a semaphore with a specific
         # `name` has been created.
         if name not in self.max_leases:
@@ -85,11 +85,6 @@ class SemaphoreExtension:
                 )
 
     async def _get_lease(self, client, name, identifier):
-        # We should make sure that the client is already properly registered with the scheduler
-        # otherwise the lease validation will mop up every acquired lease immediately. That's mostly relevant for tests
-        while client not in self.scheduler.clients:
-            await asyncio.sleep(0.0005)  # This value is set somewhat arbitrarily
-
         result = True
         if len(self.leases[name]) < self.max_leases[name]:
             # naive: self.leases[resource] += 1
