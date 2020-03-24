@@ -226,10 +226,13 @@ class Semaphore:
 
     Examples
     --------
-    >>> sem = Semaphore(max_leases=2, name='my_database')  # doctest: +SKIP
-    >>> sem.acquire(timeout=0.1)  # doctest: +SKIP
-    >>> # do things with protected resource
-    >>> sem.release()  # doctest: +SKIP
+    >>> from distributed import Semaphore
+    >>> sem = Semaphore(max_leases=2, name='my_database')
+    >>> # This automatically acquires a lease from the semaphore (if available) which will be released when leaving
+    >>> # the context manager
+    >>> with sem:
+    >>>     pass  # use the protected resource
+    >>> sem.close()  # Close resource (clearing any residual state)
 
     Notes
     -----
