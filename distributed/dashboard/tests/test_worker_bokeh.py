@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("bokeh")
 import sys
-from toolz import first
+from tlz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
@@ -14,8 +14,8 @@ from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
 from distributed.dashboard.scheduler import BokehScheduler
-from distributed.dashboard.worker import (
-    BokehWorker,
+from distributed.dashboard.worker import BokehWorker
+from distributed.dashboard.components.worker import (
     StateTable,
     CrossFilter,
     CommunicatingStream,

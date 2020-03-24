@@ -7,19 +7,20 @@ from time import sleep
 import pytest
 
 pytest.importorskip("bokeh")
-from toolz import first
+from tlz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
+import dask
 from dask.core import flatten
 from distributed.utils import tokey, format_dashboard_link
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
-from distributed.dashboard.worker import Counters, BokehWorker
-from distributed.dashboard.scheduler import (
-    applications,
-    BokehScheduler,
+from distributed.dashboard.worker import BokehWorker
+from distributed.dashboard.components.worker import Counters
+from distributed.dashboard.scheduler import applications, BokehScheduler
+from distributed.dashboard.components.scheduler import (
     SystemMonitor,
     Occupancy,
     StealingTimeSeries,
@@ -27,13 +28,13 @@ from distributed.dashboard.scheduler import (
     Events,
     TaskStream,
     TaskProgress,
-    MemoryUse,
     CurrentLoad,
     ProcessingHistogram,
     NBytesHistogram,
     WorkerTable,
-    GraphPlot,
+    TaskGraph,
     ProfileServer,
+    MemoryByKey,
 )
 
 from distributed.dashboard import scheduler
@@ -70,7 +71,7 @@ def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs=dict(services={"dashboard": BokehWorker}))
 def test_basic(c, s, a, b):
-    for component in [SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
         ss = component(s)
 
         ss.update()
@@ -247,19 +248,6 @@ def test_TaskProgress_empty(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_MemoryUse(c, s, a, b):
-    mu = MemoryUse(s)
-
-    futures = c.map(slowinc, range(10), delay=0.001)
-    yield wait(futures)
-
-    mu.update()
-    d = dict(mu.source.data)
-    assert all(len(L) == 1 for L in d.values())
-    assert d["name"] == ["slowinc"]
-
-
-@gen_cluster(client=True)
 def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
@@ -271,6 +259,8 @@ def test_CurrentLoad(c, s, a, b):
 
     assert all(len(L) == 2 for L in d.values())
     assert all(d["nbytes"])
+
+    assert cl.cpu_figure.x_range.end == 200
 
 
 @gen_cluster(client=True)
@@ -305,10 +295,18 @@ def test_WorkerTable(c, s, a, b):
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())
-    assert all(len(v) == 2 for v in wt.source.data.values())
+    assert all(
+        not v or isinstance(v, (str, int, float))
+        for L in wt.source.data.values()
+        for v in L
+    ), {type(v).__name__ for L in wt.source.data.values() for v in L}
+
+    assert all(len(v) == 3 for v in wt.source.data.values())
+    assert wt.source.data["name"][0] == "Total (2)"
 
     nthreads = wt.source.data["nthreads"]
     assert all(nthreads)
+    assert nthreads[0] == nthreads[1] + nthreads[2]
 
 
 @gen_cluster(client=True)
@@ -339,7 +337,7 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
         assert name in data
 
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_port"][i] for i in my_index] == [a.port, b.port]
     assert [data["metric_address"][i] for i in my_index] == [a.address, b.address]
@@ -364,7 +362,7 @@ def test_WorkerTable_different_metrics(c, s, a, b):
     assert "metric_a" in data
     assert "metric_b" in data
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_a"][i] for i in my_index] == [a.port, None]
     assert [data["metric_b"][i] for i in my_index] == [None, b.port]
@@ -384,7 +382,7 @@ def test_WorkerTable_metrics_with_different_metric_2(c, s, a, b):
 
     assert "metric_a" in data
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_a"][i] for i in my_index] == [a.port, None]
 
@@ -438,8 +436,8 @@ def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot(c, s, a, b):
-    gp = GraphPlot(s)
+def test_TaskGraph(c, s, a, b):
+    gp = TaskGraph(s)
     futures = c.map(inc, range(5))
     total = c.submit(sum, futures)
     yield total
@@ -447,6 +445,8 @@ def test_GraphPlot(c, s, a, b):
     gp.update()
     assert set(map(len, gp.node_source.data.values())) == {6}
     assert set(map(len, gp.edge_source.data.values())) == {5}
+    json.dumps(gp.edge_source.data)
+    json.dumps(gp.node_source.data)
 
     da = pytest.importorskip("dask.array")
     x = da.random.random((20, 20), chunks=(10, 10)).persist()
@@ -478,8 +478,8 @@ def test_GraphPlot(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot_clear(c, s, a, b):
-    gp = GraphPlot(s)
+def test_TaskGraph_clear(c, s, a, b):
+    gp = TaskGraph(s)
     futures = c.map(inc, range(5))
     total = c.submit(sum, futures)
     yield total
@@ -502,9 +502,9 @@ def test_GraphPlot_clear(c, s, a, b):
 
 
 @gen_cluster(client=True, timeout=30)
-def test_GraphPlot_complex(c, s, a, b):
+def test_TaskGraph_complex(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    gp = GraphPlot(s)
+    gp = TaskGraph(s)
     x = da.random.random((2000, 2000), chunks=(1000, 1000))
     y = ((x + x.T) - x.mean(axis=0)).persist()
     yield wait(y)
@@ -533,12 +533,12 @@ def test_GraphPlot_complex(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot_order(c, s, a, b):
+def test_TaskGraph_order(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(div, 1, 0)
     yield wait(y)
 
-    gp = GraphPlot(s)
+    gp = TaskGraph(s)
     gp.update()
 
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"
@@ -610,7 +610,7 @@ def test_proxy_to_workers(c, s, a, b):
         if proxy_exists:
             assert b"Crossfilter" in response_proxy.body
         else:
-            assert b"pip install jupyter-server-proxy" in response_proxy.body
+            assert b"python -m pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
         assert b"Crossfilter" in response_direct.body
 
@@ -624,7 +624,7 @@ def test_proxy_to_workers(c, s, a, b):
     },
 )
 async def test_lots_of_tasks(c, s, a, b):
-    import toolz
+    import tlz as toolz
 
     ts = TaskStream(s)
     ts.update()
@@ -664,6 +664,11 @@ def test_https_support(c, s, a, b):
     ctx.load_verify_locations(get_cert("tls-ca-cert.pem"))
 
     http_client = AsyncHTTPClient()
+    response = yield http_client.fetch(
+        "https://localhost:%d/individual-plots.json" % port, ssl_options=ctx
+    )
+    response = json.loads(response.body.decode())
+
     for suffix in [
         "system",
         "counters",
@@ -672,17 +677,28 @@ def test_https_support(c, s, a, b):
         "tasks",
         "stealing",
         "graph",
-        "individual-task-stream",
-        "individual-progress",
-        "individual-graph",
-        "individual-nbytes",
-        "individual-nprocessing",
-        "individual-profile",
-    ]:
+    ] + [url.strip("/") for url in response.values()]:
         req = HTTPRequest(
             url="https://localhost:%d/%s" % (port, suffix), ssl_options=ctx
         )
         response = yield http_client.fetch(req)
+        assert response.code < 300
         body = response.body.decode()
-        assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
+
+
+@gen_cluster(
+    client=True, scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}}
+)
+async def test_memory_by_key(c, s, a, b):
+    mbk = MemoryByKey(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.random.random((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    await x
+
+    y = await dask.delayed(inc)(1).persist()
+
+    mbk.update()
+    assert mbk.source.data["name"] == ["add", "inc"]
+    assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]

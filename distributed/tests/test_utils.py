@@ -1,6 +1,8 @@
+import array
 import datetime
 from functools import partial
 import io
+import os
 import queue
 import socket
 import sys
@@ -39,6 +41,10 @@ from distributed.utils import (
     parse_bytes,
     parse_timedelta,
     warn_on_duration,
+    format_dashboard_link,
+    LRU,
+    offload,
+    TimeoutError,
 )
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
@@ -105,7 +111,7 @@ def test_sync_error(loop_in_thread):
 
 def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
 
 
@@ -149,8 +155,16 @@ def test_get_ip_interface():
         assert get_ip_interface("lo") == "127.0.0.1"
     else:
         pytest.skip("test needs to be enhanced for platform %r" % (sys.platform,))
-    with pytest.raises(KeyError):
-        get_ip_interface("__non-existent-interface")
+
+    non_existent_interface = "__non-existent-interface"
+    expected_error_message = "{!r}.+network interface.+".format(non_existent_interface)
+
+    if sys.platform == "darwin":
+        expected_error_message += "'lo0'"
+    elif sys.platform.startswith("linux"):
+        expected_error_message += "'lo'"
+    with pytest.raises(ValueError, match=expected_error_message):
+        get_ip_interface(non_existent_interface)
 
 
 def test_truncate_exception():
@@ -275,11 +289,23 @@ def test_funcname():
 
 
 def test_ensure_bytes():
-    data = [b"1", "1", memoryview(b"1"), bytearray(b"1")]
+    data = [b"1", "1", memoryview(b"1"), bytearray(b"1"), array.array("b", [49])]
     for d in data:
         result = ensure_bytes(d)
         assert isinstance(result, bytes)
         assert result == b"1"
+
+
+def test_ensure_bytes_ndarray():
+    result = ensure_bytes(np.arange(12))
+    assert isinstance(result, bytes)
+
+
+def test_ensure_bytes_pyarrow_buffer():
+    pa = pytest.importorskip("pyarrow")
+    buf = pa.py_buffer(b"123")
+    result = ensure_bytes(buf)
+    assert isinstance(result, bytes)
 
 
 def test_nbytes():
@@ -561,3 +587,41 @@ def test_is_valid_xml():
     assert is_valid_xml("<a>foo</a>")
     with pytest.raises(Exception):
         assert is_valid_xml("<a>foo")
+
+
+def test_format_dashboard_link():
+    with dask.config.set({"distributed.dashboard.link": "foo"}):
+        assert format_dashboard_link("host", 1234) == "foo"
+
+    assert "host" in format_dashboard_link("host", 1234)
+    assert "1234" in format_dashboard_link("host", 1234)
+
+    try:
+        os.environ["host"] = "hello"
+        assert "hello" not in format_dashboard_link("host", 1234)
+    finally:
+        del os.environ["host"]
+
+
+def test_lru():
+
+    l = LRU(maxsize=3)
+    l["a"] = 1
+    l["b"] = 2
+    l["c"] = 3
+    assert list(l.keys()) == ["a", "b", "c"]
+
+    # Use "a" and ensure it becomes the most recently used item
+    l["a"]
+    assert list(l.keys()) == ["b", "c", "a"]
+
+    # Ensure maxsize is respected
+    l["d"] = 4
+    assert len(l) == 3
+    assert list(l.keys()) == ["c", "a", "d"]
+
+
+@pytest.mark.asyncio
+async def test_offload():
+    assert (await offload(inc, 1)) == 2
+    assert (await offload(lambda x, y: x + y, 1, y=2)) == 3

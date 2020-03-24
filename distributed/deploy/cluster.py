@@ -1,10 +1,9 @@
 import asyncio
-from datetime import timedelta
 import logging
 import threading
+import warnings
 
 from dask.utils import format_bytes
-from tornado import gen
 
 from .adaptive import Adaptive
 
@@ -23,7 +22,7 @@ from ..utils import (
 logger = logging.getLogger(__name__)
 
 
-class Cluster(object):
+class Cluster:
     """ Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -74,7 +73,7 @@ class Cluster(object):
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        self.scheduler_comm.close_rpc()
+        await self.scheduler_comm.close_rpc()
 
         self.status = "closed"
 
@@ -95,17 +94,21 @@ class Cluster(object):
             except OSError:
                 break
 
-            for op, msg in msgs:
-                if op == "add":
-                    workers = msg.pop("workers")
-                    self.scheduler_info["workers"].update(workers)
-                    self.scheduler_info.update(msg)
-                elif op == "remove":
-                    del self.scheduler_info["workers"][msg]
-                else:
-                    raise ValueError("Invalid op", op, msg)
+            with log_errors():
+                for op, msg in msgs:
+                    self._update_worker_status(op, msg)
 
         await comm.close()
+
+    def _update_worker_status(self, op, msg):
+        if op == "add":
+            workers = msg.pop("workers")
+            self.scheduler_info["workers"].update(workers)
+            self.scheduler_info.update(msg)
+        elif op == "remove":
+            del self.scheduler_info["workers"][msg]
+        else:
+            raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
         """ Turn on adaptivity
@@ -152,16 +155,16 @@ class Cluster(object):
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(self.loop, func, *args, **kwargs)
 
-    async def _logs(self, scheduler=True, workers=True):
+    async def _get_logs(self, scheduler=True, workers=True):
         logs = Logs()
 
         if scheduler:
-            L = await self.scheduler_comm.logs()
+            L = await self.scheduler_comm.get_logs()
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
@@ -171,7 +174,7 @@ class Cluster(object):
 
         return logs
 
-    def logs(self, scheduler=True, workers=True):
+    def get_logs(self, scheduler=True, workers=True):
         """ Return logs for the scheduler and workers
 
         Parameters
@@ -188,7 +191,11 @@ class Cluster(object):
             A dictionary of logs, with one item for the scheduler and one for
             each worker
         """
-        return self.sync(self._logs, scheduler=scheduler, workers=workers)
+        return self.sync(self._get_logs, scheduler=scheduler, workers=workers)
+
+    def logs(self, *args, **kwargs):
+        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
+        return self.get_logs(*args, **kwargs)
 
     @property
     def dashboard_link(self):
@@ -197,13 +204,16 @@ class Cluster(object):
         except KeyError:
             return ""
         else:
-            host = self.scheduler_address.split("://")[1].split(":")[0]
+            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
-            requested = len(self.worker_spec)
+            requested = sum(
+                1 if "group" not in each else len(each["group"])
+                for each in self.worker_spec.values()
+            )
         elif hasattr(self, "workers"):
             requested = len(self.workers)
         else:
@@ -246,7 +256,11 @@ class Cluster(object):
         except AttributeError:
             pass
 
-        from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+        try:
+            from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+        except ImportError:
+            self._cached_widget = None
+            return None
 
         layout = Layout(width="150px")
 
@@ -258,7 +272,7 @@ class Cluster(object):
         else:
             link = ""
 
-        title = "<h2>%s</h2>" % type(self).__name__
+        title = "<h2>%s</h2>" % self._cluster_class_name
         title = HTML(title)
         dashboard = HTML(link)
 
@@ -311,15 +325,32 @@ class Cluster(object):
 
         return box
 
-    def _ipython_display_(self, **kwargs):
-        return self._widget()._ipython_display_(**kwargs)
+    def _repr_html_(self):
+        if self.dashboard_link:
+            dashboard = "<a href='{0}' target='_blank'>{0}</a>".format(
+                self.dashboard_link
+            )
+        else:
+            dashboard = "Not Available"
+        return (
+            "<div style='background-color: #f2f2f2; display: inline-block; "
+            "padding: 10px; border: 1px solid #999999;'>\n"
+            "  <h3>{cls}</h3>\n"
+            "  <ul>\n"
+            "    <li><b>Dashboard: </b>{dashboard}\n"
+            "  </ul>\n"
+            "</div>\n"
+        ).format(cls=self._cluster_class_name, dashboard=dashboard)
 
-    def __repr__(self):
-        return "%s(%r, workers=%d)" % (
-            type(self).__name__,
-            self.scheduler_address,
-            len(self.scheduler_info["workers"]),
-        )
+    def _ipython_display_(self, **kwargs):
+        widget = self._widget()
+        if widget is not None:
+            return widget._ipython_display_(**kwargs)
+        else:
+            from IPython.display import display
+
+            data = {"text/plain": repr(self), "text/html": self._repr_html_()}
+            display(data, raw=True)
 
     async def __aenter__(self):
         await self
@@ -331,3 +362,34 @@ class Cluster(object):
     @property
     def scheduler_address(self):
         return self.scheduler_comm.address
+
+    @property
+    def _cluster_class_name(self):
+        return getattr(self, "_name", type(self).__name__)
+
+    def __repr__(self):
+        text = "%s(%r, workers=%d, threads=%d" % (
+            self._cluster_class_name,
+            self.scheduler_address,
+            len(self.scheduler_info["workers"]),
+            sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
+        )
+
+        memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
+        if all(memory):
+            text += ", memory=" + format_bytes(sum(memory))
+
+        text += ")"
+        return text
+
+    @property
+    def plan(self):
+        return set(self.workers)
+
+    @property
+    def requested(self):
+        return set(self.workers)
+
+    @property
+    def observed(self):
+        return {d["name"] for d in self.scheduler_info["workers"].values()}

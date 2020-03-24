@@ -1,13 +1,14 @@
 import atexit
-from datetime import timedelta
 import logging
 import os
 from queue import Queue as PyQueue
 import re
 import threading
 import weakref
+import asyncio
+import dask
 
-from .utils import mp_context
+from .utils import mp_context, TimeoutError
 
 from tornado import gen
 from tornado.concurrent import Future
@@ -39,13 +40,13 @@ def _call_and_set_future(loop, future, func, *args, **kwargs):
         _loop_add_callback(loop, future.set_result, res)
 
 
-class _ProcessState(object):
+class _ProcessState:
     is_alive = False
     pid = None
     exitcode = None
 
 
-class AsyncProcess(object):
+class AsyncProcess:
     """
     A coroutine-compatible multiprocessing.Process-alike.
     All normally blocking methods are wrapped in Tornado coroutines.
@@ -71,7 +72,14 @@ class AsyncProcess(object):
         self._process = mp_context.Process(
             target=self._run,
             name=name,
-            args=(target, args, kwargs, parent_alive_pipe, self._keep_child_alive),
+            args=(
+                target,
+                args,
+                kwargs,
+                parent_alive_pipe,
+                self._keep_child_alive,
+                dask.config.global_config,
+            ),
         )
         _dangling.add(self._process)
         self._name = self._process.name
@@ -163,7 +171,9 @@ class AsyncProcess(object):
                 handler.createLock()
 
     @classmethod
-    def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive):
+    def _run(
+        cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, inherit_config
+    ):
         # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
         # whether it is passed or not. Therefore, pass it unconditionally and
         # close it here, so that there are no other references to the pipe lying
@@ -176,6 +186,8 @@ class AsyncProcess(object):
         cls._immediate_exit_when_closed(parent_alive_pipe)
 
         threading.current_thread().name = "MainThread"
+        # Update the global config given priority to the existing global config
+        dask.config.update(dask.config.global_config, inherit_config, priority="old")
         target(*args, **kwargs)
 
     @classmethod
@@ -270,8 +282,8 @@ class AsyncProcess(object):
             yield self._exit_future
         else:
             try:
-                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-            except gen.TimeoutError:
+                yield asyncio.wait_for(self._exit_future, timeout)
+            except TimeoutError:
                 pass
 
     def close(self):

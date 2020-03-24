@@ -2,9 +2,9 @@ import asyncio
 import collections
 from contextlib import contextmanager
 import copy
-from datetime import timedelta
 import functools
 from glob import glob
+import io
 import itertools
 import logging
 import logging.config
@@ -30,14 +30,13 @@ except ImportError:
     ssl = None
 
 import pytest
-import six
 
 import dask
-from toolz import merge, memoize, assoc
+from tlz import merge, memoize, assoc
 from tornado import gen, queues
-from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from . import system
 from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
@@ -60,8 +59,9 @@ from .utils import (
     iscoroutinefunction,
     thread_state,
     _offload_executor,
+    TimeoutError,
 )
-from .worker import Worker, TOTAL_MEMORY
+from .worker import Worker
 from .nanny import Nanny
 
 try:
@@ -141,7 +141,7 @@ def loop():
             except RuntimeError as e:
                 if not re.match("IOLoop is clos(ed|ing)", str(e)):
                     raise
-            except gen.TimeoutError:
+            except TimeoutError:
                 pass
             else:
                 is_stopped.wait()
@@ -190,7 +190,7 @@ def pristine_loop():
 
 @contextmanager
 def mock_ipython():
-    import mock
+    from unittest import mock
     from distributed._ipython_utils import remote_magic
 
     ip = mock.Mock()
@@ -343,7 +343,7 @@ _varying_dict = collections.defaultdict(int)
 _varying_key_gen = itertools.count()
 
 
-class _ModuleSlot(object):
+class _ModuleSlot:
     def __init__(self, modname, slotname):
         self.modname = modname
         self.slotname = slotname
@@ -393,7 +393,7 @@ def map_varying(itemslists):
 
 
 async def geninc(x, delay=0.02):
-    await gen.sleep(delay)
+    await asyncio.sleep(delay)
     return x + 1
 
 
@@ -409,7 +409,7 @@ if sys.version_info >= (3, 5):
     compile_snippet(
         """
         async def asyncinc(x, delay=0.02):
-            await gen.sleep(delay)
+            await asyncio.sleep(delay)
             return x + 1
         """
     )
@@ -605,7 +605,12 @@ def security():
 
 @contextmanager
 def cluster(
-    nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1, scheduler_kwargs={}
+    nworkers=2,
+    nanny=False,
+    worker_kwargs={},
+    active_rpc_timeout=1,
+    disconnect_timeout=3,
+    scheduler_kwargs={},
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -636,7 +641,11 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"nthreads": 1, "local_directory": fn, "memory_limit": TOTAL_MEMORY},
+                {
+                    "nthreads": 1,
+                    "local_directory": fn,
+                    "memory_limit": system.MEMORY_LIMIT,
+                },
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -684,10 +693,16 @@ def cluster(
 
             loop.run_sync(
                 lambda: disconnect_all(
-                    [w["address"] for w in workers], timeout=0.5, rpc_kwargs=rpc_kwargs
+                    [w["address"] for w in workers],
+                    timeout=disconnect_timeout,
+                    rpc_kwargs=rpc_kwargs,
                 )
             )
-            loop.run_sync(lambda: disconnect(saddr, timeout=0.5, rpc_kwargs=rpc_kwargs))
+            loop.run_sync(
+                lambda: disconnect(
+                    saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+                )
+            )
 
             scheduler.terminate()
             scheduler_q.close()
@@ -735,8 +750,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
             with rpc(addr, **rpc_kwargs) as w:
                 await w.terminate(close=True)
 
-    with ignoring(TimeoutError):
-        await gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
+    await asyncio.wait_for(do_disconnect(), timeout=timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
@@ -808,7 +822,7 @@ async def start_cluster(
     while len(s.workers) < len(nthreads) or any(
         comm.comm is None for comm in s.stream_comms.values()
     ):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         if time() - start > 5:
             await asyncio.gather(*[w.close(timeout=1) for w in workers])
             await s.close(fast=True)
@@ -860,7 +874,7 @@ def gen_cluster(
         nthreads = ncores
 
     worker_kwargs = merge(
-        {"memory_limit": TOTAL_MEMORY, "death_timeout": 5}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 10}, worker_kwargs
     )
 
     def _(func):
@@ -909,9 +923,7 @@ def gen_cluster(
                         try:
                             future = func(*args)
                             if timeout:
-                                future = gen.with_timeout(
-                                    timedelta(seconds=timeout), future
-                                )
+                                future = asyncio.wait_for(future, timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()
@@ -919,9 +931,7 @@ def gen_cluster(
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == "closed")
                             await end_cluster(s, workers)
-                            await gen.with_timeout(
-                                timedelta(seconds=1), cleanup_global_workers()
-                            )
+                            await asyncio.wait_for(cleanup_global_workers(), 1)
 
                         try:
                             c = await default_client()
@@ -934,7 +944,7 @@ def gen_cluster(
                             if all(c.closed() for c in Comm._instances):
                                 break
                             else:
-                                await gen.sleep(0.05)
+                                await asyncio.sleep(0.05)
                         else:
                             L = [c for c in Comm._instances if not c.closed()]
                             Comm._instances.clear()
@@ -1058,7 +1068,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
 async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
     deadline = time() + timeout
     while not predicate():
-        await gen.sleep(period)
+        await asyncio.sleep(period)
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
@@ -1221,7 +1231,7 @@ def captured_logger(logger, level=logging.INFO, propagate=None):
     if propagate is not None:
         orig_propagate = logger.propagate
         logger.propagate = propagate
-    sio = six.StringIO()
+    sio = io.StringIO()
     logger.handlers[:] = [logging.StreamHandler(sio)]
     logger.setLevel(level)
     try:
@@ -1239,7 +1249,7 @@ def captured_handler(handler):
     """
     assert isinstance(handler, logging.StreamHandler)
     orig_stream = handler.stream
-    handler.stream = six.StringIO()
+    handler.stream = io.StringIO()
     try:
         yield handler.stream
     finally:

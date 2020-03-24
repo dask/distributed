@@ -39,6 +39,7 @@ extensions = [
 
 numpydoc_show_class_members = False
 
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
@@ -382,7 +383,7 @@ extlinks = {
 # and the Numpy documentation.
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "numpy": ("http://docs.scipy.org/doc/numpy", None),
+    "numpy": ("https://docs.scipy.org/doc/numpy", None),
 }
 
 # Redirects
@@ -391,6 +392,15 @@ redirect_files = [
     # old html, new html
     ("joblib.html", "https://ml.dask.org/joblib.html"),
     ("setup.html", "https://docs.dask.org/en/latest/setup.html"),
+    ("ec2.html", "https://docs.dask.org/en/latest/setup/cloud.html"),
+    ("configuration.html", "https://docs.dask.org/en/latest/configuration.html"),
+    (
+        "local-cluster.html",
+        "https://docs.dask.org/en/latest/setup/single-distributed.html",
+    ),
+    ("adaptive.html", "https://docs.dask.org/en/latest/setup/adaptive.html"),
+    ("prometheus.html", "https://docs.dask.org/en/latest/setup/prometheus.html"),
+    ("web.html", "https://docs.dask.org/en/latest/diagnostics-distributed.html"),
 ]
 
 

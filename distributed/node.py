@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import warnings
 import weakref
@@ -8,10 +9,10 @@ import dask
 
 from .core import Server, ConnectionPool
 from .versions import get_versions
-from .utils import DequeHandler
+from .utils import DequeHandler, TimeoutError
 
 
-class Node(object):
+class Node:
     """
     Base class for nodes in a distributed cluster.
     """
@@ -163,7 +164,23 @@ class ServerNode(Node, Server):
         if self.status == "running":
             return gen.sleep(0).__await__()
         else:
-            return self.start().__await__()
+            future = self.start()
+            timeout = getattr(self, "death_timeout", 0)
+            if timeout:
+
+                async def wait_for(future, timeout=None):
+                    try:
+                        await asyncio.wait_for(future, timeout=timeout)
+                    except Exception:
+                        await self.close(timeout=1)
+                        raise TimeoutError(
+                            "{} failed to start in {} seconds".format(
+                                type(self).__name__, timeout
+                            )
+                        )
+
+                future = wait_for(future, timeout=timeout)
+            return future.__await__()
 
     async def start(self):  # subclasses should implement this
         return self

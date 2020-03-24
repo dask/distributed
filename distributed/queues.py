@@ -1,10 +1,7 @@
+import asyncio
 from collections import defaultdict
-import datetime
 import logging
 import uuid
-
-import tornado.queues
-from tornado.locks import Event
 
 from .client import Future, _get_global_client, Client
 from .utils import tokey, sync, thread_state
@@ -13,7 +10,7 @@ from .worker import get_client
 logger = logging.getLogger(__name__)
 
 
-class QueueExtension(object):
+class QueueExtension:
     """ An extension for the scheduler to manage queues
 
     This adds the following routes to the scheduler
@@ -47,9 +44,9 @@ class QueueExtension(object):
         self.scheduler.extensions["queues"] = self
 
     def create(self, stream=None, name=None, client=None, maxsize=0):
-        print("name", name)
+        logger.debug("Queue name: {}".format(name))
         if name not in self.queues:
-            self.queues[name] = tornado.queues.Queue(maxsize=maxsize)
+            self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
         else:
             self.client_refcount[name] += 1
@@ -76,9 +73,7 @@ class QueueExtension(object):
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        if timeout is not None:
-            timeout = datetime.timedelta(seconds=timeout)
-        await self.queues[name].put(record, timeout=timeout)
+        await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):
         self.future_refcount[name, key] -= 1
@@ -122,9 +117,7 @@ class QueueExtension(object):
             out = [process(o) for o in out]
             return out
         else:
-            if timeout is not None:
-                timeout = datetime.timedelta(seconds=timeout)
-            record = await self.queues[name].get(timeout=timeout)
+            record = await asyncio.wait_for(self.queues[name].get(), timeout=timeout)
             record = process(record)
             return record
 
@@ -132,7 +125,7 @@ class QueueExtension(object):
         return self.queues[name].qsize()
 
 
-class Queue(object):
+class Queue:
     """ Distributed Queue
 
     This allows multiple clients to share futures or small bits of data between
@@ -147,6 +140,18 @@ class Queue(object):
     .. warning::
 
        This object is experimental and has known issues in Python 2
+
+    Parameters
+    ----------
+    name: string (optional)
+        Name used by other clients and the scheduler to identify the queue. If
+        not given, a random name will be generated.
+    client: Client (optional)
+        Client used for communication with the scheduler. Defaults to the
+        value of ``_get_global_client()``.
+    maxsize: int (optional)
+        Number of items allowed in the queue. If 0 (the default), the queue
+        size is unbounded.
 
     Examples
     --------
@@ -164,7 +169,7 @@ class Queue(object):
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or "queue-" + uuid.uuid4().hex
-        self._event_started = Event()
+        self._event_started = asyncio.Event()
         if self.client.asynchronous or getattr(
             thread_state, "on_event_loop_thread", False
         ):

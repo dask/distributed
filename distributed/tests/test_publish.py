@@ -54,8 +54,8 @@ def test_publish_non_string_key(s, a, b):
             assert name in datasets
 
     finally:
-        c.close()
-        f.close()
+        yield c.close()
+        yield f.close()
 
 
 @gen_cluster(client=False)
@@ -228,7 +228,7 @@ def test_pickle_safe(c, s, a, b):
     try:
         yield c2.publish_dataset(x=[1, 2, 3])
         result = yield c2.get_dataset("x")
-        assert result == (1, 2, 3)
+        assert result == [1, 2, 3]
 
         with pytest.raises(TypeError):
             yield c2.publish_dataset(y=lambda x: x)

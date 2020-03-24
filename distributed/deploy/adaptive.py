@@ -1,3 +1,4 @@
+from inspect import isawaitable
 import logging
 import math
 
@@ -98,23 +99,28 @@ class Adaptive(AdaptiveCore):
 
     @property
     def plan(self):
-        try:
-            return set(self.cluster.worker_spec)
-        except AttributeError:
-            return set(self.cluster.workers)
+        return self.cluster.plan
 
     @property
     def requested(self):
-        return set(self.cluster.workers)
+        return self.cluster.requested
 
     @property
     def observed(self):
-        return {d["name"] for d in self.cluster.scheduler_info["workers"].values()}
+        return self.cluster.observed
 
     async def target(self):
         return await self.scheduler.adaptive_target(
             target_duration=self.target_duration
         )
+
+    async def recommendations(self, target: int) -> dict:
+        if len(self.plan) != len(self.requested):
+            # Ensure that the number of planned and requested workers
+            # are in sync before making recommendations.
+            await self.cluster
+
+        return await super(Adaptive, self).recommendations(target)
 
     async def workers_to_close(self, target: int):
         """
@@ -153,7 +159,7 @@ class Adaptive(AdaptiveCore):
             # close workers more forcefully
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
-            if hasattr(f, "__await__"):
+            if isawaitable(f):
                 await f
 
     async def scale_up(self, n):
