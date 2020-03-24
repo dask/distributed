@@ -81,6 +81,7 @@ def test_timeout_sync(client):
         assert s.acquire(timeout=0.025) is False
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, timeout=20)
 async def test_release_semaphore_after_timeout(c, s, a, b):
     with dask.config.set(
@@ -120,6 +121,7 @@ async def test_async_ctx(s, a, b):
     assert await sem.acquire()
 
 
+@pytest.mark.slow
 def test_worker_dies():
     with cluster(disconnect_timeout=10) as (scheduler, workers):
         with Client(scheduler["address"]) as client:
