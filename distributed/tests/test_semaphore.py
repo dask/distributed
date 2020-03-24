@@ -187,7 +187,10 @@ async def test_close_async(c, s, a, b):
     ):
         await sem.close()
 
-    assert await sem.acquire() is None
+    with pytest.raises(
+        RuntimeError, match="Semaphore `test` not known or already closed."
+    ):
+        await sem.acquire()
 
     semaphore_object = s.extensions["semaphores"]
     assert not semaphore_object.max_leases
@@ -200,7 +203,8 @@ def test_close_sync(client):
     sem = Semaphore()
     sem.close()
 
-    assert sem.acquire() is None
+    with pytest.raises(RuntimeError, match="Semaphore .* not known or already closed."):
+        sem.acquire()
 
 
 @gen_cluster(client=True)

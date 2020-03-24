@@ -102,7 +102,6 @@ class SemaphoreExtension:
 
     def _semaphore_exists(self, name):
         if name not in self.max_leases:
-            logger.exception(f"Semaphore `{name}` not known or already closed.")
             return False
         return True
 
@@ -111,7 +110,7 @@ class SemaphoreExtension:
     ):
         with log_errors():
             if not self._semaphore_exists(name):
-                return
+                raise RuntimeError(f"Semaphore `{name}` not known or already closed.")
 
             if isinstance(name, list):
                 name = tuple(name)
@@ -149,6 +148,9 @@ class SemaphoreExtension:
     def release(self, comm=None, name=None, client=None, identifier=None):
         with log_errors():
             if not self._semaphore_exists(name):
+                logger.warning(
+                    f"Tried to release semaphore `{name}` but it is not known or already closed."
+                )
                 return
             if isinstance(name, list):
                 name = tuple(name)
