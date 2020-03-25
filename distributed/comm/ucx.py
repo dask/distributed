@@ -158,7 +158,10 @@ class UCX(Comm):
                 )
 
                 # Send meta data
-                cuda_frames = np.array([hasattr(f, "__cuda_array_interface__") for f in frames], dtype=np.bool)
+                cuda_frames = np.array(
+                    [hasattr(f, "__cuda_array_interface__") for f in frames],
+                    dtype=np.bool,
+                )
                 await self.ep.send(np.array([len(frames)], dtype=np.uint64))
                 await self.ep.send(cuda_frames)
                 await self.ep.send(
