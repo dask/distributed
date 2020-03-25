@@ -150,7 +150,7 @@ def test_worker_dies():
 async def test_access_semaphore_by_name(c, s, a, b):
     def f(x, release=True):
         sem = Semaphore(name="x")
-        if not sem.acquire(timeout=0.02):
+        if not sem.acquire(timeout=0.1):
             return False
         if release:
             sem.release()
