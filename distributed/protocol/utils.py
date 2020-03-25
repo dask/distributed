@@ -126,12 +126,17 @@ def unpack_frames(b):
     --------
     pack_frames
     """
-    (n_frames,) = struct.unpack("Q", b[:8])
+    offset = 0
+
+    (n_frames,) = struct.unpack_from("Q", b, offset)
+    offset += 8
 
     frames = []
     start = 8 + n_frames * 8
     for i in range(n_frames):
-        (length,) = struct.unpack("Q", b[(i + 1) * 8 : (i + 2) * 8])
+        (length,) = struct.unpack_from("Q", b, offset)
+        offset += 8
+
         frame = b[start : start + length]
         frames.append(frame)
         start += length
