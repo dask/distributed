@@ -1,6 +1,9 @@
 import struct
 import msgpack
 
+from itertools import accumulate
+from tlz import cons, sliding_window
+
 from ..utils import ensure_bytes, nbytes
 
 BIG_BYTES_SHARD_SIZE = 2 ** 26
@@ -132,9 +135,8 @@ def unpack_frames(b):
     lengths = struct.unpack_from(n_frames * fmt, b, fmt_itemsize)
 
     frames = []
-    offset = fmt_itemsize * (1 + n_frames)
-    for each_length in lengths:
-        frames.append(b[offset : offset + each_length])
-        offset += each_length
+    start = fmt_itemsize * (1 + n_frames)
+    for i, j in sliding_window(2, accumulate(cons(start, lengths))):
+        frames.append(b[i:j])
 
     return frames
