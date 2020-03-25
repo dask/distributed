@@ -231,9 +231,20 @@ class Semaphore:
 
     Notes
     -----
+    If a client attempts to release the semaphore but doesn't have a lease acquired, this will raise an exception.
+
+
+    When a semaphore is closed, if, for that closed semaphore, a client attempts to:
+
+    - Acquire a lease: an exception will be raised.
+    - Release: a warning will be logged.
+    - Close: nothing will happen.
+
+
     dask executes functions by default assuming they are pure, when using semaphore acquire/releases inside
     such a function, it must be noted that there *are* in fact side-effects, thus, the function can no longer be
     considered pure. If this is not taken into account, this may lead to unexpected behavior.
+
     """
 
     def __init__(self, max_leases=1, name=None, client=None):
