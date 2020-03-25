@@ -126,18 +126,13 @@ def unpack_frames(b):
     --------
     pack_frames
     """
-    parser = struct.Struct("Q")
-
-    offset = 0
-    (n_frames,) = parser.unpack_from(b, offset)
-
-    lengths = []
-    frames_offset = parser.size * (1 + n_frames)
-    for offset in range(parser.size, frames_offset, parser.size):
-        lengths.extend(parser.unpack_from(b, offset))
+    fmt = "Q"
+    fmt_itemsize = struct.calcsize(fmt)
+    (n_frames,) = struct.unpack_from(fmt, b)
+    lengths = struct.unpack_from(n_frames * fmt, b, fmt_itemsize)
 
     frames = []
-    offset = frames_offset
+    offset = fmt_itemsize * (1 + n_frames)
     for each_length in lengths:
         frames.append(b[offset : offset + each_length])
         offset += each_length
