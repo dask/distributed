@@ -1408,6 +1408,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
@@ -5204,6 +5207,10 @@ class Scheduler(ServerNode):
             close = time() > last_task + self.idle_timeout
 
         if close:
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
             self.loop.add_callback(self.close)
 
     def adaptive_target(self, comm=None, target_duration=None):
