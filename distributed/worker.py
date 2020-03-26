@@ -330,6 +330,7 @@ class Worker(ServerNode):
     ):
         self.tasks = dict()
         self.task_state = dict()
+        self.task_refs = dict()
         self.dep_state = dict()
         self.dependencies = dict()
         self.dependents = dict()
@@ -1299,6 +1300,11 @@ class Worker(ServerNode):
             if key in self.dep_state:
                 self.transition_dep(key, "memory", value=value)
 
+            if key in self.task_refs:
+                self.task_refs[key] += 1
+            else:
+                self.task_refs[key] = 1
+
             self.log.append((key, "receive-from-scatter"))
 
         if report:
@@ -1309,6 +1315,14 @@ class Worker(ServerNode):
     async def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
+                if key in self.task_refs:
+                    self.task_refs[key] -= 1
+                    if self.task_refs[key] > 0:
+                        keys.remove(key)
+                        continue
+                    else:
+                        del self.task_refs[key]
+
                 self.log.append((key, "delete"))
                 if key in self.task_state:
                     self.release_key(key)
