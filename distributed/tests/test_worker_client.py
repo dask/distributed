@@ -315,3 +315,16 @@ def test_submit_different_names(s, a, b):
         assert fut > 0
     finally:
         yield c.close()
+
+
+@gen_cluster(client=True)
+async def test_task_unique_groups_scatter(c, s, a, b):
+    """ This test ensure that tasks are correctly deleted when using scatter/submit
+    """
+    a = await c.scatter([0, 1], hash=True)
+    x = await c.submit(sum, a)
+    del a
+    del x
+    b = await c.scatter([1, 2], hash=True)
+    y = await c.submit(sum, b)
+    assert s.task_prefixes["sum"].states["memory"] == 1
