@@ -225,22 +225,6 @@ def test_remove_worker_by_name_from_scheduler(s, a, b):
     s.validate_state()
 
 
-@gen_cluster(client=True, Worker=Nanny)
-def test_remove_worker_increments_suspicious(client, s, a, b):
-    def killer(x):
-        import sys
-
-        sys.exit()
-
-    futures = client.map(killer, range(20))
-    while len(s.workers) == 2:
-        yield gen.sleep(0.01)
-    assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
-        ts.suspicious for ts in s.tasks.values()
-    )
-    assert 10 <= s.task_prefixes["killer"].suspicious <= 30
-
-
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
 def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
@@ -1825,6 +1809,19 @@ async def test_task_prefix(c, s, a, b):
     b = await b
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
+
+
+@gen_cluster(
+    client=True, Worker=Nanny, config={"distributed.scheduler.allowed-failures": 0}
+)
+async def test_failing_task_increments_suspicious(client, s, a, b):
+    future = client.submit(sys.exit, 0)
+    await wait(future)
+
+    assert s.task_prefixes["exit"].suspicious == 1
+    assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
+        ts.suspicious for ts in s.tasks.values()
+    )
 
 
 @gen_cluster(client=True)
