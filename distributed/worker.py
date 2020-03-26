@@ -1313,8 +1313,9 @@ class Worker(ServerNode):
         return info
 
     async def delete_data(self, comm=None, keys=None, report=True):
+        keys = list(keys)
         if keys:
-            for key in list(keys):
+            for key in keys:
                 if key in self.task_refs:
                     self.task_refs[key] -= 1
                     if self.task_refs[key] > 0:
