@@ -327,4 +327,4 @@ async def test_task_unique_groups_scatter(c, s, a, b):
     del x
     b = await c.scatter([1, 2], hash=True)
     y = await c.submit(sum, b)
-    assert s.task_prefixes["sum"].states["memory"] == 1
+    assert y.key in b.data and s.tasks[y.key].status == "memory"
