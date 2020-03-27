@@ -189,15 +189,15 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                frames = []
-                for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist()):
-                    if is_cuda:
-                        each_frame = cuda_array(each_size)
-                    else:
-                        each_frame = np.empty(each_size, dtype=np.uint8)
-                    if each_size > 0:
+                frames = [
+                    cuda_array(each_size)
+                    if is_cuda
+                    else np.empty(each_size, dtype=np.uint8)
+                    for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist())
+                ]
+                for each_frame in frames:
+                    if len(each_frame) > 0:
                         await self.ep.recv(each_frame)
-                    frames.append(each_frame)
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
