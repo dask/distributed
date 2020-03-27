@@ -33,7 +33,6 @@ conda install -c conda-forge -q \
     click \
     coverage \
     dask \
-    dill \
     flake8 \
     h5py \
     ipykernel \
@@ -79,6 +78,9 @@ if [[ $CRICK == true ]]; then
     conda install -q cython
     python -m pip install -q git+https://github.com/jcrist/crick.git
 fi;
+
+# Pin openssl==1.1.1d (see https://github.com/dask/distributed/issues/3588)
+conda install -c conda-forge openssl==1.1.1d
 
 # Install distributed
 python -m pip install --no-deps -e .

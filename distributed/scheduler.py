@@ -789,6 +789,11 @@ class TaskPrefix:
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: suspicious: int
+
+       Numbers of times a task was marked as suspicious with this prefix
+
+
     See Also
     --------
     TaskGroup
@@ -805,6 +810,7 @@ class TaskPrefix:
             )
         else:
             self.duration_average = None
+        self.suspicious = 0
 
     @property
     def states(self):
@@ -1408,6 +1414,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
@@ -2187,6 +2196,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts.suspicious += 1
+                    ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
@@ -5204,6 +5214,10 @@ class Scheduler(ServerNode):
             close = time() > last_task + self.idle_timeout
 
         if close:
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
             self.loop.add_callback(self.close)
 
     def adaptive_target(self, comm=None, target_duration=None):
