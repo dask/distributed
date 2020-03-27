@@ -39,6 +39,12 @@ def test_variable(c, s, a, b):
         assert time() < start + 5
 
 
+def test_delete_unset_variable(client):
+    x = Variable()
+    assert x.client is client
+    x.delete()
+
+
 @gen_cluster(client=True)
 def test_queue_with_data(c, s, a, b):
     x = Variable("x")

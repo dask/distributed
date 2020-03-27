@@ -113,8 +113,14 @@ class VariableExtension:
             else:
                 if old["type"] == "Future":
                     await self.release(old["value"], name)
-            del self.waiting_conditions[name]
-            del self.variables[name]
+            try:
+                del self.waiting_conditions[name]
+            except KeyError:
+                pass
+            try:
+                del self.variables[name]
+            except KeyError:
+                pass
 
 
 class Variable:
