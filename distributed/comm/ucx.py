@@ -202,7 +202,7 @@ class UCX(Comm):
                         if is_cuda:
                             frames.append(cuda_array(each_size))
                         else:
-                            frames.append(b"")
+                            each_frame = np.empty(each_size, dtype=np.uint8)
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
