@@ -219,6 +219,13 @@ def test_map_retries(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_map_partition_size(c, s, a, b):
+    result = c.map(inc, range(100), partition_size=10)
+    result = await c.gather(result)
+    assert result == list(range(1, 101))
+
+
+@gen_cluster(client=True)
 def test_compute_retries(c, s, a, b):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
 

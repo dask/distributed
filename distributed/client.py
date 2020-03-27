@@ -30,7 +30,7 @@ from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes, funcname
 
-from tlz import first, groupby, merge, valmap, keymap
+from tlz import first, groupby, merge, valmap, keymap, partition_all
 
 try:
     from dask.delayed import single_key
@@ -1542,6 +1542,7 @@ class Client(Node):
         actor=False,
         actors=False,
         pure=None,
+        partition_size=None,
         **kwargs
     ):
         """ Map a function on a sequence of arguments
@@ -1581,6 +1582,11 @@ class Client(Node):
             See :doc:`actors` for additional details.
         actors: bool (default False)
             Alias for `actor`
+        partition_size : int, optional
+            Whether to submit tasks to the scheduler in batches of at most
+            ``partition_size``. This can be useful for very large ``iterables``,
+            as the cluster can start processing tasks while later ones are
+            submitted asynchronously.
         **kwargs: dict
             Extra keywords to send to the function.
             Large values will be included explicitly in the task graph.
@@ -1598,11 +1604,6 @@ class Client(Node):
         --------
         Client.submit: Submit a single function
         """
-        key = key or funcname(func)
-        actor = actor or actors
-        if pure is None:
-            pure = not actor
-
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
 
@@ -1613,6 +1614,35 @@ class Client(Node):
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
             )
+        total_length = sum(len(x) for x in iterables)
+
+        if partition_size is not None and total_length > partition_size:
+            return sum(
+                [
+                    self.map(
+                        func,
+                        batch,
+                        key=key,
+                        workers=workers,
+                        retries=retries,
+                        priority=priority,
+                        allow_other_workers=allow_other_workers,
+                        fifo_timeout=fifo_timeout,
+                        resources=resources,
+                        actor=actor,
+                        actors=actors,
+                        pure=pure,
+                        **kwargs
+                    )
+                    for batch in partition_all(partition_size, *iterables)
+                ],
+                [],
+            )
+
+        key = key or funcname(func)
+        actor = actor or actors
+        if pure is None:
+            pure = not actor
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
