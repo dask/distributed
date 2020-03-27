@@ -209,7 +209,6 @@ def main(
         service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
         **kwargs
     )
-    logger.info("Local Directory: %26s", local_directory)
     logger.info("-" * 47)
 
     install_signal_handlers(loop)
