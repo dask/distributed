@@ -327,4 +327,4 @@ async def test_task_unique_groups_scatter(c, s, a, b):
     del x
     m = await c.scatter([1, 2], hash=True)
     y = await c.submit(sum, m)
-    assert y in list(b.data.values())
+    assert y in list(b.data.values()) or y in list(a.data.values())
