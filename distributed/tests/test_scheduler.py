@@ -2061,7 +2061,7 @@ async def test_worker_name_collision(s, a):
 
 @gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})
 async def test_unknown_task_duration_config(client, s, a, b):
-    future = client.submit(inc, 1)
+    future = client.submit(slowinc, 1)
     while not s.tasks:
         await asyncio.sleep(0.001)
     assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
