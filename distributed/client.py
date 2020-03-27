@@ -1532,6 +1532,7 @@ class Client(Node):
         self,
         func,
         *iterables,
+        chunksize=1,
         key=None,
         workers=None,
         retries=None,
@@ -1542,7 +1543,6 @@ class Client(Node):
         actor=False,
         actors=False,
         pure=None,
-        partition_size=None,
         **kwargs
     ):
         """ Map a function on a sequence of arguments
@@ -1554,6 +1554,11 @@ class Client(Node):
         func: callable
         iterables: Iterables
             List-like objects to map over.  They should have the same length.
+        chunksize : int, default 1
+            Submit tasks to the scheduler in batches of (at most) ``chunksize``.
+            Larger chunksizes can be useful for very large ``iterables``,
+            as the cluster can start processing tasks while later ones are
+            submitted asynchronously.
         key: str, list
             Prefix for task names if string.  Explicit names if list.
         pure: bool (defaults to True)
@@ -1582,11 +1587,6 @@ class Client(Node):
             See :doc:`actors` for additional details.
         actors: bool (default False)
             Alias for `actor`
-        partition_size : int, optional
-            Whether to submit tasks to the scheduler in batches of at most
-            ``partition_size``. This can be useful for very large ``iterables``,
-            as the cluster can start processing tasks while later ones are
-            submitted asynchronously.
         **kwargs: dict
             Extra keywords to send to the function.
             Large values will be included explicitly in the task graph.
@@ -1616,7 +1616,7 @@ class Client(Node):
             )
         total_length = sum(len(x) for x in iterables)
 
-        if partition_size is not None and total_length > partition_size:
+        if chunksize > 1 and total_length > chunksize:
             return sum(
                 [
                     self.map(
@@ -1634,7 +1634,7 @@ class Client(Node):
                         pure=pure,
                         **kwargs
                     )
-                    for batch in partition_all(partition_size, *iterables)
+                    for batch in partition_all(chunksize, *iterables)
                 ],
                 [],
             )

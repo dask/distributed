@@ -219,8 +219,8 @@ def test_map_retries(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_map_partition_size(c, s, a, b):
-    result = c.map(inc, range(100), partition_size=10)
+async def test_map_chunksize(c, s, a, b):
+    result = c.map(inc, range(100), chunksize=10)
     result = await c.gather(result)
     assert result == list(range(1, 101))
 
