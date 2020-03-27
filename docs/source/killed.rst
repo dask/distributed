@@ -19,13 +19,17 @@ Note the special case of ``KilledWorker``: this means that a particular task was
 tried on a worker, and it died, and then the same task was sent to another worker,
 which also died. After a configurable number of deaths (config key "
 ``distributed.scheduler.allowed-failures``), Dask decides to blame the
-task itself, and returns this exception.
+task itself, and returns this exception. Note, that it is possible for a task to be
+unfairly blamed - the worker happened to die while the task was active, perhaps
+due to another thread - complicating diagnosis.
 
 In every case, the first place to look for further information is the logs of
 the given worker, which may well give a complete description of what happened. These
 logs are printed by the worker to its "standard error", which may appear in the text
 console from which you launched the worker, or some logging system maintained by
-the cluster infrastructure.
+the cluster infrastructure. It is also helpful to watch the diagnostic dashboard to
+look for memory spikes, but of course this is only possible while the worker is still
+alive.
 
 In all cases, the scheduler will notice that the worker has gone, either because
 of an explicit de-registration, or because the worker no longer produces heartbeats,
@@ -85,6 +89,26 @@ complicated than can be described here. Commonly, it may involve logging into
 the machine running the affected worker
 (although you can :ref:`ipylaunch`).
 
+Killed by Nanny
+'''''''''''''''
+
+The Dask "nanny" is a process which watches the worker, and restarts it if
+necessary. It also tracks the worker's memory usage, and if it should cross
+a given fraction of total memory, then also the worker will be restarted,
+interrupting any work in progress. The log will show a message like
+
+::
+
+    Worker exceeded X memory budget. Restarting
+
+Where X is the memory fraction. You can set this critical fraction using
+the configuration, see :ref:`memman`. If you have an external system for
+watching memory usage provided by your cluster infrastructure (HPC,
+kubernetes, etc.), then it may be reasonable to turn off this memory
+limit. Indeed, in these cases, restarts might be handled for you too, so
+you could do without the nanny at all (``--no-nanny`` CLI option or
+configuration equivalent).
+
 Sudden Exit
 '''''''''''
 
@@ -110,33 +134,6 @@ of Dask's own limits, or simply with a bigger cluster. In any case, your deploym
 framework has its own logging system, and you should look there for the reason that
 the dask worker was taken down.
 
-Specific Cases
-~~~~~~~~~~~~~~
+Specifically for memory issues, refer to the memory section of `best practices`_.
 
-Worker never connects
-'''''''''''''''''''''
-
-**Symptom**: Your client never counts a given worker, the scheduler gives no logging
-message about the worker connecting and the worker exists with logging messages
-about timeout or other network errors
-
-**Likely cause**: The worker is unable to talk to the scheduler - it cannot find the
-address or it cannot establish a connection
-
-**Possible solutions**:
-The ``dask-scheduler`` and ``dask-worker`` CLI applications provide the options
-``--host``, ``--port``, ``--interface`` and ``--protocol``, which can all also
-be specified via the `configuration`_.
-
-
-- Ensure that the scheduler is advertising an appropriate address (see the logging
-  output of the scheduler)
-- Make sure that the address the worker is connecting to
-  (given in its logging messages) is correct, and that network firewall/access rules
-  allow the route
-- Check the network interface being used. This is particularly of note in HPC scenarios
-  where there may be multiple interfaces available.
-- Ensure that your TLS configuration (i.e., certificates) is correct and valid (see :doc:`tls`),
-  if you use it
-
-.. _configuration: https://docs.dask.org/en/latest/configuration.html
+.. _best practices: https://docs.dask.org/en/latest/best-practices.html#avoid-very-large-partitions
