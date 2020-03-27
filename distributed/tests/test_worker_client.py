@@ -321,10 +321,10 @@ def test_submit_different_names(s, a, b):
 async def test_task_unique_groups_scatter(c, s, a, b):
     """ This test ensure that tasks are correctly deleted when using scatter/submit
     """
-    a = await c.scatter([0, 1], hash=True)
-    x = await c.submit(sum, a)
-    del a
+    n = await c.scatter([0, 1], hash=True)
+    x = await c.submit(sum, n)
+    del n
     del x
-    b = await c.scatter([1, 2], hash=True)
-    y = await c.submit(sum, b)
-    assert y.key in b.data and s.tasks[y.key].status == "memory"
+    m = await c.scatter([1, 2], hash=True)
+    y = await c.submit(sum, m)
+    assert y in list(b.data.values())
