@@ -3,9 +3,7 @@ import logging
 import gc
 import os
 import re
-import shutil
 import sys
-import tempfile
 import warnings
 
 import click
