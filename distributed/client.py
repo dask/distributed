@@ -23,6 +23,8 @@ from queue import Queue as pyQueue
 import warnings
 import weakref
 
+from bokeh.resources import INLINE
+
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
@@ -3850,7 +3852,13 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        resources=INLINE,
     ):
         """ Get task stream data from scheduler
 
@@ -3879,6 +3887,9 @@ class Client(Node):
             If plot == 'save' then save the figure to a file
         filename: str (optional)
             The filename to save to if you set ``plot='save'``
+        resources: bokeh.resources.Resources (optional)
+            Specifies if the resource component is INLINE or CDN
+            Default is INLINE
 
         Examples
         --------
@@ -3918,10 +3929,17 @@ class Client(Node):
             count=count,
             plot=plot,
             filename=filename,
+            resources=resources,
         )
 
     async def _get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        resources=INLINE,
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
@@ -3933,9 +3951,15 @@ class Client(Node):
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save
+                from bokeh.plotting import save, output_file
 
-                save(figure, title="Dask Task Stream", filename=filename)
+                output_file(filename=filename, title="Dask Performance Report")
+                save(
+                    figure,
+                    title="Dask Task Stream",
+                    filename=filename,
+                    resources=resources,
+                )
             return (msgs, figure)
         else:
             return msgs
