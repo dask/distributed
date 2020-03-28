@@ -4999,6 +4999,7 @@ class Scheduler(ServerNode):
         return {"counts": counts, "keys": keys}
 
     async def performance_report(self, comm=None, start=None, code=""):
+        stop = time()
         # Profiles
         compute, scheduler, workers = await asyncio.gather(
             *[
@@ -5060,7 +5061,7 @@ class Scheduler(ServerNode):
 {code}
         </pre>
         """.format(
-            time=format_time(time() - start),
+            time=format_time(stop - start),
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),
