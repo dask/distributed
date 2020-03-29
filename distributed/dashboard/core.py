@@ -17,20 +17,21 @@ if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
     raise ImportError("Dask needs bokeh >= 0.13.0")
 
 
-def BokehApplication(applications, server, prefix="", template_variables={}):
-    prefix = prefix or ""
-    prefix = prefix.rstrip("/")
-    if prefix and not prefix.startswith("/"):
-        prefix = "/" + prefix
+def BokehApplication(applications, server, prefix="/", template_variables={}):
+    prefix = "/" + prefix.strip("/")
+    if not prefix.endswith("/"):
+        prefix = prefix + "/"
 
     extra = toolz.merge({"prefix": prefix}, template_variables)
 
-    apps = {k: functools.partial(v, server, extra) for k, v in applications.items()}
+    apps = {
+        prefix + k.lstrip("/"): functools.partial(v, server, extra)
+        for k, v in applications.items()
+    }
     apps = {k: Application(FunctionHandler(v)) for k, v in apps.items()}
 
     application = BokehTornado(
         apps,
-        prefix=prefix,
         extra_websocket_origins=["*"],
         keep_alive_milliseconds=500,
         check_unused_sessions_milliseconds=500,
