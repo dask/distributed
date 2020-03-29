@@ -24,11 +24,12 @@ from dask.system import CPU_COUNT
 
 from tlz import pluck, merge, first, keymap
 from tornado import gen
+from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 
 from . import profile, comm, system
 from .batched import BatchedSend
-from .comm import get_address_host, connect
+from .comm import get_address_host, connect, get_tcp_server_address
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -318,6 +319,7 @@ class Worker(ServerNode):
         port=None,
         protocol=None,
         dashboard_address=None,
+        dashboard=False,
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
@@ -582,16 +584,22 @@ class Worker(ServerNode):
 
         self.services = {}
         self.service_specs = services or {}
+        from .http.routing import RoutingApplication
+        from .http.worker import get_handlers
 
-        if dashboard_address is not None:
+        self.http_application = RoutingApplication(get_handlers(self))
+        self.http_server = HTTPServer(self.http_application)  # TODO security
+        self.http_server.listen(0)
+        self.http_server.port = get_tcp_server_address(self.http_server)[1]
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehWorker
+                import distributed.dashboard
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehWorker,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.worker.connect(
+                    self.http_application, self.http_server, self, prefix=""
                 )
 
         self.metrics = dict(metrics) if metrics else {}
@@ -1112,6 +1120,7 @@ class Worker(ServerNode):
             await self.scheduler.close_rpc()
             self._workdir.release()
 
+            self.http_server.stop()
             for k, v in self.services.items():
                 v.stop()
 

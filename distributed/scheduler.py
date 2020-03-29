@@ -32,6 +32,7 @@ from tlz import (
     groupby,
 )
 from tornado.ioloop import IOLoop
+from tornado.httpserver import HTTPServer
 
 import dask
 
@@ -41,6 +42,7 @@ from .comm import (
     resolve_address,
     get_address_host,
     unparse_host_port,
+    get_tcp_server_address,
 )
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
@@ -1057,6 +1059,7 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
+        dashboard=False,
         preload=None,
         preload_argv=(),
         plugins=(),
@@ -1108,16 +1111,22 @@ class Scheduler(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
+        from .http.routing import RoutingApplication
+        from .http.scheduler import get_handlers
 
-        if dashboard_address is not None:
+        self.http_application = RoutingApplication(get_handlers(self))
+        self.http_server = HTTPServer(self.http_application)  # TODO security
+        self.http_server.listen(8080)
+        self.http_server.port = get_tcp_server_address(self.http_server)[1]
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehScheduler,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.scheduler.connect(
+                    self.http_application, self.http_server, self, prefix=""
                 )
 
         # Communication state
@@ -1500,6 +1509,7 @@ class Scheduler(ServerNode):
             pc.stop()
         self.periodic_callbacks.clear()
 
+        self.http_server.stop()
         self.stop_services()
         for ext in self.extensions.values():
             with ignoring(AttributeError):

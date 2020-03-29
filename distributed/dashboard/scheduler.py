@@ -1,14 +1,14 @@
-import functools
+from urllib.parse import urljoin
 
-import dask
-
-from tlz import merge
+from tornado.ioloop import IOLoop
+from tornado import web
 
 try:
     import numpy as np
 except ImportError:
     np = False
 
+from .core import BokehApplication
 from .components.worker import counters_doc
 from .components.scheduler import (
     systemmonitor_doc,
@@ -33,7 +33,6 @@ from .components.scheduler import (
     individual_bandwidth_workers_doc,
     individual_memory_by_key_doc,
 )
-from .core import BokehServer
 from .worker import counters_doc
 
 
@@ -42,69 +41,23 @@ template_variables = {
 }
 
 
-class BokehScheduler(BokehServer):
-    def __init__(self, scheduler, io_loop=None, prefix="", **kwargs):
-        self.scheduler = scheduler
-        prefix = prefix or ""
-        prefix = prefix.rstrip("/")
-        if prefix and not prefix.startswith("/"):
-            prefix = "/" + prefix
-        self.prefix = prefix
+def connect(application, http_server, scheduler, prefix=""):
+    bokeh_app = BokehApplication(
+        applications, scheduler, prefix=prefix, template_variables=template_variables
+    )
+    application.add_application(bokeh_app)
+    bokeh_app.initialize(IOLoop.current())
 
-        self.server_kwargs = kwargs
-
-        # TLS configuration
-        http_server_kwargs = kwargs.setdefault("http_server_kwargs", {})
-        tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
-        tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
-        tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
-        if tls_cert and "ssl_options" not in http_server_kwargs:
-            import ssl
-
-            ctx = ssl.create_default_context(
-                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
-            )
-            ctx.load_cert_chain(tls_cert, keyfile=tls_key)
-            # Unlike the client/scheduler/worker TLS handling, we don't care
-            # about authenticating the user's webclient, TLS here is just for
-            # encryption. Disable these checks.
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            http_server_kwargs["ssl_options"] = ctx
-
-        self.server_kwargs["prefix"] = prefix or None
-
-        self.apps = applications
-        self.apps = {
-            k: functools.partial(v, scheduler, self.extra) for k, v in self.apps.items()
-        }
-
-        self.loop = io_loop or scheduler.loop
-        self.server = None
-
-    @property
-    def extra(self):
-        return merge({"prefix": self.prefix}, template_variables)
-
-    @property
-    def my_server(self):
-        return self.scheduler
-
-    def listen(self, *args, **kwargs):
-        from ..http.scheduler import routes
-
-        super(BokehScheduler, self).listen(*args, **kwargs)
-
-        handlers = [
+    application.add_handlers(
+        r".*",
+        [
             (
-                self.prefix + "/" + url,
-                cls,
-                {"server": self.my_server, "extra": self.extra},
+                r"/",
+                web.RedirectHandler,
+                {"url": urljoin(prefix.strip("/") + "/", r"status")},
             )
-            for url, cls in routes
-        ]
-
-        self.server._tornado.add_handlers(r".*", handlers)
+        ],
+    )
 
 
 applications = {

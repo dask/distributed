@@ -6,9 +6,9 @@ import os.path
 
 from dask.utils import format_bytes
 
-from tornado import escape
+from tornado import escape, web
 from tornado.websocket import WebSocketHandler
-from tlz import merge, merge_with
+from tlz import first, merge, merge_with
 
 from .proxy import GlobalProxyHandler
 from .utils import RequestHandler, redirect
@@ -187,7 +187,7 @@ class IdentityJSON(RequestHandler):
 class IndexJSON(RequestHandler):
     def get(self):
         with log_errors():
-            r = [url for url, _ in routes if url.endswith(".json")]
+            r = [url for url, _ in dask_routes if url.endswith(".json")]
             self.render(
                 "json-index.html", routes=r, title="Index of JSON routes", **self.extra
             )
@@ -195,10 +195,16 @@ class IndexJSON(RequestHandler):
 
 class IndividualPlots(RequestHandler):
     def get(self):
-        bokeh_server = self.server.services["dashboard"]
+        from bokeh.server.tornado import BokehTornado
+
+        bokeh_application = first(
+            app
+            for app in self.server.http_application.applications
+            if isinstance(app, BokehTornado)
+        )
         individual_bokeh = {
             uri.strip("/").replace("-", " ").title(): uri
-            for uri in bokeh_server.apps
+            for uri in bokeh_application.app_paths
             if uri.lstrip("/").startswith("individual-") and not uri.endswith(".json")
         }
         individual_static = {
@@ -333,7 +339,7 @@ class EventstreamHandler(WebSocketHandler):
         self.server.remove_plugin(self.plugin)
 
 
-routes = [
+dask_routes = [
     (r"info", redirect("info/main/workers.html")),
     (r"info/main/workers.html", Workers),
     (r"info/worker/(.*).html", Worker),
@@ -352,6 +358,16 @@ routes = [
     (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 
+plain_routes = [
+    (
+        r"/statics/(.*)",
+        web.StaticFileHandler,
+        {"path": os.path.join(os.path.dirname(__file__), "static")},
+    ),
+]
+
 
 def get_handlers(server):
-    return [(url, cls, {"server": server}) for url, cls in routes]
+    return [
+        ("/" + url, cls, {"server": server}) for url, cls in dask_routes
+    ] + plain_routes
