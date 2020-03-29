@@ -591,10 +591,11 @@ class Worker(ServerNode):
         self.http_server = HTTPServer(self.http_application)  # TODO security
         self.http_server.listen(0)
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
+        self.service_ports["dashboard"] = self.http_server.port
 
         if dashboard:
             try:
-                import distributed.dashboard
+                import distributed.dashboard.worker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:

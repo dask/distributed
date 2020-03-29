@@ -1118,10 +1118,11 @@ class Scheduler(ServerNode):
         self.http_server = HTTPServer(self.http_application)  # TODO security
         self.http_server.listen(8080)
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
+        self.services["http"] = self.http_server
 
         if dashboard:
             try:
-                import distributed.dashboard
+                import distributed.dashboard.scheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:

@@ -107,4 +107,4 @@ routes = [
 
 
 def get_handlers(server):
-    return [(url, cls, {"server": server}) for url, cls in routes]
+    return [("/" + url, cls, {"server": server}) for url, cls in routes]
