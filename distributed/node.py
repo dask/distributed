@@ -4,12 +4,16 @@ import warnings
 import weakref
 
 from tornado.ioloop import IOLoop
+from tornado.httpserver import HTTPServer
 from tornado import gen
+import tlz
 import dask
 
+from .comm import get_tcp_server_address
 from .core import Server, ConnectionPool
+from .http.routing import RoutingApplication
 from .versions import get_versions
-from .utils import DequeHandler, TimeoutError
+from .utils import DequeHandler, TimeoutError, clean_dashboard_address
 
 
 class Node:
@@ -189,3 +193,32 @@ class ServerNode(Node, Server):
         # subclasses should implement their own start method whichs calls super().start()
         await Node.start(self)
         return self
+
+    def start_http_server(
+        self, get_handlers, dashboard_address, http_prefix, default_port=0
+    ):
+        """ This creates an HTTP Server running on this node """
+
+        self.http_application = RoutingApplication(
+            get_handlers(self, prefix=http_prefix)
+        )
+
+        self.http_server = HTTPServer(self.http_application)  # TODO security
+        http_address = clean_dashboard_address(dashboard_address or default_port)
+        changed_port = False
+        try:
+            self.http_server.listen(**http_address)
+        except Exception:
+            changed_port = True
+            self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
+        self.http_server.port = get_tcp_server_address(self.http_server)[1]
+        self.services["dashboard"] = self.http_server
+
+        if changed_port and dashboard_address:
+            warnings.warn(
+                "Port {} is already in use.\n"
+                "Perhaps you already have a cluster running?\n"
+                "Hosting the HTTP server on port {} instead".format(
+                    http_address["port"], self.http_server.port
+                )
+            )

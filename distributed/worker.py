@@ -24,12 +24,11 @@ from dask.system import CPU_COUNT
 
 from tlz import pluck, merge, first, keymap
 from tornado import gen
-from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 
 from . import profile, comm, system
 from .batched import BatchedSend
-from .comm import get_address_host, connect, get_tcp_server_address
+from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -43,7 +42,6 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
-    clean_dashboard_address,
     get_ip,
     typename,
     has_arg,
@@ -586,16 +584,10 @@ class Worker(ServerNode):
 
         self.services = {}
         self.service_specs = services or {}
-        from .http.routing import RoutingApplication
+
         from .http.worker import get_handlers
 
-        self.http_application = RoutingApplication(
-            get_handlers(self, prefix=http_prefix)
-        )
-        self.http_server = HTTPServer(self.http_application)  # TODO security
-        self.http_server.listen(**clean_dashboard_address(dashboard_address or 0))
-        self.http_server.port = get_tcp_server_address(self.http_server)[1]
-        self.services["dashboard"] = self.http_server
+        self.start_http_server(get_handlers, dashboard_address, http_prefix)
 
         if dashboard:
             try:

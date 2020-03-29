@@ -32,7 +32,6 @@ from tlz import (
     groupby,
 )
 from tornado.ioloop import IOLoop
-from tornado.httpserver import HTTPServer
 
 import dask
 
@@ -42,7 +41,6 @@ from .comm import (
     resolve_address,
     get_address_host,
     unparse_host_port,
-    get_tcp_server_address,
 )
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
@@ -56,7 +54,6 @@ from .security import Security
 from .utils import (
     All,
     ignoring,
-    clean_dashboard_address,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -1113,16 +1110,11 @@ class Scheduler(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
-        from .http.routing import RoutingApplication
         from .http.scheduler import get_handlers
 
-        self.http_application = RoutingApplication(
-            get_handlers(self, prefix=http_prefix)
+        self.start_http_server(
+            get_handlers, dashboard_address, http_prefix, default_port=8787
         )
-        self.http_server = HTTPServer(self.http_application)  # TODO security
-        self.http_server.listen(**clean_dashboard_address(dashboard_address or 8787))
-        self.http_server.port = get_tcp_server_address(self.http_server)[1]
-        self.services["http"] = self.http_server
 
         if dashboard:
             try:
