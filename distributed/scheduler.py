@@ -1057,7 +1057,7 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
-        dashboard=False,
+        dashboard=None,
         http_prefix="/",
         preload=None,
         preload_argv=(),
