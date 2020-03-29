@@ -646,7 +646,7 @@ async def test_lots_of_tasks(c, s, a, b):
         "distributed.scheduler.dashboard.tls.ca-file": get_cert("tls-ca-cert.pem"),
     },
 )
-def dont_test_https_support(c, s, a, b):
+def test_https_support(c, s, a, b):
     port = s.http_server.port
 
     assert (

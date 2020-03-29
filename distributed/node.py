@@ -195,7 +195,12 @@ class ServerNode(Node, Server):
         return self
 
     def start_http_server(
-        self, get_handlers, dashboard_address, http_prefix, default_port=0
+        self,
+        get_handlers,
+        dashboard_address,
+        http_prefix,
+        default_port=0,
+        ssl_options=None,
     ):
         """ This creates an HTTP Server running on this node """
 
@@ -203,7 +208,22 @@ class ServerNode(Node, Server):
             get_handlers(self, prefix=http_prefix)
         )
 
-        self.http_server = HTTPServer(self.http_application)  # TODO security
+        # TLS configuration
+        tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
+        tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
+        tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
+        if tls_cert:
+            import ssl
+
+            ssl_options = ssl.create_default_context(
+                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+            )
+            ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
+            # We don't care about auth here, just encryption
+            ssl_options.check_hostname = False
+            ssl_options.verify_mode = ssl.CERT_NONE
+
+        self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
         http_address = clean_dashboard_address(dashboard_address or default_port)
         changed_port = False
         try:
