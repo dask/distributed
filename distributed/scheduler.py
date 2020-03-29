@@ -56,6 +56,7 @@ from .security import Security
 from .utils import (
     All,
     ignoring,
+    clean_dashboard_address,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -1119,7 +1120,7 @@ class Scheduler(ServerNode):
             get_handlers(self, prefix=http_prefix)
         )
         self.http_server = HTTPServer(self.http_application)  # TODO security
-        self.http_server.listen(8080)
+        self.http_server.listen(**clean_dashboard_address(dashboard_address or 8787))
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
         self.services["http"] = self.http_server
 
@@ -1513,8 +1514,8 @@ class Scheduler(ServerNode):
             pc.stop()
         self.periodic_callbacks.clear()
 
-        self.http_server.stop()
         self.stop_services()
+
         for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()

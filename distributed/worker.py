@@ -43,6 +43,7 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
+    clean_dashboard_address,
     get_ip,
     typename,
     has_arg,
@@ -592,9 +593,9 @@ class Worker(ServerNode):
             get_handlers(self, prefix=http_prefix)
         )
         self.http_server = HTTPServer(self.http_application)  # TODO security
-        self.http_server.listen(0)
+        self.http_server.listen(**clean_dashboard_address(dashboard_address or 0))
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
-        self.service_ports["dashboard"] = self.http_server.port
+        self.services["dashboard"] = self.http_server
 
         if dashboard:
             try:
@@ -1124,9 +1125,7 @@ class Worker(ServerNode):
             await self.scheduler.close_rpc()
             self._workdir.release()
 
-            self.http_server.stop()
-            for k, v in self.services.items():
-                v.stop()
+            self.stop_services()
 
             if (
                 self.batched_stream

@@ -205,9 +205,9 @@ def main(
         security=sec,
         host=host,
         port=port,
-        dashboard_address=dashboard_address if dashboard else None,
+        dashboard=dashboard,
+        dashboard_address=dashboard_address,
         http_prefix=http_prefix,
-        service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
         **kwargs
     )
     logger.info("-" * 47)

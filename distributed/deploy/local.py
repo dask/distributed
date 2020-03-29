@@ -189,6 +189,7 @@ class LocalCluster(SpecCluster):
                 port=scheduler_port,
                 interface=interface,
                 protocol=protocol,
+                dashboard=True,
                 dashboard_address=dashboard_address,
                 blocked_handlers=blocked_handlers,
             ),

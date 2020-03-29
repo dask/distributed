@@ -17,7 +17,7 @@ def test_prometheus(c, s, a, b):
     # prometheus_client errors
     for _ in range(2):
         response = yield http_client.fetch(
-            "http://localhost:%d/metrics" % a.services["dashboard"].port
+            "http://localhost:%d/metrics" % a.http_server.port
         )
         assert response.code == 200
         assert response.headers["Content-Type"] == "text/plain; version=0.0.4"
@@ -32,7 +32,7 @@ def test_health(c, s, a, b):
     http_client = AsyncHTTPClient()
 
     response = yield http_client.fetch(
-        "http://localhost:%d/health" % a.services["dashboard"].port
+        "http://localhost:%d/health" % a.http_server.port
     )
     assert response.code == 200
     assert response.headers["Content-Type"] == "text/plain"
