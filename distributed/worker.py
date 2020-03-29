@@ -320,6 +320,7 @@ class Worker(ServerNode):
         protocol=None,
         dashboard_address=None,
         dashboard=False,
+        http_prefix="/",
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
@@ -587,7 +588,9 @@ class Worker(ServerNode):
         from .http.routing import RoutingApplication
         from .http.worker import get_handlers
 
-        self.http_application = RoutingApplication(get_handlers(self))
+        self.http_application = RoutingApplication(
+            get_handlers(self, prefix=http_prefix)
+        )
         self.http_server = HTTPServer(self.http_application)  # TODO security
         self.http_server.listen(0)
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
@@ -600,7 +603,7 @@ class Worker(ServerNode):
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 distributed.dashboard.worker.connect(
-                    self.http_application, self.http_server, self, prefix=""
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         self.metrics = dict(metrics) if metrics else {}

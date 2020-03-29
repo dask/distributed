@@ -1060,6 +1060,7 @@ class Scheduler(ServerNode):
         protocol=None,
         dashboard_address=None,
         dashboard=False,
+        http_prefix="/",
         preload=None,
         preload_argv=(),
         plugins=(),
@@ -1114,7 +1115,9 @@ class Scheduler(ServerNode):
         from .http.routing import RoutingApplication
         from .http.scheduler import get_handlers
 
-        self.http_application = RoutingApplication(get_handlers(self))
+        self.http_application = RoutingApplication(
+            get_handlers(self, prefix=http_prefix)
+        )
         self.http_server = HTTPServer(self.http_application)  # TODO security
         self.http_server.listen(8080)
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
@@ -1127,7 +1130,7 @@ class Scheduler(ServerNode):
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 distributed.dashboard.scheduler.connect(
-                    self.http_application, self.http_server, self, prefix=""
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         # Communication state

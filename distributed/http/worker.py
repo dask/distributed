@@ -106,5 +106,7 @@ routes = [
 ]
 
 
-def get_handlers(server):
-    return [("/" + url, cls, {"server": server}) for url, cls in routes]
+def get_handlers(server, prefix="/"):
+    if not prefix.startswith("/"):
+        prefix = "/" + prefix
+    return [(prefix + url, cls, {"server": server}) for url, cls in routes]

@@ -367,7 +367,9 @@ plain_routes = [
 ]
 
 
-def get_handlers(server):
+def get_handlers(server, prefix="/"):
+    if not prefix.startswith("/"):
+        prefix = "/" + prefix
     return [
-        ("/" + url, cls, {"server": server}) for url, cls in dask_routes
+        (prefix + url, cls, {"server": server}) for url, cls in dask_routes
     ] + plain_routes
