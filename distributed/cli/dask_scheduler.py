@@ -86,7 +86,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--dashboard-prefix", type=str, default=None, help="Prefix for the dashboard app"
 )
-@click.option("--http-prefix", type=str, default="", help="Prefix for the HTTP Server")
 @click.option(
     "--use-xheaders",
     type=bool,
@@ -130,7 +129,6 @@ def main(
     dashboard,
     bokeh,
     dashboard_prefix,
-    http_prefix,
     use_xheaders,
     pid_file,
     tls_ca_file,
@@ -207,7 +205,7 @@ def main(
         port=port,
         dashboard=dashboard,
         dashboard_address=dashboard_address,
-        http_prefix=http_prefix,
+        http_prefix=dashboard_prefix,
         **kwargs
     )
     logger.info("-" * 47)
