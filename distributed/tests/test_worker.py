@@ -1024,39 +1024,24 @@ def test_worker_fds(s):
 
 @gen_cluster(nthreads=[])
 async def test_service_hosts_match_worker(s):
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehWorker
 
-    async with Worker(
-        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://0.0.0.0"
-    ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+    async with Worker(s.address, host="tcp://0.0.0.0") as w:
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    async with Worker(
-        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://127.0.0.1"
-    ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+    async with Worker(s.address, host="tcp://127.0.0.1") as w:
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    async with Worker(
-        s.address, services={("dashboard", 0): BokehWorker}, host="tcp://127.0.0.1"
-    ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+    async with Worker(s.address, host="tcp://127.0.0.1") as w:
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] == "127.0.0.1"
 
 
 @gen_cluster(nthreads=[])
-def test_start_services(s):
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehWorker
-
-    services = {("dashboard", ":1234"): BokehWorker}
-
-    w = yield Worker(s.address, services=services)
-
-    assert w.services["dashboard"].server.port == 1234
-    yield w.close()
+async def test_start_services(s):
+    async with Worker(s.address, dashboard_address=1234) as w:
+        assert w.http_server.port == 1234
 
 
 @gen_test()

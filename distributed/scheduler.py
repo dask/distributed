@@ -1110,6 +1110,16 @@ class Scheduler(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
+
+        self._start_address = addresses_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+            default_port=self.default_port,
+        )
+
         from .http.scheduler import get_handlers
 
         self.start_http_server(
@@ -1329,15 +1339,6 @@ class Scheduler(ServerNode):
         }
 
         connection_limit = get_fileno_limit() / 2
-
-        self._start_address = addresses_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-            default_port=self.default_port,
-        )
 
         super(Scheduler, self).__init__(
             handlers=self.handlers,

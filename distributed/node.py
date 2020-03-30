@@ -10,10 +10,11 @@ import tlz
 import dask
 
 from .comm import get_tcp_server_address
+from .comm import get_address_host
 from .core import Server, ConnectionPool
 from .http.routing import RoutingApplication
 from .versions import get_versions
-from .utils import DequeHandler, TimeoutError, clean_dashboard_address
+from .utils import DequeHandler, TimeoutError, clean_dashboard_address, ignoring
 
 
 class Node:
@@ -225,6 +226,14 @@ class ServerNode(Node, Server):
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
         http_address = clean_dashboard_address(dashboard_address or default_port)
+
+        if not http_address["address"]:
+            address = self._start_address
+            if isinstance(address, (list, tuple)):
+                address = address[0]
+            if address:
+                with ignoring(ValueError):
+                    http_address["address"] = get_address_host(address)
         changed_port = False
         try:
             self.http_server.listen(**http_address)
