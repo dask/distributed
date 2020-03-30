@@ -368,6 +368,7 @@ plain_routes = [
 
 
 def get_handlers(server, prefix="/"):
+    prefix = prefix or ""
     prefix = "/" + prefix.strip("/")
     if not prefix.endswith("/"):
         prefix = prefix + "/"

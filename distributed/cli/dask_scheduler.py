@@ -84,7 +84,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
-    "--dashboard-prefix", type=str, default=None, help="Prefix for the dashboard app"
+    "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard app"
 )
 @click.option(
     "--use-xheaders",

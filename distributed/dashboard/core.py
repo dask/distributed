@@ -18,6 +18,7 @@ if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
 
 
 def BokehApplication(applications, server, prefix="/", template_variables={}):
+    prefix = prefix or ""
     prefix = "/" + prefix.strip("/")
     if not prefix.endswith("/"):
         prefix = prefix + "/"
