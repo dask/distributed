@@ -4,9 +4,8 @@ from functools import partial
 import asyncio
 import dask
 from asyncio import TimeoutError
-from .client import Client, _get_global_client
 from .utils import PeriodicCallback, log_errors, parse_timedelta
-from .worker import get_client, get_worker
+from .worker import get_client
 from .metrics import time
 import warnings
 import logging
@@ -251,7 +250,7 @@ class Semaphore:
         # NOTE: the `id` of the `Semaphore` instance will always be unique, even among different
         # instances for the same resource. The actual attribute that identifies a specific resource is `name`,
         # which will be the same for all instances of this class which limit the same resource.
-        self.client = client or _get_global_client() or get_worker().client
+        self.client = client or get_client()
         self.id = uuid.uuid4().hex
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
@@ -324,14 +323,13 @@ class Semaphore:
         await self.release()
 
     def __getstate__(self):
-        return (self.name, self.client.scheduler.address, self.max_leases)
+        # Do not serialize the address since workers may have different
+        # addresses for the scheduler (e.g. if a proxy is between them)
+        return (self.name, self.max_leases)
 
     def __setstate__(self, state):
-        name, address, max_leases = state
-        try:
-            client = get_client(address)
-        except (AttributeError, AssertionError):
-            client = Client(address, set_as_default=False)
+        name, max_leases = state
+        client = get_client()
         self.__init__(name=name, client=client, max_leases=max_leases)
 
     def close(self):
