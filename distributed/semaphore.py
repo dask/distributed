@@ -222,11 +222,17 @@ class Semaphore:
     --------
     >>> from distributed import Semaphore
     >>> sem = Semaphore(max_leases=2, name='my_database')
-    >>> # This automatically acquires a lease from the semaphore (if available) which will be released when leaving
-    >>> # the context manager
-    >>> with sem:
-    >>>     pass  # use the protected resource
-    >>> sem.close()  # Close resource (clearing any residual state)
+    >>> def access_ressource(s, sem):
+    >>>     # This automatically acquires a lease from the semaphore (if available) which will be
+    >>>     # released when leaving the context manager.
+    >>>     with sem:
+    >>>         pass
+    >>>    
+    >>> futures = client.map(access_ressource, range(10), sem=sem)
+    >>> client.gather(futures)
+    >>> # Once done, close the semaphore to clean up the state on scheduler side.
+    >>> sem.close()
+    
 
     Notes
     -----
