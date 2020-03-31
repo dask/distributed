@@ -23,8 +23,6 @@ from queue import Queue as pyQueue
 import warnings
 import weakref
 
-from bokeh.resources import INLINE
-
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
@@ -3369,8 +3367,9 @@ class Client(Node):
                 filename = "dask-profile.html"
 
             if filename:
-                from bokeh.plotting import save
+                from bokeh.plotting import output_file, save
 
+                output_file(filename=filename, title="Dask Profile")
                 save(figure, title="Dask Profile", filename=filename)
             return (state, figure)
 
@@ -3858,7 +3857,7 @@ class Client(Node):
         count=None,
         plot=False,
         filename="task-stream.html",
-        resources=INLINE,
+        bokeh_resources=None,
     ):
         """ Get task stream data from scheduler
 
@@ -3887,9 +3886,8 @@ class Client(Node):
             If plot == 'save' then save the figure to a file
         filename: str (optional)
             The filename to save to if you set ``plot='save'``
-        resources: bokeh.resources.Resources (optional)
+        bokeh_resources: bokeh.resources.Resources (optional)
             Specifies if the resource component is INLINE or CDN
-            Default is INLINE
 
         Examples
         --------
@@ -3929,7 +3927,7 @@ class Client(Node):
             count=count,
             plot=plot,
             filename=filename,
-            resources=resources,
+            bokeh_resources=bokeh_resources,
         )
 
     async def _get_task_stream(
@@ -3939,7 +3937,7 @@ class Client(Node):
         count=None,
         plot=False,
         filename="task-stream.html",
-        resources=INLINE,
+        bokeh_resources=None,
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
@@ -3953,12 +3951,12 @@ class Client(Node):
             if plot == "save":
                 from bokeh.plotting import save, output_file
 
-                output_file(filename=filename, title="Dask Performance Report")
+                output_file(filename=filename, title="Dask Task Stream")
                 save(
                     figure,
                     title="Dask Task Stream",
                     filename=filename,
-                    resources=resources,
+                    bokeh_resources=bokeh_resources,
                 )
             return (msgs, figure)
         else:
