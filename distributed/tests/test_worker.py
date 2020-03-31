@@ -322,16 +322,15 @@ def test_worker_with_port_zero():
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_worker_waits_for_scheduler(cleanup):
-    async with Scheduler() as s:
-        w = Worker(s.address)
-        try:
-            await asyncio.wait_for(w, 3)
-        except TimeoutError:
-            pass
-        else:
-            assert False
-        assert w.status not in ("closed", "running")
-        await w.close(timeout=0.1)
+    w = Worker("127.0.0.1:8724")
+    try:
+        await asyncio.wait_for(w, 3)
+    except TimeoutError:
+        pass
+    else:
+        assert False
+    assert w.status not in ("closed", "running")
+    await w.close(timeout=0.1)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
