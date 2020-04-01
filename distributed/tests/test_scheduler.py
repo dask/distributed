@@ -787,6 +787,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     yield s.retire_workers(workers=[a.address])
 
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
+    assert all(tp.suspicious == 0 for tp in s.task_prefixes.values())
 
 
 @pytest.mark.slow
@@ -1542,15 +1543,20 @@ async def test_idle_timeout(c, s, a, b):
 
     assert s.status != "closed"
 
-    start = time()
-    while s.status != "closed":
-        await gen.sleep(0.01)
-        assert time() < start + 3
+    with captured_logger("distributed.scheduler") as logs:
+        start = time()
+        while s.status != "closed":
+            await gen.sleep(0.01)
+            assert time() < start + 3
 
-    start = time()
-    while not (a.status == "closed" and b.status == "closed"):
-        await gen.sleep(0.01)
-        assert time() < start + 1
+        start = time()
+        while not (a.status == "closed" and b.status == "closed"):
+            await gen.sleep(0.01)
+            assert time() < start + 1
+
+    assert "idle" in logs.getvalue()
+    assert "500" in logs.getvalue()
+    assert "ms" in logs.getvalue()
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
@@ -1805,6 +1811,19 @@ async def test_task_prefix(c, s, a, b):
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
 
 
+@gen_cluster(
+    client=True, Worker=Nanny, config={"distributed.scheduler.allowed-failures": 0}
+)
+async def test_failing_task_increments_suspicious(client, s, a, b):
+    future = client.submit(sys.exit, 0)
+    await wait(future)
+
+    assert s.task_prefixes["exit"].suspicious == 1
+    assert sum(tp.suspicious for tp in s.task_prefixes.values()) == sum(
+        ts.suspicious for ts in s.tasks.values()
+    )
+
+
 @gen_cluster(client=True)
 async def test_task_group_non_tuple_key(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -1887,7 +1906,7 @@ async def test_gather_failing_cnn_recover(c, s, a, b):
     orig_rpc = s.rpc
     x = await c.scatter({"x": 1}, workers=a.address)
 
-    s.rpc = FlakyConnectionPool(failing_connections=1)
+    s.rpc = await FlakyConnectionPool(failing_connections=1)
     with mock.patch("distributed.utils_comm.retry_count", 1):
         res = await s.gather(keys=["x"])
     assert res["status"] == "OK"
@@ -1898,7 +1917,7 @@ async def test_gather_failing_cnn_error(c, s, a, b):
     orig_rpc = s.rpc
     x = await c.scatter({"x": 1}, workers=a.address)
 
-    s.rpc = FlakyConnectionPool(failing_connections=10)
+    s.rpc = await FlakyConnectionPool(failing_connections=10)
     res = await s.gather(keys=["x"])
     assert res["status"] == "error"
     assert list(res["keys"]) == ["x"]
@@ -1949,7 +1968,7 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     z = c.submit(reducer, x, y)
 
-    s.rpc = FlakyConnectionPool(failing_connections=4)
+    s.rpc = await FlakyConnectionPool(failing_connections=4)
 
     with captured_logger(
         logging.getLogger("distributed.scheduler")
@@ -2052,3 +2071,14 @@ async def test_worker_name_collision(s, a):
     s.validate_state()
     assert set(s.workers) == {a.address}
     assert s.aliases == {a.name: a.address}
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})
+async def test_unknown_task_duration_config(client, s, a, b):
+    future = client.submit(slowinc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+    assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
+    assert len(s.unknown_durations) == 1
+    await wait(future)
+    assert len(s.unknown_durations) == 0
