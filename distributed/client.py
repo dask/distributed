@@ -3367,10 +3367,9 @@ class Client(Node):
                 filename = "dask-profile.html"
 
             if filename:
-                from bokeh.plotting import save, output_file
+                from bokeh.plotting import save
 
-                output_file(filename=filename, title="Dask Profile")
-                save(figure, filename=filename)
+                save(figure, title="Dask Profile", filename=filename)
             return (state, figure)
 
         else:
@@ -3936,10 +3935,9 @@ class Client(Node):
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save, output_file
+                from bokeh.plotting import save
 
-                output_file(filename=filename, title="Dask Task Stream")
-                save(figure, filename=filename)
+                save(figure, title="Dask Task Stream", filename=filename)
             return (msgs, figure)
         else:
             return msgs
