@@ -3370,7 +3370,7 @@ class Client(Node):
                 from bokeh.plotting import output_file, save
 
                 output_file(filename=filename, title="Dask Profile")
-                save(figure, title="Dask Profile", filename=filename)
+                save(figure, filename=filename)
             return (state, figure)
 
         else:
@@ -3952,12 +3952,7 @@ class Client(Node):
                 from bokeh.plotting import save, output_file
 
                 output_file(filename=filename, title="Dask Task Stream")
-                save(
-                    figure,
-                    title="Dask Task Stream",
-                    filename=filename,
-                    bokeh_resources=bokeh_resources,
-                )
+                save(figure, filename=filename, resources=bokeh_resources)
             return (msgs, figure)
         else:
             return msgs
