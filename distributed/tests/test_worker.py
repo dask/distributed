@@ -42,6 +42,7 @@ from distributed.worker import (
     parse_memory_limit,
     dumps_function,
     cache_dumps,
+    _subgraphcallable_cache_key,
 )
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
@@ -1665,5 +1666,15 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 def test_dumps_function_subgraphcallable_cached():
     dsk = {"x": 1, "y": (slowinc, "x")}
     func = SubgraphCallable(dsk, outkey="y", inkeys=())
-    dumps_function(func)
-    assert id(func) in cache_dumps
+    key = _subgraphcallable_cache_key(func)
+    if key is func:
+        pytest.skip(
+            "Caching serialized SubgraphCallables is not supported for this version of Dask"
+        )
+    else:
+        dumps_function(func)
+        assert key in cache_dumps
+
+        # Ensure SubgraphCallables are removed from cache_dumps once garbage collected
+        del func
+        assert key not in cache_dumps
