@@ -3276,42 +3276,26 @@ cache_dumps = LRU(maxsize=100)
 _cache_lock = threading.Lock()
 
 
-def _remove_from_cache_dumps(key):
-    with _cache_lock:
-        if key in cache_dumps:
-            del cache_dumps[key]
-
-
-def _subgraphcallable_cache_key(x):
-    try:
-        weakref.ref(x)
-    except TypeError:
-        return x
-    else:
-        # Ensure SubgraphCallable is removed from cache_dumps if gc'ed
-        key = id(x)
-        weakref.finalize(x, _remove_from_cache_dumps, key)
-        return key
-
-
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
-    if isinstance(func, SubgraphCallable):
-        key = _subgraphcallable_cache_key(func)
-    else:
-        key = func
-
+    key = func if not isinstance(func, SubgraphCallable) else id(func)
     try:
         with _cache_lock:
             result = cache_dumps[key]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
+            if isinstance(func, SubgraphCallable):
+                result = (result, func)  # avoids func being garbage collected early
             with _cache_lock:
                 cache_dumps[key] = result
     except TypeError:  # Unhashable key
         result = pickle.dumps(func)
-    return result
+
+    if isinstance(result, bytes):
+        return result
+    else:
+        return result[0]
 
 
 def dumps_task(task):
