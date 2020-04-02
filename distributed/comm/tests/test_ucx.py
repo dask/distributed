@@ -225,9 +225,7 @@ async def test_ping_pong_cupy(shape):
     "n",
     [
         int(1e9),
-        pytest.param(
-            int(2.5e9), marks=[pytest.mark.xfail(reason="integer type in ucx-py")]
-        ),
+        int(2.5e9),
     ],
 )
 async def test_large_cupy(n, cleanup):
