@@ -1012,6 +1012,8 @@ class Worker(ServerNode):
             return
         assert self.status is None, self.status
 
+        await super().start()
+
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
@@ -1158,7 +1160,7 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
-    async def terminate(self, comm, report=True, **kwargs):
+    async def terminate(self, comm=None, report=True, **kwargs):
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1836,13 +1838,16 @@ class Worker(ServerNode):
 
     def send_task_state_to_scheduler(self, key):
         if key in self.data or self.actors.get(key):
-            try:
-                value = self.data[key]
-            except KeyError:
-                value = self.actors[key]
-            nbytes = self.nbytes[key] or sizeof(value)
-            typ = self.types.get(key) or type(value)
-            del value
+            nbytes = self.nbytes.get(key)
+            typ = self.types.get(key)
+            if nbytes is None or typ is None:
+                try:
+                    value = self.data[key]
+                except KeyError:
+                    value = self.actors[key]
+                nbytes = self.nbytes[key] = sizeof(value)
+                typ = self.types[key] = type(value)
+                del value
             try:
                 typ_serialized = dumps_function(typ)
             except PicklingError:

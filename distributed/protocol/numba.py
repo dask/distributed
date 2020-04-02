@@ -1,3 +1,5 @@
+import weakref
+
 import numba.cuda
 import numpy as np
 
@@ -21,6 +23,7 @@ def cuda_serialize_numba_ndarray(x):
 
     header = x.__cuda_array_interface__.copy()
     header["strides"] = tuple(x.strides)
+    header["lengths"] = [x.nbytes]
     frames = [
         numba.cuda.cudadrv.devicearray.DeviceNDArray(
             shape=(x.nbytes,), strides=(1,), dtype=np.dtype("u1"), gpu_data=x.gpu_data,
@@ -58,6 +61,8 @@ def dask_deserialize_numba_array(header, frames):
         frames = [dask_deserialize_rmm_device_buffer(header, frames)]
     else:
         frames = [numba.cuda.to_device(np.asarray(memoryview(f))) for f in frames]
+        for f in frames:
+            weakref.finalize(f, numba.cuda.current_context)
 
     arr = cuda_deserialize_numba_ndarray(header, frames)
     return arr

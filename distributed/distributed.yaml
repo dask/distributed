@@ -24,6 +24,7 @@ distributed:
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []
     preload-argv: []
+    unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
     default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
       rechunk-split: 1us
       shuffle-split: 1us
@@ -37,6 +38,8 @@ distributed:
         ca-file: null
         key: null
         cert: null
+    locks:
+      lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
 
   worker:
     blocked-handlers: []

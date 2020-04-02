@@ -923,6 +923,9 @@ class Client(Node):
             )
 
     async def _start(self, timeout=no_default, **kwargs):
+
+        await super().start()
+
         if timeout == no_default:
             timeout = self._timeout
         if timeout is not None:
@@ -2449,8 +2452,6 @@ class Client(Node):
                 actors = list(self._expand_key(actors))
 
             keyset = set(keys)
-            flatkeys = list(map(tokey, keys))
-            futures = {key: Future(key, self, inform=False) for key in keyset}
 
             values = {
                 k: v
@@ -2503,12 +2504,13 @@ class Client(Node):
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk3}
 
+            futures = {key: Future(key, self, inform=False) for key in keyset}
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
                     "tasks": valmap(dumps_task, dsk3),
                     "dependencies": dependencies,
-                    "keys": list(flatkeys),
+                    "keys": list(map(tokey, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
                     "priority": priority,
@@ -3365,9 +3367,10 @@ class Client(Node):
                 filename = "dask-profile.html"
 
             if filename:
-                from bokeh.plotting import save
+                from bokeh.plotting import output_file, save
 
-                save(figure, title="Dask Profile", filename=filename)
+                output_file(filename=filename, title="Dask Profile")
+                save(figure, filename=filename)
             return (state, figure)
 
         else:
@@ -3487,9 +3490,11 @@ class Client(Node):
         Examples
         --------
         You can get information about active workers using the following:
+
         >>> workers = client.scheduler_info()['workers']
 
         From that list you may want to select some workers to close
+
         >>> client.retire_workers(workers=['tcp://address:port', ...])
 
         See Also
@@ -3848,7 +3853,13 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        bokeh_resources=None,
     ):
         """ Get task stream data from scheduler
 
@@ -3877,6 +3888,8 @@ class Client(Node):
             If plot == 'save' then save the figure to a file
         filename: str (optional)
             The filename to save to if you set ``plot='save'``
+        bokeh_resources: bokeh.resources.Resources (optional)
+            Specifies if the resource component is INLINE or CDN
 
         Examples
         --------
@@ -3916,10 +3929,17 @@ class Client(Node):
             count=count,
             plot=plot,
             filename=filename,
+            bokeh_resources=bokeh_resources,
         )
 
     async def _get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        bokeh_resources=None,
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
@@ -3931,9 +3951,10 @@ class Client(Node):
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save
+                from bokeh.plotting import save, output_file
 
-                save(figure, title="Dask Task Stream", filename=filename)
+                output_file(filename=filename, title="Dask Task Stream")
+                save(figure, filename=filename, resources=bokeh_resources)
             return (msgs, figure)
         else:
             return msgs
@@ -4233,17 +4254,18 @@ class as_completed:
             except CancelledError as exc:
                 result = exc
         with self.lock:
-            self.futures[future] -= 1
-            if not self.futures[future]:
-                del self.futures[future]
-            if self.with_results:
-                self.queue.put_nowait((future, result))
-            else:
-                self.queue.put_nowait(future)
-            async with self.condition:
-                self.condition.notify()
-            with self.thread_condition:
-                self.thread_condition.notify()
+            if future in self.futures:
+                self.futures[future] -= 1
+                if not self.futures[future]:
+                    del self.futures[future]
+                if self.with_results:
+                    self.queue.put_nowait((future, result))
+                else:
+                    self.queue.put_nowait(future)
+                async with self.condition:
+                    self.condition.notify()
+                with self.thread_condition:
+                    self.thread_condition.notify()
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -4280,6 +4302,11 @@ class as_completed:
         """
         with self.lock:
             return len(self.futures) + len(self.queue.queue)
+
+    def __repr__(self):
+        return "<as_completed: waiting={} done={}>".format(
+            len(self.futures), len(self.queue.queue)
+        )
 
     def __iter__(self):
         return self
@@ -4371,6 +4398,13 @@ class as_completed:
                 yield self.next_batch(block=True)
             except StopIteration:
                 return
+
+    def clear(self):
+        """ Clear out all submitted futures """
+        with self.lock:
+            self.futures.clear()
+            while not self.queue.empty():
+                self.queue.get()
 
 
 def AsCompleted(*args, **kwargs):
