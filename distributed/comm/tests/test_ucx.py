@@ -12,8 +12,6 @@ from distributed.deploy.local import LocalCluster
 from dask.dataframe.utils import assert_eq
 from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
 
-from .test_comms import check_deserialize
-
 
 try:
     HOST = ucp.get_address()
@@ -156,6 +154,10 @@ async def test_ping_pong_data():
 
 @gen_test()
 def test_ucx_deserialize():
+    try:
+        from .test_comms import check_deserialize
+    except Exception:
+        pytest.skip("Unable to import `check_deserialize`")
     yield check_deserialize("tcp://")
 
 
