@@ -79,6 +79,9 @@ if [[ $CRICK == true ]]; then
     python -m pip install -q git+https://github.com/jcrist/crick.git
 fi;
 
+# TODO: REMOVE THE LINE BELOW
+conda install -c conda-forge openssl==1.1.1e
+
 # Install distributed
 python -m pip install --no-deps -e .
 
