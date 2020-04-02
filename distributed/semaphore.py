@@ -212,8 +212,9 @@ class Semaphore:
 
     The lifetime of a lease is coupled to the ``Client`` it was acquired with.
     Once the Client goes out of scope, the leases associated to it are freed.
-    This behavior can be controlled with the parameter
-    `distributed.scheduler.locks.lease-validation-interval`.
+    This behavior can be controlled with the
+    ``distributed.scheduler.locks.lease-validation-interval`` configuration
+    option.
 
     A noticeable difference to the Semaphore of the python standard library is
     that this implementation does not allow to release more often than it was
