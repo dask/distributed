@@ -204,14 +204,15 @@ class SemaphoreExtension:
 class Semaphore:
     """ Semaphore
 
-    This semaphore will track leases on the scheduler which can be acquired and
+    This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
+    will track leases on the scheduler which can be acquired and
     released by an instance of this class. If the maximum amount of leases are
     already acquired, it is not possible to acquire more and the caller waits
     until another lease has been released.
 
-    The lifetime of a lease are coupled to the ``Client`` it was acquired with.
+    The lifetime of a lease is coupled to the ``Client`` it was acquired with.
     Once the Client goes out of scope, the leases associated to it are freed.
-    This behaviour can be controlled with the parameter
+    This behavior can be controlled with the parameter
     `distributed.scheduler.locks.lease-validation-interval`.
 
     A noticeable difference to the Semaphore of the python standard library is
@@ -220,7 +221,7 @@ class Semaphore:
     not modified.
 
     This implementation is still in an experimental state and subtle changes in
-    behaviour may occur without any change in the major version of this library.
+    behavior may occur without any change in the major version of this library.
 
     Parameters
     ----------
