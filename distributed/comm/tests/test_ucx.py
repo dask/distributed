@@ -158,6 +158,7 @@ def test_ucx_deserialize():
     # `socket.gaierror: [Errno -5] No address associated with hostname`
     # This may be due to a system configuration issue.
     from .test_comms import check_deserialize
+
     yield check_deserialize("tcp://")
 
 
