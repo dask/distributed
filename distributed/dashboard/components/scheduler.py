@@ -1193,7 +1193,7 @@ class TaskGraph(DashboardComponent):
 
     @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
-        max_items = config.get('distributed.dashboard.graph_max_items', 2)
+        max_items = dask.config.get('distributed.dashboard.graph_max_items', 2)
         if new or update:
             node_key = []
             node_x = []
