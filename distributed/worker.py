@@ -2693,7 +2693,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
-                check_pause(memory)
+            check_pause(memory)
             if count:
                 logger.debug(
                     "Moved %d pieces of data data and %s to disk",
