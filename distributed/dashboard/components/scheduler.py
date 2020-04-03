@@ -35,7 +35,6 @@ from bokeh.transform import factor_cmap, linear_cmap
 from bokeh.io import curdoc
 import dask
 from dask.utils import format_bytes, key_split
-from dask.config import config
 from tlz import pipe
 from tlz.curried import map, concat, groupby
 from tornado import escape
