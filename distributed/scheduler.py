@@ -220,9 +220,9 @@ class WorkerState:
        includes those actors whose state actually lives on this worker, not
        actors to which this worker has a reference.
 
-    .. attribute:: active: bool
+    .. attribute:: retiring: bool
 
-        Indicate whether the worker is still active and can be served with additional tasks.
+        Indicate whether the worker is retiring and about to be shut down.
 
     """
 
