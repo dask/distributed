@@ -503,10 +503,7 @@ def test_TaskGraph_clear(c, s, a, b):
 
 
 @gen_cluster(
-    client=True,
-    config={
-        "distributed.dashboard.graph-max-items": 2,
-    },
+    client=True, config={"distributed.dashboard.graph-max-items": 2,},
 )
 def test_TaskGraph_limit(c, s, a, b):
     gp = TaskGraph(s)
@@ -517,21 +514,21 @@ def test_TaskGraph_limit(c, s, a, b):
     f1 = c.submit(func, 1)
     yield wait(f1)
     gp.update()
-    assert len(gp.node_source.data['x']) == 1
+    assert len(gp.node_source.data["x"]) == 1
     f2 = c.submit(func, 2)
     yield wait(f2)
     gp.update()
-    assert len(gp.node_source.data['x']) == 2
+    assert len(gp.node_source.data["x"]) == 2
     f3 = c.submit(func, 3)
     yield wait(f3)
     gp.update()
-    assert len(gp.node_source.data['x']) == 2
+    assert len(gp.node_source.data["x"]) == 2
     del f1
     del f2
     del f3
     _ = c.submit(func, 1)
 
-    async_wait_for(lambda: len(gp.node_source.data['x']) == 1, timeout=1)
+    async_wait_for(lambda: len(gp.node_source.data["x"]) == 1, timeout=1)
 
 
 @gen_cluster(client=True, timeout=30)

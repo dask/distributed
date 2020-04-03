@@ -1172,7 +1172,7 @@ class TaskGraph(DashboardComponent):
         tap = TapTool(callback=OpenURL(url="info/task/@key.html"), renderers=[rect])
         rect.nonselection_glyph = None
         self.root.add_tools(hover, tap)
-        self.max_items = config.get('distributed.dashboard.graph-max-items', 5000)
+        self.max_items = config.get("distributed.dashboard.graph-max-items", 5000)
 
     @without_property_validation
     def update(self):
