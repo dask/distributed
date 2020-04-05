@@ -5,7 +5,6 @@ from time import sleep
 import pytest
 
 pytest.importorskip("bokeh")
-import sys
 from tlz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
@@ -49,9 +48,6 @@ def test_routes(c, s, a, b):
     assert str(port) in response.body.decode()
 
 
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="https://github.com/bokeh/bokeh/issues/5494"
-)
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 def test_simple(c, s, a, b):
     # assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
@@ -61,7 +57,7 @@ def test_simple(c, s, a, b):
     yield gen.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    for suffix in ["main", "crossfilter", "system"]:
+    for suffix in ["crossfilter", "system"]:
         response = yield http_client.fetch(
             "http://localhost:%d/%s" % (a.http_server.port, suffix)
         )

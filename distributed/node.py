@@ -196,18 +196,11 @@ class ServerNode(Node, Server):
         return self
 
     def start_http_server(
-        self,
-        get_handlers,
-        dashboard_address,
-        http_prefix,
-        default_port=0,
-        ssl_options=None,
+        self, routes, dashboard_address, default_port=0, ssl_options=None,
     ):
         """ This creates an HTTP Server running on this node """
 
-        self.http_application = RoutingApplication(
-            get_handlers(self, prefix=http_prefix)
-        )
+        self.http_application = RoutingApplication(routes,)
 
         # TLS configuration
         tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")

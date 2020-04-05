@@ -36,6 +36,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from . import profile
 from .batched import BatchedSend
 from .comm import (
     normalize_address,
@@ -46,7 +47,8 @@ from .comm import (
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from . import profile
+
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules
@@ -1123,11 +1125,12 @@ class Scheduler(ServerNode):
             default_port=self.default_port,
         )
 
-        from .http.scheduler import get_handlers
-
-        self.start_http_server(
-            get_handlers, dashboard_address, http_prefix, default_port=8787
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.scheduler.http.routes"),
+            prefix=http_prefix,
         )
+        self.start_http_server(routes, dashboard_address, default_port=8787)
 
         if dashboard:
             try:

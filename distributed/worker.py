@@ -32,6 +32,7 @@ from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules
@@ -585,9 +586,12 @@ class Worker(ServerNode):
         self.services = {}
         self.service_specs = services or {}
 
-        from .http.worker import get_handlers
-
-        self.start_http_server(get_handlers, dashboard_address, http_prefix)
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.worker.http.routes"),
+            prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address)
 
         if dashboard:
             try:

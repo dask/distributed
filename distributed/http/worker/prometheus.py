@@ -1,6 +1,6 @@
-import logging
+from ..utils import RequestHandler
 
-from .utils import RequestHandler, redirect
+import logging
 
 
 class _PrometheusCollector:
@@ -93,22 +93,6 @@ class PrometheusHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain; version=0.0.4")
 
 
-class HealthHandler(RequestHandler):
-    def get(self):
-        self.write("ok")
-        self.set_header("Content-Type", "text/plain")
-
-
 routes = [
-    (r"metrics", PrometheusHandler),
-    (r"health", HealthHandler),
-    (r"main", redirect("/status")),
+    (r"metrics", PrometheusHandler, {}),
 ]
-
-
-def get_handlers(server, prefix="/"):
-    prefix = prefix or ""
-    prefix = "/" + prefix.strip("/")
-    if not prefix.endswith("/"):
-        prefix = prefix + "/"
-    return [(prefix + url, cls, {"server": server}) for url, cls in routes]

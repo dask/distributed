@@ -1,12 +1,10 @@
 import pytest
 
-pytest.importorskip("bokeh")
-
 from tornado.httpclient import AsyncHTTPClient
 from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+@gen_cluster(client=True)
 def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -27,7 +25,7 @@ def test_prometheus(c, s, a, b):
         assert "dask_worker_latency_seconds" in families
 
 
-@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+@gen_cluster(client=True)
 def test_health(c, s, a, b):
     http_client = AsyncHTTPClient()
 

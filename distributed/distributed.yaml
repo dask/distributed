@@ -41,6 +41,15 @@ distributed:
     locks:
       lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
 
+    http:
+      routes:
+        - distributed.http.scheduler.prometheus
+        - distributed.http.scheduler.info
+        - distributed.http.scheduler.json
+        - distributed.http.health
+        - distributed.http.proxy
+        - distributed.http.statics
+
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn
@@ -70,6 +79,11 @@ distributed:
       spill: 0.70  # fraction at which we spill to disk
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
+
+    http:
+      routes:
+        - distributed.http.worker.prometheus
+        - distributed.http.health
 
   client:
     heartbeat: 5s  # time between client heartbeats

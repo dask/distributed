@@ -13,11 +13,7 @@ from distributed.utils import is_valid_xml
 from distributed.utils_test import gen_cluster, slowinc, inc
 
 
-@gen_cluster(
-    client=True,
-    scheduler_kwargs={"dashboard": True},
-    worker_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True)
 async def test_connect(c, s, a, b):
     future = c.submit(lambda x: x + 1, 1)
     x = c.submit(slowinc, 1, delay=1, retries=5)
@@ -48,9 +44,7 @@ async def test_connect(c, s, a, b):
             assert not re.search("href=./", body)  # no absolute links
 
 
-@gen_cluster(
-    client=True, nthreads=[], scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, nthreads=[])
 async def test_worker_404(c, s):
     http_client = AsyncHTTPClient()
     with pytest.raises(HTTPClientError) as err:
@@ -65,9 +59,7 @@ async def test_worker_404(c, s):
     assert err.value.code == 404
 
 
-@gen_cluster(
-    client=True, scheduler_kwargs={"dashboard": True, "http_prefix": "/foo"},
-)
+@gen_cluster(client=True, scheduler_kwargs={"http_prefix": "/foo", "dashboard": True})
 async def test_prefix(c, s, a, b):
     http_client = AsyncHTTPClient()
     for suffix in ["foo/info/main/workers.html", "foo/json/index.html", "foo/system"]:
@@ -82,9 +74,7 @@ async def test_prefix(c, s, a, b):
             assert is_valid_xml(body)
 
 
-@gen_cluster(
-    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -105,9 +95,7 @@ async def test_prometheus(c, s, a, b):
         assert "dask_scheduler_workers" in families
 
 
-@gen_cluster(
-    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_prometheus_collect_task_states(c, s, a, b):
     pytest.importorskip("prometheus_client")
     from prometheus_client.parser import text_string_to_metric_families
@@ -160,9 +148,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert sum(forgotten_tasks) == 0.0
 
 
-@gen_cluster(
-    client=True, clean_kwargs={"threads": False}, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 async def test_health(c, s, a, b):
     http_client = AsyncHTTPClient()
 
@@ -176,9 +162,7 @@ async def test_health(c, s, a, b):
     assert txt == "ok"
 
 
-@gen_cluster(
-    client=True, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True)
 async def test_task_page(c, s, a, b):
     future = c.submit(lambda x: x + 1, 1, workers=a.address)
     x = c.submit(inc, 1)
