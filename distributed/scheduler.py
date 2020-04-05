@@ -30,6 +30,7 @@ from tlz import (
     second,
     compose,
     groupby,
+    concat,
 )
 from tornado.ioloop import IOLoop
 
@@ -76,6 +77,7 @@ from . import versions as version_module
 
 from .publish import PublishExtension
 from .queues import QueueExtension
+from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
@@ -96,6 +98,7 @@ DEFAULT_EXTENSIONS = [
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
+    SemaphoreExtension,
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -3109,7 +3112,7 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                        "keys": tuple(concat(r["keys"].keys() for r in result)),
                     }
 
                 for sender, recipient, ts in msgs:

@@ -587,7 +587,7 @@ class Client(Node):
         deserializers=None,
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
-        **kwargs
+        **kwargs,
     ):
         if timeout == no_default:
             timeout = dask.config.get("distributed.comm.timeouts.connect")
@@ -960,7 +960,7 @@ class Client(Node):
                 self.cluster = await LocalCluster(
                     loop=self.loop,
                     asynchronous=self._asynchronous,
-                    **self._startup_kwargs
+                    **self._startup_kwargs,
                 )
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
@@ -970,7 +970,7 @@ class Client(Node):
                     scheduler_port=0,
                     loop=self.loop,
                     asynchronous=True,
-                    **self._startup_kwargs
+                    **self._startup_kwargs,
                 )
 
             # Wait for all workers to be ready
@@ -1422,7 +1422,7 @@ class Client(Node):
         actor=False,
         actors=False,
         pure=None,
-        **kwargs
+        **kwargs,
     ):
 
         """ Submit a function application to the scheduler
@@ -1542,7 +1542,7 @@ class Client(Node):
         actor=False,
         actors=False,
         pure=None,
-        **kwargs
+        **kwargs,
     ):
         """ Map a function on a sequence of arguments
 
@@ -2538,7 +2538,7 @@ class Client(Node):
         priority=0,
         fifo_timeout="60s",
         actors=None,
-        **kwargs
+        **kwargs,
     ):
         """ Compute dask graph
 
@@ -2669,7 +2669,7 @@ class Client(Node):
         fifo_timeout="60s",
         actors=None,
         traverse=True,
-        **kwargs
+        **kwargs,
     ):
         """ Compute dask collections on cluster
 
@@ -2817,7 +2817,7 @@ class Client(Node):
         priority=0,
         fifo_timeout="60s",
         actors=None,
-        **kwargs
+        **kwargs,
     ):
         """ Persist dask collections on cluster
 
@@ -3013,6 +3013,10 @@ class Client(Node):
         await _wait(futures)
         keys = list({tokey(f.key) for f in self.futures_of(futures)})
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
+        if result["status"] == "missing-data":
+            raise ValueError(
+                f"During rebalance {len(result['keys'])} keys were found to be missing"
+            )
         assert result["status"] == "OK"
 
     def rebalance(self, futures=None, workers=None, **kwargs):
@@ -3023,7 +3027,7 @@ class Client(Node):
         depending on keyword arguments.
 
         This operation is generally not well tested against normal operation of
-        the scheduler.  It it not recommended to use it while waiting on
+        the scheduler.  It is not recommended to use it while waiting on
         computations.
 
         Parameters
@@ -3085,7 +3089,7 @@ class Client(Node):
             n=n,
             workers=workers,
             branching_factor=branching_factor,
-            **kwargs
+            **kwargs,
         )
 
     def nthreads(self, workers=None, **kwargs):
@@ -3367,9 +3371,10 @@ class Client(Node):
                 filename = "dask-profile.html"
 
             if filename:
-                from bokeh.plotting import save
+                from bokeh.plotting import output_file, save
 
-                save(figure, title="Dask Profile", filename=filename)
+                output_file(filename=filename, title="Dask Profile")
+                save(figure, filename=filename)
             return (state, figure)
 
         else:
@@ -3489,9 +3494,11 @@ class Client(Node):
         Examples
         --------
         You can get information about active workers using the following:
+
         >>> workers = client.scheduler_info()['workers']
 
         From that list you may want to select some workers to close
+
         >>> client.retire_workers(workers=['tcp://address:port', ...])
 
         See Also
@@ -3502,7 +3509,7 @@ class Client(Node):
             self.scheduler.retire_workers,
             workers=workers,
             close_workers=close_workers,
-            **kwargs
+            **kwargs,
         )
 
     def set_metadata(self, key, value):
@@ -3850,7 +3857,13 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        bokeh_resources=None,
     ):
         """ Get task stream data from scheduler
 
@@ -3879,6 +3892,8 @@ class Client(Node):
             If plot == 'save' then save the figure to a file
         filename: str (optional)
             The filename to save to if you set ``plot='save'``
+        bokeh_resources: bokeh.resources.Resources (optional)
+            Specifies if the resource component is INLINE or CDN
 
         Examples
         --------
@@ -3918,10 +3933,17 @@ class Client(Node):
             count=count,
             plot=plot,
             filename=filename,
+            bokeh_resources=bokeh_resources,
         )
 
     async def _get_task_stream(
-        self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
+        self,
+        start=None,
+        stop=None,
+        count=None,
+        plot=False,
+        filename="task-stream.html",
+        bokeh_resources=None,
     ):
         msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
@@ -3933,9 +3955,10 @@ class Client(Node):
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save
+                from bokeh.plotting import save, output_file
 
-                save(figure, title="Dask Task Stream", filename=filename)
+                output_file(filename=filename, title="Dask Task Stream")
+                save(figure, filename=filename, resources=bokeh_resources)
             return (msgs, figure)
         else:
             return msgs
