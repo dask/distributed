@@ -48,13 +48,13 @@ def connect(application, http_server, scheduler, prefix=""):
     application.add_application(bokeh_app)
     bokeh_app.initialize(IOLoop.current())
 
-    application.add_handlers(
+    bokeh_app.add_handlers(
         r".*",
         [
             (
                 r"/",
                 web.RedirectHandler,
-                {"url": urljoin((prefix or "").strip("/") + "/", r"status")},
+                {"url": urljoin((prefix or "").strip("/") + "/", r"workers")},
             )
         ],
     )
