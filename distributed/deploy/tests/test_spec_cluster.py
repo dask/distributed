@@ -87,7 +87,7 @@ def test_spec_sync(loop):
 def test_loop_started():
     with SpecCluster(
         worker_spec, scheduler={"cls": Scheduler, "options": {"port": 0}}
-        ) as cluster:
+    ) as cluster:
         pass
 
 
@@ -326,7 +326,6 @@ async def test_scheduler_info(cleanup):
             == cluster.scheduler_info["services"]
         )
         assert len(cluster.scheduler_info["workers"]) == len(cluster.workers)
-
 
 
 @pytest.mark.asyncio
