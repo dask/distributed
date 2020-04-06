@@ -59,7 +59,7 @@ class IdentityJSON(RequestHandler):
 class IndexJSON(RequestHandler):
     def get(self):
         with log_errors():
-            r = [url for url, _, _ in routes if url.endswith(".json")]
+            r = [url[5:] for url, _, _ in routes if url.endswith(".json")]
             self.render(
                 "json-index.html", routes=r, title="Index of JSON routes", **self.extra
             )
