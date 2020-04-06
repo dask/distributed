@@ -54,7 +54,7 @@ def connect(application, http_server, scheduler, prefix=""):
             (
                 r"/",
                 web.RedirectHandler,
-                {"url": urljoin((prefix or "").strip("/") + "/", r"workers")},
+                {"url": urljoin((prefix or "").strip("/") + "/", r"status")},
             )
         ],
     )
