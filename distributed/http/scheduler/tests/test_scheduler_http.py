@@ -209,3 +209,14 @@ async def test_allow_websocket_origin(c, s, a, b):
         )
     assert err.value.code == 403
 """
+
+
+@gen_cluster(client=True)
+async def test_eventstream(c, s, a, b):
+    from tornado.websocket import websocket_connect
+
+    ws_client = await websocket_connect(
+        "ws://localhost:%d/%s" % (s.http_server.port, "eventstream")
+    )
+    assert "websocket" in str(s.plugins).lower()
+    ws_client.close()
