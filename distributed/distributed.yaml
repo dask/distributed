@@ -84,6 +84,7 @@ distributed:
       routes:
         - distributed.http.worker.prometheus
         - distributed.http.health
+        - distributed.http.statics
 
   client:
     heartbeat: 5s  # time between client heartbeats
