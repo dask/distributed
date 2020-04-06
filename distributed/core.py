@@ -829,7 +829,7 @@ class ConnectionPool:
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self.timeout = timeout
         self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
