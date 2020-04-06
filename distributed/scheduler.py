@@ -19,11 +19,19 @@ import weakref
 import psutil
 import sortedcontainers
 
-try:
-    from cytoolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-except ImportError:
-    from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-from toolz import valmap, second, compose, groupby
+from tlz import (
+    frequencies,
+    merge,
+    pluck,
+    merge_sorted,
+    first,
+    merge_with,
+    valmap,
+    second,
+    compose,
+    groupby,
+    concat,
+)
 from tornado.ioloop import IOLoop
 
 import dask
@@ -69,6 +77,7 @@ from . import versions as version_module
 
 from .publish import PublishExtension
 from .queues import QueueExtension
+from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
@@ -89,6 +98,7 @@ DEFAULT_EXTENSIONS = [
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
+    SemaphoreExtension,
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -782,6 +792,11 @@ class TaskPrefix:
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: suspicious: int
+
+       Numbers of times a task was marked as suspicious with this prefix
+
+
     See Also
     --------
     TaskGroup
@@ -798,6 +813,7 @@ class TaskPrefix:
             )
         else:
             self.duration_average = None
+        self.suspicious = 0
 
     @property
     def states(self):
@@ -1267,6 +1283,7 @@ class Scheduler(ServerNode):
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "performance_report": self.performance_report,
+            "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
             "nbytes": self.get_nbytes,
@@ -1400,6 +1417,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
@@ -2184,6 +2204,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts.suspicious += 1
+                    ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
@@ -3088,7 +3109,7 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                        "keys": tuple(concat(r["keys"].keys() for r in result)),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -3687,7 +3708,7 @@ class Scheduler(ServerNode):
         """
         return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
-    def get_task_duration(self, ts, default=0.5):
+    def get_task_duration(self, ts, default=None):
         """
         Get the estimated computation cost of the given task
         (not including any communication cost).
@@ -3695,6 +3716,10 @@ class Scheduler(ServerNode):
         duration = ts.prefix.duration_average
         if duration is None:
             self.unknown_durations[ts.prefix.name].add(ts)
+            if default is None:
+                default = parse_timedelta(
+                    dask.config.get("distributed.scheduler.unknown-task-duration")
+                )
             return default
 
         return duration
@@ -4653,7 +4678,7 @@ class Scheduler(ServerNode):
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
-            if ts.state == "forgotten":
+            if ts.state == "forgotten" and ts.group.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg = ts.group
                 if not any(tg.states.get(s) for s in ALL_TASK_STATES):
@@ -4993,6 +5018,7 @@ class Scheduler(ServerNode):
         return {"counts": counts, "keys": keys}
 
     async def performance_report(self, comm=None, start=None, code=""):
+        stop = time()
         # Profiles
         compute, scheduler, workers = await asyncio.gather(
             *[
@@ -5054,7 +5080,7 @@ class Scheduler(ServerNode):
 {code}
         </pre>
         """.format(
-            time=format_time(time() - start),
+            time=format_time(stop - start),
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),
@@ -5201,9 +5227,13 @@ class Scheduler(ServerNode):
             close = time() > last_task + self.idle_timeout
 
         if close:
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration=None):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -5219,6 +5249,8 @@ class Scheduler(ServerNode):
         --------
         distributed.deploy.Adaptive
         """
+        if target_duration is None:
+            target_duration = dask.config.get("distributed.adaptive.target-duration")
         target_duration = parse_timedelta(target_duration)
 
         # CPU

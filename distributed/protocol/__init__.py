@@ -30,6 +30,12 @@ def _register_numpy():
     from . import numpy
 
 
+@dask_serialize.register_lazy("scipy")
+@dask_deserialize.register_lazy("scipy")
+def _register_scipy():
+    from . import scipy
+
+
 @dask_serialize.register_lazy("h5py")
 @dask_deserialize.register_lazy("h5py")
 def _register_h5py():
@@ -70,18 +76,28 @@ def _register_torch():
 
 @cuda_serialize.register_lazy("cupy")
 @cuda_deserialize.register_lazy("cupy")
+@dask_serialize.register_lazy("cupy")
+@dask_deserialize.register_lazy("cupy")
+@cuda_serialize.register_lazy("cupyx")
+@cuda_deserialize.register_lazy("cupyx")
+@dask_serialize.register_lazy("cupyx")
+@dask_deserialize.register_lazy("cupyx")
 def _register_cupy():
     from . import cupy
 
 
 @cuda_serialize.register_lazy("numba")
 @cuda_deserialize.register_lazy("numba")
+@dask_serialize.register_lazy("numba")
+@dask_deserialize.register_lazy("numba")
 def _register_numba():
     from . import numba
 
 
 @cuda_serialize.register_lazy("rmm")
 @cuda_deserialize.register_lazy("rmm")
+@dask_serialize.register_lazy("rmm")
+@dask_deserialize.register_lazy("rmm")
 def _register_rmm():
     from . import rmm
 
@@ -92,3 +108,12 @@ def _register_rmm():
 @dask_deserialize.register_lazy("cudf")
 def _register_cudf():
     from cudf.comm import serialize
+
+
+@cuda_serialize.register_lazy("cuml")
+@cuda_deserialize.register_lazy("cuml")
+@dask_serialize.register_lazy("cuml")
+@dask_deserialize.register_lazy("cuml")
+def _register_cuml():
+    with ignoring(ImportError):
+        from cuml.comm import serialize

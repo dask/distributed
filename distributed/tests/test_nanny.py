@@ -9,7 +9,7 @@ import multiprocessing as mp
 import numpy as np
 
 import pytest
-from toolz import valmap, first
+from tlz import valmap, first
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -400,6 +400,16 @@ def test_data_types(c, s):
     r = yield c.run(lambda dask_worker: type(dask_worker.data))
     assert r[w.worker_address] == dict
     yield w.close()
+
+
+@gen_cluster(nthreads=[])
+def test_local_directory(s):
+    with tmpfile() as fn:
+        with dask.config.set(temporary_directory=fn):
+            w = yield Nanny(s.address)
+            assert w.local_directory.startswith(fn)
+            assert "dask-worker-space" in w.local_directory
+            yield w.close()
 
 
 def _noop(x):

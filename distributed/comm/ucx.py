@@ -5,9 +5,8 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
-import ucp
-
 import logging
+import weakref
 
 import dask
 import numpy as np
@@ -16,19 +15,34 @@ from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
 from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors, CancelledError
-
-import dask
-import numpy as np
-
+from ..utils import (
+    ensure_ip,
+    get_ip,
+    get_ipv6,
+    nbytes,
+    log_errors,
+    CancelledError,
+    parse_bytes,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # In order to avoid double init when forking/spawning new processes (multiprocess),
-# we make sure only to import and initialize UCX once at first use.
+# we make sure only to import and initialize UCX once at first use. This is also
+# required to ensure Dask configuration gets propagated to UCX, which needs
+# variables to be set before being imported.
 ucp = None
 cuda_array = None
+
+
+def synchronize_stream(stream=0):
+    import numba.cuda
+
+    ctx = numba.cuda.current_context()
+    cu_stream = numba.cuda.driver.drvapi.cu_stream(stream)
+    stream = numba.cuda.driver.Stream(ctx, cu_stream, None)
+    stream.synchronize()
 
 
 def init_once():
@@ -39,7 +53,11 @@ def init_once():
     import ucp as _ucp
 
     ucp = _ucp
-    ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
+
+    # remove/process dask.ucx flags for valid ucx options
+    ucx_config = _scrub_ucx_config()
+
+    ucp.init(options=ucx_config, env_takes_precedence=True)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
@@ -48,18 +66,37 @@ def init_once():
         if hasattr(rmm, "DeviceBuffer"):
             cuda_array = lambda n: rmm.DeviceBuffer(size=n)
         else:  # pre-0.11.0
-            cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
+            import numba.cuda
+
+            def rmm_cuda_array(n):
+                a = rmm.device_array(n, dtype=np.uint8)
+                weakref.finalize(a, numba.cuda.current_context)
+                return a
+
+            cuda_array = rmm_cuda_array
     except ImportError:
         try:
             import numba.cuda
 
-            cuda_array = lambda n: numba.cuda.device_array((n,), dtype=np.uint8)
+            def numba_cuda_array(n):
+                a = numba.cuda.device_array((n,), dtype=np.uint8)
+                weakref.finalize(a, numba.cuda.current_context)
+                return a
+
+            cuda_array = numba_cuda_array
         except ImportError:
 
             def cuda_array(n):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
+
+    pool_size_str = dask.config.get("rmm.pool-size")
+    if pool_size_str is not None:
+        pool_size = parse_bytes(pool_size_str)
+        rmm.reinitialize(
+            pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+        )
 
 
 class UCX(Comm):
@@ -132,23 +169,34 @@ class UCX(Comm):
                 frames = await to_frames(
                     msg, serializers=serializers, on_error=on_error
                 )
+                send_frames = [
+                    each_frame for each_frame in frames if len(each_frame) > 0
+                ]
 
                 # Send meta data
-                await self.ep.send(np.array([len(frames)], dtype=np.uint64))
-                await self.ep.send(
-                    np.array(
-                        [hasattr(f, "__cuda_array_interface__") for f in frames],
-                        dtype=np.bool,
-                    )
+                cuda_frames = np.array(
+                    [hasattr(f, "__cuda_array_interface__") for f in frames],
+                    dtype=np.bool,
                 )
+                await self.ep.send(np.array([len(frames)], dtype=np.uint64))
+                await self.ep.send(cuda_frames)
                 await self.ep.send(
                     np.array([nbytes(f) for f in frames], dtype=np.uint64)
                 )
+
                 # Send frames
-                for frame in frames:
-                    if nbytes(frame) > 0:
-                        await self.ep.send(frame)
-                return sum(map(nbytes, frames))
+
+                # It is necessary to first synchronize the default stream before start sending
+                # We synchronize the default stream because UCX is not stream-ordered and
+                #  syncing the default stream will wait for other non-blocking CUDA streams.
+                # Note this is only sufficient if the memory being sent is not currently in use on
+                # non-blocking CUDA streams.
+                if cuda_frames.any():
+                    synchronize_stream(0)
+
+                for each_frame in send_frames:
+                    await self.ep.send(each_frame)
+                return sum(map(nbytes, send_frames))
             except (ucp.exceptions.UCXBaseException):
                 self.abort()
                 raise CommClosedError("While writing, the connection was closed")
@@ -174,20 +222,23 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                frames = []
-                for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
-                    if size > 0:
-                        if is_cuda:
-                            frame = cuda_array(size)
-                        else:
-                            frame = np.empty(size, dtype=np.uint8)
-                        await self.ep.recv(frame)
-                        frames.append(frame)
-                    else:
-                        if is_cuda:
-                            frames.append(cuda_array(size))
-                        else:
-                            frames.append(b"")
+                frames = [
+                    cuda_array(each_size)
+                    if is_cuda
+                    else np.empty(each_size, dtype=np.uint8)
+                    for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist())
+                ]
+                recv_frames = [
+                    each_frame for each_frame in frames if len(each_frame) > 0
+                ]
+
+                # It is necessary to first populate `frames` with CUDA arrays and synchronize
+                # the default stream before starting receiving to ensure buffers have been allocated
+                if is_cudas.any():
+                    synchronize_stream(0)
+
+                for each_frame in recv_frames:
+                    await self.ep.recv(each_frame)
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
@@ -328,3 +379,58 @@ class UCXBackend(Backend):
 
 
 backends["ucx"] = UCXBackend()
+
+
+def _scrub_ucx_config():
+    """Function to scrub dask config options for valid UCX config options"""
+
+    # configuration of UCX can happen in two ways:
+    # 1) high level on/off flags which correspond to UCX configuration
+    # 2) explicity defined UCX configuration flags
+
+    # import does not initialize ucp -- this will occur outside this function
+    from ucp import get_config
+
+    options = {}
+
+    # if any of the high level flags are set, as long as they are not Null/None,
+    # we assume we should configure basic TLS settings for UCX, otherwise we
+    # leave UCX to its default configuration
+    if any(
+        [
+            dask.config.get("ucx.tcp"),
+            dask.config.get("ucx.nvlink"),
+            dask.config.get("ucx.infiniband"),
+        ]
+    ):
+        tls = "tcp,sockcm"
+        tls_priority = "sockcm"
+
+        # CUDA COPY can optionally be used with ucx -- we rely on the user
+        # to define when messages will include CUDA objects.  Note:
+        # defining only the Infiniband flag will not enable cuda_copy
+        if any([dask.config.get("ucx.nvlink"), dask.config.get("ucx.cuda_copy")]):
+            tls = tls + ",cuda_copy"
+
+        if dask.config.get("ucx.infiniband"):
+            tls = "rc," + tls
+        if dask.config.get("ucx.nvlink"):
+            tls = tls + ",cuda_ipc"
+
+        options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
+
+        net_devices = dask.config.get("ucx.net-devices")
+        if net_devices is not None and net_devices != "":
+            options["NET_DEVICES"] = net_devices
+
+    # ANY UCX options defined in config will overwrite high level dask.ucx flags
+    valid_ucx_keys = list(get_config().keys())
+    for k, v in dask.config.get("ucx").items():
+        if k in valid_ucx_keys:
+            options[k] = v
+        else:
+            logger.debug(
+                "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
+            )
+
+    return options

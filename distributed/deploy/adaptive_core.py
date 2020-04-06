@@ -2,7 +2,7 @@ import collections
 import math
 
 from tornado.ioloop import IOLoop
-import toolz
+import tlz as toolz
 
 from ..metrics import time
 from ..utils import parse_timedelta, PeriodicCallback
@@ -13,7 +13,7 @@ class AdaptiveCore:
     The core logic for adaptive deployments, with none of the cluster details
 
     This class controls our adaptive scaling behavior.  It is intended to be
-    sued as a super-class or mixin.  It expects the following state and methods:
+    used as a super-class or mixin.  It expects the following state and methods:
 
     **State**
 

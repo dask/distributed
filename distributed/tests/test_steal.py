@@ -1,31 +1,29 @@
 import itertools
-from operator import mul
 import random
 import sys
-from time import sleep
 import weakref
+from operator import mul
+from time import sleep
 
+import dask
 import pytest
-from toolz import sliding_window, concat
-from tornado import gen
-
 from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import key_split
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
-    slowinc,
-    slowadd,
-    inc,
-    gen_cluster,
-    slowidentity,
     captured_logger,
+    gen_cluster,
+    inc,
+    nodebug_setup_module,
+    nodebug_teardown_module,
+    slowadd,
+    slowidentity,
+    slowinc,
 )
-from distributed.utils_test import nodebug_setup_module, nodebug_teardown_module
-
-import pytest
-
+from tlz import concat, sliding_window
+from tornado import gen
 
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
@@ -144,21 +142,59 @@ def test_steal_related_tasks(e, s, a, b, c):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
-def test_dont_steal_fast_tasks(c, s, *workers):
+async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     np = pytest.importorskip("numpy")
     x = c.submit(np.random.random, 10000000, workers=workers[0].address)
 
     def do_nothing(x, y=None):
         pass
 
-    yield wait(c.submit(do_nothing, 1))
+    # execute and meassure runtime once
+    await wait(c.submit(do_nothing, 1))
 
     futures = c.map(do_nothing, range(1000), y=x)
 
-    yield wait(futures)
+    await wait(futures)
 
     assert len(s.who_has[x.key]) == 1
     assert len(s.has_what[workers[0].address]) == 1001
+
+
+@gen_cluster(client=True)
+async def test_dont_steal_fast_tasks_blacklist(c, s, a, b):
+    # create a dependency
+    x = c.submit(slowinc, 1, workers=[b.address])
+
+    # If the blacklist of fast tasks is tracked somewhere else, this needs to be
+    # changed. This test requies *any* key which is blacklisted.
+    from distributed.stealing import fast_tasks
+
+    blacklisted_key = next(iter(fast_tasks))
+
+    def fast_blacklisted(x, y=None):
+        # The task should observe a certain computation time such that we can
+        # ensure that it is not stolen due to the blacklisting. If it is too
+        # fast, the standard mechansim shouldn't allow stealing
+        import time
+
+        time.sleep(0.01)
+
+    futures = c.map(
+        fast_blacklisted,
+        range(100),
+        y=x,
+        # Submit the task to one worker but allow it to be distributed else,
+        # i.e. this is not a task restriction
+        workers=[a.address],
+        allow_other_workers=True,
+        key=blacklisted_key,
+    )
+
+    await wait(futures)
+
+    # The +1 is the dependency we initially submitted to worker B
+    assert len(s.has_what[a.address]) == 101
+    assert len(s.has_what[b.address]) == 1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=20)
@@ -223,6 +259,32 @@ def test_dont_steal_worker_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 2)]
+)
+def test_steal_worker_restrictions(c, s, wa, wb, wc):
+    future = c.submit(slowinc, 1, delay=0.1, workers={wa.address, wb.address})
+    yield future
+
+    ntasks = 100
+    futures = c.map(slowinc, range(ntasks), delay=0.1, workers={wa.address, wb.address})
+
+    while sum(len(w.task_state) for w in [wa, wb, wc]) < ntasks:
+        yield gen.sleep(0.01)
+
+    assert 0 < len(wa.task_state) < ntasks
+    assert 0 < len(wb.task_state) < ntasks
+    assert len(wc.task_state) == 0
+
+    s.extensions["stealing"].balance()
+
+    yield gen.sleep(0.1)
+
+    assert 0 < len(wa.task_state) < ntasks
+    assert 0 < len(wb.task_state) < ntasks
+    assert len(wc.task_state) == 0
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
@@ -242,6 +304,34 @@ def test_dont_steal_host_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 2)])
+def test_steal_host_restrictions(c, s, wa, wb):
+    future = c.submit(slowinc, 1, delay=0.10, workers=wa.address)
+    yield future
+
+    ntasks = 100
+    futures = c.map(slowinc, range(ntasks), delay=0.1, workers="127.0.0.1")
+    while len(wa.task_state) < ntasks:
+        yield gen.sleep(0.01)
+    assert len(wa.task_state) == ntasks
+    assert len(wb.task_state) == 0
+
+    wc = yield Worker(s.address, nthreads=1)
+
+    start = time()
+    while not wc.task_state or len(wa.task_state) == ntasks:
+        yield gen.sleep(0.01)
+        assert time() < start + 3
+
+    yield gen.sleep(0.1)
+    assert 0 < len(wa.task_state) < ntasks
+    assert len(wb.task_state) == 0
+    assert 0 < len(wc.task_state) < ntasks
 
 
 @gen_cluster(
@@ -264,7 +354,6 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@pytest.mark.skip(reason="no stealing of resources")
 @gen_cluster(
     client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})], timeout=3
 )
@@ -676,3 +765,20 @@ def test_lose_task(c, s, a, b):
 
     out = log.getvalue()
     assert "Error" not in out
+
+
+@gen_cluster(client=True)
+def test_worker_stealing_interval(c, s, a, b):
+    from distributed.scheduler import WorkStealing
+
+    ws = WorkStealing(s)
+    assert ws._pc.callback_time == 100
+
+    with dask.config.set({"distributed.scheduler.work-stealing-interval": "500ms"}):
+        ws = WorkStealing(s)
+    assert ws._pc.callback_time == 500
+
+    # Default unit is `ms`
+    with dask.config.set({"distributed.scheduler.work-stealing-interval": 2}):
+        ws = WorkStealing(s)
+    assert ws._pc.callback_time == 2

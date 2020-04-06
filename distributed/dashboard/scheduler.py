@@ -8,10 +8,7 @@ import logging
 import dask
 from dask.utils import format_bytes
 
-try:
-    from cytoolz import merge, merge_with
-except ImportError:
-    from toolz import merge, merge_with
+from tlz import merge, merge_with
 
 from tornado import escape
 from tornado.websocket import WebSocketHandler
@@ -291,6 +288,16 @@ class _PrometheusCollector:
         task_counter = merge_with(
             sum, (tp.states for tp in self.server.task_prefixes.values())
         )
+
+        suspicious_tasks = CounterMetricFamily(
+            "dask_scheduler_tasks_suspicious",
+            "Total number of times a task has been marked suspicious",
+            labels=["task_prefix_name"],
+        )
+
+        for tp in self.server.task_prefixes.values():
+            suspicious_tasks.add_metric([tp.name], tp.suspicious)
+        yield suspicious_tasks
 
         yield CounterMetricFamily(
             "dask_scheduler_tasks_forgotten",

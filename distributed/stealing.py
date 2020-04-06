@@ -4,14 +4,12 @@ from math import log
 from time import time
 
 import dask
+from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, PeriodicCallback
+from .utils import log_errors, parse_timedelta, PeriodicCallback
 
-try:
-    from cytoolz import topk
-except ImportError:
-    from toolz import topk
+from tlz import topk
 
 LATENCY = 10e-3
 log_2 = log(2)
@@ -31,8 +29,6 @@ class WorkStealing(SchedulerPlugin):
         self.stealable = dict()
         # { task state: (worker, level) }
         self.key_stealable = dict()
-        # { prefix: { task states } }
-        self.stealable_unknown_durations = defaultdict(set)
 
         self.cost_multipliers = [1 + 2 ** (i - 6) for i in range(15)]
         self.cost_multipliers[0] = 1
@@ -40,8 +36,15 @@ class WorkStealing(SchedulerPlugin):
         for worker in scheduler.workers:
             self.add_worker(worker=worker)
 
+        # `callback_time` is in milliseconds
+        callback_time = 1000 * parse_timedelta(
+            dask.config.get("distributed.scheduler.work-stealing-interval"),
+            default="ms",
+        )
         pc = PeriodicCallback(
-            callback=self.balance, callback_time=100, io_loop=self.scheduler.loop
+            callback=self.balance,
+            callback_time=callback_time,
+            io_loop=self.scheduler.loop,
         )
         self._pc = pc
         self.scheduler.periodic_callbacks["stealing"] = pc
@@ -78,11 +81,7 @@ class WorkStealing(SchedulerPlugin):
 
         if start == "processing":
             self.remove_key_from_stealable(ts)
-            if finish == "memory":
-                for tts in self.stealable_unknown_durations.pop(ts.prefix, ()):
-                    if tts not in self.in_flight and tts.state == "processing":
-                        self.put_key_in_stealable(tts)
-            else:
+            if finish != "memory":
                 self.in_flight.pop(ts, None)
 
     def put_key_in_stealable(self, ts):
@@ -121,35 +120,26 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
-        if not ts.loose_restrictions and (
-            ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
-        ):
-            return None, None  # don't steal
-
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
         nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        split = ts.prefix
+        split = ts.prefix.name
         if split in fast_tasks:
             return None, None
         ws = ts.processing_on
-        if ws is None:
-            self.stealable_unknown_durations[split].add(ts)
+        compute_time = ws.processing[ts]
+        if compute_time < 0.005:  # 5ms, just give up
             return None, None
-        else:
-            compute_time = ws.processing[ts]
-            if compute_time < 0.005:  # 5ms, just give up
-                return None, None
-            cost_multiplier = transfer_time / compute_time
-            if cost_multiplier > 100:
-                return None, None
+        cost_multiplier = transfer_time / compute_time
+        if cost_multiplier > 100:
+            return None, None
 
-            level = int(round(log(cost_multiplier) / log_2 + 6, 0))
-            level = max(1, level)
-            return cost_multiplier, level
+        level = int(round(log(cost_multiplier) / log_2 + 6, 0))
+        level = max(1, level)
+        return cost_multiplier, level
 
     def move_task_request(self, ts, victim, thief):
         try:
@@ -251,7 +241,7 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.check_idle_saturated(victim)
 
             # Victim was waiting, has given up task, enact steal
-            elif state in ("waiting", "ready"):
+            elif state in ("waiting", "ready", "constrained"):
                 self.remove_key_from_stealable(ts)
                 ts.processing_on = thief
                 duration = victim.processing.pop(ts)
@@ -353,14 +343,23 @@ class WorkStealing(SchedulerPlugin):
                         i += 1
                         if not idle:
                             break
-                        idl = idle[i % len(idle)]
+
+                        if _has_restrictions(ts):
+                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
+                        else:
+                            thieves = idle
+                        if not thieves:
+                            break
+                        thief = thieves[i % len(thieves)]
 
                         duration = sat.processing.get(ts)
                         if duration is None:
                             stealable.discard(ts)
                             continue
 
-                        maybe_move_task(level, ts, sat, idl, duration, cost_multiplier)
+                        maybe_move_task(
+                            level, ts, sat, thief, duration, cost_multiplier
+                        )
 
                 if self.cost_multipliers[level] < 20:  # don't steal from public at cost
                     stealable = self.stealable_all[level]
@@ -381,10 +380,18 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        idl = idle[i % len(idle)]
+                        if _has_restrictions(ts):
+                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
+                        else:
+                            thieves = idle
+                        if not thieves:
+                            continue
+                        thief = thieves[i % len(thieves)]
                         duration = sat.processing[ts]
 
-                        maybe_move_task(level, ts, sat, idl, duration, cost_multiplier)
+                        maybe_move_task(
+                            level, ts, sat, thief, duration, cost_multiplier
+                        )
 
             if log:
                 self.log.append(log)
@@ -401,7 +408,6 @@ class WorkStealing(SchedulerPlugin):
         for s in self.stealable_all:
             s.clear()
         self.key_stealable.clear()
-        self.stealable_unknown_durations.clear()
 
     def story(self, *keys):
         keys = set(keys)
@@ -413,6 +419,43 @@ class WorkStealing(SchedulerPlugin):
                 if any(x in keys for x in t):
                     out.append(t)
         return out
+
+
+def _has_restrictions(ts):
+    """Determine whether the given task has restrictions and whether these
+    restrictions are strict.
+    """
+    return not ts.loose_restrictions and (
+        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
+    )
+
+
+def _can_steal(thief, ts, victim):
+    """Determine whether worker ``thief`` can steal task ``ts`` from worker
+    ``victim``.
+
+    Assumes that `ts` has some restrictions.
+    """
+    if (
+        ts.host_restrictions
+        and get_address_host(thief.address) not in ts.host_restrictions
+    ):
+        return False
+    elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
+        return False
+
+    if victim.resources is None:
+        return True
+
+    for resource, value in victim.resources.items():
+        try:
+            supplied = thief.resources[resource]
+        except KeyError:
+            return False
+        else:
+            if supplied < value:
+                return False
+    return True
 
 
 fast_tasks = {"shuffle-split"}

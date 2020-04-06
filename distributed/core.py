@@ -1,7 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
 from functools import partial
-from inspect import isawaitable
+import inspect
 import logging
 import threading
 import traceback
@@ -10,7 +10,7 @@ import weakref
 
 import dask
 import tblib
-from toolz import merge
+from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -312,13 +312,12 @@ class Server:
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
-        listener = listen(
+        listener = await listen(
             addr,
             self.handle_comm,
             deserialize=self.deserialize,
             connection_args=listen_args,
         )
-        await listener.start()
         self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
@@ -406,7 +405,7 @@ class Server:
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if isawaitable(result):
+                        if inspect.isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
@@ -496,7 +495,9 @@ class Server:
         for pc in self.periodic_callbacks.values():
             pc.stop()
         for listener in self.listeners:
-            self.listener.stop()
+            future = self.listener.stop()
+            if inspect.isawaitable(future):
+                yield future
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
@@ -834,8 +835,6 @@ class ConnectionPool:
         self.connection_args = connection_args
         self.timeout = timeout
         self._n_connecting = 0
-        # Invariant: semaphore._value == limit - open - _n_connecting
-        self.semaphore = asyncio.Semaphore(self.limit)
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -869,6 +868,17 @@ class ConnectionPool:
         return PooledRPCCall(
             addr, self, serializers=self.serializers, deserializers=self.deserializers
         )
+
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        # Invariant: semaphore._value == limit - open - _n_connecting
+        self.semaphore = asyncio.Semaphore(self.limit)
 
     async def connect(self, addr, timeout=None):
         """

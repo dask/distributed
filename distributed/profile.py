@@ -31,7 +31,7 @@ import sys
 import threading
 from time import sleep
 
-import toolz
+import tlz as toolz
 
 from .metrics import time
 from .utils import format_time, color_of, parse_timedelta
@@ -383,7 +383,7 @@ def plot_figure(data, **kwargs):
 
     source = ColumnDataSource(data=data)
 
-    fig = figure(tools="tap", **kwargs)
+    fig = figure(tools="tap,box_zoom,xwheel_zoom,reset", **kwargs)
     r = fig.quad(
         "left",
         "right",

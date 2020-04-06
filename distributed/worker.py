@@ -3,6 +3,7 @@ import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
+from functools import partial
 import heapq
 from inspect import isawaitable
 import logging
@@ -21,10 +22,7 @@ from dask.compatibility import apply
 from dask.utils import format_bytes, funcname
 from dask.system import CPU_COUNT
 
-try:
-    from cytoolz import pluck, partial, merge, first, keymap
-except ImportError:
-    from toolz import pluck, partial, merge, first, keymap
+from tlz import pluck, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -382,7 +380,6 @@ class Worker(ServerNode):
         self.executed_count = 0
         self.long_running = set()
 
-        self.batched_stream = None
         self.recent_messages_log = deque(
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
@@ -493,7 +490,7 @@ class Worker(ServerNode):
         if local_directory is None:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
             if not os.path.exists(local_directory):
-                os.mkdir(local_directory)
+                os.makedirs(local_directory)
             local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
@@ -573,6 +570,7 @@ class Worker(ServerNode):
         self.actor_executor = ThreadPoolExecutor(
             1, thread_name_prefix="Dask-Actor-Threads"
         )
+        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = dict()
@@ -650,6 +648,13 @@ class Worker(ServerNode):
 
         pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks["heartbeat"] = pc
+        pc = PeriodicCallback(
+            lambda: self.batched_stream.send({"op": "keep-alive"}),
+            60000,
+            io_loop=self.io_loop,
+        )
+        self.periodic_callbacks["keep-alive"] = pc
+
         self._address = contact_address
 
         if self.memory_limit:
@@ -797,6 +802,7 @@ class Worker(ServerNode):
     #####################
 
     async def _register_with_scheduler(self):
+        self.periodic_callbacks["keep-alive"].stop()
         self.periodic_callbacks["heartbeat"].stop()
         start = time()
         if self.contact_address is None:
@@ -863,15 +869,8 @@ class Worker(ServerNode):
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.batched_stream.start(comm)
-        pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}),
-            60000,
-            io_loop=self.io_loop,
-        )
-        self.periodic_callbacks["keep-alive"] = pc
-        pc.start()
+        self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
@@ -912,14 +911,16 @@ class Worker(ServerNode):
                 )
                 self.bandwidth_workers.clear()
                 self.bandwidth_types.clear()
+            except CommClosedError:
+                logger.warning("Heartbeat to scheduler failed")
+                if not self.reconnect:
+                    await self.close(report=False)
             except IOError as e:
                 # Scheduler is gone. Respect distributed.comm.timeouts.connect
                 if "Timed out trying to connect" in str(e):
                     await self.close(report=False)
                 else:
                     raise e
-            except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
             finally:
                 self.heartbeat_active = False
         else:
@@ -1010,6 +1011,8 @@ class Worker(ServerNode):
         if self.status and self.status.startswith("clos"):
             return
         assert self.status is None, self.status
+
+        await super().start()
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
@@ -1112,7 +1115,11 @@ class Worker(ServerNode):
             for k, v in self.services.items():
                 v.stop()
 
-            if self.batched_stream and not self.batched_stream.comm.closed():
+            if (
+                self.batched_stream
+                and self.batched_stream.comm
+                and not self.batched_stream.comm.closed()
+            ):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
@@ -1153,7 +1160,7 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
-    async def terminate(self, comm, report=True, **kwargs):
+    async def terminate(self, comm=None, report=True, **kwargs):
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1831,13 +1838,16 @@ class Worker(ServerNode):
 
     def send_task_state_to_scheduler(self, key):
         if key in self.data or self.actors.get(key):
-            try:
-                value = self.data[key]
-            except KeyError:
-                value = self.actors[key]
-            nbytes = self.nbytes[key] or sizeof(value)
-            typ = self.types.get(key) or type(value)
-            del value
+            nbytes = self.nbytes.get(key)
+            typ = self.types.get(key)
+            if nbytes is None or typ is None:
+                try:
+                    value = self.data[key]
+                except KeyError:
+                    value = self.actors[key]
+                nbytes = self.nbytes[key] = sizeof(value)
+                typ = self.types[key] = type(value)
+                del value
             try:
                 typ_serialized = dumps_function(typ)
             except PicklingError:
@@ -2143,7 +2153,7 @@ class Worker(ServerNode):
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
 
-        if state in ("ready", "waiting"):
+        if state in ("ready", "waiting", "constrained"):
             self.release_key(key)
 
     def release_key(self, key, cause=None, reason=None, report=True):

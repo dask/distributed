@@ -66,7 +66,7 @@ class Nanny(ServerNode):
         ncores=None,
         loop=None,
         local_dir=None,
-        local_directory="dask-worker-space",
+        local_directory=None,
         services=None,
         name=None,
         memory_limit="auto",
@@ -149,6 +149,12 @@ class Nanny(ServerNode):
         if local_dir is not None:
             warnings.warn("The local_dir keyword has moved to local_directory")
             local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            if not os.path.exists(local_directory):
+                os.makedirs(local_directory)
+            local_directory = os.path.join(local_directory, "dask-worker-space")
 
         self.local_directory = local_directory
 
@@ -235,6 +241,9 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
+
+        await super().start()
+
         await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
