@@ -162,10 +162,10 @@ class IndividualPlots(RequestHandler):
 
 
 class EventstreamHandler(WebSocketHandler):
-    def initialize(self, server=None, extra=None):
-        self.server = server
+    def initialize(self, dask_server=None, extra=None):
+        self.server = dask_server
         self.extra = extra or {}
-        self.plugin = WebsocketPlugin(self, server)
+        self.plugin = WebsocketPlugin(self, self.server)
         self.server.add_plugin(self.plugin)
 
     def send(self, name, data):
