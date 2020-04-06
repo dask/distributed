@@ -50,8 +50,8 @@ def test_routes(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs={"dashboard": True})
 def test_simple(c, s, a, b):
-    # assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
-    # assert s.workers[b.address].services == {"dashboard": b.services["dashboard"].port}
+    assert s.workers[a.address].services == {"dashboard": a.http_server.port}
+    assert s.workers[b.address].services == {"dashboard": b.http_server.port}
 
     future = c.submit(sleep, 1)
     yield gen.sleep(0.1)
@@ -68,8 +68,7 @@ def test_simple(c, s, a, b):
     client=True, worker_kwargs={"dashboard": True},
 )
 def test_services_kwargs(c, s, a, b):
-    # assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
-    pass
+    assert s.workers[a.address].services == {"dashboard": a.http_server.port}
 
 
 @gen_cluster(client=True)
