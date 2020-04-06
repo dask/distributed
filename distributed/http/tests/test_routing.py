@@ -36,11 +36,3 @@ async def test_basic():
     application.add_handlers(".*", [(r"/three", OneHandler, {})])
     response = await client.fetch("http://localhost:1234/three")
     assert response.body.decode() == "one"
-
-    # from dask.distributed import LocalCluster
-    # async with LocalCluster(processes=False, asynchronous=True) as cluster:
-    #     dashboard = cluster.scheduler.services["dashboard"]
-    #     application.applications.append(dashboard.server._tornado)
-
-    #     response = await client.fetch("http://localhost:1234/status")
-    #     assert "bokeh" in response.body.decode()
