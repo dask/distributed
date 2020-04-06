@@ -1472,7 +1472,9 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [%s]" % (self.address,))
         return self
 
-    async def close(self, comm=None, fast=False, close_workers=False):
+    async def close(
+        self, comm=None, fast=False, close_workers=False, close_clients=True
+    ):
         """ Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -1497,8 +1499,9 @@ class Scheduler(ServerNode):
                 else:
                     break
 
-        for c in self.client_comms.values():
-            c.send({"op": "scheduler-shutdown"})
+        if close_clients:
+            for c in self.client_comms.values():
+                c.send({"op": "scheduler-shutdown"})
 
         await asyncio.gather(*[plugin.close() for plugin in self.plugins])
 

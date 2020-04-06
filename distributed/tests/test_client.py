@@ -3579,7 +3579,7 @@ def test_reconnect(loop):
 @gen_cluster(client=True, nthreads=[], client_kwargs={"timeout": 0.5})
 def test_reconnect_timeout(c, s):
     with captured_logger(logging.getLogger("distributed.client")) as logger:
-        yield s.close()
+        yield s.close(close_clients=False)
         start = time()
         while c.status != "closed":
             yield c._update_scheduler_info()
@@ -5721,6 +5721,12 @@ async def test_scheduler_cleans_clients(cleanup):
 
     await s.close()
     assert c.status == "closed"
+
+    s = await Scheduler(port=0)
+    c = await Client(s.address, asynchronous=True)
+    await s.close(close_clients=False)
+    assert c.status == "connecting"
+    await c.close()
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
