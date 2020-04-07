@@ -505,7 +505,9 @@ class Worker(ServerNode):
         self.preload_argv = preload_argv
         if self.preload_argv is None:
             self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-        preloading.on_creation(self.preload, file_dir=self.local_directory)
+        self._preload_modules = preloading.on_creation(
+            self.preload, file_dir=self.local_directory
+        )
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -1027,7 +1029,7 @@ class Worker(ServerNode):
             self.name = self.address
 
         await preloading.on_start(
-            self.preload, self, argv=self.preload_argv, file_dir=self.local_directory,
+            self._preload_modules, self, argv=self.preload_argv,
         )
 
         # Services listen on all addresses
@@ -1086,9 +1088,7 @@ class Worker(ServerNode):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
 
-            await preloading.on_teardown(
-                self.preload, self, file_dir=self.local_directory
-            )
+            await preloading.on_teardown(self._preload_modules, self)
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:

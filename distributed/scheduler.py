@@ -1106,7 +1106,7 @@ class Scheduler(ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preload = preload
         self.preload_argv = preload_argv
-        preloading.on_creation(self.preload)
+        self._preload_modules = preloading.on_creation(self.preload)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -1464,7 +1464,7 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        await preloading.on_start(self.preload, self, argv=self.preload_argv)
+        await preloading.on_start(self._preload_modules, self, argv=self.preload_argv)
 
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
@@ -1488,7 +1488,7 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
-        await preloading.on_teardown(self.preload, self)
+        await preloading.on_teardown(self._preload_modules, self)
 
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)

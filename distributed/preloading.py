@@ -111,7 +111,7 @@ def _import_module(name, file_dir=None):
     }
 
 
-def on_creation(names, file_dir=None):
+def on_creation(names, file_dir: str = None) -> dict:
     """ Imports each of the preload modules
 
     Parameters
@@ -127,13 +127,13 @@ def on_creation(names, file_dir=None):
     return {name: _import_module(name, file_dir=file_dir) for name in names}
 
 
-async def on_start(names, dask_server=None, file_dir: str = None, argv=None):
-    """ Imports modules, handles `dask_setup` and `dask_teardown`.
+async def on_start(modules: dict, dask_server=None, argv=None):
+    """ Run when the server finishes its start method
 
     Parameters
     ----------
-    names: list of strings
-        Module names or file paths
+    modules: Dict[str, module]
+        The imported modules, from on_creation
     dask_server: dask.distributed.Server
         The Worker or Scheduler
     argv: [string]
@@ -141,7 +141,7 @@ async def on_start(names, dask_server=None, file_dir: str = None, argv=None):
     file_dir: string
         Path of a directory where files should be copied
     """
-    for name, interface in on_creation(names, file_dir).items():
+    for name, interface in modules.items():
         dask_setup = interface.get("dask_setup", None)
 
         if dask_setup:
@@ -157,17 +157,17 @@ async def on_start(names, dask_server=None, file_dir: str = None, argv=None):
                 logger.info("Run preload setup function: %s", name)
 
 
-async def on_teardown(names, dask_server=None, file_dir=None):
-    """ Imports modules, handles `dask_setup` and `dask_teardown`.
+async def on_teardown(modules: dict, dask_server=None):
+    """ Run when the server starts its close method
 
     Parameters
     ----------
-    names: list of strings
-        Module names or file paths
+    modules: Dict[str, module]
+        The imported modules, from on_creation
     dask_server: dask.distributed.Server
         The Worker or Scheduler
     """
-    for name, interface in on_creation(names, file_dir).items():
+    for name, interface in modules.items():
         dask_teardown = interface.get("dask_teardown", None)
         if dask_teardown:
             future = dask_teardown(dask_server)
