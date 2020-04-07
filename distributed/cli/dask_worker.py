@@ -248,6 +248,7 @@ def main(
     tls_key,
     dashboard_address,
     worker_class,
+    preload_nanny,
     **kwargs
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -357,6 +358,7 @@ def main(
     worker_class = import_term(worker_class)
     if nanny:
         kwargs["worker_class"] = worker_class
+        kwargs["preload_nanny"] = preload_nanny
 
     if nanny:
         kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
