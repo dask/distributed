@@ -79,8 +79,8 @@ class Nanny(ServerNode):
         death_timeout=None,
         preload=None,
         preload_argv=None,
-        nanny_preload=None,
-        nanny_preload_argv=None,
+        preload_nanny=None,
+        preload_nanny_argv=None,
         security=None,
         contact_address=None,
         listen_address=None,
@@ -133,12 +133,12 @@ class Nanny(ServerNode):
         if self.preload_argv is None:
             self.preload_argv = dask.config.get("distributed.worker.preload-argv")
 
-        self.nanny_preload = nanny_preload
-        if self.nanny_preload is None:
-            self.nanny_preload = dask.config.get("distributed.nanny.preload")
-        self.nanny_preload_argv = nanny_preload_argv
-        if self.nanny_preload_argv is None:
-            self.nanny_preload_argv = dask.config.get("distributed.nanny.preload-argv")
+        self.preload_nanny = preload_nanny
+        if self.preload_nanny is None:
+            self.preload_nanny = dask.config.get("distributed.nanny.preload")
+        self.preload_nanny_argv = preload_nanny_argv
+        if self.preload_nanny_argv is None:
+            self.preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
 
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
@@ -171,7 +171,7 @@ class Nanny(ServerNode):
         self.local_directory = local_directory
 
         self._preload_modules = preloading.on_creation(
-            self.nanny_preload, file_dir=self.local_directory
+            self.preload_nanny, file_dir=self.local_directory
         )
 
         self.services = services
