@@ -71,6 +71,10 @@ distributed:
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
+  nanny:
+    preload: []
+    preload-argv: []
+
   client:
     heartbeat: 5s  # time between client heartbeats
 
