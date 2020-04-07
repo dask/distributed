@@ -1464,7 +1464,7 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        await preloading.on_start(self.preload, parameter=self, argv=self.preload_argv)
+        await preloading.on_start(self.preload, self, argv=self.preload_argv)
 
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
@@ -1488,7 +1488,7 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
-        await preloading.on_teardown(self.preload, parameter=self)
+        await preloading.on_teardown(self.preload, self)
 
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)

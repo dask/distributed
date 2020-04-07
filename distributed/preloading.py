@@ -112,16 +112,12 @@ def _import_module(name, file_dir=None):
 
 
 def on_creation(names, file_dir=None):
-    """ Imports modules, handles `dask_setup` and `dask_teardown`.
+    """ Imports each of the preload modules
 
     Parameters
     ----------
     names: list of strings
         Module names or file paths
-    parameter: object
-        Parameter passed to `dask_setup` and `dask_teardown`
-    argv: [string]
-        List of string arguments passed to click-configurable `dask_setup`.
     file_dir: string
         Path of a directory where files should be copied
     """
@@ -131,15 +127,15 @@ def on_creation(names, file_dir=None):
     return {name: _import_module(name, file_dir=file_dir) for name in names}
 
 
-async def on_start(names, parameter=None, file_dir=None, argv=None):
+async def on_start(names, dask_server=None, file_dir: str = None, argv=None):
     """ Imports modules, handles `dask_setup` and `dask_teardown`.
 
     Parameters
     ----------
     names: list of strings
         Module names or file paths
-    parameter: object
-        Parameter passed to `dask_setup` and `dask_teardown`
+    dask_server: dask.distributed.Server
+        The Worker or Scheduler
     argv: [string]
         List of string arguments passed to click-configurable `dask_setup`.
     file_dir: string
@@ -153,27 +149,27 @@ async def on_start(names, parameter=None, file_dir=None, argv=None):
                 context = dask_setup.make_context(
                     "dask_setup", list(argv), allow_extra_args=False
                 )
-                dask_setup.callback(parameter, *context.args, **context.params)
+                dask_setup.callback(dask_server, *context.args, **context.params)
             else:
-                future = dask_setup(parameter)
+                future = dask_setup(dask_server)
                 if inspect.isawaitable(future):
                     await future
                 logger.info("Run preload setup function: %s", name)
 
 
-async def on_teardown(names, parameter=None, file_dir=None):
+async def on_teardown(names, dask_server=None, file_dir=None):
     """ Imports modules, handles `dask_setup` and `dask_teardown`.
 
     Parameters
     ----------
     names: list of strings
         Module names or file paths
-    parameter: object
-        Parameter passed to `dask_setup` and `dask_teardown`
+    dask_server: dask.distributed.Server
+        The Worker or Scheduler
     """
     for name, interface in on_creation(names, file_dir).items():
         dask_teardown = interface.get("dask_teardown", None)
         if dask_teardown:
-            future = dask_teardown(parameter)
+            future = dask_teardown(dask_server)
             if inspect.isawaitable(future):
                 await future

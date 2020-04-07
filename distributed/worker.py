@@ -1027,10 +1027,7 @@ class Worker(ServerNode):
             self.name = self.address
 
         await preloading.on_start(
-            self.preload,
-            parameter=self,
-            argv=self.preload_argv,
-            file_dir=self.local_directory,
+            self.preload, self, argv=self.preload_argv, file_dir=self.local_directory,
         )
 
         # Services listen on all addresses
@@ -1090,7 +1087,7 @@ class Worker(ServerNode):
             self.status = "closing"
 
             await preloading.on_teardown(
-                self.preload, parameter=self, file_dir=self.local_directory
+                self.preload, self, file_dir=self.local_directory
             )
 
             if nanny and self.nanny:
