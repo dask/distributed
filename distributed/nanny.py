@@ -264,7 +264,7 @@ class Nanny(ServerNode):
         self.ip = get_address_host(self.address)
 
         await preloading.on_start(
-            self._preload_modules, self, argv=self.preload_argv,
+            self._preload_modules, self, argv=self.preload_nanny_argv,
         )
 
         logger.info("        Start Nanny at: %r", self.address)
