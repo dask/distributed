@@ -216,16 +216,10 @@ def start_scheduler(
     ssh_port,
     ssh_private_key,
     remote_python=None,
-    local_directory=None,
 ):
     cmd = "{python} -m distributed.cli.dask_scheduler --port {port}".format(
         python=remote_python or sys.executable, port=port, logdir=logdir
     )
-
-    if local_directory is not None:
-        cmd += " --local-directory {local_directory}".format(
-            local_directory=local_directory
-        )
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
@@ -422,7 +416,6 @@ class SSHCluster:
             ssh_port,
             ssh_private_key,
             remote_python,
-            local_directory,
         )
 
         # Start worker nodes

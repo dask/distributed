@@ -82,7 +82,7 @@ from distributed.cli.utils import check_python_3
     default=None,
     type=click.Path(exists=True),
     help=(
-        "Directory to use on all cluster nodes to place workers " "and scheduler files."
+        "Directory to use on all cluster nodes to place workers files."
     ),
 )
 @click.option(
