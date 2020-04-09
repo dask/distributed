@@ -38,6 +38,10 @@ distributed:
         ca-file: null
         key: null
         cert: null
+      bokeh-application:  # keywords to pass to BokehTornado application
+        allow_websocket_origin: ["*"]
+        keep_alive_milliseconds: 500
+        check_unused_sessions_milliseconds: 500
     locks:
       lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
 

@@ -184,21 +184,19 @@ async def test_task_page(c, s, a, b):
     assert "memory" in body
 
 
-"""  # Need to figure out about other http server keywords
 @gen_cluster(
     client=True,
-    scheduler_kwargs={
-        "services": {
-            ("dashboard", 0): (
-                BokehScheduler,
-                {"allow_websocket_origin": ["good.invalid"]},
-            )
-        }
+    scheduler_kwargs={"dashboard": True},
+    config={
+        "distributed.scheduler.dashboard.bokeh-application.allow_websocket_origin": [
+            "good.invalid"
+        ]
     },
 )
 async def test_allow_websocket_origin(c, s, a, b):
     from tornado.httpclient import HTTPRequest
     from tornado.websocket import websocket_connect
+
     url = (
         "ws://localhost:%d/status/ws?bokeh-protocol-version=1.0&bokeh-session-id=1"
         % s.http_server.port
@@ -208,7 +206,6 @@ async def test_allow_websocket_origin(c, s, a, b):
             HTTPRequest(url, headers={"Origin": "http://evil.invalid"})
         )
     assert err.value.code == 403
-"""
 
 
 @gen_cluster(client=True)

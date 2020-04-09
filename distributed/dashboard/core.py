@@ -4,8 +4,10 @@ import warnings
 
 import bokeh
 from bokeh.server.server import BokehTornado
+from bokeh.server.util import create_hosts_whitelist
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.application import Application
+import dask
 import toolz
 
 
@@ -30,12 +32,15 @@ def BokehApplication(applications, server, prefix="/", template_variables={}):
         for k, v in applications.items()
     }
     apps = {k: Application(FunctionHandler(v)) for k, v in apps.items()}
+    kwargs = dask.config.get("distributed.scheduler.dashboard.bokeh-application").copy()
+    extra_websocket_origins = create_hosts_whitelist(
+        kwargs.pop("allow_websocket_origin"), server.http_server.port
+    )
 
     application = BokehTornado(
         apps,
-        extra_websocket_origins=["*"],
-        keep_alive_milliseconds=500,
-        check_unused_sessions_milliseconds=500,
         use_index=False,
+        extra_websocket_origins=extra_websocket_origins,
+        **kwargs,
     )
     return application
