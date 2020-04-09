@@ -89,8 +89,6 @@ class Worker(Process):
         self.proc = await self.connection.create_process(
             " ".join(
                 [
-                    'DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
                     sys.executable,
                     "-m",
                     self.worker_module,
@@ -99,7 +97,12 @@ class Worker(Process):
                     str(self.name),
                 ]
                 + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
-            )
+            ),
+            env={
+                "DASK_INTERNAL_INHERIT_CONFIG": serialize_for_cli(
+                    dask.config.global_config
+                )
+            },
         )
 
         # We watch stderr in order to get the address, then we return
@@ -146,15 +149,14 @@ class Scheduler(Process):
 
         self.proc = await self.connection.create_process(
             " ".join(
-                [
-                    'DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
-                    "-m",
-                    "distributed.cli.dask_scheduler",
-                ]
+                [sys.executable, "-m", "distributed.cli.dask_scheduler",]
                 + cli_keywords(self.kwargs, cls=_Scheduler)
-            )
+            ),
+            env={
+                "DASK_INTERNAL_INHERIT_CONFIG": serialize_for_cli(
+                    dask.config.global_config
+                )
+            },
         )
 
         # We watch stderr in order to get the address, then we return
