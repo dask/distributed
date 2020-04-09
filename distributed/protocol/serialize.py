@@ -132,8 +132,29 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
+    # Check for "dask"-serializable data in large collections.
+    # We will iterate through small collections by default (<=5).
+    # We will not iterate through any collections larger than 64
+    supported = False
+    if type(x) in (list, set, tuple):
+        supported = len(x) <= 5
+        if not supported and len(x) <= 64:
+            try:
+                dask_serialize.dispatch(type(x[0]))
+                supported = True
+            except TypeError:
+                pass
+    elif type(x) is dict:
+        supported = len(x) <= 5
+        if not supported and len(x) <= 64:
+            try:
+                dask_serialize.dispatch(type(next(iter(x.items()))[1]))
+                supported = True
+            except TypeError:
+                pass
+
     # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and len(x) <= 5:
+    if type(x) is dict and supported:
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -143,9 +164,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     if (
         type(x) in (list, set, tuple)
-        and len(x) <= 5
+        and supported
         or type(x) is dict
-        and len(x) <= 5
+        and supported
         and dict_safe
     ):
         if isinstance(x, dict):
