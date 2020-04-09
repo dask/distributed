@@ -132,15 +132,15 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    # Check for "dask"-serializable data in large collections.
-    # We will iterate through small collections by default (<=5).
-    # We will not iterate through any collections larger than 64
+    # Check for "dask"-serializable data in large data structures.
+    # We will iterate through small structures by default (<=5).
+    # We will not iterate through any structures larger than 64
     supported = False
     if type(x) in (list, set, tuple):
         supported = len(x) <= 5
         if not supported and len(x) <= 64:
             try:
-                dask_serialize.dispatch(type(x[0]))
+                dask_serialize.dispatch(type(next(iter(x))))
                 supported = True
             except TypeError:
                 pass
