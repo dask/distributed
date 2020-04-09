@@ -44,6 +44,7 @@ API
    Client.unpublish_dataset
    Client.upload_file
    Client.who_has
+   Client.wait_for_workers
 
 .. currentmodule:: distributed
 
