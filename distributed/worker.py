@@ -35,7 +35,7 @@ from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from .preloading import preload_modules
+from . import preloading
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
 from .pubsub import PubSubWorkerExtension
@@ -455,7 +455,7 @@ class Worker(ServerNode):
         # Target interface on which we contact the scheduler by default
         # TODO: it is unfortunate that we special-case inproc here
         if not host and not interface and not scheduler_addr.startswith("inproc://"):
-            host = get_ip(get_address_host(scheduler_addr))
+            host = get_ip(get_address_host(scheduler_addr.split("://")[-1]))
 
         self._start_address = address_from_user_args(
             host=host,
@@ -473,12 +473,7 @@ class Worker(ServerNode):
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
-        self.preload = preload
-        if self.preload is None:
-            self.preload = dask.config.get("distributed.worker.preload")
-        self.preload_argv = preload_argv
-        if self.preload_argv is None:
-            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+
         self.memory_monitor_interval = parse_timedelta(
             memory_monitor_interval, default="ms"
         )
@@ -507,10 +502,19 @@ class Worker(ServerNode):
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
+        self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
+        self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+        self._preload_modules = preloading.on_creation(
+            self.preload, file_dir=self.local_directory
+        )
+
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
@@ -820,9 +824,7 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                comm = await connect(
-                    self.scheduler.address, connection_args=self.connection_args
-                )
+                comm = await connect(self.scheduler.address, **self.connection_args)
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -1026,18 +1028,18 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        await self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(
+            self._start_address, **self.security.get_listen_args("worker")
+        )
         self.ip = get_address_host(self.address)
 
         if self.name is None:
             self.name = self.address
 
-        preload_modules(
-            self.preload,
-            parameter=self,
-            file_dir=self.local_directory,
-            argv=self.preload_argv,
+        await preloading.on_start(
+            self._preload_modules, self, argv=self.preload_argv,
         )
+
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
@@ -1093,6 +1095,8 @@ class Worker(ServerNode):
             if self.status not in ("running", "closing-gracefully"):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
+
+            await preloading.on_teardown(self._preload_modules, self)
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
@@ -1188,7 +1192,7 @@ class Worker(ServerNode):
 
             async def batched_send_connect():
                 comm = await connect(
-                    address, connection_args=self.connection_args  # TODO, serialization
+                    address, **self.connection_args  # TODO, serialization
                 )
                 comm.name = "Worker->Worker"
                 await comm.write({"op": "connection_stream"})

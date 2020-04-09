@@ -32,7 +32,9 @@ def test_defaults(loop):
         @gen.coroutine
         def f():
             # Default behaviour is to listen on all addresses
-            yield [assert_can_connect_from_everywhere_4_6(8786, 5.0)]  # main port
+            yield [
+                assert_can_connect_from_everywhere_4_6(8786, timeout=5.0)
+            ]  # main port
 
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             c.sync(f)
@@ -51,7 +53,7 @@ def test_hostport(loop):
         def f():
             yield [
                 # The scheduler's main port can't be contacted from the outside
-                assert_can_connect_locally_4(8978, 5.0)
+                assert_can_connect_locally_4(8978, timeout=5.0)
             ]
 
         with Client("127.0.0.1:8978", loop=loop) as c:
@@ -390,3 +392,28 @@ def test_idle_timeout(loop):
     )
     stop = time()
     assert 1 < stop - start < 10
+
+
+def test_multiple_workers(loop):
+    text = """
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    with popen(["dask-scheduler", "--no-dashboard"]) as s:
+        with popen(
+            [
+                "dask-worker",
+                "localhost:8786",
+                "--no-dashboard",
+                "--preload",
+                text,
+                "--preload-nanny",
+                text,
+            ]
+        ) as a:
+            with Client("127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(1)
+                [foo] = c.run(lambda dask_worker: dask_worker.foo).values()
+                assert foo == "setup"
+                [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
+                assert foo == "setup"
