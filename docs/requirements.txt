@@ -7,3 +7,4 @@ dask
 sphinx
 dask_sphinx_theme
 sphinx-click
+sphinx-jsonschema
