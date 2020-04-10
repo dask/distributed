@@ -147,9 +147,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
         return x.header, x.frames
 
     # Check for "dask"-serializable data in dict/list/set
-    supported = isinstance(x, list) and "pickle" not in serializers
-    if not supported:
-        supported = check_dask_serializable(x)
+    supported = (
+        isinstance(x, list) and "pickle" not in serializers
+    ) or check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
     if type(x) is dict and supported:
