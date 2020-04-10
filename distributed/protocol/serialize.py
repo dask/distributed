@@ -90,25 +90,21 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
-def check_dask_serializable_collection(x):
-    supported = False
+def check_dask_serializable(x, serializers=None):
+    serializers = serializers or []
     if type(x) in (list, set, tuple):
-        supported = len(x) <= 5
-        if not supported:
-            try:
-                dask_serialize.dispatch(type(next(iter(x))))
-                supported = True
-            except TypeError:
-                pass
+        if type(x) is list and "pickle" not in serializers:
+            return True  # msgpack seems to get this wrong
+        return check_dask_serializable(next(iter(x)))
     elif type(x) is dict:
-        supported = len(x) <= 5
-        if not supported:
-            try:
-                dask_serialize.dispatch(type(next(iter(x.items()))[1]))
-                supported = True
-            except TypeError:
-                pass
-    return supported
+        return check_dask_serializable(next(iter(x.items()))[1])
+    else:
+        try:
+            dask_serialize.dispatch(type(x))
+            return True
+        except TypeError:
+            pass
+    return False
 
 
 def serialize(x, serializers=None, on_error="message", context=None):
@@ -154,7 +150,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
         return x.header, x.frames
 
     # Check for "dask"-serializable data in dict/list/set
-    supported = check_dask_serializable_collection(x)
+    supported = check_dask_serializable(x, serializers=serializers)
 
     # Determine whether keys are safe to be serialized with msgpack
     if type(x) is dict and supported:
