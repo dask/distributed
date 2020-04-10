@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import os
+import yaml
 
 import pytest
 
@@ -265,3 +266,17 @@ qualname=foo.bar
             """
         subprocess.check_call([sys.executable, "-c", code])
     os.remove(logging_config.name)
+
+
+def test_schema():
+    jsonschema = pytest.importorskip("jsonschema")
+    config_fn = os.path.join(os.path.dirname(__file__), "..", "distributed.yaml")
+    schema_fn = os.path.join(os.path.dirname(__file__), "..", "distributed-schema.yaml")
+
+    with open(config_fn) as f:
+        config = yaml.safe_load(f)
+
+    with open(schema_fn) as f:
+        schema = yaml.safe_load(f)
+
+    jsonschema.validate(config, schema)
