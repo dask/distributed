@@ -394,10 +394,8 @@ def test_compression_numpy_list():
 @pytest.mark.parametrize(
     "test_pair",
     [
-        ({"x": 1}, False),
-        (["x", "y", "z"], False),
+        ({i: i for i in range(10)}, False),
         (set(range(10)), False),
-        ({"x": {"y": "z"}}, False),
         (tuple(range(100)), False),
         ({"x": MyObj(5)}, True),
         pytest.param(
