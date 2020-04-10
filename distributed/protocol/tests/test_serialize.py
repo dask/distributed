@@ -21,6 +21,7 @@ from distributed.protocol import (
     register_serialization_family,
     dask_serialize,
 )
+from distributed.protocol.serialize import check_dask_serializable_collection
 from distributed.utils import nbytes
 from distributed.utils_test import inc, gen_test
 from distributed.comm.utils import to_frames, from_frames
@@ -388,3 +389,28 @@ def test_compression_numpy_list():
 
     header, frames = serialize([MyObj(), MyObj()])
     assert header["compression"] == [False, False]
+
+
+@pytest.mark.parametrize(
+    "test_pair",
+    [
+        ({"x": 1}, False),
+        (["x", "y", "z"], False),
+        (set(range(10)), False),
+        ({"x": {"y": "z"}}, False),
+        (tuple(range(100)), False),
+        ({"x": MyObj(5)}, True),
+        pytest.param(
+            ([1, MyObj(5)], True),
+            marks=pytest.mark.xfail(reason="Only checks 0th element for now."),
+        ),
+        ([MyObj([0, 1, 2]), 1], True),
+        (tuple([MyObj(None)]), True),
+        ({("x", i): MyObj(5) for i in range(100)}, True),
+    ],
+)
+def test_check_dask_serializable_collection(test_pair):
+    result = check_dask_serializable_collection(test_pair[0])
+    expected = test_pair[1]
+
+    assert result == expected

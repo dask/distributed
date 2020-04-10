@@ -90,6 +90,22 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
+def check_dask_serializable_collection(x):
+    if type(x) in (list, set, tuple):
+        try:
+            dask_serialize.dispatch(type(next(iter(x))))
+            return True
+        except TypeError:
+            pass
+    elif type(x) is dict:
+        try:
+            dask_serialize.dispatch(type(next(iter(x.items()))[1]))
+            return True
+        except TypeError:
+            pass
+    return False
+
+
 def serialize(x, serializers=None, on_error="message", context=None):
     r"""
     Convert object to a header and list of bytestrings
@@ -132,26 +148,8 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    # Check for "dask"-serializable data in large data structures.
-    # We will iterate through small structures by default (<=5).
-    # We will not iterate through any structures larger than 64
-    supported = False
-    if type(x) in (list, set, tuple):
-        supported = len(x) <= 5
-        if not supported and len(x) <= 64:
-            try:
-                dask_serialize.dispatch(type(next(iter(x))))
-                supported = True
-            except TypeError:
-                pass
-    elif type(x) is dict:
-        supported = len(x) <= 5
-        if not supported and len(x) <= 64:
-            try:
-                dask_serialize.dispatch(type(next(iter(x.items()))[1]))
-                supported = True
-            except TypeError:
-                pass
+    # Check for "dask"-serializable data in dict/list/set
+    supported = check_dask_serializable_collection(x)
 
     # Determine whether keys are safe to be serialized with msgpack
     if type(x) is dict and supported:
