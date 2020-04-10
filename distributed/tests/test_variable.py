@@ -46,8 +46,8 @@ async def test_delete_unset_variable(c, s, a, b):
     x = Variable()
     assert x.client is c
     with captured_logger(logging.getLogger("distributed.utils")) as logger:
-        yield x.delete()
-        yield c.close()
+        await x.delete()
+        await c.close()
     text = logger.getvalue()
     assert "KeyError" not in text
 
