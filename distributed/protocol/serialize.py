@@ -90,11 +90,8 @@ register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
 register_serialization_family("error", None, serialization_error_loads)
 
 
-def check_dask_serializable(x, serializers=None):
-    serializers = serializers or []
+def check_dask_serializable(x):
     if type(x) in (list, set, tuple):
-        if type(x) is list and "pickle" not in serializers:
-            return True  # msgpack seems to get this wrong
         return check_dask_serializable(next(iter(x)))
     elif type(x) is dict:
         return check_dask_serializable(next(iter(x.items()))[1])
@@ -150,10 +147,10 @@ def serialize(x, serializers=None, on_error="message", context=None):
         return x.header, x.frames
 
     # Check for "dask"-serializable data in dict/list/set
-    supported = check_dask_serializable(x, serializers=serializers)
+    supported = check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and supported:
+    if type(x) is dict and (supported or len(x) <= 5):
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -163,9 +160,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     if (
         type(x) in (list, set, tuple)
-        and supported
+        and (supported or len(x) <= 5)
         or type(x) is dict
-        and supported
+        and (supported or len(x) <= 5)
         and dict_safe
     ):
         if isinstance(x, dict):
