@@ -92,12 +92,16 @@ register_serialization_family("error", None, serialization_error_loads)
 
 def check_dask_serializable_collection(x):
     if type(x) in (list, set, tuple):
+        if len(x) <= 5:
+            return True
         try:
             dask_serialize.dispatch(type(next(iter(x))))
             return True
         except TypeError:
             pass
     elif type(x) is dict:
+        if len(x) <= 5:
+            return True
         try:
             dask_serialize.dispatch(type(next(iter(x.items()))[1]))
             return True
