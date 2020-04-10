@@ -92,16 +92,12 @@ register_serialization_family("error", None, serialization_error_loads)
 
 def check_dask_serializable_collection(x):
     if type(x) in (list, set, tuple):
-        if len(x) <= 5:
-            return True
         try:
             dask_serialize.dispatch(type(next(iter(x))))
             return True
         except TypeError:
             pass
     elif type(x) is dict:
-        if len(x) <= 5:
-            return True
         try:
             dask_serialize.dispatch(type(next(iter(x.items()))[1]))
             return True
@@ -156,7 +152,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
     supported = check_dask_serializable_collection(x)
 
     # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and supported:
+    if type(x) is dict and (supported or len(x) <= 5):
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -166,9 +162,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     if (
         type(x) in (list, set, tuple)
-        and supported
+        and (supported or len(x) <= 5)
         or type(x) is dict
-        and supported
+        and (supported or len(x) <= 5)
         and dict_safe
     ):
         if isinstance(x, dict):
