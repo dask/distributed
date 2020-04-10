@@ -91,9 +91,9 @@ register_serialization_family("error", None, serialization_error_loads)
 
 
 def check_dask_serializable(x):
-    if type(x) in (list, set, tuple):
+    if type(x) in (list, set, tuple) and len(x):
         return check_dask_serializable(next(iter(x)))
-    elif type(x) is dict:
+    elif type(x) is dict and len(x):
         return check_dask_serializable(next(iter(x.items()))[1])
     else:
         try:
