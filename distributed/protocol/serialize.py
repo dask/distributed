@@ -148,9 +148,10 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     # Check for "dask"-serializable data in dict/list/set
     supported = check_dask_serializable(x)
+    special_case = isinstance(x, list) and "pickle" not in serializers
 
     # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and (supported or len(x) <= 5):
+    if type(x) is dict and (supported or special_case):
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -160,9 +161,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     if (
         type(x) in (list, set, tuple)
-        and (supported or len(x) <= 5)
+        and (supported or special_case)
         or type(x) is dict
-        and (supported or len(x) <= 5)
+        and (supported or special_case)
         and dict_safe
     ):
         if isinstance(x, dict):
