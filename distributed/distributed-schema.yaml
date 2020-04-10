@@ -1,0 +1,32 @@
+properties:
+  distributed:
+    type: object
+    properties:
+
+      version:
+        type: integer
+
+      scheduler:
+        type: object
+        properties:
+
+          allowed-failures:
+            type: integer
+            minimum: 0
+            description:
+              The number of retries before a task is considered bad
+
+              When a worker dies when a task is running that task is rerun elsewhere.
+              If many workers die while running this same task then we call the task bad, and raise a KilledWorker exception.
+              This is the number of workers that are allowed to die before this task is marked as bad.
+
+          bandwidth:
+            type:
+            - integer
+            - string
+            description:
+              The expected bandwidth between any pair of workers
+
+              This is used when making scheduling decisions.
+              The scheduler will use this value as a baseline, but also learn it over time.
+
