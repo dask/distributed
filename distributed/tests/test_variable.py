@@ -42,7 +42,7 @@ def test_variable(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_delete_unset_variable(c, s, a, b):
+async def test_delete_unset_variable(c, s, a, b):
     x = Variable()
     assert x.client is c
     with captured_logger(logging.getLogger("distributed.utils")) as logger:
