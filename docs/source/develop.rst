@@ -27,8 +27,8 @@ On Windows:
 1. Install anaconda or miniconda
 2. ::
 
-    conda create -n distributed python=3.8 tornado=6
-    conda activate distributed
+    conda create -n dask-distributed python=3.8 tornado=6
+    conda activate dask-distributed
     conda env update --file continuous_integration/environment-windows.yml
     python -m pip install .
 
