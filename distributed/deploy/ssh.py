@@ -70,6 +70,7 @@ class Worker(Process):
         connect_options: dict,
         kwargs: dict,
         worker_module="distributed.cli.dask_worker",
+        python_remote=None,
         loop=None,
         name=None,
     ):
@@ -81,6 +82,7 @@ class Worker(Process):
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.name = name
+        self.python_remote = python_remote
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -91,7 +93,7 @@ class Worker(Process):
                 [
                     'DASK_INTERNAL_INHERIT_CONFIG="%s"'
                     % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
+                    self.python_remote or sys.executable,
                     "-m",
                     self.worker_module,
                     self.scheduler,
@@ -130,12 +132,15 @@ class Scheduler(Process):
         dask.distributed.Scheduler class
     """
 
-    def __init__(self, address: str, connect_options: dict, kwargs: dict):
+    def __init__(
+        self, address: str, connect_options: dict, kwargs: dict, python_remote=None
+    ):
         super().__init__()
 
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
+        self.python_remote = python_remote
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -149,7 +154,7 @@ class Scheduler(Process):
                 [
                     'DASK_INTERNAL_INHERIT_CONFIG="%s"'
                     % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
+                    self.python_remote or sys.executable,
                     "-m",
                     "distributed.cli.dask_scheduler",
                 ]
@@ -195,6 +200,7 @@ def SSHCluster(
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
+    python_remote: str = None,
     **kwargs
 ):
     """ Deploy a Dask cluster using SSH
@@ -229,6 +235,8 @@ def SSHCluster(
         Keywords to pass on to scheduler.
     worker_module: str, optional
         Python module to call to start the worker.
+    python_remote: str, optional
+        Path to Python on remote nodes.
 
     Examples
     --------
@@ -275,6 +283,7 @@ def SSHCluster(
             "address": hosts[0],
             "connect_options": connect_options,
             "kwargs": scheduler_options,
+            "python_remote": python_remote,
         },
     }
     workers = {
@@ -285,6 +294,7 @@ def SSHCluster(
                 "connect_options": connect_options,
                 "kwargs": worker_options,
                 "worker_module": worker_module,
+                "python_remote": python_remote,
             },
         }
         for i, host in enumerate(hosts[1:])
