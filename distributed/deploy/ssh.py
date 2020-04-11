@@ -58,6 +58,8 @@ class Worker(Process):
         The python module to run to start the worker.
     connect_options: dict
         kwargs to be passed to asyncssh connections
+    python_remote: str
+        Path to Python on remote node to run this worker.
     kwargs: dict
         These will be passed through the dask-worker CLI to the
         dask.distributed.Worker class
@@ -127,6 +129,8 @@ class Scheduler(Process):
         The hostname where we should run this worker
     connect_options: dict
         kwargs to be passed to asyncssh connections
+    python_remote: str
+        Path to Python on remote node to run this scheduler.
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
         dask.distributed.Scheduler class
