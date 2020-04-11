@@ -175,7 +175,7 @@ class Scheduler(Process):
             # retry without env command
             if not line.strip() and retry_flag:
                 retry_flag = False
-                logger.info("Retry creating process without env command")
+                logger.debug("Retry creating process without env command")
                 self.proc = await self.connection.create_process(
                     cmd.replace(
                         "env DASK_INTERNAL_INHERIT_CONFIG=",
