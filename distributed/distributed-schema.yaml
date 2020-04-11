@@ -93,3 +93,22 @@ properties:
             type: string
             description:
               How frequently to balance worker loads
+
+          worker-ttl:
+            type:
+            - string
+            - "null"
+            description:
+              Time to live for workers.
+
+              If we don't receive a heartbeat faster than this then we assume that the worker has died.
+
+          pickle:
+            type: boolean
+            description:
+              Is the scheduler allowed to deserialize arbitrary bytestrings?
+
+              The scheduler almost never deserializes user data.
+              However there are some cases where the user can submit functions to run directly on the scheduler.
+              This can be convenient for debugging, but also introduces some security risk.
+              By setting this to false we ensure that the user is unable to run arbitrary code on the scheduler.
