@@ -16,7 +16,7 @@ Clone this repository with git::
    git clone git@github.com:dask/distributed.git
    cd distributed
 
-Install all dependencies to match CI:
+Install all dependencies:
 
 On Linux / MacOSX::
 
