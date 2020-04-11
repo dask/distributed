@@ -5,6 +5,12 @@
 
 # Note we disable progress bars to make Travis log loading much faster
 
+# Set default variable values if unset
+# (useful when this script is not invoked by Travis)
+: ${PYTHON:=3.8}
+: ${TORNADO:=6}
+: ${PACKAGES:=python-snappy python-blosc}
+
 # Install conda
 case "$(uname -s)" in
     'Darwin')
@@ -16,18 +22,21 @@ case "$(uname -s)" in
     *)  ;;
 esac
 
-wget https://repo.continuum.io/miniconda/$MINICONDA_FILENAME -O miniconda.sh
-bash miniconda.sh -b -p $HOME/miniconda
-export PATH="$HOME/miniconda/bin:$PATH"
-conda config --set always_yes yes --set changeps1 no
-conda update -q conda
+if ! which conda; then
+  wget https://repo.continuum.io/miniconda/$MINICONDA_FILENAME -O miniconda.sh
+  bash miniconda.sh -b -p $HOME/miniconda
+  export PATH="$HOME/miniconda/bin:$PATH"
+fi
+
+conda config --set always_yes yes --set quiet yes --set changeps1 no
+conda update conda
 
 # Create conda environment
-conda create -q -n test-environment python=$PYTHON
-source activate test-environment
+conda create -n distributed -c pkgs/main python=$PYTHON
+source activate distributed
 
 # Install dependencies
-conda install -c conda-forge -q \
+conda install -c conda-forge \
     asyncssh \
     bokeh \
     click \
@@ -39,17 +48,17 @@ conda install -c conda-forge -q \
     ipywidgets \
     joblib \
     jupyter_client \
-    msgpack-python>=0.6.0 \
+    msgpack-python \
     netcdf4 \
     paramiko \
     prometheus_client \
     psutil \
-    pytest>=4 \
+    pytest \
     pytest-timeout \
-    python=$PYTHON \
     requests \
+    scikit-learn \
     scipy \
-    tblib>=1.5.0 \
+    tblib \
     toolz \
     tornado=$TORNADO \
     zstandard \
@@ -60,12 +69,11 @@ conda install -c conda-forge -q \
 if [[ $PYTHON != 3.8 ]]; then
     # For low-level profiler, install libunwind and stacktrace from conda-forge
     # For stacktrace we use --no-deps to avoid upgrade of python
-    conda install -c defaults -c conda-forge libunwind
-    conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
-fi;
+    conda install -c pgks/main -c conda-forge libunwind
+    conda install --no-deps -c pgks/main -c numba -c conda-forge stacktrace
+fi
 
 python -m pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
-
 python -m pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
@@ -75,9 +83,9 @@ python -m pip install -q sortedcollections --no-deps
 python -m pip install -q keras --upgrade --no-deps
 
 if [[ $CRICK == true ]]; then
-    conda install -q cython
+    conda install -c pkgs/main cython
     python -m pip install -q git+https://github.com/jcrist/crick.git
-fi;
+fi
 
 # Install distributed
 python -m pip install --no-deps -e .
