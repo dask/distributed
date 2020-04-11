@@ -86,10 +86,26 @@ class Worker(Process):
         import asyncssh  # import now to avoid adding to module startup time
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
+
+        result = await self.connection.run("uname")
+        if result.exit_status == 0:
+            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+                serialize_for_cli(dask.config.global_config)
+            )
+        else:
+            result = await self.connection.run("cmd /c ver")
+            if result.exit_status == 0:
+                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                    serialize_for_cli(dask.config.global_config)
+                )
+            else:
+                raise Exception(
+                    "Worker failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
+                )
+
         cmd = " ".join(
             [
-                'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                % serialize_for_cli(dask.config.global_config),
+                set_env,
                 sys.executable,
                 "-m",
                 self.worker_module,
@@ -103,20 +119,8 @@ class Worker(Process):
         self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
-        retry_flag = True
         while True:
             line = await self.proc.stderr.readline()
-            # retry without env command
-            if not line.strip() and retry_flag:
-                retry_flag = False
-                logger.debug("Retry creating process without env command")
-                self.proc = await self.connection.create_process(
-                    cmd.replace(
-                        "env DASK_INTERNAL_INHERIT_CONFIG=",
-                        "DASK_INTERNAL_INHERIT_CONFIG=",
-                    )
-                )
-                continue
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
@@ -156,33 +160,31 @@ class Scheduler(Process):
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
+        result = await self.connection.run("uname")
+        if result.exit_status == 0:
+            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+                serialize_for_cli(dask.config.global_config)
+            )
+        else:
+            result = await self.connection.run("cmd /c ver")
+            if result.exit_status == 0:
+                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                    serialize_for_cli(dask.config.global_config)
+                )
+            else:
+                raise Exception(
+                    "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
+                )
+
         cmd = " ".join(
-            [
-                'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                % serialize_for_cli(dask.config.global_config),
-                sys.executable,
-                "-m",
-                "distributed.cli.dask_scheduler",
-            ]
+            [set_env, sys.executable, "-m", "distributed.cli.dask_scheduler",]
             + cli_keywords(self.kwargs, cls=_Scheduler)
         )
         self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
-        retry_flag = True
         while True:
             line = await self.proc.stderr.readline()
-            # retry without env command
-            if not line.strip() and retry_flag:
-                retry_flag = False
-                logger.debug("Retry creating process without env command")
-                self.proc = await self.connection.create_process(
-                    cmd.replace(
-                        "env DASK_INTERNAL_INHERIT_CONFIG=",
-                        "DASK_INTERNAL_INHERIT_CONFIG=",
-                    )
-                )
-                continue
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
