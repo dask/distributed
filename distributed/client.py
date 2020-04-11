@@ -2248,11 +2248,10 @@ class Client(Node):
     async def _get_dataset(self, name):
         out = await self.scheduler.publish_get(name=name, client=self.id)
         if out is None:
-            raise KeyError("Dataset '%s' not found" % name)
+            raise KeyError(f"Dataset '{name}' not found")
 
         with temp_default_client(self):
-            data = out["data"]
-        return data
+            return out["data"]
 
     def get_dataset(self, name, **kwargs):
         """
