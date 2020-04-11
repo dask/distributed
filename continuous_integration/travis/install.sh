@@ -32,8 +32,8 @@ conda config --set always_yes yes --set quiet yes --set changeps1 no
 conda update conda
 
 # Create conda environment
-conda create -n distributed -c pkgs/main python=$PYTHON
-source activate distributed
+conda create -n dask-distributed -c pkgs/main python=$PYTHON
+source activate dask-distributed
 
 # Install dependencies
 conda install -c conda-forge \
