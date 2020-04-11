@@ -30,3 +30,66 @@ properties:
               This is used when making scheduling decisions.
               The scheduler will use this value as a baseline, but also learn it over time.
 
+          blocked-handlers:
+            type: array
+            description:
+              A list of handlers to exclude
+
+              The scheduler operates by receiving messages from various workers and clients
+              and then performing operations based on those messages.
+              Each message has an operation like "close-worker" or "task-finished".
+              In some high security situations administrators may choose to block certain handlers
+              from running.  Those handlers can be listed here.
+
+              For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
+
+          default-data-size:
+            type:
+            - string
+            - integer
+            description:
+              The default size of a piece of data if we don't know anything about it.
+
+              This is used by the scheduler in some scheduling decisions
+
+          events-cleanup-delay:
+            type: string
+            description:
+              The amount of time to wait until workers or clients are removed from the event log
+              after they have been removed from the scheduler
+
+          idle-timeout:
+            type:
+            - string
+            - "null"
+            description:
+              Shut down the scheduler after this duration if no activity has occured
+
+              This can be helpful to reduce costs and stop zombie processes from roaming the earth.
+
+          transition-log-length:
+            type: integer
+            minimum: 0
+            description:
+              How long should we keep the transition log
+
+              Every time a task transitions states (like "waiting", "processing", "memory", "released")
+              we record that transition in a log.
+
+              To make sure that we don't run out of memory
+              we will clear out old entries after a certain length.
+              This is that length.
+
+          work-stealing:
+            type: boolean
+            description:
+              Whether or not to balance work between workers dynamically
+
+              Some times one worker has more work than we expected.
+              The scheduler will move these tasks around as necessary by default.
+              Set this to false to disable this behavior
+
+          work-stealing-interval:
+            type: string
+            description:
+              How frequently to balance worker loads
