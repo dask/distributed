@@ -1,4 +1,4 @@
-name: testenv
+name: distributed
 channels:
   - conda-forge
 dependencies:
