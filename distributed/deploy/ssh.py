@@ -86,25 +86,37 @@ class Worker(Process):
         import asyncssh  # import now to avoid adding to module startup time
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
-        self.proc = await self.connection.create_process(
-            " ".join(
-                [
-                    'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
-                    "-m",
-                    self.worker_module,
-                    self.scheduler,
-                    "--name",
-                    str(self.name),
-                ]
-                + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
-            )
+        cmd = " ".join(
+            [
+                'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
+                % serialize_for_cli(dask.config.global_config),
+                sys.executable,
+                "-m",
+                self.worker_module,
+                self.scheduler,
+                "--name",
+                str(self.name),
+            ]
+            + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
 
+        self.proc = await self.connection.create_process(cmd)
+
         # We watch stderr in order to get the address, then we return
+        retry_flag = True
         while True:
             line = await self.proc.stderr.readline()
+            # retry without env command
+            if not line.strip() and retry_flag:
+                retry_flag = False
+                logger.debug("Retry creating process without env command")
+                self.proc = await self.connection.create_process(
+                    cmd.replace(
+                        "env DASK_INTERNAL_INHERIT_CONFIG=",
+                        "DASK_INTERNAL_INHERIT_CONFIG=",
+                    )
+                )
+                continue
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
@@ -144,22 +156,33 @@ class Scheduler(Process):
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
-        self.proc = await self.connection.create_process(
-            " ".join(
-                [
-                    'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
-                    "-m",
-                    "distributed.cli.dask_scheduler",
-                ]
-                + cli_keywords(self.kwargs, cls=_Scheduler)
-            )
+        cmd = " ".join(
+            [
+                'env DASK_INTERNAL_INHERIT_CONFIG="%s"'
+                % serialize_for_cli(dask.config.global_config),
+                sys.executable,
+                "-m",
+                "distributed.cli.dask_scheduler",
+            ]
+            + cli_keywords(self.kwargs, cls=_Scheduler)
         )
+        self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
+        retry_flag = True
         while True:
             line = await self.proc.stderr.readline()
+            # retry without env command
+            if not line.strip() and retry_flag:
+                retry_flag = False
+                logger.info("Retry creating process without env command")
+                self.proc = await self.connection.create_process(
+                    cmd.replace(
+                        "env DASK_INTERNAL_INHERIT_CONFIG=",
+                        "DASK_INTERNAL_INHERIT_CONFIG=",
+                    )
+                )
+                continue
             if not line.strip():
                 raise Exception("Worker failed to start")
             logger.info(line.strip())
