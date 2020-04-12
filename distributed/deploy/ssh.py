@@ -58,7 +58,7 @@ class Worker(Process):
         The python module to run to start the worker.
     connect_options: dict
         kwargs to be passed to asyncssh connections
-    python_remote: str
+    remote_python: str
         Path to Python on remote node to run this worker.
     kwargs: dict
         These will be passed through the dask-worker CLI to the
@@ -72,7 +72,7 @@ class Worker(Process):
         connect_options: dict,
         kwargs: dict,
         worker_module="distributed.cli.dask_worker",
-        python_remote=None,
+        remote_python=None,
         loop=None,
         name=None,
     ):
@@ -84,7 +84,7 @@ class Worker(Process):
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.name = name
-        self.python_remote = python_remote
+        self.remote_python = remote_python
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -95,7 +95,7 @@ class Worker(Process):
                 [
                     'DASK_INTERNAL_INHERIT_CONFIG="%s"'
                     % serialize_for_cli(dask.config.global_config),
-                    self.python_remote or sys.executable,
+                    self.remote_python or sys.executable,
                     "-m",
                     self.worker_module,
                     self.scheduler,
@@ -129,7 +129,7 @@ class Scheduler(Process):
         The hostname where we should run this worker
     connect_options: dict
         kwargs to be passed to asyncssh connections
-    python_remote: str
+    remote_python: str
         Path to Python on remote node to run this scheduler.
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
@@ -137,14 +137,14 @@ class Scheduler(Process):
     """
 
     def __init__(
-        self, address: str, connect_options: dict, kwargs: dict, python_remote=None
+        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
     ):
         super().__init__()
 
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
-        self.python_remote = python_remote
+        self.remote_python = remote_python
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -158,7 +158,7 @@ class Scheduler(Process):
                 [
                     'DASK_INTERNAL_INHERIT_CONFIG="%s"'
                     % serialize_for_cli(dask.config.global_config),
-                    self.python_remote or sys.executable,
+                    self.remote_python or sys.executable,
                     "-m",
                     "distributed.cli.dask_scheduler",
                 ]
@@ -204,7 +204,7 @@ def SSHCluster(
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
-    python_remote: str = None,
+    remote_python: str = None,
     **kwargs
 ):
     """ Deploy a Dask cluster using SSH
@@ -239,7 +239,7 @@ def SSHCluster(
         Keywords to pass on to scheduler.
     worker_module: str, optional
         Python module to call to start the worker.
-    python_remote: str, optional
+    remote_python: str, optional
         Path to Python on remote nodes.
 
     Examples
@@ -287,7 +287,7 @@ def SSHCluster(
             "address": hosts[0],
             "connect_options": connect_options,
             "kwargs": scheduler_options,
-            "python_remote": python_remote,
+            "remote_python": remote_python,
         },
     }
     workers = {
@@ -298,7 +298,7 @@ def SSHCluster(
                 "connect_options": connect_options,
                 "kwargs": worker_options,
                 "worker_module": worker_module,
-                "python_remote": python_remote,
+                "remote_python": remote_python,
             },
         }
         for i, host in enumerate(hosts[1:])
