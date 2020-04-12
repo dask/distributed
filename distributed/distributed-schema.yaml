@@ -112,3 +112,245 @@ properties:
               However there are some cases where the user can submit functions to run directly on the scheduler.
               This can be convenient for debugging, but also introduces some security risk.
               By setting this to false we ensure that the user is unable to run arbitrary code on the scheduler.
+
+          preload:
+            type: array
+            description:
+              Run custom modules during the lifetime of the scheduler
+
+              You can run custom modules when the scheduler starts up and closes down.
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+          preload-argv:
+            type: array
+            description:
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+          unknown-task-duration:
+            type: string
+            description:
+              Default duration for all tasks with unknown durations
+
+              Over time the scheduler learns a duration for tasks.
+              However when it sees a new type of task for the first time it has to make a guess
+              as to how long it will take.  This value is that guess.
+
+          default-task-duration:
+            type: object
+            description:
+              How long we expect function names to run
+
+              Over time the scheduler will learn these values, but these give it a good starting point.
+
+          validate:
+            type: boolean
+            description:
+              Whether or not to run consistency checks during execution.
+              This is typically only used for debugging.
+
+          dashboard:
+            type: object
+            description:
+              Configuration options for Dask's real-time dashboard
+
+            properties:
+              status:
+                type: object
+                description: The main status page of the dashboard
+                properties:
+                  task-stream-length:
+                    type: integer
+                    minimum: 0
+                    description: The maximum number of tasks to include in the task stream plot
+              tasks:
+                type: object
+                description: The page which includes the full task stream history
+                properties:
+                  task-stream-length:
+                    type: integer
+                    minimum: 0
+                    description: The maximum number of tasks to include in the task stream plot
+              tls:
+                type: object
+                description: Settings around securing the dashboard
+                properties:
+                  ca-file:
+                    type:
+                    - string
+                    - "null"
+                  key:
+                    type:
+                    - string
+                    - "null"
+                  cert:
+                    type:
+                    - string
+                    - "null"
+              bokeh-application:
+                type: object
+                description: Keywords to pass to the BokehTornado application
+            locks:
+              type: object
+              description:
+                Settings for Dask's distributed Lock object
+
+                See https://docs.dask.org/en/latest/futures.html#locks for more information
+              properties:
+                lease-validation-interval:
+                  type: string
+                  description:
+                    The time to wait until an acquired semaphore is released if the Client goes out of scope
+
+            http:
+              type: object
+              decription: Settings for Dask's embedded HTTP Server
+              properties:
+                routes:
+                  type: array
+                  description:
+                    A list of modules like "prometheus" and "health" that can be included or excluded as desired
+
+                    These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
+                    This is also a list that can be extended with user defined modules.
+
+      worker:
+        type: object
+        description: Configuration settings for Dask Workers
+        properties:
+          blocked-handlers:
+            type: array
+            description:
+              A list of handlers to exclude
+
+              The scheduler operates by receiving messages from various workers and clients
+              and then performing operations based on those messages.
+              Each message has an operation like "close-worker" or "task-finished".
+              In some high security situations administrators may choose to block certain handlers
+              from running.  Those handlers can be listed here.
+
+              For a list of handlers see the `dask.distributed.Scheduler.handlers` attribute.
+
+          multiprocessing-method:
+            type: string
+            description:
+              How we create new workers, one of "spawn", "forkserver", or "fork"
+
+              This is passed to the ``multiprocessing.get_context`` function.
+          use-file-locking:
+            type: boolean
+            description:
+              Whether or not to use lock files when creating workers
+
+              Workers create a local directory in which to place temporary files.
+              When many workers are created on the same process at once
+              these workers can conflict with each other by trying to create this directory all at the same time.
+
+              To avoid this, Dask usually used a file-based lock.
+              However, on some systems file-based locks don't work.
+              This is particularly common on HPC NFS systems, where users may want to set this to false.
+          connections:
+            type: object
+            description: The number of concurrent connections to allow to other workers
+            properties:
+              incoming:
+                type: integer
+                minimum: 0
+              outgoing:
+                type: integer
+                minimum: 0
+
+          preload:
+            type: array
+            description:
+              Run custom modules during the lifetime of the worker
+
+              You can run custom modules when the worker starts up and closes down.
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+          preload-argv:
+            type: array
+            description:
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+          daemon:
+            type: boolean
+            description: Whether or not to run our process as a daemon process
+
+          validate:
+            type: boolean
+            description:
+              Whether or not to run consistency checks during execution.
+              This is typically only used for debugging.
+
+          lifetime:
+            type: object
+            description:
+              The worker may choose to gracefully close itself down after some pre-determined time.
+
+              This is particularly useful if you know that your worker job has a time limit on it.
+              This is particularly common in HPC job schedulers.
+
+              For example if your worker has a walltime of one hour,
+              then you may want to set the lifetime.duration to "55 minutes"
+            properties:
+              duration:
+                type:
+                - string
+                - "null"
+                description: The time after creation to close the worker, like "1 hour"
+              stagger:
+                type: string
+                description:
+                  Random amount by which to stagger lifetimes
+
+                  If you create many workers at the same time,
+                  you may want to avoid having them kill themselves all at the same time.
+                  To avoid this you might want to set a stagger time,
+                  so that they close themselves with some random variation, like "5 minutes"
+
+                  That way some workers can die, new ones can be brought up,
+                  and data can be transferred over smoothly.
+              restart:
+                type: boolean
+                description:
+                  Do we try to resurrect the worker after the lifetime deadline?
+
+
+          profile:
+            type: object
+            description:
+              The workers periodically poll every worker thread to see what they are working on.
+              This data gets collected into statistical profiling information,
+              which is then periodically bundled together and sent along to the scheduler.
+            properties:
+              interval:
+                type: string
+                description: The time between polling the worker threads, typically short like 10ms
+              cycle:
+                type: string
+                description:
+                  The time between bundling together this data and sending it to the scheduler
+
+                  This controls the granularity at which people can query the profile information
+                  on the time axis.
+              low-level:
+                type: boolean
+                description:
+                  Whether or not to use the libunwind and stacktrace libraries
+                  to gather profiling information at the lower level (beneath Python)
+
+                  To get this to work you will need to install the experimental stacktrace library at
+
+                  conda install -c numba stacktrace
+
+                  See https://github.com/numba/stacktrace
+
+          memory:
+            type: object
+            description:
+              When Dask workers have more data than memory they spill this data to disk.
+              They do this at a few conditions.
