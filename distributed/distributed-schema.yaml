@@ -13,7 +13,7 @@ properties:
           allowed-failures:
             type: integer
             minimum: 0
-            description:
+            description: |
               The number of retries before a task is considered bad
 
               When a worker dies when a task is running that task is rerun elsewhere.
@@ -24,7 +24,7 @@ properties:
             type:
             - integer
             - string
-            description:
+            description: |
               The expected bandwidth between any pair of workers
 
               This is used when making scheduling decisions.
@@ -32,7 +32,7 @@ properties:
 
           blocked-handlers:
             type: array
-            description:
+            description: |
               A list of handlers to exclude
 
               The scheduler operates by receiving messages from various workers and clients
@@ -47,14 +47,14 @@ properties:
             type:
             - string
             - integer
-            description:
+            description: |
               The default size of a piece of data if we don't know anything about it.
 
               This is used by the scheduler in some scheduling decisions
 
           events-cleanup-delay:
             type: string
-            description:
+            description: |
               The amount of time to wait until workers or clients are removed from the event log
               after they have been removed from the scheduler
 
@@ -62,7 +62,7 @@ properties:
             type:
             - string
             - "null"
-            description:
+            description: |
               Shut down the scheduler after this duration if no activity has occured
 
               This can be helpful to reduce costs and stop zombie processes from roaming the earth.
@@ -70,7 +70,7 @@ properties:
           transition-log-length:
             type: integer
             minimum: 0
-            description:
+            description: |
               How long should we keep the transition log
 
               Every time a task transitions states (like "waiting", "processing", "memory", "released")
@@ -82,7 +82,7 @@ properties:
 
           work-stealing:
             type: boolean
-            description:
+            description: |
               Whether or not to balance work between workers dynamically
 
               Some times one worker has more work than we expected.
@@ -91,21 +91,21 @@ properties:
 
           work-stealing-interval:
             type: string
-            description:
+            description: |
               How frequently to balance worker loads
 
           worker-ttl:
             type:
             - string
             - "null"
-            description:
+            description: |
               Time to live for workers.
 
               If we don't receive a heartbeat faster than this then we assume that the worker has died.
 
           pickle:
             type: boolean
-            description:
+            description: |
               Is the scheduler allowed to deserialize arbitrary bytestrings?
 
               The scheduler almost never deserializes user data.
@@ -115,7 +115,7 @@ properties:
 
           preload:
             type: array
-            description:
+            description: |
               Run custom modules during the lifetime of the scheduler
 
               You can run custom modules when the scheduler starts up and closes down.
@@ -123,14 +123,14 @@ properties:
 
           preload-argv:
             type: array
-            description:
+            description: |
               Arguments to pass into the preload scripts described above
 
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
           unknown-task-duration:
             type: string
-            description:
+            description: |
               Default duration for all tasks with unknown durations
 
               Over time the scheduler learns a duration for tasks.
@@ -139,20 +139,20 @@ properties:
 
           default-task-duration:
             type: object
-            description:
+            description: |
               How long we expect function names to run
 
               Over time the scheduler will learn these values, but these give it a good starting point.
 
           validate:
             type: boolean
-            description:
+            description: |
               Whether or not to run consistency checks during execution.
               This is typically only used for debugging.
 
           dashboard:
             type: object
-            description:
+            description: |
               Configuration options for Dask's real-time dashboard
 
             properties:
@@ -163,18 +163,22 @@ properties:
                   task-stream-length:
                     type: integer
                     minimum: 0
-                    description: The maximum number of tasks to include in the task stream plot
+                    description: |
+                      The maximum number of tasks to include in the task stream plot
               tasks:
                 type: object
-                description: The page which includes the full task stream history
+                description: |
+                  The page which includes the full task stream history
                 properties:
                   task-stream-length:
                     type: integer
                     minimum: 0
-                    description: The maximum number of tasks to include in the task stream plot
+                    description: |
+                      The maximum number of tasks to include in the task stream plot
               tls:
                 type: object
-                description: Settings around securing the dashboard
+                description: |
+                  Settings around securing the dashboard
                 properties:
                   ca-file:
                     type:
@@ -190,17 +194,18 @@ properties:
                     - "null"
               bokeh-application:
                 type: object
-                description: Keywords to pass to the BokehTornado application
+                description: |
+                  Keywords to pass to the BokehTornado application
             locks:
               type: object
-              description:
+              description: |
                 Settings for Dask's distributed Lock object
 
                 See https://docs.dask.org/en/latest/futures.html#locks for more information
               properties:
                 lease-validation-interval:
                   type: string
-                  description:
+                  description: |
                     The time to wait until an acquired semaphore is released if the Client goes out of scope
 
             http:
@@ -209,7 +214,7 @@ properties:
               properties:
                 routes:
                   type: array
-                  description:
+                  description: |
                     A list of modules like "prometheus" and "health" that can be included or excluded as desired
 
                     These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
@@ -217,11 +222,12 @@ properties:
 
       worker:
         type: object
-        description: Configuration settings for Dask Workers
+        description: |
+          Configuration settings for Dask Workers
         properties:
           blocked-handlers:
             type: array
-            description:
+            description: |
               A list of handlers to exclude
 
               The scheduler operates by receiving messages from various workers and clients
@@ -234,13 +240,13 @@ properties:
 
           multiprocessing-method:
             type: string
-            description:
+            description: |
               How we create new workers, one of "spawn", "forkserver", or "fork"
 
               This is passed to the ``multiprocessing.get_context`` function.
           use-file-locking:
             type: boolean
-            description:
+            description: |
               Whether or not to use lock files when creating workers
 
               Workers create a local directory in which to place temporary files.
@@ -252,7 +258,8 @@ properties:
               This is particularly common on HPC NFS systems, where users may want to set this to false.
           connections:
             type: object
-            description: The number of concurrent connections to allow to other workers
+            description: |
+              The number of concurrent connections to allow to other workers
             properties:
               incoming:
                 type: integer
@@ -263,7 +270,7 @@ properties:
 
           preload:
             type: array
-            description:
+            description: |
               Run custom modules during the lifetime of the worker
 
               You can run custom modules when the worker starts up and closes down.
@@ -271,24 +278,25 @@ properties:
 
           preload-argv:
             type: array
-            description:
+            description: |
               Arguments to pass into the preload scripts described above
 
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
           daemon:
             type: boolean
-            description: Whether or not to run our process as a daemon process
+            description: |
+              Whether or not to run our process as a daemon process
 
           validate:
             type: boolean
-            description:
+            description: |
               Whether or not to run consistency checks during execution.
               This is typically only used for debugging.
 
           lifetime:
             type: object
-            description:
+            description: |
               The worker may choose to gracefully close itself down after some pre-determined time.
 
               This is particularly useful if you know that your worker job has a time limit on it.
@@ -301,10 +309,11 @@ properties:
                 type:
                 - string
                 - "null"
-                description: The time after creation to close the worker, like "1 hour"
+                description: |
+                  The time after creation to close the worker, like "1 hour"
               stagger:
                 type: string
-                description:
+                description: |
                   Random amount by which to stagger lifetimes
 
                   If you create many workers at the same time,
@@ -316,30 +325,31 @@ properties:
                   and data can be transferred over smoothly.
               restart:
                 type: boolean
-                description:
+                description: |
                   Do we try to resurrect the worker after the lifetime deadline?
 
 
           profile:
             type: object
-            description:
+            description: |
               The workers periodically poll every worker thread to see what they are working on.
               This data gets collected into statistical profiling information,
               which is then periodically bundled together and sent along to the scheduler.
             properties:
               interval:
                 type: string
-                description: The time between polling the worker threads, typically short like 10ms
+                description: |
+                  The time between polling the worker threads, typically short like 10ms
               cycle:
                 type: string
-                description:
+                description: |
                   The time between bundling together this data and sending it to the scheduler
 
                   This controls the granularity at which people can query the profile information
                   on the time axis.
               low-level:
                 type: boolean
-                description:
+                description: |
                   Whether or not to use the libunwind and stacktrace libraries
                   to gather profiling information at the lower level (beneath Python)
 
@@ -351,6 +361,6 @@ properties:
 
           memory:
             type: object
-            description:
+            description: |
               When Dask workers have more data than memory they spill this data to disk.
               They do this at a few conditions.
