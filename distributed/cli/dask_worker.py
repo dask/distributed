@@ -30,6 +30,32 @@ logger = logging.getLogger("distributed.dask_worker")
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
+def _normalize_worker_ports(port, nprocs):
+    if isinstance(port, str) and ":" not in port:
+        port = int(port)
+
+    if port is None:
+        port = [0 for _ in range(nprocs)]
+    elif isinstance(port, int):
+        if nprocs > 1:
+            raise ValueError(
+                "Failed to launch worker. You must specify multiple ports when "
+                f"nprocs > 1, but got {port} instead"
+            )
+        port = [port]
+    else:
+        port_start, port_stop = map(int, port.split(":"))
+        if port_stop < port_start + nprocs - 1:
+            raise ValueError(
+                "Failed to launch worker. "
+                "More worker processes were requested than ports supplied. "
+                f"Asked for nprocs={nprocs} processes, but gave port range of {port}."
+            )
+        port = list(range(port_start, port_start + nprocs))
+
+    return port
+
+
 @click.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument("scheduler", type=str, required=False)
 @click.option(
@@ -52,12 +78,21 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option(
     "--worker-port",
-    type=int,
-    default=0,
-    help="Serving computation port, defaults to random",
+    default=None,
+    help="Serving computation port, defaults to random. "
+    "When creating multiple workers with --nprocs, a sequential range of "
+    "worker ports may be used by specifying the first and last available "
+    "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
+    "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
-    "--nanny-port", type=int, default=0, help="Serving nanny port, defaults to random"
+    "--nanny-port",
+    default=None,
+    help="Serving nanny port, defaults to random. "
+    "When creating multiple nannies with --nprocs, a sequential range of "
+    "nanny ports may be used by specifying the first and last available "
+    "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
+    "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
     "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
@@ -249,7 +284,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -281,9 +316,13 @@ def main(
         }
     )
 
-    if nprocs > 1 and worker_port != 0:
+    worker_ports = _normalize_worker_ports(worker_port, nprocs)
+    nanny_ports = _normalize_worker_ports(nanny_port, nprocs)
+
+    if nanny and len(worker_ports) != len(nanny_ports):
         logger.error(
-            "Failed to launch worker.  You cannot use the --port argument when nprocs > 1."
+            f"The number of worker ports ({len(worker_ports)}) must"
+            f"be the same as the number of nanny ports ({len(nanny_ports)})"
         )
         sys.exit(1)
 
@@ -328,11 +367,6 @@ def main(
         logger.error("Failed to launch worker. " + str(e))
         sys.exit(1)
 
-    if nanny:
-        port = nanny_port
-    else:
-        port = worker_port
-
     if not nthreads:
         nthreads = CPU_COUNT // nprocs
 
@@ -355,19 +389,6 @@ def main(
 
     loop = IOLoop.current()
 
-    worker_class = import_term(worker_class)
-    if nanny:
-        kwargs["worker_class"] = worker_class
-        kwargs["preload_nanny"] = preload_nanny
-
-    if nanny:
-        kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
-        t = Nanny
-    else:
-        if nanny_port:
-            kwargs["service_ports"] = {"nanny": nanny_port}
-        t = worker_class
-
     if (
         not scheduler
         and not scheduler_file
@@ -386,8 +407,26 @@ def main(
         # Update the global config given priority to the existing global config
         dask.config.update(dask.config.global_config, config, priority="old")
 
-    nannies = [
-        t(
+    worker_class = import_term(worker_class)
+    if nanny:
+        t = Nanny
+        kwargs["worker_class"] = worker_class
+        kwargs["preload_nanny"] = preload_nanny
+        kwargs["listen_address"] = listen_address
+    else:
+        t = worker_class
+
+    nannies = []
+    for i, nanny_port, worker_port in zip(range(nprocs), nanny_ports, worker_ports):
+        if nanny:
+            port = nanny_port
+            kwargs["worker_port"] = worker_port
+        else:
+            port = worker_port
+            if nanny_port:
+                kwargs["service_ports"] = {"nanny": nanny_port}
+
+        nanny = t(
             scheduler,
             scheduler_file=scheduler_file,
             nthreads=nthreads,
@@ -402,10 +441,10 @@ def main(
             name=name
             if nprocs == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
-            **kwargs
+            **kwargs,
         )
-        for i in range(nprocs)
-    ]
+
+        nannies.append(nanny)
 
     async def close_all():
         # Unregister all workers from scheduler
