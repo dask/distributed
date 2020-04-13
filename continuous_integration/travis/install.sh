@@ -70,7 +70,7 @@ if [[ $PYTHON != 3.8 ]]; then
     # For low-level profiler, install libunwind and stacktrace from conda-forge
     # For stacktrace we use --no-deps to avoid upgrade of python
     conda install -c pkgs/main -c conda-forge libunwind
-    conda install --no-deps -c pgks/main -c numba -c conda-forge stacktrace
+    conda install --no-deps -c pkgs/main -c numba -c conda-forge stacktrace
 fi
 
 python -m pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
