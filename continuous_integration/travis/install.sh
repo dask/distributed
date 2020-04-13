@@ -69,7 +69,7 @@ conda install -c conda-forge \
 if [[ $PYTHON != 3.8 ]]; then
     # For low-level profiler, install libunwind and stacktrace from conda-forge
     # For stacktrace we use --no-deps to avoid upgrade of python
-    conda install -c pgks/main -c conda-forge libunwind
+    conda install -c pkgs/main -c conda-forge libunwind
     conda install --no-deps -c pgks/main -c numba -c conda-forge stacktrace
 fi
 
