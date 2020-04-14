@@ -794,7 +794,6 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="file descriptors not really a thing"
 )
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="intermittent failure")
 @gen_cluster(client=True, nthreads=[], timeout=240)
 def test_file_descriptors(c, s):
     yield gen.sleep(0.1)

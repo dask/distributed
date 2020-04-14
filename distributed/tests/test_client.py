@@ -152,8 +152,7 @@ def test_map(c, s, a, b):
 
     L4 = c.map(add, range(3), range(4))
     results = yield c.gather(L4)
-    if sys.version_info[0] >= 3:
-        assert results == list(map(add, range(3), range(4)))
+    assert results == list(map(add, range(3), range(4)))
 
     def f(x, y=10):
         return x + y
@@ -1439,9 +1438,7 @@ def test_many_submits_spread_evenly(c, s, a, b):
 def test_traceback(c, s, a, b):
     x = c.submit(div, 1, 0)
     tb = yield x.traceback()
-
-    if sys.version_info[0] >= 3:
-        assert any("x / y" in line for line in pluck(3, traceback.extract_tb(tb)))
+    assert any("x / y" in line for line in pluck(3, traceback.extract_tb(tb)))
 
 
 @gen_cluster(client=True)
@@ -1468,12 +1465,11 @@ def test_gather_traceback(c, s, a, b):
 def test_traceback_sync(c):
     x = c.submit(div, 1, 0)
     tb = x.traceback()
-    if sys.version_info[0] >= 3:
-        assert any(
-            "x / y" in line
-            for line in concat(traceback.extract_tb(tb))
-            if isinstance(line, str)
-        )
+    assert any(
+        "x / y" in line
+        for line in concat(traceback.extract_tb(tb))
+        if isinstance(line, str)
+    )
 
     y = c.submit(inc, x)
     tb2 = y.traceback()
@@ -2597,9 +2593,8 @@ def test_run_coroutine(c, s, a, b):
     with pytest.raises(RuntimeError, match="hello"):
         yield c.run(throws, 1)
 
-    if sys.version_info >= (3, 5):
-        results = yield c.run(asyncinc, 2, delay=0.01)
-        assert results == {a.address: 3, b.address: 3}
+    results = yield c.run(asyncinc, 2, delay=0.01)
+    assert results == {a.address: 3, b.address: 3}
 
 
 def test_run_coroutine_sync(c, s, a, b):
@@ -5212,7 +5207,6 @@ def test_scatter_direct(s, a, b):
     yield c.close()
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="cloudpickle Py27 issue")
 @gen_cluster(client=True)
 def test_unhashable_function(c, s, a, b):
     d = {"a": 1}
