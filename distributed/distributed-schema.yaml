@@ -196,29 +196,30 @@ properties:
                 type: object
                 description: |
                   Keywords to pass to the BokehTornado application
-            locks:
-              type: object
-              description: |
-                Settings for Dask's distributed Lock object
+          locks:
+            type: object
+            description: |
+              Settings for Dask's distributed Lock object
 
-                See https://docs.dask.org/en/latest/futures.html#locks for more information
-              properties:
-                lease-validation-interval:
-                  type: string
-                  description: |
-                    The time to wait until an acquired semaphore is released if the Client goes out of scope
+              See https://docs.dask.org/en/latest/futures.html#locks for more information
+            properties:
+              lease-validation-interval:
+                type: string
+                description: |
+                  The time to wait until an acquired semaphore is released if the Client goes out of scope
 
-            http:
-              type: object
-              decription: Settings for Dask's embedded HTTP Server
-              properties:
-                routes:
-                  type: array
-                  description: |
-                    A list of modules like "prometheus" and "health" that can be included or excluded as desired
+          http:
+            type: object
+            decription: Settings for Dask's embedded HTTP Server
+            properties:
+              routes:
+                type: array
+                description: |
+                  A list of modules like "prometheus" and "health" that can be included or excluded as desired
 
-                    These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
-                    This is also a list that can be extended with user defined modules.
+                  These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
+                  This is also a list that can be extended with user defined modules.
+
 
       worker:
         type: object
@@ -364,3 +365,313 @@ properties:
             description: |
               When Dask workers have more data than memory they spill this data to disk.
               They do this at a few conditions.
+            properties:
+              target:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: |
+                  Target fraction below which to try to keep memory
+
+              spill:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: |
+                  When the process memory (as observed by the operating system) gets above this amount we spill data to disk.
+
+              pause:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: |
+                  When the process memory (as observed by the operating system) gets above this amount
+                  we no longer start new tasks on this worker.
+
+              terminate:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: |
+                  When the process memory reaches this level the nanny process will kill the worker
+                  (if a nanny is present)
+
+          http:
+            type: object
+            decription: Settings for Dask's embedded HTTP Server
+            properties:
+              routes:
+                type: array
+                description: |
+                  A list of modules like "prometheus" and "health" that can be included or excluded as desired
+
+                  These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
+                  This is also a list that can be extended with user defined modules.
+          http:
+            type: object
+            decription: Settings for Dask's embedded HTTP Server
+            properties:
+              routes:
+                type: array
+                description: |
+                  A list of modules like "prometheus" and "health" that can be included or excluded as desired
+
+                  These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
+                  This is also a list that can be extended with user defined modules.
+
+      worker:
+        type: object
+        description: |
+          Configuration settings for Dask Nannies
+        properties:
+
+          preload:
+            type: array
+            description: |
+              Run custom modules during the lifetime of the scheduler
+
+              You can run custom modules when the scheduler starts up and closes down.
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+          preload-argv:
+            type: array
+            description: |
+              Arguments to pass into the preload scripts described above
+
+              See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
+
+      client:
+        type: object
+        description: |
+          Configuration settings for Dask Clients
+
+        properties:
+          heartbeat:
+            type: string
+            description:
+              This value is the time between heartbeats
+
+              The client sends a periodic heartbeat message to the scheduler.
+              If it misses enough of these then the scheduler assumes that it has gone.
+
+      deploy:
+        type: object
+        description: Configuration settings for general Dask deployment
+        properties:
+          lost-worker-timeout:
+            type: string
+            description: |
+              Interval after which to hard-close a lost worker job
+
+              Otherwise we wait for a while to see if a worker will reappear
+
+      adaptive:
+        type: object
+        description: Configuration settings for Dask's adaptive scheduling
+        properties:
+          interval:
+            type: string
+            description: |
+              The duration between checking in with adaptive scheduling load
+
+              The adaptive system periodically checks scheduler load and determines
+              if it should scale the cluster up or down.
+              This is the timing between those checks.
+
+          target-duration:
+            type: string
+            description: |
+              The desired time for the entire computation to run
+
+              The adaptive system will try to start up enough workers to run
+              the computation in about this time.
+
+          minimum:
+            type: integer
+            minimum: 0
+            description: |
+              The minimum number of workers to keep around
+
+          maximum:
+            type: number
+            minimum: 0
+            description: |
+              The maximum number of workers to keep around
+
+          wait-count:
+            type: integer
+            minimum: 1
+            description: |
+              The number of times a worker should be suggested for removal before removing it
+
+              This helps to smooth out the number of deployed workers
+
+      comm:
+        type: object
+        description: Configuration settings for Dask communications
+        properties:
+
+          retry:
+            type: object
+            description: |
+              Some operations (such as gathering data) are subject to re-tries with the below parameters
+            properties:
+
+              count:
+                type: integer
+                minimum: 0
+                description: |
+                  The number of times to retry a connection
+
+              delay:
+                type: object
+                properties:
+                  min:
+                    type: string
+                    description: The first non-zero delay between retry attempts
+                  max:
+                    type: string
+                    description: The maximum delay between retries
+
+          compression:
+            type: string
+            description: |
+              The compression algorithm to use
+
+              This could be one of lz4, snappy, zstd, or blosc
+
+          offload:
+            type:
+            - boolean
+            - string
+            description: |
+              The size of message after which we choose to offload serialization to another thread
+
+              In some cases, you may also choose to disable this altogether with the value false
+              This is useful if you want to include serialization in profiling data,
+              or if you have data types that are particularly sensitive to deserialization
+
+          socket-backlog:
+            type: integer
+            description: |
+              When shuffling data between workers, there can
+              really be O(cluster size) connection requests
+              on a single worker socket, make sure the backlog
+              is large enough not to lose any.
+
+          zstd:
+            type: object
+            description: Options for the Z Standard compression scheme
+            properties:
+              level:
+                type: integer
+                minimum: 1
+                maximum: 22
+                description: Compression level, between 1 and 22.
+              threads:
+                type: integer
+                minimum: -1
+                description: |
+                  Number of threads to use.
+
+                  0 for single-threaded, -1 to infer from cpu count.
+
+          timeouts:
+            type: object
+            properties:
+              connect:
+                type: string
+              tcp:
+                type: string
+
+          require-encryption:
+            type: boolean
+            description: |
+              Whether to require encryption on non-local comms
+
+          tls:
+            type: object
+            properties:
+              ciphers:
+                type:
+                - string
+                - "null"
+                descsription: Allowed ciphers, specified as an OpenSSL cipher string.
+
+              ca-file:
+                type:
+                - string
+                - "null"
+                description: Path to a CA file, in pem format
+
+              scheduler:
+                type: object
+                description: TLS information for the scheduler
+                properties:
+                  cert:
+                    type:
+                    - string
+                    - "null"
+                    description: Path to certificate file
+                  key:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      Path to key file.
+
+                      Alternatively, the key can be appended to the cert file
+                      above, and this field left blank
+
+              worker:
+                type: object
+                description: TLS information for the worker
+                properties:
+                  cert:
+                    type:
+                    - string
+                    - "null"
+                    description: Path to certificate file
+                  key:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      Path to key file.
+
+                      Alternatively, the key can be appended to the cert file
+                      above, and this field left blank
+
+              client:
+                type: object
+                description: TLS information for the client
+                properties:
+                  cert:
+                    type:
+                    - string
+                    - "null"
+                    description: Path to certificate file
+                  key:
+                    type:
+                    - string
+                    - "null"
+                    description: |
+                      Path to key file.
+
+                      Alternatively, the key can be appended to the cert file
+                      above, and this field left blank
+
+      dashboard:
+        type: object
+        properties:
+          link:
+            type: string
+            description: |
+              The form for the dashboard links
+
+              This is used wherever we print out the link for the dashboard
+              It is filled in with relevant information like the schema, host, and port number
+          graph-max-items:
+            type: integer
+            minimum: 0
+            description: maximum number of tasks to try to plot in "graph" view
