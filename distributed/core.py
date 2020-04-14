@@ -673,24 +673,24 @@ class rpc:
         return tasks
 
     def __getattr__(self, key):
-        return partial(self._send_recv_from_rpc, key)
+        async def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get("serializers") is None:
+                kwargs["serializers"] = self.serializers
+            if self.deserializers is not None and kwargs.get("deserializers") is None:
+                kwargs["deserializers"] = self.deserializers
+            try:
+                comm = await self.live_comm()
+                comm.name = "rpc." + key
+                result = await send_recv(comm=comm, op=key, **kwargs)
+            except (RPCClosed, CommClosedError) as e:
+                raise e.__class__(
+                    "%s: while trying to call remote method %r" % (e, key)
+                )
 
-    async def _send_recv_from_rpc(self, key, **kwargs):
-        if self.serializers is not None and kwargs.get("serializers") is None:
-            kwargs["serializers"] = self.serializers
-        if self.deserializers is not None and kwargs.get("deserializers") is None:
-            kwargs["deserializers"] = self.deserializers
-        try:
-            comm = await self.live_comm()
-            comm.name = "rpc." + key
-            result = await send_recv(comm=comm, op=key, **kwargs)
-        except (RPCClosed, CommClosedError) as e:
-            raise e.__class__(
-                "%s: while trying to call remote method %r" % (e, key)
-            )
+            self.comms[comm] = True  # mark as open
+            return result
 
-        self.comms[comm] = True  # mark as open
-        return result
+        return send_recv_from_rpc
 
     def close_rpc(self):
         if self.status != "closed":
@@ -744,22 +744,22 @@ class PooledRPCCall:
         return self.addr
 
     def __getattr__(self, key):
-        return partial(self._send_recv_from_rpc, key)
+        async def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get("serializers") is None:
+                kwargs["serializers"] = self.serializers
+            if self.deserializers is not None and kwargs.get("deserializers") is None:
+                kwargs["deserializers"] = self.deserializers
+            comm = await self.pool.connect(self.addr)
+            name, comm.name = comm.name, "ConnectionPool." + key
+            try:
+                result = await send_recv(comm=comm, op=key, **kwargs)
+            finally:
+                self.pool.reuse(self.addr, comm)
+                comm.name = name
 
-    async def _send_recv_from_rpc(self, key, **kwargs):
-        if self.serializers is not None and kwargs.get("serializers") is None:
-            kwargs["serializers"] = self.serializers
-        if self.deserializers is not None and kwargs.get("deserializers") is None:
-            kwargs["deserializers"] = self.deserializers
-        comm = await self.pool.connect(self.addr)
-        name, comm.name = comm.name, "ConnectionPool." + key
-        try:
-            result = await send_recv(comm=comm, op=key, **kwargs)
-        finally:
-            self.pool.reuse(self.addr, comm)
-            comm.name = name
+            return result
 
-        return result
+        return send_recv_from_rpc
 
     async def close_rpc(self):
         pass
