@@ -6,10 +6,10 @@ from .utils import log_errors, tokey
 class PublishExtension:
     """ An extension for the scheduler to manage collections
 
-    *  publish-list
-    *  publish-put
-    *  publish-get
-    *  publish-delete
+    *  publish_list
+    *  publish_put
+    *  publish_get
+    *  publish_delete
     """
 
     def __init__(self, scheduler):
