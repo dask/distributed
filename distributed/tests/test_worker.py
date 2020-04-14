@@ -136,10 +136,11 @@ def test_worker_bad_args(c, s, a, b):
     with pytest.raises(ZeroDivisionError):
         yield y
 
-    tb = yield y._traceback()
-    assert any(
-        "1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line
-    )
+    if sys.version_info[0] >= 3:
+        tb = yield y._traceback()
+        assert any(
+            "1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line
+        )
     assert "Compute Failed" in hdlr.messages["warning"][0]
     logger.setLevel(old_level)
 
@@ -472,6 +473,9 @@ def test_run_dask_worker(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_run_coroutine_dask_worker(c, s, a, b):
+    if sys.version_info < (3,) and tornado.version_info < (4, 5):
+        pytest.skip("test needs Tornado 4.5+ on Python 2.7")
+
     @gen.coroutine
     def f(dask_worker=None):
         yield gen.sleep(0.001)
@@ -582,6 +586,7 @@ def test_clean(c, s, a, b):
         assert not c
 
 
+@pytest.mark.skipif(sys.version_info[:2] == (3, 4), reason="mul bytes fails")
 @gen_cluster(client=True)
 def test_message_breakup(c, s, a, b):
     n = 100000
