@@ -200,7 +200,7 @@ class TCP(Comm):
                     else:
                         frame = await stream.read_bytes(length)
                 else:
-                    frame = b""
+                    frame = bytearray()
                 frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
