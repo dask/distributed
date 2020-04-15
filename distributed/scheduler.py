@@ -3386,16 +3386,13 @@ class Scheduler(ServerNode):
             return result
 
     async def notify_worker_retirement(self, worker):
-        logger.info("Notify worker for retirement %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "notify-retire-worker"})
             ws = self.workers[worker]
 
             ws.retiring = True
 
-            nanny_addr = ws.nanny
-            address = nanny_addr or worker
-
+            # TODO: There is a misalignment between nanny and worker close_gracefully, hence the new coroutine name
             self.worker_send(worker, {"op": "prepare_retirement"})
 
             if "stealing" in self.extensions:
@@ -3462,16 +3459,26 @@ class Scheduler(ServerNode):
                         return workers
                     except KeyError:  # keys left during replicate
                         pass
+
+            workers_not_known = {w for w in workers if w not in self.workers}
             workers = {self.workers[w] for w in workers if w in self.workers}
+            logger.error("Tried to retire unknown workers: %s", workers_not_known)
             if not workers:
+                logger.error("Called retire_workers but no workers selected.")
                 return []
             logger.info("Retire workers %s", workers)
 
             worker_keys = {ws.address: ws.identity() for ws in workers}
+
+            # Nanny would otherwise start the workers again
+            # TODO: There is a misalingment between nanny and worker for close_gracefully. I need to notify both since
+            # the worker needs to stop whatever it is doing and the nanny must be told not to restart the worker again
+            await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             await asyncio.gather(
                 *[self.notify_worker_retirement(worker=w) for w in worker_keys]
             )
 
+            # TODO: Do I need to lock here? replicate can call it on its own
             async with self._lock if lock else empty_context:
                 # Keys orphaned by retiring those workers
                 keys = set.union(*[w.has_what for w in workers])
@@ -3481,14 +3488,16 @@ class Scheduler(ServerNode):
                 if keys:
                     if other_workers:
                         logger.info("Moving %d keys to other workers", len(keys))
+                        # Do not provide workers explicitly but let the replicate figure out what's still active when
+                        # it is actually called.
                         await self.replicate(
-                            keys=keys,
-                            workers=[ws.address for ws in other_workers],
-                            n=1,
-                            delete=False,
-                            lock=False,
+                            keys=keys, n=1, delete=False, lock=False,
                         )
                     else:
+                        logger.warning(
+                            "Need to move %d keys but there are no workers left",
+                            len(keys),
+                        )
                         return []
 
             worker_keys = {ws.address: ws.identity() for ws in workers}
@@ -4877,7 +4886,7 @@ class Scheduler(ServerNode):
         if s is True:
             return s
         else:
-            return {self.workers[w] for w in s}
+            return s & self.active
 
     def consume_resources(self, ts, ws):
         if ts.resource_restrictions:
@@ -4946,8 +4955,9 @@ class Scheduler(ServerNode):
         Takes a list of worker addresses or hostnames.
         Returns a list of all worker addresses that match
         """
+        active_addresses = {ws.address for ws in self.active}
         if workers is None:
-            return list(self.workers)
+            return list(active_addresses)
 
         out = set()
         for w in workers:
@@ -4955,7 +4965,7 @@ class Scheduler(ServerNode):
                 out.add(w)
             else:
                 out.update({ww for ww in self.workers if w in ww})  # TODO: quadratic
-        return list(out)
+        return list(out & active_addresses)
 
     def start_ipython(self, comm=None):
         """Start an IPython kernel
