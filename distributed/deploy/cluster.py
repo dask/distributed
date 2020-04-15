@@ -48,7 +48,7 @@ class Cluster:
     _supports_scaling = True
 
     def __init__(self, asynchronous):
-        self.scheduler_info = {}
+        self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
 
@@ -135,8 +135,8 @@ class Cluster:
         n: int
             Target number of workers
 
-        Example
-        -------
+        Examples
+        --------
         >>> cluster.scale(10)  # scale cluster to ten workers
         """
         raise NotImplementedError()
@@ -351,6 +351,12 @@ class Cluster:
 
             data = {"text/plain": repr(self), "text/html": self._repr_html_()}
             display(data, raw=True)
+
+    def __enter__(self):
+        return self.sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return self.sync(self.__aexit__, typ, value, traceback)
 
     async def __aenter__(self):
         await self
