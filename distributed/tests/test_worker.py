@@ -16,7 +16,6 @@ from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
 from tlz import pluck, sliding_window, first
-from tornado import gen
 
 from distributed import (
     Client,
@@ -290,10 +289,10 @@ async def test_upload_pyz(c, s, a, b):
 @gen_cluster(client=True)
 async def test_upload_large_file(c, s, a, b):
     pytest.importorskip("crick")
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     with rpc(a.address) as aa:
         await aa.upload_file(filename="myfile.dat", data=b"0" * 100000000)
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         assert a.digests["tick-duration"].components[0].max() < 0.050
 
 
@@ -469,7 +468,7 @@ async def test_run_dask_worker(c, s, a, b):
 @gen_cluster(client=True)
 async def test_run_coroutine_dask_worker(c, s, a, b):
     async def f(dask_worker=None):
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
         return dask_worker.id
 
     response = await c.run(f)
@@ -516,7 +515,7 @@ async def test_close_on_disconnect(s, w):
 
     start = time()
     while w.status != "closed":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -571,7 +570,7 @@ async def test_clean(c, s, a, b):
     y.release()
 
     while x.key in a.task_state:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     for c in collections:
         assert not c
@@ -609,7 +608,7 @@ async def test_types(c, s, a, b):
 
     start = time()
     while y.key in b.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     assert y.key not in b.types
@@ -632,7 +631,7 @@ async def test_restrictions(c, s, a, b):
     await c._cancel(x)
 
     while x.key in a.task_state:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert a.resource_restrictions == {}
 
@@ -648,7 +647,7 @@ async def test_clean_nbytes(c, s, a, b):
     future = c.compute(total)
     await wait(future)
 
-    await gen.sleep(1)
+    await asyncio.sleep(1)
     assert len(a.nbytes) + len(b.nbytes) == 1
 
 
@@ -725,7 +724,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
             future = c.submit(div, 1, 0)
             await wait(future)
 
-            await gen.sleep(0.1)
+            await asyncio.sleep(0.1)
             fh.flush()
             with open(fn) as f:
                 text = f.read()
@@ -749,7 +748,7 @@ async def test_clean_up_dependencies(c, s, a, b):
 
     start = time()
     while len(a.data) + len(b.data) > 1:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
     assert set(a.data) | set(b.data) == {zz.key}
@@ -764,7 +763,7 @@ async def test_hold_onto_dependents(c, s, a, b):
     assert x.key in b.data
 
     await c._cancel(y)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     assert x.key in b.data
 
@@ -788,13 +787,13 @@ async def test_worker_death_timeout(s):
 @gen_cluster(client=True)
 async def test_stop_doing_unnecessary_work(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.01)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     del futures
 
     start = time()
     while a.executing:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
 
@@ -826,9 +825,9 @@ async def test_priorities(c, s, w):
 async def test_heartbeats(c, s, a, b):
     x = s.workers[a.address].last_seen
     start = time()
-    await gen.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.1)
+    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.1)
     while s.workers[a.address].last_seen == x:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
     assert a.periodic_callbacks["heartbeat"].callback_time < 1000
 
@@ -888,7 +887,7 @@ async def test_fail_write_to_disk(c, s, a, b):
 )
 async def test_fail_write_many_to_disk(c, s, a):
     a.validate = False
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert not a.paused
 
     class Bad:
@@ -990,22 +989,22 @@ async def test_global_workers(s, a, b):
 @gen_cluster(nthreads=[])
 async def test_worker_fds(s):
     psutil = pytest.importorskip("psutil")
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     start = psutil.Process().num_fds()
 
     worker = await Worker(s.address, loop=s.loop)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     middle = psutil.Process().num_fds()
     start = time()
     while middle > start:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 1
 
     await worker.close()
 
     start = time()
     while psutil.Process().num_fds() > start:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 0.5
 
 
@@ -1047,7 +1046,7 @@ async def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
     assert abs(a.scheduler_delay) < 0.3
     assert abs(b.scheduler_delay) < 0.3
-    await gen.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.3)
+    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.3)
     assert a.scheduler_delay != old
 
 
@@ -1109,7 +1108,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
     start = time()
     while not a.data.disk:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 5
 
 
@@ -1145,7 +1144,7 @@ async def test_pause_executor(c, s, a):
 
         start = time()
         while not a.paused:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 4, (
                 format_bytes(psutil.Process().memory_info().rss),
                 format_bytes(a.memory_limit),
@@ -1164,7 +1163,7 @@ async def test_pause_executor(c, s, a):
 async def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     await wait(futures)
-    await gen.sleep(0.01)
+    await asyncio.sleep(0.01)
     end = time()
     assert len(a.profile_history) > 3
 
@@ -1231,7 +1230,7 @@ async def test_avoid_memory_monitor_if_zero_limit(c, s):
 
     future = c.submit(inc, 1)
     assert (await future) == 2
-    await gen.sleep(worker.memory_monitor_interval / 1000)
+    await asyncio.sleep(worker.memory_monitor_interval / 1000)
 
     await c.submit(inc, 2)  # worker doesn't pause
 
@@ -1525,7 +1524,7 @@ async def test_worker_listens_on_same_interface_by_default(Worker):
 async def test_close_gracefully(c, s, a, b):
     futures = c.map(slowinc, range(200), delay=0.1)
     while not b.data:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     mem = set(b.data)
     proc = set(b.executing)
@@ -1546,7 +1545,7 @@ async def test_lifetime(cleanup):
         async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
             async with Client(s.address, asynchronous=True) as c:
                 futures = c.map(slowinc, range(200), delay=0.1)
-                await gen.sleep(1.5)
+                await asyncio.sleep(1.5)
                 assert b.status != "running"
                 await b.finished()
 

@@ -1,18 +1,17 @@
 import asyncio
-import cloudpickle
-import pickle
-from collections import defaultdict
 import json
+import logging
+import pickle
 import operator
 import re
 import sys
+from collections import defaultdict
 from time import sleep
-import logging
 
+import cloudpickle
 import dask
 from dask import delayed
 from tlz import merge, concat, valmap, first, frequencies
-from tornado import gen
 
 import pytest
 
@@ -70,7 +69,7 @@ async def test_respect_data_in_memory(c, s, a):
     f2 = c.persist(z)
     while f2.key not in s.tasks or not s.tasks[f2.key]:
         assert s.tasks[y.key].who_has
-        await gen.sleep(0.0001)
+        await asyncio.sleep(0.0001)
 
 
 @gen_cluster(client=True)
@@ -82,7 +81,7 @@ async def test_recompute_released_results(c, s, a, b):
     await wait(yy)
 
     while s.tasks[x.key].who_has or x.key in a.data or x.key in b.data:  # let x go away
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     z = delayed(dec)(x)
     zz = c.compute(z)
@@ -140,7 +139,7 @@ async def test_balance_with_restrictions(client, s, a, b, c):
 async def test_no_valid_workers(client, s, a, b, c):
     x = client.submit(inc, 1, workers="127.0.0.5:9999")
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.tasks[x.key] in s.unrunnable
 
@@ -159,7 +158,7 @@ async def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
 async def test_no_workers(client, s):
     x = client.submit(inc, 1)
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.tasks[x.key] in s.unrunnable
 
@@ -238,7 +237,7 @@ async def test_clear_events_worker_removal(s, a, b):
 
     start = time()
     while a.address in s.events:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
     assert b.address in s.events
 
@@ -258,7 +257,7 @@ async def test_clear_events_client_removal(c, s, a, b):
     # If it doesn't reconnect after a given time, the events log should be cleared
     start = time()
     while c.id in s.events:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
 
@@ -355,7 +354,7 @@ async def test_feed_setup_teardown(s, a, b):
     await comm.close()
     start = time()
     while not hasattr(s, "flag"):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 5
 
 
@@ -392,7 +391,7 @@ async def test_delete_data(c, s, a, b):
 
     start = time()
     while set(a.data) | set(b.data) != {"z"}:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -406,7 +405,7 @@ async def test_delete(c, s, a):
 
     start = time()
     while x.key in a.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -623,7 +622,7 @@ async def test_file_descriptors_dont_leak(s):
 
     start = time()
     while proc.num_fds() > before:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -725,7 +724,7 @@ async def test_retire_workers_n(c, s, a, b):
     assert len(s.workers) == 0
 
     while not (a.status.startswith("clos") and b.status.startswith("clos")):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -735,7 +734,7 @@ async def test_workers_to_close(cl, s, *workers):
     ):
         futures = cl.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
         while sum(len(w.processing) for w in s.workers.values()) < 3:
-            await gen.sleep(0.001)
+            await asyncio.sleep(0.001)
 
         wtc = s.workers_to_close()
         assert all(not s.workers[w].processing for w in wtc)
@@ -759,14 +758,14 @@ async def test_workers_to_close_grouped(c, s, *workers):
     # Assert that job in one worker blocks closure of group
     future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
     while len(s.rprocessing) < 1:
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
 
     assert set(s.workers_to_close(key=key)) == {workers[2].address, workers[3].address}
 
     del future
 
     while len(s.rprocessing) > 0:
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
 
     # Assert that *total* byte count in group determines group priority
     av = await c.scatter("a" * 100, workers=workers[0].address)
@@ -781,7 +780,7 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     future = c.submit(
         slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True
     )
-    await gen.sleep(0.2)
+    await asyncio.sleep(0.2)
     await s.retire_workers(workers=[a.address])
 
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
@@ -794,7 +793,7 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 )
 @gen_cluster(client=True, nthreads=[], timeout=240)
 async def test_file_descriptors(c, s):
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     psutil = pytest.importorskip("psutil")
     da = pytest.importorskip("dask.array")
     proc = psutil.Process()
@@ -804,11 +803,11 @@ async def test_file_descriptors(c, s):
     nannies = await asyncio.gather(*[Nanny(s.address, loop=s.loop) for _ in range(N)])
 
     while len(s.nthreads) < N:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     num_fds_2 = proc.num_fds()
 
-    await gen.sleep(0.2)
+    await asyncio.sleep(0.2)
 
     num_fds_3 = proc.num_fds()
     assert num_fds_3 <= num_fds_2 + N  # add some heartbeats
@@ -826,7 +825,7 @@ async def test_file_descriptors(c, s):
     num_fds_5 = proc.num_fds()
     assert num_fds_5 < num_fds_4 + N
 
-    await gen.sleep(1)
+    await asyncio.sleep(1)
 
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
@@ -842,7 +841,7 @@ async def test_file_descriptors(c, s):
 
     start = time()
     while proc.num_fds() > num_fds_1 + N:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
 
@@ -852,7 +851,7 @@ async def test_file_descriptors(c, s):
 async def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.2)
     while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert 100 < s.total_occupancy < 1000
     for w in [a, b]:
@@ -865,7 +864,7 @@ async def test_learn_occupancy(c, s, a, b):
 async def test_learn_occupancy_2(c, s, a, b):
     future = c.map(slowinc, range(1000), delay=0.2)
     while not any(ts.who_has for ts in s.tasks.values()):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert 100 < s.total_occupancy < 1000
 
@@ -905,7 +904,7 @@ async def test_balance_many_workers_2(c, s, *workers):
 @gen_cluster(client=True)
 async def test_learn_occupancy_multiple_workers(c, s, a, b):
     x = c.submit(slowinc, 1, delay=0.2, workers=a.address)
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     futures = c.map(slowinc, range(100), delay=0.2)
 
     await wait(x)
@@ -940,7 +939,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     yy, zz = c.persist([y, z])
 
     while not any(w.processing for w in s.workers.values()):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
     w.put_key_in_memory(y.key, 3)
@@ -950,7 +949,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
     start = time()
 
     while len(s.workers) < 3:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.get_task_status(keys={x.key, y.key, z.key}) == {
         x.key: "released",
@@ -972,7 +971,7 @@ async def test_worker_breaks_and_returns(c, s, a):
 
     await a.batched_stream.comm.close()
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     start = time()
     await wait(future, timeout=10)
     end = time()
@@ -992,7 +991,7 @@ async def test_no_workers_to_memory(c, s):
     yy, zz = c.persist([y, z])
 
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
     w.put_key_in_memory(y.key, 3)
@@ -1002,7 +1001,7 @@ async def test_no_workers_to_memory(c, s):
     start = time()
 
     while not s.workers:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.get_task_status(keys={x.key, y.key, z.key}) == {
         x.key: "released",
@@ -1022,7 +1021,7 @@ async def test_no_worker_to_memory_restrictions(c, s, a, b):
     yy, zz = c.persist([y, z], workers={(x, y, z): "alice"})
 
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1, name="alice")
     w.put_key_in_memory(y.key, 3)
@@ -1030,8 +1029,8 @@ async def test_no_worker_to_memory_restrictions(c, s, a, b):
     await w
 
     while len(s.workers) < 3:
-        await gen.sleep(0.01)
-    await gen.sleep(0.3)
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.3)
 
     assert s.get_task_status(keys={x.key, y.key, z.key}) == {
         x.key: "released",
@@ -1073,7 +1072,7 @@ async def test_close_worker(c, s, a, b):
     assert len(s.workers) == 1
     assert a.address not in s.workers
 
-    await gen.sleep(0.5)
+    await asyncio.sleep(0.5)
 
     assert len(s.workers) == 1
 
@@ -1093,20 +1092,20 @@ async def test_close_nanny(c, s, a, b):
 
     start = time()
     while a.is_alive():
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 5
 
     assert not a.is_alive()
     assert a.pid is None
 
     for i in range(10):
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert len(s.workers) == 1
         assert not a.is_alive()
         assert a.pid is None
 
     while a.status != "closed":
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         assert time() < start + 10
 
 
@@ -1115,7 +1114,7 @@ async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers
     while a.status != "closed" and b.status != "closed":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, timeout=20, Worker=Nanny)
@@ -1127,7 +1126,7 @@ async def test_retire_nannies_close(c, s, a, b):
     start = time()
 
     while any(n.status != "closed" for n in nannies):
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         assert time() < start + 10
 
     assert not any(n.is_alive() for n in nannies)
@@ -1140,7 +1139,7 @@ async def test_fifo_submission(c, s, w):
     for i in range(20):
         future = c.submit(slowinc, i, delay=0.1, key="inc-%02d" % i, fifo_timeout=0.01)
         futures.append(future)
-        await gen.sleep(0.02)
+        await asyncio.sleep(0.02)
     await wait(futures[-1])
     assert futures[10].status == "finished"
 
@@ -1166,7 +1165,7 @@ async def test_non_existent_worker(c, s):
             address="127.0.0.1:5738", nthreads=2, nbytes={}, host_info={}
         )
         futures = c.map(inc, range(10))
-        await gen.sleep(0.300)
+        await asyncio.sleep(0.300)
         assert not s.workers
         assert all(ts.state == "no-worker" for ts in s.tasks.values())
 
@@ -1178,7 +1177,7 @@ async def test_correct_bad_time_estimate(c, s, *workers):
 
     futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
 
-    await gen.sleep(0.5)
+    await asyncio.sleep(0.5)
 
     await wait(futures)
 
@@ -1212,7 +1211,7 @@ async def test_profile_metadata(c, s, a, b):
     start = time() - 1
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await wait(futures)
-    await gen.sleep(0.200)
+    await asyncio.sleep(0.200)
 
     meta = await s.get_profile_metadata(profile_cycle_interval=0.100)
     now = time() + 1
@@ -1244,7 +1243,7 @@ async def test_cancel_fire_and_forget(c, s, a, b):
     future = c.compute(w)
     fire_and_forget(future)
 
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     await future.cancel(force=True)
     assert future.status == "cancelled"
     assert not s.tasks
@@ -1268,7 +1267,7 @@ async def test_reschedule(c, s, a, b):
     futures = c.map(slowinc, range(10, 20), delay=0.1, workers=a.address)
 
     while len(s.tasks) < len(x) + len(futures):
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
 
     for future in x:
         s.reschedule(key=future.key)
@@ -1348,7 +1347,7 @@ async def test_mising_data_errant_worker(c, s, w1, w2, w3):
 
         y = c.submit(len, x, workers=w3.address)
         while not w3.tasks:
-            await gen.sleep(0.001)
+            await asyncio.sleep(0.001)
         await w1.close()
         await wait(y)
 
@@ -1366,7 +1365,7 @@ async def test_dont_recompute_if_persisted(c, s, a, b):
     yyy = y.persist()
     await wait(yyy)
 
-    await gen.sleep(0.100)
+    await asyncio.sleep(0.100)
     assert list(s.transition_log) == old
 
 
@@ -1384,7 +1383,7 @@ async def test_dont_recompute_if_persisted_2(c, s, a, b):
     zz = z.persist()
     await wait(zz)
 
-    await gen.sleep(0.100)
+    await asyncio.sleep(0.100)
     assert s.story("x", "y") == old
 
 
@@ -1402,7 +1401,7 @@ async def test_dont_recompute_if_persisted_3(c, s, a, b):
 
     www = w.persist()
     await wait(www)
-    await gen.sleep(0.100)
+    await asyncio.sleep(0.100)
     assert list(s.transition_log) == old
 
 
@@ -1418,7 +1417,7 @@ async def test_dont_recompute_if_persisted_4(c, s, a, b):
     old = s.story("x")
 
     while s.tasks["x"].state == "memory":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     yyy, zzz = dask.persist(y, z)
     await wait([yyy, zzz])
@@ -1437,7 +1436,7 @@ async def test_dont_forget_released_keys(c, s, a, b):
     del z
 
     while "z" in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert "x" in s.tasks
 
@@ -1455,7 +1454,7 @@ async def test_dont_recompute_if_erred(c, s, a, b):
     yyy = y.persist()
     await wait(yyy)
 
-    await gen.sleep(0.100)
+    await asyncio.sleep(0.100)
     assert list(s.transition_log) == old
 
 
@@ -1465,7 +1464,7 @@ async def test_closing_scheduler_closes_workers(s, a, b):
 
     start = time()
     while a.status != "closed" or b.status != "closed":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
 
@@ -1476,12 +1475,12 @@ async def test_resources_reset_after_cancelled_task(c, s, w):
     future = c.submit(sleep, 0.2, resources={"A": 1})
 
     while not w.executing:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     await future.cancel()
 
     while w.executing:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert not s.workers[w.address].used_resources["A"]
     assert w.available_resources == {"A": 1}
@@ -1510,7 +1509,7 @@ async def test_gh2187(c, s, a, b):
     await y
     z = c.submit(qux, y, key="z")
     del y
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     f = c.submit(bar, x, key="y")
     await f
 
@@ -1536,12 +1535,12 @@ async def test_idle_timeout(c, s, a, b):
     with captured_logger("distributed.scheduler") as logs:
         start = time()
         while s.status != "closed":
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 3
 
         start = time()
         while not (a.status == "closed" and b.status == "closed"):
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 1
 
     assert "idle" in logs.getvalue()
@@ -1642,16 +1641,16 @@ async def test_adaptive_target(c, s, a, b):
         # Long task
         x = c.submit(slowinc, 1, delay=0.5)
         while x.key not in s.tasks:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
         assert s.adaptive_target(target_duration=".1s") == 1  # still one
 
         L = c.map(slowinc, range(100), delay=0.5)
         while len(s.tasks) < 100:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
         assert 10 < s.adaptive_target(target_duration=".1s") <= 100
         del x, L
         while s.tasks:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
         assert s.adaptive_target(target_duration=".1s") == 0
 
 

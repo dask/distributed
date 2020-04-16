@@ -1,12 +1,12 @@
-from operator import add, sub
+import asyncio
 import re
+from operator import add, sub
 from time import sleep
 
 import pytest
 
 pytest.importorskip("bokeh")
 from tlz import first
-from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed.client import wait
@@ -32,7 +32,7 @@ async def test_routes(c, s, a, b):
     port = a.http_server.port
 
     future = c.submit(sleep, 1)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
     for suffix in ["status", "counters", "system", "profile", "profile-server"]:
@@ -54,7 +54,7 @@ async def test_simple(c, s, a, b):
     assert s.workers[b.address].services == {"dashboard": b.http_server.port}
 
     future = c.submit(sleep, 1)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
     for suffix in ["crossfilter", "system"]:
@@ -92,7 +92,7 @@ async def test_basic(c, s, a, b):
 
         x = c.submit(slowall, xs, ys, 1, workers=a.address)
         y = c.submit(slowall, xs, ys, 2, workers=b.address)
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
         aa.update()
         bb.update()
@@ -106,16 +106,16 @@ async def test_basic(c, s, a, b):
 async def test_counters(c, s, a, b):
     pytest.importorskip("crick")
     while "tick-duration" not in a.digests:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     aa = Counters(a)
 
     aa.update()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     aa.update()
 
     start = time()
     while not len(aa.digest_sources["tick-duration"][0].data["x"]):
-        await gen.sleep(1)
+        await asyncio.sleep(1)
         assert time() < start + 5
 
     a.digests["foo"].add(1)

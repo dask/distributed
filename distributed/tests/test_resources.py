@@ -3,7 +3,6 @@ from time import time
 
 from dask import delayed
 import pytest
-from tornado import gen
 
 from distributed import Worker
 from distributed.client import wait
@@ -229,7 +228,7 @@ async def test_submit_many_non_overlapping(c, s, a, b):
     futures = c.map(slowinc, range(100), resources={"A": 1}, delay=0.02)
 
     while len(a.data) + len(b.data) < 100:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert len(a.executing) <= 2
         assert len(b.executing) <= 1
 
@@ -243,7 +242,7 @@ async def test_minimum_resource(c, s, a):
     futures = c.map(slowinc, range(30), resources={"A": 1, "B": 1}, delay=0.02)
 
     while len(a.data) < 30:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert len(a.executing) <= 1
 
     await wait(futures)
@@ -291,7 +290,7 @@ async def test_set_resources(c, s, a):
 
     future = c.submit(slowinc, 1, delay=1, resources={"A": 1})
     while a.available_resources["A"] == 2:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     await a.set_resources(A=3)
     assert a.total_resources["A"] == 3

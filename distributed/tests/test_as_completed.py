@@ -6,7 +6,6 @@ import random
 from time import sleep
 
 import pytest
-from tornado import gen
 
 from distributed.client import _as_completed, as_completed, _first_completed, wait
 from distributed.metrics import time
@@ -130,7 +129,7 @@ def test_as_completed_cancel_last(client):
     y = client.submit(inc, 0.3)
 
     async def _():
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         await w.cancel(asynchronous=True)
         await y.cancel(asynchronous=True)
 

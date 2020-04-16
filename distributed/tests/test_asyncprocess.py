@@ -1,11 +1,12 @@
-from datetime import timedelta
+import asyncio
 import gc
 import os
 import signal
 import sys
 import threading
-from time import sleep
 import weakref
+from datetime import timedelta
+from time import sleep
 
 import pytest
 from tornado import gen
@@ -133,7 +134,7 @@ async def test_simple():
         pytest.fail("AsyncProcess should have been destroyed")
     t1 = time()
     while wr2() is not None:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         gc.collect()
         dt = time() - t1
         assert dt < 2.0
@@ -236,7 +237,7 @@ async def test_exit_callback():
     proc.daemon = True
 
     await proc.start()
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     assert proc.is_alive()
     assert not evt.is_set()
 
@@ -252,7 +253,7 @@ async def test_exit_callback():
     proc.daemon = True
 
     await proc.start()
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)
     assert proc.is_alive()
     assert not evt.is_set()
 
@@ -304,7 +305,7 @@ async def test_num_fds():
 
     start = time()
     while p.num_fds() > before:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         print("fds:", before, p.num_fds())
         assert time() < start + 10
 
@@ -313,7 +314,7 @@ async def test_num_fds():
 async def test_terminate_after_stop():
     proc = AsyncProcess(target=sleep, args=(0,))
     await proc.start()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     await proc.terminate()
 
 

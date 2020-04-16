@@ -20,7 +20,6 @@ import zipfile
 
 import pytest
 from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
-from tornado import gen
 
 import dask
 from dask import delayed
@@ -387,18 +386,18 @@ async def test_Future_release(c, s, a, b):
     x = c.submit(div, 1, 1)
     await x
     x.release()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert not c.futures
 
     x = c.submit(slowinc, 1, delay=0.5)
     x.release()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert not c.futures
 
     x = c.submit(div, 1, 0)
     await x.exception()
     x.release()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert not c.futures
 
 
@@ -718,19 +717,19 @@ async def test_garbage_collection(c, s, a, b):
 
     assert c.refcount[x.key] == 2
     x.__del__()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert c.refcount[x.key] == 1
 
     z = c.submit(inc, y)
     y.__del__()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
 
     result = await z
     assert result == 3
 
     ykey = y.key
     y.__del__()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert ykey not in c.futures
 
 
@@ -744,7 +743,7 @@ async def test_garbage_collection_with_scatter(c, s, a, b):
     key = future.key
     assert c.refcount[key] == 1
     future.__del__()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert c.refcount[key] == 0
 
     start = time()
@@ -753,7 +752,7 @@ async def test_garbage_collection_with_scatter(c, s, a, b):
             break
         else:
             assert time() < start + 3
-            await gen.sleep(0.1)
+            await asyncio.sleep(0.1)
 
 
 @gen_cluster(timeout=1000, client=True)
@@ -765,12 +764,12 @@ async def test_recompute_released_key(c, s, a, b):
     import gc
 
     gc.collect()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     assert c.refcount[xkey] == 0
 
     # 1 second batching needs a second action to trigger
     while xkey in s.tasks and s.tasks[xkey].who_has or xkey in a.data or xkey in b.data:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     x = c.submit(inc, 100)
     assert x.key in c.futures
@@ -805,7 +804,7 @@ async def test_missing_data_heals(c, s, a, b):
     if y.key in b.data:
         del b.data[y.key]
         b.release_key(y.key)
-    await gen.sleep(0)
+    await asyncio.sleep(0)
 
     w = c.submit(add, y, z)
 
@@ -825,7 +824,7 @@ async def test_gather_robust_to_missing_data(c, s, a, b):
         for w in [a, b]:
             if f.key in w.data:
                 del w.data[f.key]
-                await gen.sleep(0)
+                await asyncio.sleep(0)
                 w.release_key(f.key)
 
     xx, yy, zz = await c.gather([x, y, z])
@@ -848,7 +847,7 @@ async def test_gather_robust_to_nested_missing_data(c, s, a, b):
         for datum in [y, z]:
             if datum.key in worker.data:
                 del worker.data[datum.key]
-                await gen.sleep(0)
+                await asyncio.sleep(0)
                 worker.release_key(datum.key)
 
     result = await c.gather([z])
@@ -968,7 +967,7 @@ async def test_errors_dont_block(c, s, w):
     start = time()
     while not (L[0].status == L[2].status == "finished"):
         assert time() < start + 5
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     result = await c.gather([L[0], L[2]])
     assert result == [2, 3]
@@ -1058,7 +1057,7 @@ async def test_aliases_2(c, s, a, b):
     for dsk, keys in dsk_keys:
         result = await c.gather(c.get(dsk, keys, sync=False))
         assert list(result) == list(dask.get(dsk, keys))
-        await gen.sleep(0)
+        await asyncio.sleep(0)
 
 
 @gen_cluster(client=True)
@@ -1182,7 +1181,7 @@ async def test_get_releases_data(c, s, a, b):
 
     start = time()
     while c.refcount["x"]:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
 
@@ -1980,7 +1979,7 @@ async def test_forget_complex(e, s, A, B):
 
     start = time()
     while b.key in A.data or b.key in B.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 10
 
     s.client_releases_keys(keys=[ac.key], client=e.id)
@@ -2000,7 +1999,7 @@ async def test_forget_in_flight(e, s, A, B):
     s.validate_state()
 
     for i in range(5):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         s.validate_state()
 
     s.client_releases_keys(keys=[y.key], client=e.id)
@@ -2091,7 +2090,7 @@ async def test_multi_client(s, a, b):
 
     start = time()
     while c.id in s.wants_what:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     assert c.id not in s.wants_what
@@ -2102,7 +2101,7 @@ async def test_multi_client(s, a, b):
 
     start = time()
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2, s.tasks
 
 
@@ -2122,14 +2121,14 @@ async def test_cleanup_after_broken_client_connection(s, a, b):
 
     start = time()
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     proc.terminate()
 
     start = time()
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -2150,7 +2149,7 @@ async def test_multi_garbage_collection(s, a, b):
     x.__del__()
     start = time()
     while x.key in a.data or x.key in b.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     assert s.wants_what == {c.id: {y.key}, f.id: {y.key}, "fire-and-forget": set()}
@@ -2159,10 +2158,10 @@ async def test_multi_garbage_collection(s, a, b):
     y.__del__()
     start = time()
     while x.key in s.wants_what[f.id]:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert y.key in a.data or y.key in b.data
     assert s.wants_what == {c.id: {y.key}, f.id: set(), "fire-and-forget": set()}
     assert s.who_wants == {y.key: {c.id}}
@@ -2170,7 +2169,7 @@ async def test_multi_garbage_collection(s, a, b):
     y2.__del__()
     start = time()
     while y.key in a.data or y.key in b.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     assert not any(v for v in s.wants_what.values())
@@ -2230,7 +2229,7 @@ async def test__cancel(c, s, a, b):
     y = c.submit(slowinc, x)
 
     while y.key not in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     await c.cancel([x])
 
@@ -2240,7 +2239,7 @@ async def test__cancel(c, s, a, b):
 
     start = time()
     while not y.cancelled():
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     assert not s.tasks
@@ -2273,7 +2272,7 @@ async def test_cancel_multi_client(s, a, b):
 
     start = time()
     while y.key not in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     out = await y
@@ -2372,7 +2371,7 @@ async def test_async_persist(c, s, a, b):
     assert w.__dask_keys__() == ww.__dask_keys__()
 
     while y.key not in s.tasks and w.key not in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.who_wants[y.key] == {c.id}
     assert s.who_wants[w.key] == {c.id}
@@ -2505,17 +2504,17 @@ async def test_dont_delete_recomputed_results(c, s, w):
     x = c.submit(inc, 1)  # compute first time
     await wait([x])
     x.__del__()  # trigger garbage collection
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     xx = c.submit(inc, 1)  # compute second time
 
     start = time()
     while xx.key not in w.data:  # data shows up
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 1
 
     while time() < start + (s.delete_interval + 100) / 1000:  # and stays
         assert xx.key in w.data
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -2525,7 +2524,7 @@ async def test_fatally_serialized_input(c, s):
     future = c.submit(inc, o)
 
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @pytest.mark.skip(reason="Use fast random selection now")
@@ -2728,7 +2727,7 @@ async def test_persist_get(c, s, a, b):
     xxyy2 = c.persist(xxyy)
     xxyy3 = delayed(add)(xxyy2, 10)
 
-    await gen.sleep(0.5)
+    await asyncio.sleep(0.5)
     result = await c.gather(c.get(xxyy3.dask, xxyy3.__dask_keys__(), sync=False))
     assert result[0] == ((1 + 1) + (2 + 2)) + 10
 
@@ -2864,7 +2863,7 @@ def test_rebalance_sync(c, s, a, b):
 @gen_cluster(client=True)
 async def test_rebalance_unprepared(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     await c.rebalance(futures)
     s.validate_state()
 
@@ -2887,7 +2886,7 @@ async def test_receive_lost_key(c, s, a, b):
     start = time()
     while x.status == "finished":
         assert time() < start + 5
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @pytest.mark.skipif(
@@ -2902,7 +2901,7 @@ async def test_unrunnable_task_runs(c, s, a, b):
     start = time()
     while x.status == "finished":
         assert time() < start + 5
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
@@ -2912,7 +2911,7 @@ async def test_unrunnable_task_runs(c, s, a, b):
     start = time()
     while x.status != "finished":
         assert time() < start + 2
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert s.tasks[x.key] not in s.unrunnable
     result = await x
@@ -3172,7 +3171,7 @@ async def test_scheduler_saturates_cores(c, s, a, b):
                     for w in s.workers.values()
                     for p in w.processing.values()
                 )
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 20)] * 2)
@@ -3186,7 +3185,7 @@ async def test_scheduler_saturates_cores_random(c, s, a, b):
                     for w in s.workers.values()
                     for p in w.processing.values()
                 )
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -3194,14 +3193,14 @@ async def test_cancel_clears_processing(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = c.submit(slowinc, 1, delay=0.2)
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     await c.cancel(x)
 
     start = time()
     while any(v for w in s.workers.values() for v in w.processing):
         assert time() < start + 0.2
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     s.validate_state()
 
 
@@ -3252,7 +3251,7 @@ async def test_get_processing(c, s, a, b):
         slowinc, range(10), delay=0.1, workers=[a.address], allow_other_workers=True
     )
 
-    await gen.sleep(0.2)
+    await asyncio.sleep(0.2)
 
     x = await c.processing()
     assert set(x) == {a.address, b.address}
@@ -3403,7 +3402,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
     import gc
 
     gc.collect()
-    await gen.sleep(0)
+    await asyncio.sleep(0)
 
     assert key not in c.refcount
 
@@ -3573,7 +3572,7 @@ async def test_reconnect_timeout(c, s):
         start = time()
         while c.status != "closed":
             await c._update_scheduler_info()
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
             assert time() < start + 5, "Timeout waiting for reconnect to fail"
     text = logger.getvalue()
     assert "Failed to reconnect" in text
@@ -3597,7 +3596,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
         async def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
-                await gen.sleep(sleep)
+                await asyncio.sleep(sleep)
                 if not status:
                     return
                 w = worker(s["address"], loop=loop)
@@ -3606,10 +3605,10 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 await w
                 addr = w.worker_address
                 running[w] = addr
-                await gen.sleep(duration)
+                await asyncio.sleep(duration)
                 await w.close()
                 del w
-                await gen.sleep(0)
+                await asyncio.sleep(0)
             done.release()
 
         for i in range(count):
@@ -3659,7 +3658,7 @@ async def test_idempotence(s, a, b):
     y = f.submit(inc, 1)
     assert x.key == y.key
     await y
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     log2 = list(s.transition_log)
     assert log == log2
 
@@ -3672,7 +3671,7 @@ async def test_idempotence(s, a, b):
     b = f.submit(div, 1, 0)
     assert a.key == b.key
     await wait(b)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     log2 = list(s.transition_log)
     assert log == log2
 
@@ -3748,7 +3747,7 @@ async def test_lose_scattered_data(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
     await a.close()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     assert x.status == "cancelled"
     assert x.key not in s.tasks
@@ -3760,7 +3759,7 @@ async def test_partially_lose_scattered_data(e, s, a, b, c):
     await e.replicate(x, n=2)
 
     await a.close()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     assert x.status == "finished"
     assert s.get_task_status(keys=[x.key]) == {x.key: "memory"}
@@ -3772,7 +3771,7 @@ async def test_scatter_compute_lose(c, s, a, b):
     y = c.submit(inc, 1, workers=b.address)
 
     z = c.submit(slowadd, x, y, delay=0.2)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     await a.close()
 
@@ -3804,7 +3803,7 @@ async def test_scatter_compute_store_lose(c, s, a, b):
 
     start = time()
     while x.status == "finished":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
     # assert xx.status == 'finished'
@@ -3819,7 +3818,7 @@ async def test_scatter_compute_store_lose(c, s, a, b):
 
     start = time()
     while s.get_task_status(keys=[zkey]) != {zkey: "released"}:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
     xxkey = xx.key
@@ -3827,7 +3826,7 @@ async def test_scatter_compute_store_lose(c, s, a, b):
 
     start = time()
     while x.key in s.tasks and zkey not in s.tasks and xxkey not in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
 
@@ -3844,12 +3843,12 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
     y = c.submit(slowinc, x, delay=0.2)
     z = c.submit(inc, y)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     await a.close()
 
     start = time()
     while x.status == "finished":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
     assert y.status == "cancelled"
@@ -4007,7 +4006,7 @@ async def test_retire_many_workers(c, s, *workers):
     assert results == list(range(100))
 
     while len(s.workers) != 3:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert len(s.has_what) == len(s.nthreads) == 3
 
@@ -4085,7 +4084,7 @@ async def test_add_done_callback(c, s, a, b):
 
     t = time()
     while len(S) < 4 and time() - t < 2.0:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert S == {(f.key, f.status) for f in (u, v, w, x)}
 
@@ -4211,14 +4210,14 @@ async def test_interleave_computations(c, s, a, b):
 
     done = ("memory", "released")
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     x_keys = [x.key for x in xs]
     y_keys = [y.key for y in ys]
     z_keys = [z.key for z in zs]
 
     while not s.tasks or any(w.processing for w in s.workers.values()):
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         x_done = sum(state in done for state in s.get_task_status(keys=x_keys).values())
         y_done = sum(state in done for state in s.get_task_status(keys=y_keys).values())
         z_done = sum(state in done for state in s.get_task_status(keys=z_keys).values())
@@ -4244,7 +4243,7 @@ async def test_interleave_computations_map(c, s, a, b):
     z_keys = [z.key for z in zs]
 
     while not s.tasks or any(w.processing for w in s.workers.values()):
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         x_done = sum(state in done for state in s.get_task_status(keys=x_keys).values())
         y_done = sum(state in done for state in s.get_task_status(keys=y_keys).values())
         z_done = sum(state in done for state in s.get_task_status(keys=z_keys).values())
@@ -4266,7 +4265,7 @@ async def test_client_timeout():
     c = Client("127.0.0.1:57484", asynchronous=True)
 
     s = Scheduler(loop=c.loop, port=57484)
-    await gen.sleep(4)
+    await asyncio.sleep(4)
     try:
         await s
     except EnvironmentError:  # port in use
@@ -4312,12 +4311,12 @@ async def test_dont_clear_waiting_data(c, s, a, b):
     x = await c.scatter(1)
     y = c.submit(slowinc, x, delay=0.5)
     while y.key not in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     key = x.key
     del x
     for i in range(5):
         assert s.waiting_data[key]
-        await gen.sleep(0)
+        await asyncio.sleep(0)
 
 
 @gen_cluster(client=True)
@@ -4461,7 +4460,7 @@ async def test_retire_workers(c, s, a, b):
 
     start = time()
     while a.status != "closed":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -4541,7 +4540,7 @@ async def test_fire_and_forget(c, s, a, b):
 
         start = time()
         while not hasattr(distributed, "foo"):
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 2
         assert distributed.foo == 123
     finally:
@@ -4549,7 +4548,7 @@ async def test_fire_and_forget(c, s, a, b):
 
     start = time()
     while len(s.tasks) > 1:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 2
 
     assert set(s.who_wants) == {future.key}
@@ -4559,12 +4558,12 @@ async def test_fire_and_forget(c, s, a, b):
 @gen_cluster(client=True)
 async def test_fire_and_forget_err(c, s, a, b):
     fire_and_forget(c.submit(div, 1, 0))
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     # erred task should clear out quickly
     start = time()
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 1
 
 
@@ -4609,7 +4608,7 @@ async def test_close(s, a, b):
 
     start = time()
     while c.id in s.wants_what or s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -4755,7 +4754,7 @@ async def test_secede_balances(c, s, a, b):
     futures = c.map(f, range(100))
     start = time()
     while not all(f.status == "finished" for f in futures):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert threading.active_count() < count + 50
 
     assert len(a.log) < 2 * len(b.log)
@@ -4772,7 +4771,7 @@ async def test_sub_submit_priority(c, s, a, b):
         client.submit(slowinc, 1, delay=0.2, key="slowinc")
 
     future = c.submit(f, key="f")
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     if len(s.tasks) == 2:
         assert (
             s.priorities["f"] > s.priorities["slowinc"]
@@ -4931,7 +4930,7 @@ def test_warn_executor(loop, s, a, b):
 async def test_call_stack_future(c, s, a, b):
     x = c.submit(slowdec, 1, delay=0.5)
     future = c.submit(slowinc, 1, delay=0.5)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     results = await asyncio.gather(
         c.call_stack(future), c.call_stack(keys=[future.key])
     )
@@ -4949,7 +4948,7 @@ async def test_call_stack_future(c, s, a, b):
 async def test_call_stack_all(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.8)
     while not a.executing and not b.executing:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     result = await c.call_stack()
     w = a if a.executing else b
     assert list(result) == [w.address]
@@ -4962,7 +4961,7 @@ async def test_call_stack_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.executing and not b.executing:
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
     result = await c.call_stack(x)
     assert result
 
@@ -4972,7 +4971,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.executing and not b.executing:
-        await gen.sleep(0.001)
+        await asyncio.sleep(0.001)
     result = await c.call_stack()
     assert result
 
@@ -5048,7 +5047,7 @@ async def test_future_auto_inform(c, s, a, b):
 
     start = time()
     while future.status != "finished":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 1
 
     await client.close()
@@ -5095,7 +5094,7 @@ async def test_task_metadata(c, s, a, b):
     del future
 
     while key in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     with pytest.raises(KeyError):
         await c.get_metadata(key)
@@ -5196,7 +5195,7 @@ async def test_scatter_direct(s, a, b):
 
     start = time()
     while s.clients[c.id].last_seen == last:
-        await gen.sleep(0.10)
+        await asyncio.sleep(0.10)
         assert time() < start + 5
 
     await c.close()
@@ -5405,7 +5404,7 @@ async def test_scatter_error_cancel(c, s, a, b):
 
     await wait(y)
     assert y.status == "error"
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert y.status == "error"  # not cancelled
 
 
@@ -5471,7 +5470,7 @@ async def test_map_large_kwargs_in_graph(c, s, a, b):
     x = np.random.random(100000)
     futures = c.map(lambda a, b: a + b, range(100), b=x)
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert len(s.tasks) == 101
     assert any(k.startswith("ndarray") for k in s.tasks)
@@ -5613,7 +5612,7 @@ async def test_instances(c, s, a, b):
 @gen_cluster(client=True)
 async def test_wait_for_workers(c, s, a, b):
     future = asyncio.ensure_future(c.wait_for_workers(n_workers=3))
-    await gen.sleep(0.22)  # 2 chances
+    await asyncio.sleep(0.22)  # 2 chances
     assert not future.done()
 
     w = await Worker(s.address)
@@ -5780,7 +5779,7 @@ async def test_as_completed_async_for_cancel(c, s, a, b):
     ac = as_completed([x, y])
 
     async def _():
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         await y.cancel(asynchronous=True)
 
     c.loop.add_callback(_)
@@ -5818,7 +5817,7 @@ def test_async_with(loop):
 
 def test_client_sync_with_async_def(loop):
     async def ff():
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         return 1
 
     with cluster() as (s, [a, b]):
@@ -5861,13 +5860,13 @@ async def test_dont_hold_on_to_large_messages(c, s, a, b):
                     )
             pytest.fail("array should have been destroyed")
 
-        await gen.sleep(0.200)
+        await asyncio.sleep(0.200)
 
 
 @gen_cluster(client=True)
 async def test_run_scheduler_async_def(c, s, a, b):
     async def f(dask_scheduler):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
 
     await c.run_on_scheduler(f)
@@ -5875,7 +5874,7 @@ async def test_run_scheduler_async_def(c, s, a, b):
     assert s.foo == "bar"
 
     async def f(dask_worker):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         dask_worker.foo = "bar"
 
     await c.run(f)
@@ -5886,23 +5885,23 @@ async def test_run_scheduler_async_def(c, s, a, b):
 @gen_cluster(client=True)
 async def test_run_scheduler_async_def_wait(c, s, a, b):
     async def f(dask_scheduler):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         dask_scheduler.foo = "bar"
 
     await c.run_on_scheduler(f, wait=False)
 
     while not hasattr(s, "foo"):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     assert s.foo == "bar"
 
     async def f(dask_worker):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         dask_worker.foo = "bar"
 
     await c.run(f, wait=False)
 
     while not hasattr(a, "foo") or not hasattr(b, "foo"):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert a.foo == "bar"
     assert b.foo == "bar"

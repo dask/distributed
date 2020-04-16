@@ -1,8 +1,8 @@
-from operator import add
+import asyncio
 import random
 import sys
+from operator import add
 from time import sleep
-import asyncio
 
 from dask import delayed
 import pytest
@@ -27,7 +27,6 @@ from distributed.utils_test import (  # noqa: F401
     nodebug_teardown_module,
 )
 from distributed.client import wait
-from tornado import gen
 
 
 # All tests here are slow in some way
@@ -41,7 +40,7 @@ async def test_stress_1(c, s, a, b):
 
     seq = c.map(inc, range(n))
     while len(seq) > 1:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         seq = [c.submit(add, seq[i], seq[i + 1]) for i in range(0, len(seq), 2)]
     result = await seq[0]
     assert result == sum(map(inc, range(n)))
@@ -72,7 +71,7 @@ async def test_cancel_stress(c, s, *workers):
     for i in range(5):
         f = c.compute(y)
         while len(s.waiting) > (random.random() + 1) * 0.5 * n_todo:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
         await c._cancel(f)
 
 
@@ -105,7 +104,7 @@ async def test_stress_creation_and_deletion(c, s):
         start = time()
         while time() < start + 5:
             n = await Nanny(s.address, nthreads=2, loop=s.loop)
-            await gen.sleep(delay)
+            await asyncio.sleep(delay)
             await n.close()
             print("Killed nanny")
 
@@ -146,7 +145,7 @@ async def test_stress_scatter_death(c, s, *workers):
     from distributed.scheduler import logger
 
     for i in range(7):
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         try:
             s.validate_state()
         except Exception as c:
@@ -208,7 +207,7 @@ async def test_stress_steal(c, s, *workers):
     future = c.compute(total)
 
     while future.status != "finished":
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         for i in range(3):
             a = random.choice(workers)
             b = random.choice(workers)
@@ -229,7 +228,7 @@ async def test_close_connections(c, s, *workers):
 
     future = c.compute(x.sum())
     while any(s.processing.values()):
-        await gen.sleep(0.5)
+        await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
         for comm in worker._comms:
             comm.abort()
@@ -263,7 +262,7 @@ async def test_no_delay_during_large_transfer(c, s, w):
 
     with ResourceProfiler(dt=0.01) as rprof:
         future = await c.scatter(x, direct=True, hash=False)
-        await gen.sleep(0.5)
+        await asyncio.sleep(0.5)
 
     rprof.close()
     x = None  # lose ref

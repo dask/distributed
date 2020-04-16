@@ -1,9 +1,9 @@
+import asyncio
 import math
 from time import sleep
 
 import dask
 import pytest
-from tornado import gen
 
 from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
 from distributed.utils_test import gen_test, slowinc, clean
@@ -39,13 +39,13 @@ async def test_simultaneous_scale_up_and_down(cleanup):
                 future = c.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
 
                 while len(s.rprocessing) < 3:
-                    await gen.sleep(0.001)
+                    await asyncio.sleep(0.001)
 
                 ta = cluster.adapt(
                     interval="100 ms", scale_factor=2, Adaptive=TestAdaptive
                 )
 
-                await gen.sleep(0.3)
+                await asyncio.sleep(0.3)
 
 
 def test_adaptive_local_cluster(loop):
@@ -90,7 +90,7 @@ async def test_adaptive_local_cluster_multi_workers(cleanup):
 
             start = time()
             while not cluster.scheduler.workers:
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
                 assert time() < start + 15, adapt.log
 
             await c.gather(futures)
@@ -99,13 +99,13 @@ async def test_adaptive_local_cluster_multi_workers(cleanup):
             start = time()
             # while cluster.workers:
             while cluster.scheduler.workers:
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
                 assert time() < start + 15, adapt.log
 
             # no workers for a while
             for i in range(10):
                 assert not cluster.scheduler.workers
-                await gen.sleep(0.05)
+                await asyncio.sleep(0.05)
 
             futures = c.map(slowinc, range(100), delay=0.01)
             await c.gather(futures)
@@ -135,7 +135,7 @@ async def test_adaptive_scale_down_override(cleanup):
         ta = cluster.adapt(
             min_size=2, interval=0.1, scale_factor=2, Adaptive=TestAdaptive
         )
-        await gen.sleep(0.3)
+        await asyncio.sleep(0.3)
 
         # Assert that adaptive cycle does not reduce cluster below minimum size
         # as determined via override.
@@ -158,10 +158,10 @@ async def test_min_max():
 
         start = time()
         while not cluster.scheduler.workers:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 1
 
-        await gen.sleep(0.2)
+        await asyncio.sleep(0.2)
         assert len(cluster.scheduler.workers) == 1
         assert len(adapt.log) == 1 and adapt.log[-1][1] == {"status": "up", "n": 1}
 
@@ -169,11 +169,11 @@ async def test_min_max():
 
         start = time()
         while len(cluster.scheduler.workers) < 2:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 1
 
         assert len(cluster.scheduler.workers) == 2
-        await gen.sleep(0.5)
+        await asyncio.sleep(0.5)
         assert len(cluster.scheduler.workers) == 2
         assert len(cluster.workers) == 2
         assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
@@ -182,7 +182,7 @@ async def test_min_max():
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             assert time() < start + 2
         assert adapt.log[-1][1]["status"] == "down"
     finally:
@@ -210,7 +210,7 @@ async def test_avoid_churn(cleanup):
 
             for i in range(10):
                 await client.submit(slowinc, i, delay=0.040)
-                await gen.sleep(0.040)
+                await asyncio.sleep(0.040)
 
             assert len(adapt.log) == 1
 
@@ -240,24 +240,24 @@ async def test_adapt_quickly():
         # Scale up when there is plenty of available work
         futures = client.map(slowinc, range(1000), delay=0.100)
         while len(adapt.log) == 1:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
         assert len(adapt.log) == 2
         assert adapt.log[-1][1]["status"] == "up"
         d = [x for x in adapt.log[-1] if isinstance(x, dict)][0]
         assert 2 < d["n"] <= adapt.maximum
 
         while len(cluster.workers) < adapt.maximum:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
         del futures
 
         while len(cluster.scheduler.tasks) > 1:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
         await cluster
 
         while len(cluster.scheduler.workers) > 1 or len(cluster.worker_spec) > 1:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
         # Don't scale up for large sequential computations
         x = await client.scatter(1)
@@ -265,7 +265,7 @@ async def test_adapt_quickly():
         for i in range(100):
             x = client.submit(slowinc, x)
 
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert len(cluster.workers) == 1
     finally:
         await client.close()
@@ -288,13 +288,13 @@ async def test_adapt_down():
 
             futures = client.map(slowinc, range(1000), delay=0.1)
             while len(cluster.scheduler.workers) < 5:
-                await gen.sleep(0.1)
+                await asyncio.sleep(0.1)
 
             cluster.adapt(maximum=2)
 
             start = time()
             while len(cluster.scheduler.workers) != 2:
-                await gen.sleep(0.1)
+                await asyncio.sleep(0.1)
                 assert time() < start + 1
 
 
@@ -349,12 +349,12 @@ async def test_target_duration():
             adapt = cluster.adapt(interval="20ms", minimum=2, target_duration="5s")
             async with Client(cluster, asynchronous=True) as client:
                 while len(cluster.scheduler.workers) < 2:
-                    await gen.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
                 futures = client.map(slowinc, range(100), delay=0.3)
 
                 while len(adapt.log) < 2:
-                    await gen.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
                 assert adapt.log[0][1] == {"status": "up", "n": 2}
                 assert adapt.log[1][1] == {"status": "up", "n": 20}
@@ -382,7 +382,7 @@ async def test_worker_keys(cleanup):
         await adaptive.adapt()
 
         while len(cluster.scheduler.workers) == 4:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
         names = {ws.name for ws in cluster.scheduler.workers.values()}
         assert names == {"a-1", "a-2"} or names == {"b-1", "b-2"}

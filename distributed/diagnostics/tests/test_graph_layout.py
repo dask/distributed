@@ -1,9 +1,9 @@
+import asyncio
 import operator
 
 from distributed.utils_test import gen_cluster, inc
 from distributed.diagnostics import GraphLayout
 from distributed import wait
-from tornado import gen
 
 
 @gen_cluster(client=True)
@@ -60,7 +60,7 @@ async def test_release_tasks(c, s, a, b):
     key = total.key
     del total
     while key in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert len(gl.visible_updates) == 1
     assert len(gl.visible_edge_updates) == 5
@@ -75,7 +75,7 @@ async def test_forget(c, s, a, b):
     await wait(futures)
     del futures
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert not gl.x
     assert not gl.y

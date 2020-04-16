@@ -10,7 +10,6 @@ import weakref
 from distutils.version import LooseVersion
 
 from tornado.ioloop import IOLoop
-from tornado import gen
 import tornado
 from tornado.httpclient import AsyncHTTPClient
 import pytest
@@ -784,14 +783,14 @@ async def test_scale_retires_workers():
 
     start = time()
     while len(cluster.scheduler.workers) != 2:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
     await cluster.scale(1)
 
     start = time()
     while len(cluster.scheduler.workers) != 1:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
     await c.close()

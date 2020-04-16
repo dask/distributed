@@ -9,7 +9,6 @@ import pytest
 
 pytest.importorskip("bokeh")
 from tlz import first
-from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
 import dask
@@ -46,7 +45,7 @@ async def test_simple(c, s, a, b):
     port = s.http_server.port
 
     future = c.submit(sleep, 1)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
@@ -78,16 +77,16 @@ def test_basic(c, s, a, b):
 async def test_counters(c, s, a, b):
     pytest.importorskip("crick")
     while "tick-duration" not in s.digests:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     ss = Counters(s)
 
     ss.update()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     ss.update()
 
     start = time()
     while not len(ss.digest_sources["tick-duration"][0].data["x"]):
-        await gen.sleep(1)
+        await asyncio.sleep(1)
         assert time() < start + 5
 
 
@@ -100,7 +99,7 @@ async def test_stealing_events(c, s, a, b):
     )
 
     while not b.task_state:  # will steal soon
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     se.update()
 
@@ -116,7 +115,7 @@ async def test_events(c, s, a, b):
     )
 
     while not b.task_state:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     e.update()
     d = dict(e.source.data)
@@ -177,7 +176,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
 
     await wait(c.map(inc, range(10)))
     ts.update()
-    await gen.sleep(0.010)
+    await asyncio.sleep(0.010)
     await wait(c.map(dec, range(10)))
     ts.update()
 
@@ -185,7 +184,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
     assert ts.source.data["name"].count("inc") == 10
     assert ts.source.data["name"].count("dec") == 10
 
-    await gen.sleep(0.300)
+    await asyncio.sleep(0.300)
     await wait(c.map(inc, range(10, 20)))
     ts.update()
 
@@ -217,7 +216,7 @@ async def test_TaskProgress(c, s, a, b):
     del futures, futures2
 
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     tp.update()
     assert not tp.source.data["all"]
@@ -234,7 +233,7 @@ async def test_TaskProgress_empty(c, s, a, b):
 
     del futures
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     tp.update()
 
     assert not any(len(v) for v in tp.source.data.values())
@@ -264,7 +263,7 @@ async def test_ProcessingHistogram(c, s, a, b):
 
     futures = c.map(slowinc, range(10), delay=0.050)
     while not s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     ph.update()
     assert ph.source.data["right"][-1] > 2
@@ -460,7 +459,7 @@ async def test_TaskGraph(c, s, a, b):
     key = future.key
     del future, future2
     while key in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert "memory" in gp.node_source.data["state"]
 
@@ -482,14 +481,14 @@ async def test_TaskGraph_clear(c, s, a, b):
     del total, futures
 
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     gp.update()
     gp.update()
 
     start = time()
     while any(gp.node_source.data.values()) or any(gp.edge_source.data.values()):
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         gp.update()
         assert time() < start + 5
 
@@ -533,7 +532,7 @@ async def test_TaskGraph_complex(c, s, a, b):
     assert len(gp.layout.index) == len(gp.node_source.data["x"])
     assert len(gp.layout.index) == len(s.tasks)
     del z
-    await gen.sleep(0.2)
+    await asyncio.sleep(0.2)
     gp.update()
     assert len(gp.layout.index) == sum(
         v == "True" for v in gp.node_source.data["visible"]
@@ -570,9 +569,9 @@ async def test_TaskGraph_order(c, s, a, b):
 async def test_profile_server(c, s, a, b):
     ptp = ProfileServer(s)
     start = time()
-    await gen.sleep(0.100)
+    await asyncio.sleep(0.100)
     while len(ptp.ts_source.data["time"]) < 2:
-        await gen.sleep(0.100)
+        await asyncio.sleep(0.100)
         ptp.trigger_update()
         assert time() < start + 2
 

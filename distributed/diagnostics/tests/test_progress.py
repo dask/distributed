@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-from tornado import gen
 
 from distributed import Nanny
 from distributed.client import wait
@@ -42,7 +41,7 @@ async def test_many_Progress(c, s, a, b):
 
     start = time()
     while not all(b.status == "finished" for b in bars):
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 5
 
 
@@ -127,7 +126,7 @@ async def test_AllProgress(c, s, a, b):
     gc.collect()
 
     while any(k in s.who_has for k in keys):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert p.state["released"]["inc"] == keys
     assert p.all["inc"] == keys
@@ -146,7 +145,7 @@ async def test_AllProgress(c, s, a, b):
     gc.collect()
 
     while tkey in s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     for coll in [p.all, p.nbytes] + list(p.state.values()):
         assert "inc" not in coll
@@ -161,7 +160,7 @@ async def test_AllProgress(c, s, a, b):
 
     gc.collect()
 
-    await gen.sleep(1)
+    await asyncio.sleep(1)
 
     await wait([future])
     assert p.state["memory"] == {"f": {future.key}}
@@ -189,7 +188,7 @@ async def test_AllProgress_lost_key(c, s, a, b, timeout=None):
 
     start = time()
     while len(p.state["memory"]["inc"]) > 0:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 5
 
 
@@ -213,6 +212,6 @@ async def test_GroupProgress(c, s, a, b):
 
     del x, y, z
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert not fp.groups

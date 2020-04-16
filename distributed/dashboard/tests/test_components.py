@@ -1,9 +1,10 @@
+import asyncio
+
 import pytest
 
 pytest.importorskip("bokeh")
 
 from bokeh.models import ColumnDataSource, Model
-from tornado import gen
 
 from distributed.utils_test import slowinc, gen_cluster
 from distributed.dashboard.components.shared import (
@@ -45,4 +46,4 @@ async def test_profile_time_plot(c, s, a, b):
     await c.gather(c.map(slowinc, range(10), delay=0.05))
     ap.trigger_update()
     sp.trigger_update()
-    await gen.sleep(0.05)
+    await asyncio.sleep(0.05)

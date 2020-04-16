@@ -10,7 +10,6 @@ import numpy as np
 
 import pytest
 from tlz import valmap, first
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -93,20 +92,20 @@ async def test_nanny_process_failure(c, s):
 
     start = time()
     while n.pid == pid:  # wait while process dies and comes back
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 5
 
     start = time()
-    await gen.sleep(1)
+    await asyncio.sleep(1)
     while not n.is_alive():  # wait while process comes back
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 5
 
     # assert n.worker_address != original_address  # most likely
 
     start = time()
     while n.worker_address not in s.nthreads or n.worker_dir is None:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 5
 
     second_dir = n.worker_dir
@@ -155,7 +154,7 @@ async def test_close_on_disconnect(s, w):
 
     start = time()
     while w.status != "closed":
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         assert time() < start + 9
 
 
@@ -221,13 +220,13 @@ async def test_num_fds(s):
 
     for i in range(3):
         w = await Nanny(s.address)
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         await w.close()
 
     start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 10
 
 
@@ -270,7 +269,7 @@ async def test_nanny_timeout(c, s, a):
 
     start = time()
     while x.status != "cancelled":
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 7
 
 
@@ -296,7 +295,7 @@ async def test_nanny_terminate(c, s, a):
         future = c.submit(leak)
         start = time()
         while a.process.pid == proc:
-            await gen.sleep(0.1)
+            await asyncio.sleep(0.1)
             assert time() < start + 10
         out = logger.getvalue()
         assert "restart" in out.lower()
@@ -348,7 +347,7 @@ async def test_avoid_memory_monitor_if_zero_limit(c, s):
 
     future = c.submit(inc, 1)
     assert await future == 2
-    await gen.sleep(0.02)
+    await asyncio.sleep(0.02)
 
     await c.submit(inc, 2)  # worker doesn't pause
 
@@ -363,7 +362,7 @@ async def test_scheduler_address_config(c, s):
 
         start = time()
         while not s.workers:
-            await gen.sleep(0.1)
+            await asyncio.sleep(0.1)
             assert time() < start + 10
 
     await nanny.close()
@@ -375,7 +374,7 @@ async def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")
         IOLoop.current().add_callback(w.start)
-        await gen.sleep(6)
+        await asyncio.sleep(6)
         await w.close()
 
     log = log.getvalue()
@@ -489,7 +488,7 @@ async def test_nanny_closes_cleanly(cleanup):
                     IOLoop.current().add_callback(w.terminate)
                     start = time()
                     while n.status != "closed":
-                        await gen.sleep(0.01)
+                        await asyncio.sleep(0.01)
                         assert time() < start + 5
 
                     assert n.status == "closed"

@@ -1,8 +1,7 @@
-from time import sleep
 import asyncio
+from time import sleep
 
 import pytest
-from tornado import gen
 
 from distributed import Client, Queue, Nanny, worker_client, wait, TimeoutError
 from distributed.metrics import time
@@ -29,13 +28,13 @@ async def test_queue(c, s, a, b):
 
     del future, future2
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert s.tasks  # future still present in y's queue
     await y.get()  # burn future
 
     start = time()
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -75,7 +74,7 @@ async def test_hold_futures(s, a, b):
     del q1
     await c1.close()
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     c2 = await Client(s.address, asynchronous=True)
     q2 = await Queue("q")
@@ -151,14 +150,14 @@ async def test_same_futures(c, s, a, b):
     for i in range(4):
         future2 = await q.get()
         assert s.wants_what["queue-x"] == {future.key}
-        await gen.sleep(0.05)
+        await asyncio.sleep(0.05)
         assert s.wants_what["queue-x"] == {future.key}
 
     await q.get()
 
     start = time()
     while s.wants_what["queue-x"]:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 2
 
 
@@ -213,7 +212,7 @@ async def test_Future_knows_status_immediately(c, s, a, b):
             break
         except Exception:
             assert time() < start + 5
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
     await c2.close()
 
@@ -223,7 +222,7 @@ async def test_erred_future(c, s, a, b):
     future = c.submit(div, 1, 0)
     q = await Queue()
     await q.put(future)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     future2 = await q.get()
     with pytest.raises(ZeroDivisionError):
         await future2.result()
@@ -240,7 +239,7 @@ async def test_close(c, s, a, b):
     q.close()
 
     while q.name in s.extensions["queues"].queues:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)

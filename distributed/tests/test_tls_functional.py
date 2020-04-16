@@ -2,7 +2,7 @@
 Various functional tests for TLS networking.
 Most are taken from other test files and adapted.
 """
-from tornado import gen
+import asyncio
 
 from distributed import Nanny, worker_client, Queue
 from distributed.client import wait
@@ -106,7 +106,7 @@ async def test_rebalance(c, s, a, b):
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50, delay=0.1)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     await wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
@@ -170,5 +170,5 @@ async def test_retire_workers(c, s, a, b):
 
     start = time()
     while a.status != "closed":
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5

@@ -1,10 +1,10 @@
+import asyncio
 import os
 import random
 from time import sleep
 
 import pytest
 from tlz import partition_all, first
-from tornado import gen
 
 from dask import delayed
 from distributed import Client, Nanny, wait
@@ -38,7 +38,7 @@ def test_submit_after_failed_worker_sync(loop):
 async def test_submit_after_failed_worker_async(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
     while len(s.workers) < 3:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     L = c.map(inc, range(10))
     await wait(L)
@@ -107,14 +107,14 @@ async def test_failed_worker_without_warning(c, s, a, b):
         await c._run(os._exit, 1, workers=[a.worker_address])
     start = time()
     while a.pid == original_pid:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 10
 
-    await gen.sleep(0.5)
+    await asyncio.sleep(0.5)
 
     start = time()
     while len(s.nthreads) < 2:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 10
 
     await wait(L)
@@ -278,7 +278,7 @@ async def test_multiple_clients_restart(s, a, b):
     assert x.cancelled()
     start = time()
     while not y.cancelled():
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     await c1.close()
@@ -307,7 +307,7 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     import gc
 
     gc.collect()
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     await y
 
 
@@ -318,7 +318,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
 
     start = time()
     while len(s.nthreads) < 3:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     N = 256
@@ -333,13 +333,13 @@ async def test_broken_worker_during_computation(c, s, a, b):
             key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)]
         )
 
-    await gen.sleep(random.random() / 20)
+    await asyncio.sleep(random.random() / 20)
     with ignoring(CommClosedError):  # comm will be closed abrupty
         await c._run(os._exit, 1, workers=[n.worker_address])
 
-    await gen.sleep(random.random() / 20)
+    await asyncio.sleep(random.random() / 20)
     while len(s.workers) < 3:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     with ignoring(
         CommClosedError, EnvironmentError
@@ -361,7 +361,7 @@ async def test_restart_during_computation(c, s, a, b):
     total = delayed(sum)(zs)
     result = c.compute(total)
 
-    await gen.sleep(0.5)
+    await asyncio.sleep(0.5)
     assert s.rprocessing
     await c.restart()
     assert not s.rprocessing
@@ -376,7 +376,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 
     start = time()
     while len(s.nthreads) < 3:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     futures = c.map(slowinc, range(20), delay=0.01, key=["f%d" % i for i in range(20)])
@@ -391,7 +391,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
     while len(s.workers) > 2:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     total = c.submit(sum, futures, workers=a.address)
     await total
@@ -407,7 +407,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
         future = c.submit(sleep, 3600)
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         await c.restart(timeout=20)
 
     text = sio.getvalue()
@@ -418,12 +418,12 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
 async def test_worker_time_to_live(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
     a.periodic_callbacks["heartbeat"].stop()
-    await gen.sleep(0.010)
+    await asyncio.sleep(0.010)
     assert set(s.workers) == {a.address, b.address}
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
-        await gen.sleep(0.050)
+        await asyncio.sleep(0.050)
         assert time() < start + 2
 
     set(s.workers) == {b.address}

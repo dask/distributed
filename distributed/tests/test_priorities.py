@@ -1,5 +1,6 @@
+import asyncio
+
 import pytest
-from tornado import gen
 
 from dask.core import flatten
 import dask
@@ -105,7 +106,7 @@ async def test_repeated_persists_same_priority(c, s, w):
     while (
         sum(t.state == "memory" for t in s.tasks.values()) < 5
     ):  # TODO: reduce this number
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert any(s.tasks[y.key].state == "memory" for y in ys)
     assert any(s.tasks[z.key].state == "memory" for z in zs)
@@ -118,6 +119,6 @@ async def test_last_in_first_out(c, s, w):
     zs = [c.submit(slowinc, y, delay=0.05) for y in ys]
 
     while len(s.tasks) < 15 or not any(s.tasks[z.key].state == "memory" for z in zs):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     assert not all(s.tasks[x.key].state == "memory" for x in xs)

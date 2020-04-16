@@ -1,7 +1,6 @@
 import asyncio
 import operator
 from time import sleep
-from tornado import gen
 
 import pytest
 
@@ -80,7 +79,7 @@ def test_client_actions(direct_to_workers):
         counter.add(10)
         while (await counter.n) != 10 + 2:
             n = await counter.n
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
 
         await c.close()
 
@@ -143,7 +142,7 @@ async def test_linear_access(c, s, a, b):
         actor.append(i)
 
     while True:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         L = await actor.L
         if len(L) == 100:
             break
@@ -187,7 +186,7 @@ async def test_gc(c, s, a, b):
     del actor
 
     while a.actors or b.actors:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -198,7 +197,7 @@ async def test_track_dependencies(c, s, a, b):
     y = c.submit(lambda x, y: x, x, actor)
     del actor
 
-    await gen.sleep(0.3)
+    await asyncio.sleep(0.3)
 
     assert a.actors or b.actors
 
@@ -214,7 +213,7 @@ async def test_future(c, s, a, b):
     assert isinstance(counter, Actor)
     assert counter._address
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert counter.key in c.futures  # don't lose future
 
 
@@ -343,7 +342,7 @@ async def test_many_computations(c, s, a, b):
 
     while not done.done():
         assert len(s.processing) <= a.nthreads + b.nthreads
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     await done
 
@@ -474,7 +473,7 @@ async def test_compute(c, s, a, b):
 
     start = time()
     while a.data or b.data:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -545,7 +544,7 @@ async def test_waiter(c, s, a, b):
 
     futures = [waiter.wait() for _ in range(5)]  # way more than we have actor threads
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert not any(future.done() for future in futures)
 
     await waiter.set()

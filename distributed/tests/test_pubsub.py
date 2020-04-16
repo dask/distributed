@@ -2,7 +2,6 @@ import asyncio
 from time import sleep
 
 import pytest
-from tornado import gen
 import tlz as toolz
 
 from distributed import Pub, Sub, wait, get_worker, TimeoutError
@@ -62,7 +61,7 @@ async def test_client(c, s):
 
     start = time()
     while not set(sps.client_subscribers["a"]) == {c.id}:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
     pub.put(123)
@@ -101,7 +100,7 @@ async def test_client_worker(c, s, a, b):
         or bps.publishers["a"]
         or len(sps.client_subscribers["a"]) != 1
     ):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
     del sub
@@ -112,7 +111,7 @@ async def test_client_worker(c, s, a, b):
         or any(aps.publish_to_scheduler.values())
         or any(bps.publish_to_scheduler.values())
     ):
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
 
@@ -146,7 +145,7 @@ async def test_basic(c, s, a, b):
 
         i = 0
         while True:
-            await gen.sleep(0.01)
+            await asyncio.sleep(0.01)
             pub._put(i)
             i += 1
 

@@ -1,10 +1,10 @@
+import asyncio
 from contextlib import contextmanager
 import socket
 import threading
 from time import sleep
 
 import pytest
-from tornado import gen
 
 from distributed import Scheduler, Worker, Client, config, default_client
 from distributed.core import rpc
@@ -93,7 +93,7 @@ def test_gen_cluster_tls(e, s, a, b):
 
 @gen_test()
 async def test_gen_test():
-    await gen.sleep(0.01)
+    await asyncio.sleep(0.01)
 
 
 @contextmanager
@@ -189,4 +189,4 @@ async def test_gen_cluster_async(s, a, b):  # flake8: noqa
 
 @gen_test()
 async def test_gen_test_async():  # flake8: noqa
-    await gen.sleep(0.001)
+    await asyncio.sleep(0.001)

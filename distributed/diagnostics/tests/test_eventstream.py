@@ -1,7 +1,7 @@
+import asyncio
 import collections
 
 import pytest
-from tornado import gen
 
 from distributed.client import wait
 from distributed.diagnostics.eventstream import EventStream, eventstream
@@ -49,7 +49,7 @@ async def test_eventstream_remote(c, s, a, b):
 
     start = time()
     while len(s.plugins) == base_plugins:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     futures = c.map(div, [1] * 10, range(10))
@@ -65,5 +65,5 @@ async def test_eventstream_remote(c, s, a, b):
     await comm.close()
     start = time()
     while len(s.plugins) > base_plugins:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5

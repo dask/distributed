@@ -1,3 +1,4 @@
+import asyncio
 import array
 import datetime
 from functools import partial
@@ -11,7 +12,6 @@ import traceback
 
 import numpy as np
 import pytest
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -55,7 +55,7 @@ def test_All(loop):
         1 / 0
 
     async def slow():
-        await gen.sleep(10)
+        await asyncio.sleep(10)
 
     async def inc(x):
         return x + 1
@@ -107,7 +107,7 @@ def test_sync_error(loop_in_thread):
 def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
     with pytest.raises(TimeoutError):
-        sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
+        sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
 
 
 def test_sync_closed_loop():
@@ -483,13 +483,13 @@ async def test_loop_runner_gen():
     runner = LoopRunner(asynchronous=True)
     assert runner.loop is IOLoop.current()
     assert not runner.is_started()
-    await gen.sleep(0.01)
+    await asyncio.sleep(0.01)
     runner.start()
     assert runner.is_started()
-    await gen.sleep(0.01)
+    await asyncio.sleep(0.01)
     runner.stop()
     assert not runner.is_started()
-    await gen.sleep(0.01)
+    await asyncio.sleep(0.01)
 
 
 def test_parse_bytes():
@@ -545,7 +545,7 @@ async def test_all_exceptions_logging():
         import gc
 
         gc.collect()
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     assert "foo1234" not in sio.getvalue()
 

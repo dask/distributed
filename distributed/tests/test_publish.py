@@ -8,7 +8,6 @@ from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc
 from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 from distributed.protocol import Serialized
-from tornado import gen
 
 
 @gen_cluster(client=False)
@@ -91,7 +90,7 @@ async def test_unpublish(c, s, a, b):
 
     start = time()
     while key in s.who_wants:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
     with pytest.raises(KeyError) as exc_info:

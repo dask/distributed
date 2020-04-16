@@ -1,3 +1,4 @@
+import asyncio
 import random
 import threading
 from time import sleep
@@ -6,7 +7,6 @@ import warnings
 import dask
 from dask import delayed
 import pytest
-from tornado import gen
 
 from distributed import (
     worker_client,
@@ -77,7 +77,7 @@ async def test_scatter_from_worker(c, s, a, b):
 
     start = time()
     while not all(v == 1 for v in s.nthreads.values()):
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 5
 
 
@@ -156,7 +156,7 @@ async def test_async(c, s, a, b):
 
     start = time()
     while len(a.data) + len(b.data) > 1:
-        await gen.sleep(0.1)
+        await asyncio.sleep(0.1)
         assert time() < start + 3
 
 

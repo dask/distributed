@@ -4,7 +4,6 @@ from time import sleep
 import logging
 
 import pytest
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
@@ -29,14 +28,14 @@ async def test_variable(c, s, a, b):
 
     del future, future2
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     assert s.tasks  # future still present
 
     x.delete()
 
     start = time()
     while s.tasks:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 5
 
 
@@ -82,7 +81,7 @@ async def test_hold_futures(s, a, b):
     del x1
     await c1.close()
 
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     c2 = await Client(s.address, asynchronous=True)
     x2 = Variable("x")
@@ -138,10 +137,10 @@ async def test_cleanup(c, s, a, b):
 
     await v.set(x)
     del x
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     t_future = xx = asyncio.ensure_future(vv._get())
-    await gen.sleep(0)
+    await asyncio.sleep(0)
     asyncio.ensure_future(v.set(y))
 
     future = await t_future
@@ -201,7 +200,7 @@ async def test_race(c, s, *workers):
 
     start = time()
     while len(s.wants_what["variable-x"]) != 1:
-        await gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() - start < 2
 
 
@@ -233,7 +232,7 @@ async def test_Future_knows_status_immediately(c, s, a, b):
             break
         except Exception:
             assert time() < start + 5
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
     await c2.close()
 
@@ -243,7 +242,7 @@ async def test_erred_future(c, s, a, b):
     future = c.submit(div, 1, 0)
     var = Variable()
     await var.set(future)
-    await gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     future2 = await var.get()
     with pytest.raises(ZeroDivisionError):
         await future2.result()
