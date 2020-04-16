@@ -151,7 +151,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
     #       list (see GitHub PR#2000), so we need to use
     #       "pickle" or "dask" for list objects
     supported = (
-        isinstance(x, list) and "pickle" not in serializers
+        isinstance(x, list) or "msgpack" in serializers
     ) or check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
