@@ -2884,6 +2884,15 @@ def test_rebalance_unprepared(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_rebalance_raises_missing_data(c, s, a, b):
+    with pytest.raises(ValueError, match=f"keys were found to be missing"):
+        futures = await c.scatter(range(100))
+        keys = [f.key for f in futures]
+        del futures
+        await c.rebalance(keys)
+
+
+@gen_cluster(client=True)
 def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])
     result = yield x
@@ -4871,8 +4880,8 @@ def test_bytes_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_ascii_keys(c, s, a, b):
-    uni_type = type(u"")
-    key = u"inc-123"
+    uni_type = type("")
+    key = "inc-123"
     future = c.submit(inc, 1, key=key)
     result = yield future
     assert type(future.key) is uni_type
@@ -4883,8 +4892,8 @@ def test_unicode_ascii_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_keys(c, s, a, b):
-    uni_type = type(u"")
-    key = u"inc-123\u03bc"
+    uni_type = type("")
+    key = "inc-123\u03bc"
     future = c.submit(inc, 1, key=key)
     result = yield future
     assert type(future.key) is uni_type
@@ -4896,8 +4905,8 @@ def test_unicode_keys(c, s, a, b):
     result2 = yield future2
     assert result2 == 3
 
-    future3 = yield c.scatter({u"data-123": 123})
-    result3 = yield future3[u"data-123"]
+    future3 = yield c.scatter({"data-123": 123})
+    result3 = yield future3["data-123"]
     assert result3 == 123
 
 
@@ -5245,14 +5254,9 @@ def test_quiet_scheduler_loss(c, s):
 
 
 def test_dashboard_link(loop, monkeypatch):
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehScheduler
-
     monkeypatch.setenv("USER", "myusername")
 
-    with cluster(
-        scheduler_kwargs={"services": {("dashboard", 12355): BokehScheduler}}
-    ) as (s, [a, b]):
+    with cluster(scheduler_kwargs={"dashboard_address": ":12355"}) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             with dask.config.set(
                 {"distributed.dashboard.link": "{scheme}://foo-{USER}:{port}/status"}
@@ -5456,6 +5460,9 @@ def test_mixing_clients(s, a, b):
     future = c1.submit(inc, 1)
     with pytest.raises(ValueError):
         c2.submit(inc, future)
+
+    assert not c2.futures  # Don't create Futures on second Client
+
     yield c1.close()
     yield c2.close()
 
@@ -5469,12 +5476,11 @@ def test_tuple_keys(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_multiple_scatter(c, s, a, b):
-    for i in range(5):
-        x = c.scatter(1, direct=True)
+async def test_multiple_scatter(c, s, a, b):
+    futures = await asyncio.gather(*[c.scatter(1, direct=True) for _ in range(5)])
 
-    x = yield x
-    x = yield x
+    x = await futures[0]
+    x = await futures[0]
 
 
 @gen_cluster(client=True)
@@ -5920,22 +5926,34 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    x = da.random.random((1000, 1000), chunks=(100, 100))
 
-    with tmpfile(extension="html") as fn:
-        async with performance_report(filename=fn):
-            await c.compute((x + x.T).sum())
+    async def f():
+        """
+        We wrap this in a function so that the assertions aren't in the
+        performanace report itself
 
-        with open(fn) as f:
-            data = f.read()
+        Also, we want this comment to appear
+        """
+        x = da.random.random((1000, 1000), chunks=(100, 100))
+        with tmpfile(extension="html") as fn:
+            async with performance_report(filename=fn):
+                await c.compute((x + x.T).sum())
 
-        assert "bokeh" in data
-        assert "random" in data
-        assert "Dask Performance Report" in data
-        assert "x = da.random" in data
+            with open(fn) as f:
+                data = f.read()
+        return data
+
+    data = await f()
+
+    assert "Also, we want this comment to appear" in data
+    assert "bokeh" in data
+    assert "random" in data
+    assert "Dask Performance Report" in data
+    assert "x = da.random" in data
+    assert "Threads: 4" in data
 
 
 @pytest.mark.asyncio
