@@ -13,7 +13,7 @@ except ImportError:
 
 import dask
 from tornado import netutil
-from tornado.iostream import StreamClosedError, IOStream
+from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
@@ -131,10 +131,6 @@ class TCP(Comm):
     """
     An established communication based on an underlying Tornado IOStream.
     """
-
-    # IOStream.read_into() currently proposed in
-    # https://github.com/tornadoweb/tornado/pull/2193
-    _iostream_has_read_into = hasattr(IOStream, "read_into")
 
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
         Comm.__init__(self)

@@ -12,8 +12,6 @@ from distributed.deploy.local import LocalCluster
 from dask.dataframe.utils import assert_eq
 from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
 
-from .test_comms import check_deserialize
-
 
 try:
     HOST = ucp.get_address()
@@ -28,18 +26,16 @@ def test_registered():
 
 
 async def get_comm_pair(
-    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
+    listen_addr="ucx://" + HOST, listen_args={}, connect_args={}, **kwargs
 ):
     q = asyncio.queues.Queue()
 
     async def handle_comm(comm):
         await q.put(comm)
 
-    listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
+    listener = listen(listen_addr, handle_comm, **listen_args, **kwargs)
     async with listener:
-        comm = await connect(
-            listener.contact_address, connection_args=connect_args, **kwargs
-        )
+        comm = await connect(listener.contact_address, **connect_args, **kwargs)
         serv_comm = await q.get()
         return (comm, serv_comm)
 
@@ -156,6 +152,11 @@ async def test_ping_pong_data():
 
 @gen_test()
 def test_ucx_deserialize():
+    # Note we see this error on some systems with this test:
+    # `socket.gaierror: [Errno -5] No address associated with hostname`
+    # This may be due to a system configuration issue.
+    from .test_comms import check_deserialize
+
     yield check_deserialize("tcp://")
 
 
@@ -169,22 +170,15 @@ def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame([1]).head(0),
         lambda cudf: cudf.DataFrame([1.0]).head(0),
         lambda cudf: cudf.DataFrame({"a": []}),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
-            marks=pytest.mark.xfail(reason="0 length objects don't deseralize cleanly"),
-        ),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
-            marks=pytest.mark.xfail(reason="0 length objects don't deseralize cleanly"),
-        ),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
-            marks=pytest.mark.xfail(reason="0 length objects don't deseralize cleanly"),
-        ),
+        lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
         pytest.param(
             lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
-            marks=pytest.mark.xfail(reason="0 length objects don't deseralize cleanly"),
+            marks=pytest.mark.skip(
+                reason="This test segfaults for some reason. So skip running it entirely."
+            ),
         ),
     ],
 )
@@ -231,13 +225,7 @@ async def test_ping_pong_cupy(shape):
 @pytest.mark.slow
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "n",
-    [
-        int(1e9),
-        pytest.param(
-            int(2.5e9), marks=[pytest.mark.xfail(reason="integer type in ucx-py")]
-        ),
-    ],
+    "n", [int(1e9), int(2.5e9),],
 )
 async def test_large_cupy(n, cleanup):
     cupy = pytest.importorskip("cupy")

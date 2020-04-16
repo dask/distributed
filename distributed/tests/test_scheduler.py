@@ -7,7 +7,6 @@ import operator
 import re
 import sys
 from time import sleep
-from unittest import mock
 import logging
 
 import dask
@@ -1190,19 +1189,14 @@ def test_correct_bad_time_estimate(c, s, *workers):
 
 @gen_test()
 async def test_service_hosts():
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehScheduler
-
     port = 0
     for url, expected in [
         ("tcp://0.0.0.0", ("::", "0.0.0.0")),
         ("tcp://127.0.0.1", "127.0.0.1"),
         ("tcp://127.0.0.1:38275", "127.0.0.1"),
     ]:
-        services = {("dashboard", port): BokehScheduler}
-
-        async with Scheduler(host=url, services=services) as s:
-            sock = first(s.services["dashboard"].server._http._sockets.values())
+        async with Scheduler(host=url) as s:
+            sock = first(s.http_server._sockets.values())
             if isinstance(expected, tuple):
                 assert sock.getsockname()[0] in expected
             else:
@@ -1210,10 +1204,8 @@ async def test_service_hosts():
 
     port = ("127.0.0.1", 0)
     for url in ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]:
-        services = {("dashboard", port): BokehScheduler}
-
-        async with Scheduler(services=services, host=url) as s:
-            sock = first(s.services["dashboard"].server._http._sockets.values())
+        async with Scheduler(dashboard_address="127.0.0.1:0", host=url) as s:
+            sock = first(s.http_server._sockets.values())
             assert sock.getsockname()[0] == "127.0.0.1"
 
 
@@ -1907,7 +1899,7 @@ async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     s.rpc = await FlakyConnectionPool(failing_connections=1)
-    with mock.patch("distributed.utils_comm.retry_count", 1):
+    with dask.config.set({"distributed.comm.retry.count": 1}):
         res = await s.gather(keys=["x"])
     assert res["status"] == "OK"
 
@@ -1970,20 +1962,19 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     s.rpc = await FlakyConnectionPool(failing_connections=4)
 
-    with captured_logger(
-        logging.getLogger("distributed.scheduler")
-    ) as sched_logger, captured_logger(
-        logging.getLogger("distributed.client")
-    ) as client_logger, captured_logger(
-        logging.getLogger("distributed.utils_comm")
-    ) as utils_comm_logger, mock.patch(
-        "distributed.utils_comm.retry_count", 3
-    ), mock.patch(
-        "distributed.utils_comm.retry_delay_min", 0.5
+    with dask.config.set(
+        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3,}
     ):
-        # Gather using the client (as an ordinary user would)
-        # Upon a missing key, the client will reschedule the computations
-        res = await c.gather(z)
+        with captured_logger(
+            logging.getLogger("distributed.scheduler")
+        ) as sched_logger, captured_logger(
+            logging.getLogger("distributed.client")
+        ) as client_logger, captured_logger(
+            logging.getLogger("distributed.utils_comm")
+        ) as utils_comm_logger:
+            # Gather using the client (as an ordinary user would)
+            # Upon a missing key, the client will reschedule the computations
+            res = await c.gather(z)
 
     assert res == 5
 
@@ -2071,3 +2062,14 @@ async def test_worker_name_collision(s, a):
     s.validate_state()
     assert set(s.workers) == {a.address}
     assert s.aliases == {a.name: a.address}
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})
+async def test_unknown_task_duration_config(client, s, a, b):
+    future = client.submit(slowinc, 1)
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+    assert sum(s.get_task_duration(ts) for ts in s.tasks.values()) == 3600
+    assert len(s.unknown_durations) == 1
+    await wait(future)
+    assert len(s.unknown_durations) == 0
