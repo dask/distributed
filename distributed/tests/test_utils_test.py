@@ -155,7 +155,7 @@ def test_new_config():
 def test_lingering_client():
     @gen_cluster()
     def f(s, a, b):
-        c = yield Client(s.address, asynchronous=True)
+        yield Client(s.address, asynchronous=True)
 
     f()
 

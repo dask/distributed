@@ -68,7 +68,7 @@ def test_dataframes(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test__dask_array_collections(c, s, a, b):
+def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
     s.validate = False
@@ -199,5 +199,5 @@ def test_delayed_none(c, s, w):
     x = dask.delayed(None)
     y = dask.delayed(123)
     [xx, yy] = c.compute([x, y])
-    assert (yield xx) is None
-    assert (yield yy) == 123
+    assert yield xx is None
+    assert yield yy == 123

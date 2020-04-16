@@ -1,3 +1,4 @@
+import asyncio
 import itertools
 import random
 import sys
@@ -643,7 +644,7 @@ def test_steal_twice(c, s, a, b):
         yield gen.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = yield [Worker(s.address, loop=s.loop) for _ in range(20)]
+    workers = yield asyncio.gather(*[Worker(s.address, loop=s.loop) for _ in range(20)])
 
     yield wait(futures)
 
@@ -657,7 +658,7 @@ def test_steal_twice(c, s, a, b):
     assert max(map(len, has_what.values())) < 30
 
     yield c._close()
-    yield [w.close() for w in workers]
+    yield asyncio.gather(*[w.close() for w in workers])
 
 
 @gen_cluster(client=True)

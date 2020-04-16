@@ -45,7 +45,7 @@ def test_client_submit(c, s, a, b):
     yy = [c.submit(slowinc, i) for i in range(10)]
     results = []
     for y in yy:
-        results.append((yield y))
+        results.append(yield y)
     assert results == list(range(1, 11))
 
 

@@ -1339,6 +1339,10 @@ class Client(Node):
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
         if self.status == "closed":
+            if self.asynchronous:
+                future = asyncio.Future()
+                future.set_result(None)
+                return future
             return
         self.status = "closing"
 

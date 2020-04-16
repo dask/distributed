@@ -16,14 +16,12 @@ from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
 from tlz import pluck, sliding_window, first
-import tornado
 from tornado import gen
 
 from distributed import (
     Client,
     Nanny,
     get_client,
-    wait,
     default_client,
     get_worker,
     Reschedule,
@@ -136,11 +134,8 @@ def test_worker_bad_args(c, s, a, b):
     with pytest.raises(ZeroDivisionError):
         yield y
 
-    if sys.version_info[0] >= 3:
-        tb = yield y._traceback()
-        assert any(
-            "1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line
-        )
+    tb = yield y._traceback()
+    assert any("1 / 0" in line for line in pluck(3, traceback.extract_tb(tb)) if line)
     assert "Compute Failed" in hdlr.messages["warning"][0]
     logger.setLevel(old_level)
 
@@ -182,10 +177,10 @@ def test_upload_file(c, s, a, b):
     assert a.local_directory != b.local_directory
 
     with rpc(a.address) as aa, rpc(b.address) as bb:
-        yield [
+        yield asyncio.gather(
             aa.upload_file(filename="foobar.py", data=b"x = 123"),
             bb.upload_file(filename="foobar.py", data="x = 123"),
-        ]
+        )
 
     assert os.path.exists(os.path.join(a.local_directory, "foobar.py"))
     assert os.path.exists(os.path.join(b.local_directory, "foobar.py"))
@@ -473,13 +468,9 @@ def test_run_dask_worker(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_run_coroutine_dask_worker(c, s, a, b):
-    if sys.version_info < (3,) and tornado.version_info < (4, 5):
-        pytest.skip("test needs Tornado 4.5+ on Python 2.7")
-
-    @gen.coroutine
     def f(dask_worker=None):
         yield gen.sleep(0.001)
-        raise gen.Return(dask_worker.id)
+        return dask_worker.id
 
     response = yield c.run(f)
     assert response == {a.address: a.id, b.address: b.id}
@@ -586,7 +577,6 @@ def test_clean(c, s, a, b):
         assert not c
 
 
-@pytest.mark.skipif(sys.version_info[:2] == (3, 4), reason="mul bytes fails")
 @gen_cluster(client=True)
 def test_message_breakup(c, s, a, b):
     n = 100000
@@ -968,24 +958,22 @@ def test_get_client_sync(client):
 
 @gen_cluster(client=True)
 def test_get_client_coroutine(c, s, a, b):
-    @gen.coroutine
     def f():
         client = yield get_client()
         future = client.submit(inc, 10)
         result = yield future
-        raise gen.Return(result)
+        return result
 
     results = yield c.run(f)
     assert results == {a.address: 11, b.address: 11}
 
 
 def test_get_client_coroutine_sync(client, s, a, b):
-    @gen.coroutine
     def f():
         client = yield get_client()
         future = client.submit(inc, 10)
         result = yield future
-        raise gen.Return(result)
+        return result
 
     results = client.run(f)
     assert results == {a["address"]: 11, b["address"]: 11}

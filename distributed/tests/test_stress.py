@@ -101,7 +101,6 @@ def test_stress_creation_and_deletion(c, s):
 
     z = c.persist(y)
 
-    @gen.coroutine
     def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:

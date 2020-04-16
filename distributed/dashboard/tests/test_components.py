@@ -24,7 +24,7 @@ def test_basic(Component):
 def test_profile_plot(c, s, a, b):
     p = ProfilePlot()
     assert not p.source.data["left"]
-    yield c.map(slowinc, range(10), delay=0.05)
+    yield c.gather(c.map(slowinc, range(10), delay=0.05))
     p.update(a.profile_recent)
     assert len(p.source.data["left"]) >= 1
 
@@ -42,7 +42,7 @@ def test_profile_time_plot(c, s, a, b):
     assert len(sp.source.data["left"]) <= 1
     assert len(ap.source.data["left"]) <= 1
 
-    yield c.map(slowinc, range(10), delay=0.05)
+    yield c.gather(c.map(slowinc, range(10), delay=0.05))
     ap.trigger_update()
     sp.trigger_update()
     yield gen.sleep(0.05)

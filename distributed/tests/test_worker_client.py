@@ -268,7 +268,7 @@ def test_secede_without_stealing_issue_1262():
 
         f = yield c.gather(c.submit(func, 1))
 
-        raise gen.Return((c, s, a, b, f))
+        return c, s, a, b, f
 
     c, s, a, b, f = secede_test()
 

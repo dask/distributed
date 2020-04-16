@@ -11,8 +11,8 @@ def test_prometheus(c, s, a, b):
 
     http_client = AsyncHTTPClient()
 
-    # request data twice since there once was a case where metrics got registered multiple times resulting in
-    # prometheus_client errors
+    # request data twice since there once was a case where metrics got registered
+    # multiple times resulting in prometheus_client errors
     for _ in range(2):
         response = yield http_client.fetch(
             "http://localhost:%d/metrics" % a.http_server.port

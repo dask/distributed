@@ -1,5 +1,6 @@
-import pytest
+import asyncio
 
+import pytest
 from tornado import gen
 
 from distributed import Nanny
@@ -34,8 +35,8 @@ def test_many_Progress(c, s, a, b):
     y = c.submit(g, x)
     z = c.submit(h, y)
 
-    bars = [Progress(keys=[z], scheduler=s) for i in range(10)]
-    yield [bar.setup() for bar in bars]
+    bars = [Progress(keys=[z], scheduler=s) for _ in range(10)]
+    yield asyncio.gather(*(bar.setup() for bar in bars))
 
     yield z
 

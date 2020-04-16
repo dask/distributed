@@ -51,21 +51,16 @@ from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, capture
 
 
 def test_All(loop):
-    @gen.coroutine
     def throws():
         1 / 0
 
-    @gen.coroutine
     def slow():
         yield gen.sleep(10)
 
-    @gen.coroutine
     def inc(x):
-        raise gen.Return(x + 1)
+        return x + 1
 
-    @gen.coroutine
     def f():
-
         results = yield All([inc(i) for i in range(10)])
         assert results == list(range(1, 11))
 
@@ -538,7 +533,6 @@ def test_parse_timedelta():
 
 @gen_test()
 def test_all_exceptions_logging():
-    @gen.coroutine
     def throws():
         raise Exception("foo1234")
 

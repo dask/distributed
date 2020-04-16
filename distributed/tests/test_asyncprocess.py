@@ -222,6 +222,7 @@ def test_exit_callback():
     from_child = mp_context.Queue()
     evt = Event()
 
+    # FIXME: this breaks if changed to def...
     @gen.coroutine
     def on_stop(_proc):
         assert _proc is proc
@@ -359,7 +360,7 @@ def _parent_process(child_pipe):
 
     with pristine_loop() as loop:
         try:
-            loop.run_sync(gen.coroutine(parent_process_coroutine), timeout=10)
+            loop.run_sync(parent_process_coroutine(), timeout=10)
         finally:
             loop.stop()
 

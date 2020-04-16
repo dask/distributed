@@ -152,8 +152,7 @@ def test_map(c, s, a, b):
 
     L4 = c.map(add, range(3), range(4))
     results = yield c.gather(L4)
-    if sys.version_info[0] >= 3:
-        assert results == list(map(add, range(3), range(4)))
+    assert results == list(map(add, range(3), range(4)))
 
     def f(x, y=10):
         return x + y
@@ -200,20 +199,20 @@ def test_map_retries(c, s, a, b):
     ]
 
     x, y, z = c.map(*map_varying(args), retries=2)
-    assert (yield x) == 2
-    assert (yield y) == 4
-    assert (yield z) == 9
+    assert yield x == 2
+    assert yield y == 4
+    assert yield z == 9
 
     x, y, z = c.map(*map_varying(args), retries=1, pure=False)
-    assert (yield x) == 2
-    assert (yield y) == 4
+    assert yield x == 2
+    assert yield y == 4
     with pytest.raises(ZeroDivisionError, match="eight"):
         yield z
 
     x, y, z = c.map(*map_varying(args), retries=0, pure=False)
     with pytest.raises(ZeroDivisionError, match="one"):
         yield x
-    assert (yield y) == 4
+    assert yield y == 4
     with pytest.raises(ZeroDivisionError, match="seven"):
         yield z
 
@@ -233,11 +232,11 @@ def test_compute_retries(c, s, a, b):
         yield x
 
     x = c.compute(delayed(varying(args))(), retries=2)
-    assert (yield x) == 3
+    assert yield x == 3
 
     args.append(4)
     x = c.compute(delayed(varying(args))(), retries=2)
-    assert (yield x) == 3
+    assert yield x == 3
 
     # Per-future retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
@@ -248,7 +247,7 @@ def test_compute_retries(c, s, a, b):
     x, y = c.compute([x, y], retries={x: 2})
     gc.collect()
 
-    assert (yield x) == 30
+    assert yield x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
         yield y
 
@@ -257,8 +256,8 @@ def test_compute_retries(c, s, a, b):
 
     with pytest.raises(ZeroDivisionError, match="one"):
         yield x
-    assert (yield y) == 70
-    assert (yield z) == 80
+    assert yield y == 70
+    assert yield z == 80
 
 
 def test_retries_get(c):
@@ -289,12 +288,12 @@ def test_compute_persisted_retries(c, s, a, b):
 
     x = c.persist(delayed(varying(args))())
     fut = c.compute(x, retries=2)
-    assert (yield fut) == 3
+    assert yield fut == 3
 
     args.append(4)
     x = c.persist(delayed(varying(args))())
     fut = c.compute(x, retries=3)
-    assert (yield fut) == 3
+    assert yield fut == 3
 
 
 @gen_cluster(client=True)
@@ -309,7 +308,7 @@ def test_persist_retries(c, s, a, b):
 
     x = c.persist(delayed(varying(args))(), retries=2)
     x = c.compute(x)
-    assert (yield x) == 3
+    assert yield x == 3
 
     # Per-key retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
@@ -322,8 +321,8 @@ def test_persist_retries(c, s, a, b):
 
     with pytest.raises(ZeroDivisionError, match="one"):
         yield x
-    assert (yield y) == 70
-    assert (yield z) == 80
+    assert yield y == 70
+    assert yield z == 80
 
 
 @gen_cluster(client=True)
@@ -388,18 +387,18 @@ def test_Future_release(c, s, a, b):
     x = c.submit(div, 1, 1)
     yield x
     x.release()
-    yield gen.moment
+    yield gen.sleep(0)
     assert not c.futures
 
     x = c.submit(slowinc, 1, delay=0.5)
     x.release()
-    yield gen.moment
+    yield gen.sleep(0)
     assert not c.futures
 
     x = c.submit(div, 1, 0)
     yield x.exception()
     x.release()
-    yield gen.moment
+    yield gen.sleep(0)
     assert not c.futures
 
 
@@ -470,7 +469,7 @@ def test_exceptions(c, s, a, b):
 
     x = c.submit(div, 1, 0)
     with pytest.raises(ZeroDivisionError):
-        result = yield x
+        yield x
 
     x = c.submit(div, 10, 2)  # continues to operate
     result = yield x
@@ -538,7 +537,7 @@ def test_gather_lost(c, s, a, b):
     yield a.close()
 
     with pytest.raises(Exception):
-        res = yield c.gather([x, y])
+        yield c.gather([x, y])
 
 
 def test_gather_sync(c):
@@ -583,7 +582,7 @@ def test_gather_skip(c, s, a):
 @gen_cluster(client=True)
 def test_limit_concurrent_gathering(c, s, a, b):
     futures = c.map(inc, range(100))
-    results = yield futures
+    yield c.gather(futures)
     assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
 
 
@@ -596,10 +595,11 @@ def test_get(c, s, a, b):
 
     futures = c.get({"x": (inc, 1)}, ["x"], sync=False)
     assert isinstance(futures[0], Future)
-    result = yield futures
+    result = yield c.gather(futures)
     assert result == [2]
 
-    result = yield c.get({}, [], sync=False)
+    futures = c.get({}, [], sync=False)
+    result = yield c.gather(futures)
     assert result == []
 
     result = yield c.get(
@@ -718,19 +718,19 @@ def test_garbage_collection(c, s, a, b):
 
     assert c.refcount[x.key] == 2
     x.__del__()
-    yield gen.moment
+    yield gen.sleep(0)
     assert c.refcount[x.key] == 1
 
     z = c.submit(inc, y)
     y.__del__()
-    yield gen.moment
+    yield gen.sleep(0)
 
     result = yield z
     assert result == 3
 
     ykey = y.key
     y.__del__()
-    yield gen.moment
+    yield gen.sleep(0)
     assert ykey not in c.futures
 
 
@@ -744,7 +744,7 @@ def test_garbage_collection_with_scatter(c, s, a, b):
     key = future.key
     assert c.refcount[key] == 1
     future.__del__()
-    yield gen.moment
+    yield gen.sleep(0)
     assert c.refcount[key] == 0
 
     start = time()
@@ -765,7 +765,7 @@ def test_recompute_released_key(c, s, a, b):
     import gc
 
     gc.collect()
-    yield gen.moment
+    yield gen.sleep(0)
     assert c.refcount[xkey] == 0
 
     # 1 second batching needs a second action to trigger
@@ -805,7 +805,7 @@ def test_missing_data_heals(c, s, a, b):
     if y.key in b.data:
         del b.data[y.key]
         b.release_key(y.key)
-    yield gen.moment
+    yield gen.sleep(0)
 
     w = c.submit(add, y, z)
 
@@ -825,7 +825,7 @@ def test_gather_robust_to_missing_data(c, s, a, b):
         for w in [a, b]:
             if f.key in w.data:
                 del w.data[f.key]
-                yield gen.moment
+                yield gen.sleep(0)
                 w.release_key(f.key)
 
     xx, yy, zz = yield c.gather([x, y, z])
@@ -848,7 +848,7 @@ def test_gather_robust_to_nested_missing_data(c, s, a, b):
         for datum in [y, z]:
             if datum.key in worker.data:
                 del worker.data[datum.key]
-                yield gen.moment
+                yield gen.sleep(0)
                 worker.release_key(datum.key)
 
     result = yield c.gather([z])
@@ -931,7 +931,7 @@ def test_restrictions_get(c, s, a, b):
     restrictions = {"y": {a.ip}, "z": {b.ip}}
 
     futures = c.get(dsk, ["y", "z"], restrictions, sync=False)
-    result = yield futures
+    result = yield c.gather(futures)
     assert result == [2, 3]
     assert "y" in a.data
     assert "z" in b.data
@@ -1056,13 +1056,13 @@ def test_aliases_2(c, s, a, b):
         ({"x": 1, "y": "x", "z": "y", "w": (inc, "z")}, ["w"]),
     ]
     for dsk, keys in dsk_keys:
-        result = yield c.get(dsk, keys, sync=False)
+        result = yield c.gather(c.get(dsk, keys, sync=False))
         assert list(result) == list(dask.get(dsk, keys))
-        yield gen.moment
+        yield gen.sleep(0)
 
 
 @gen_cluster(client=True)
-def test__scatter(c, s, a, b):
+def test_scatter(c, s, a, b):
     d = yield c.scatter({"y": 20})
     assert isinstance(d["y"], Future)
     assert a.data.get("y") == 20 or b.data.get("y") == 20
@@ -1093,7 +1093,7 @@ def test__scatter(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test__scatter_types(c, s, a, b):
+def test_scatter_types(c, s, a, b):
     d = yield c.scatter({"x": 1})
     assert isinstance(d, dict)
     assert list(d) == ["x"]
@@ -1111,7 +1111,7 @@ def test__scatter_types(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test__scatter_non_list(c, s, a, b):
+def test_scatter_non_list(c, s, a, b):
     x = yield c.scatter(1)
     assert isinstance(x, Future)
     result = yield x
@@ -1175,7 +1175,7 @@ def test_scatter_hash(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_get_releases_data(c, s, a, b):
-    [x] = yield c.get({"x": (inc, 1)}, ["x"], sync=False)
+    yield c.gather(c.get({"x": (inc, 1)}, ["x"], sync=False))
     import gc
 
     gc.collect()
@@ -1278,7 +1278,6 @@ def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
     results = c.map(f, lists, [total] * 10)
 
     yield wait([total])
-
     yield wait(results)
 
     assert (
@@ -1439,9 +1438,7 @@ def test_many_submits_spread_evenly(c, s, a, b):
 def test_traceback(c, s, a, b):
     x = c.submit(div, 1, 0)
     tb = yield x.traceback()
-
-    if sys.version_info[0] >= 3:
-        assert any("x / y" in line for line in pluck(3, traceback.extract_tb(tb)))
+    assert any("x / y" in line for line in pluck(3, traceback.extract_tb(tb)))
 
 
 @gen_cluster(client=True)
@@ -1468,12 +1465,11 @@ def test_gather_traceback(c, s, a, b):
 def test_traceback_sync(c):
     x = c.submit(div, 1, 0)
     tb = x.traceback()
-    if sys.version_info[0] >= 3:
-        assert any(
-            "x / y" in line
-            for line in concat(traceback.extract_tb(tb))
-            if isinstance(line, str)
-        )
+    assert any(
+        "x / y" in line
+        for line in concat(traceback.extract_tb(tb))
+        if isinstance(line, str)
+    )
 
     y = c.submit(inc, x)
     tb2 = y.traceback()
@@ -2252,17 +2248,16 @@ def test__cancel(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test__cancel_tuple_key(c, s, a, b):
+def test_cancel_tuple_key(c, s, a, b):
     x = c.submit(inc, 1, key=("x", 0, 1))
-
-    result = yield x
+    yield x
     yield c.cancel(x)
     with pytest.raises(CancelledError):
         yield x
 
 
 @gen_cluster()
-def test__cancel_multi_client(s, a, b):
+def test_cancel_multi_client(s, a, b):
     c = yield Client(s.address, asynchronous=True)
     f = yield Client(s.address, asynchronous=True)
 
@@ -2292,7 +2287,7 @@ def test__cancel_multi_client(s, a, b):
 
 
 @gen_cluster(client=True)
-def test__cancel_collection(c, s, a, b):
+def test_cancel_collection(c, s, a, b):
     L = c.map(double, [[1], [2], [3]])
     x = db.Bag({("b", i): f for i, f in enumerate(L)}, "b", 3)
 
@@ -2510,7 +2505,7 @@ def test_dont_delete_recomputed_results(c, s, w):
     x = c.submit(inc, 1)  # compute first time
     yield wait([x])
     x.__del__()  # trigger garbage collection
-    yield gen.moment
+    yield gen.sleep(0)
     xx = c.submit(inc, 1)  # compute second time
 
     start = time()
@@ -2597,9 +2592,8 @@ def test_run_coroutine(c, s, a, b):
     with pytest.raises(RuntimeError, match="hello"):
         yield c.run(throws, 1)
 
-    if sys.version_info >= (3, 5):
-        results = yield c.run(asyncinc, 2, delay=0.01)
-        assert results == {a.address: 3, b.address: 3}
+    results = yield c.run(asyncinc, 2, delay=0.01)
+    assert results == {a.address: 3, b.address: 3}
 
 
 def test_run_coroutine_sync(c, s, a, b):
@@ -2691,8 +2685,7 @@ def test_worker_aliases():
     a = Worker(s.address, name="alice")
     b = Worker(s.address, name="bob")
     w = Worker(s.address, name=3)
-    yield [a, b, w]
-
+    yield asyncio.gather(a, b, w)
     c = yield Client(s.address, asynchronous=True)
 
     L = c.map(inc, range(10), workers="alice")
@@ -2707,7 +2700,7 @@ def test_worker_aliases():
         assert result == i + 1
 
     yield c.close()
-    yield [a.close(), b.close(), w.close()]
+    yield asyncio.gather(a.close(), b.close(), w.close())
     yield s.close()
 
 
@@ -2736,7 +2729,7 @@ def test_persist_get(c, s, a, b):
     xxyy3 = delayed(add)(xxyy2, 10)
 
     yield gen.sleep(0.5)
-    result = yield c.get(xxyy3.dask, xxyy3.__dask_keys__(), sync=False)
+    result = yield c.gather(c.get(xxyy3.dask, xxyy3.__dask_keys__(), sync=False))
     assert result[0] == ((1 + 1) + (2 + 2)) + 10
 
     result = yield c.compute(xxyy3)
@@ -2888,7 +2881,7 @@ async def test_rebalance_raises_missing_data(c, s, a, b):
 @gen_cluster(client=True)
 def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])
-    result = yield x
+    yield x
     yield a.close()
 
     start = time()
@@ -2903,7 +2896,7 @@ def test_receive_lost_key(c, s, a, b):
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 def test_unrunnable_task_runs(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.ip])
-    result = yield x
+    yield x
 
     yield a.close()
     start = time()
@@ -2930,11 +2923,8 @@ def test_unrunnable_task_runs(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
-
     n = yield Nanny(s.address, nthreads=2, loop=s.loop, port=0)
-
-    result = yield c.gather(futures)
-
+    yield c.gather(futures)
     yield n.close()
 
 
@@ -2960,7 +2950,7 @@ def test_submit_on_cancelled_future(c, s, a, b):
     yield c.cancel(x)
 
     with pytest.raises(CancelledError):
-        y = c.submit(inc, x)
+        c.submit(inc, x)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
@@ -3351,7 +3341,7 @@ def test_bad_tasks_fail(c, s, a, b):
         yield f
 
     assert info.value.last_worker.nanny in {a.address, b.address}
-    yield [a.close(), b.close()]
+    yield asyncio.gather(a.close(), b.close())
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -3413,7 +3403,7 @@ def test_Client_clears_references_after_restart(c, s, a, b):
     import gc
 
     gc.collect()
-    yield gen.moment
+    yield gen.sleep(0)
 
     assert key not in c.refcount
 
@@ -3605,7 +3595,6 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         workers = set()
         status = True
 
-        @gen.coroutine
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
@@ -3620,7 +3609,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 yield gen.sleep(duration)
                 yield w.close()
                 del w
-                yield gen.moment
+                yield gen.sleep(0)
             done.release()
 
         for i in range(count):
@@ -4328,7 +4317,7 @@ def test_dont_clear_waiting_data(c, s, a, b):
     del x
     for i in range(5):
         assert s.waiting_data[key]
-        yield gen.moment
+        yield gen.sleep(0)
 
 
 @gen_cluster(client=True)
@@ -4904,12 +4893,11 @@ def test_unicode_keys(c, s, a, b):
 
 
 def test_use_synchronous_client_in_async_context(loop, c):
-    @gen.coroutine
     def f():
         x = yield c.scatter(123)
         y = c.submit(inc, x)
         z = yield c.gather(y)
-        raise gen.Return(z)
+        return z
 
     z = sync(loop, f)
     assert z == 124
@@ -4944,7 +4932,9 @@ def test_call_stack_future(c, s, a, b):
     x = c.submit(slowdec, 1, delay=0.5)
     future = c.submit(slowinc, 1, delay=0.5)
     yield gen.sleep(0.1)
-    results = yield [c.call_stack(future), c.call_stack(keys=[future.key])]
+    results = yield asyncio.gather(
+        c.call_stack(future), c.call_stack(keys=[future.key])
+    )
     assert all(list(first(result.values())) == [future.key] for result in results)
     assert results[0] == results[1]
     result = results[0]
@@ -5212,7 +5202,6 @@ def test_scatter_direct(s, a, b):
     yield c.close()
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="cloudpickle Py27 issue")
 @gen_cluster(client=True)
 def test_unhashable_function(c, s, a, b):
     d = {"a": 1}
@@ -5548,7 +5537,7 @@ def test_profile_bokeh(c, s, a, b):
     pytest.importorskip("bokeh.plotting")
     from bokeh.model import Model
 
-    yield c.map(slowinc, range(10), delay=0.2)
+    yield c.gather(c.map(slowinc, range(10), delay=0.2))
     state, figure = yield c.profile(plot=True)
     assert isinstance(figure, Model)
 

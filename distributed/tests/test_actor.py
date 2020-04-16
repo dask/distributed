@@ -1,3 +1,4 @@
+import asyncio
 import operator
 from time import sleep
 from tornado import gen
@@ -71,7 +72,7 @@ def test_client_actions(direct_to_workers):
         assert isinstance(a.actors[counter.key], Counter)
         assert s.tasks[counter.key].actor
 
-        yield [counter.increment(), counter.increment()]
+        yield asyncio.gather(counter.increment(), counter.increment())
 
         n = yield counter.n
         assert n == 2
@@ -106,10 +107,10 @@ def test_worker_actions(separate_thread):
             assert end > start
 
         futures = [c.submit(f, counter, pure=False) for _ in range(10)]
-        yield futures
+        yield c.gather(futures)
 
         counter = yield counter
-        assert (yield counter.n) == 10
+        assert yield counter.n == 10
 
     test()
 
@@ -163,7 +164,7 @@ def test_exceptions_create(c, s, a, b):
             raise ValueError("bar")
 
     with pytest.raises(ValueError) as info:
-        future = yield c.submit(Foo, actor=True)
+        yield c.submit(Foo, actor=True)
 
     assert "bar" in str(info.value)
 
@@ -365,7 +366,7 @@ def test_thread_safety(c, s, a, b):
     unsafe = yield c.submit(Unsafe, actor=True)
 
     futures = [unsafe.f() for i in range(10)]
-    yield futures
+    yield c.gather(futures)
 
 
 @gen_cluster(client=True)
@@ -534,21 +535,19 @@ def test_waiter(c, s, a, b):
         def __init__(self):
             self.event = Event()
 
-        @gen.coroutine
         def set(self):
             self.event.set()
 
-        @gen.coroutine
         def wait(self):
             yield self.event.wait()
 
     waiter = yield c.submit(Waiter, actor=True)
 
-    futures = [waiter.wait() for i in range(5)]  # way more than we have actor threads
+    futures = [waiter.wait() for _ in range(5)]  # way more than we have actor threads
 
     yield gen.sleep(0.1)
     assert not any(future.done() for future in futures)
 
     yield waiter.set()
 
-    yield futures
+    yield c.gather(futures)

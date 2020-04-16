@@ -63,8 +63,8 @@ async def test_nanny(s):
 def test_many_kills(s):
     n = yield Nanny(s.address, nthreads=2, loop=s.loop)
     assert n.is_alive()
-    yield [n.kill() for i in range(5)]
-    yield [n.kill() for i in range(5)]
+    yield asyncio.gather(*(n.kill() for _ in range(5)))
+    yield asyncio.gather(*(n.kill() for _ in range(5)))
     yield n.close()
 
 
@@ -191,7 +191,6 @@ def test_nanny_death_timeout(s):
 
 @gen_cluster(client=True, Worker=Nanny)
 def test_random_seed(c, s, a, b):
-    @gen.coroutine
     def check_func(func):
         x = c.submit(func, 0, 2 ** 31, pure=False, workers=a.worker_address)
         y = c.submit(func, 0, 2 ** 31, pure=False, workers=b.worker_address)
@@ -348,7 +347,7 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
     assert "memory" not in nanny.periodic_callbacks
 
     future = c.submit(inc, 1)
-    assert (yield future) == 2
+    assert yield future == 2
     yield gen.sleep(0.02)
 
     yield c.submit(inc, 2)  # worker doesn't pause
@@ -388,10 +387,10 @@ def test_wait_for_scheduler():
 def test_environment_variable(c, s):
     a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
     b = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "456"})
-    yield [a, b]
+    yield asyncio.gather(a, b)
     results = yield c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
-    yield [a.close(), b.close()]
+    yield asyncio.gather(a.close(), b.close())
 
 
 @gen_cluster(nthreads=[], client=True)

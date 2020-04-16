@@ -182,7 +182,7 @@ def test_get_many(c, s, a, b):
     assert data == [1, 2]
 
     with pytest.raises(TimeoutError):
-        data = yield asyncio.wait_for(xx.get(batch=2), 0.1)
+        yield asyncio.wait_for(xx.get(batch=2), 0.1)
 
 
 @gen_cluster(client=True)
@@ -275,4 +275,4 @@ def test_2220(c, s, a, b):
     fut = c.submit(put)
     res = c.submit(get)
 
-    yield [res, fut]
+    yield c.gather([res, fut])

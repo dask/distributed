@@ -254,7 +254,7 @@ def test_err_on_bad_deserializer():
     result = yield from_frames(frames, deserializers=["pickle", "foo"])
     assert result == {"x": 1234}
 
-    with pytest.raises(TypeError) as info:
+    with pytest.raises(TypeError):
         yield from_frames(frames, deserializers=["msgpack"])
 
 

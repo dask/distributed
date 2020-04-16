@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import ssl
@@ -35,16 +36,11 @@ from distributed.dashboard.components.scheduler import (
     ProfileServer,
     MemoryByKey,
 )
-from distributed.utils_test import async_wait_for
-
 from distributed.dashboard import scheduler
 
 scheduler.PROFILING = False
 
 
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="https://github.com/bokeh/bokeh/issues/5494"
-)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 def test_simple(c, s, a, b):
     port = s.http_server.port
@@ -320,7 +316,7 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
         for name, func in metrics.items():
             w.metrics[name] = func
 
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     for w in [a, b]:
         assert s.workers[w.address].metrics["metric_port"] == w.port
@@ -347,7 +343,7 @@ def test_WorkerTable_different_metrics(c, s, a, b):
 
     a.metrics["metric_a"] = metric_port
     b.metrics["metric_b"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     assert s.workers[a.address].metrics["metric_a"] == a.port
     assert s.workers[b.address].metrics["metric_b"] == b.port
@@ -371,7 +367,7 @@ def test_WorkerTable_metrics_with_different_metric_2(c, s, a, b):
         return worker.port
 
     a.metrics["metric_a"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     wt = WorkerTable(s)
     wt.update()
@@ -391,7 +387,7 @@ def test_WorkerTable_add_and_remove_metrics(c, s, a, b):
 
     a.metrics["metric_a"] = metric_port
     b.metrics["metric_b"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     assert s.workers[a.address].metrics["metric_a"] == a.port
     assert s.workers[b.address].metrics["metric_b"] == b.port
@@ -403,14 +399,14 @@ def test_WorkerTable_add_and_remove_metrics(c, s, a, b):
 
     # Remove 'metric_b' from worker b
     del b.metrics["metric_b"]
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     wt = WorkerTable(s)
     wt.update()
     assert "metric_a" in wt.source.data
 
     del a.metrics["metric_a"]
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     wt = WorkerTable(s)
     wt.update()
@@ -425,7 +421,7 @@ def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     a.metrics["executing"] = metric
     a.metrics["cpu"] = metric
     a.metrics["metric"] = metric
-    yield [a.heartbeat(), b.heartbeat()]
+    yield asyncio.gather(a.heartbeat(), b.heartbeat())
 
     assert s.workers[a.address].metrics["executing"] != -999
     assert s.workers[a.address].metrics["cpu"] != -999
@@ -519,12 +515,6 @@ def test_TaskGraph_limit(c, s, a, b):
     yield wait(f3)
     gp.update()
     assert len(gp.node_source.data["x"]) == 2
-    del f1
-    del f2
-    del f3
-    _ = c.submit(func, 1)
-
-    async_wait_for(lambda: len(gp.node_source.data["x"]) == 1, timeout=1)
 
 
 @gen_cluster(client=True, timeout=30)

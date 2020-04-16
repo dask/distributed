@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from dask import delayed
@@ -12,16 +13,17 @@ from tornado import gen
 
 @gen_cluster(client=False)
 def test_publish_simple(s, a, b):
-    c = yield Client(s.address, asynchronous=True)
-    f = yield Client(s.address, asynchronous=True)
+    c = Client(s.address, asynchronous=True)
+    f = Client(s.address, asynchronous=True)
+    yield asyncio.gather(c, f)
 
     data = yield c.scatter(range(3))
-    out = yield c.publish_dataset(data=data)
+    yield c.publish_dataset(data=data)
     assert "data" in s.extensions["publish"].datasets
     assert isinstance(s.extensions["publish"].datasets["data"]["data"], Serialized)
 
     with pytest.raises(KeyError) as exc_info:
-        out = yield c.publish_dataset(data=data)
+        yield c.publish_dataset(data=data)
 
     assert "exists" in str(exc_info.value)
     assert "data" in str(exc_info.value)
@@ -32,19 +34,15 @@ def test_publish_simple(s, a, b):
     result = yield f.scheduler.publish_list()
     assert result == ("data",)
 
-    yield c.close()
-    yield f.close()
+    yield asyncio.gather(c.close(), f.close())
 
 
 @gen_cluster(client=False)
 def test_publish_non_string_key(s, a, b):
-    c = yield Client(s.address, asynchronous=True)
-    f = yield Client(s.address, asynchronous=True)
-
-    try:
+    async with Client(s.address, asynchronous=True) as c:
         for name in [("a", "b"), 9.0, 8]:
             data = yield c.scatter(range(3))
-            out = yield c.publish_dataset(data, name=name)
+            yield c.publish_dataset(data, name=name)
             assert name in s.extensions["publish"].datasets
             assert isinstance(
                 s.extensions["publish"].datasets[name]["data"], Serialized
@@ -52,10 +50,6 @@ def test_publish_non_string_key(s, a, b):
 
             datasets = yield c.scheduler.publish_list()
             assert name in datasets
-
-    finally:
-        yield c.close()
-        yield f.close()
 
 
 @gen_cluster(client=False)
@@ -74,7 +68,7 @@ def test_publish_roundtrip(s, a, b):
     assert out == [0, 1, 2]
 
     with pytest.raises(KeyError) as exc_info:
-        result = yield f.get_dataset(name="nonexistent")
+        yield f.get_dataset(name="nonexistent")
 
     assert "not found" in str(exc_info.value)
     assert "nonexistent" in str(exc_info.value)
@@ -101,7 +95,7 @@ def test_unpublish(c, s, a, b):
         assert time() < start + 5
 
     with pytest.raises(KeyError) as exc_info:
-        result = yield c.get_dataset(name="data")
+        yield c.get_dataset(name="data")
 
     assert "not found" in str(exc_info.value)
     assert "data" in str(exc_info.value)
@@ -113,7 +107,7 @@ def test_unpublish_sync(client):
     client.unpublish_dataset(name="data")
 
     with pytest.raises(KeyError) as exc_info:
-        result = client.get_dataset(name="data")
+        client.get_dataset(name="data")
 
     assert "not found" in str(exc_info.value)
     assert "data" in str(exc_info.value)
@@ -136,7 +130,7 @@ def test_unpublish_multiple_datasets_sync(client):
     client.unpublish_dataset(name="x")
 
     with pytest.raises(KeyError) as exc_info:
-        result = client.get_dataset(name="x")
+        client.get_dataset(name="x")
 
     datasets = client.list_datasets()
     assert set(datasets) == {"y"}
@@ -147,7 +141,7 @@ def test_unpublish_multiple_datasets_sync(client):
     client.unpublish_dataset(name="y")
 
     with pytest.raises(KeyError) as exc_info:
-        result = client.get_dataset(name="y")
+        client.get_dataset(name="y")
 
     assert "not found" in str(exc_info.value)
     assert "y" in str(exc_info.value)
@@ -224,8 +218,7 @@ def test_datasets_iter(client):
 
 @gen_cluster(client=True)
 def test_pickle_safe(c, s, a, b):
-    c2 = yield Client(s.address, asynchronous=True, serializers=["msgpack"])
-    try:
+    async with Client(s.address, asynchronous=True, serializers=["msgpack"]) as c2:
         yield c2.publish_dataset(x=[1, 2, 3])
         result = yield c2.get_dataset("x")
         assert result == [1, 2, 3]
@@ -237,5 +230,3 @@ def test_pickle_safe(c, s, a, b):
 
         with pytest.raises(TypeError):
             yield c2.get_dataset("z")
-    finally:
-        yield c2.close()

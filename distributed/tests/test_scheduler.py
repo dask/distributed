@@ -92,10 +92,10 @@ def test_recompute_released_results(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_decide_worker_with_many_independent_leaves(c, s, a, b):
-    xs = yield [
+    xs = yield asyncio.gather(
         c.scatter(list(range(0, 100, 2)), workers=a.address),
         c.scatter(list(range(1, 100, 2)), workers=b.address),
-    ]
+    )
     xs = list(concat(zip(*xs)))
     ys = [delayed(inc)(x) for x in xs]
 
@@ -126,10 +126,10 @@ def test_move_data_over_break_restrictions(client, s, a, b, c):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 def test_balance_with_restrictions(client, s, a, b, c):
-    [x], [y] = yield [
+    [x], [y] = yield asyncio.gather(
         client.scatter([[1, 2, 3]], workers=a.address),
         client.scatter([1], workers=c.address),
-    ]
+    )
     z = client.submit(inc, 1, workers=[a.address, c.address])
     yield wait(z)
 
@@ -151,7 +151,6 @@ def test_no_valid_workers(client, s, a, b, c):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
     x = client.submit(inc, 1, workers="127.0.0.5:9999", allow_other_workers=True)
-
     result = yield x
     assert result == 2
 
@@ -563,7 +562,7 @@ def test_coerce_address():
         a = Worker(s.address, name="alice")
         b = Worker(s.address, name=123)
         c = Worker("127.0.0.1", s.port, name="charlie")
-        yield [a, b, c]
+        yield asyncio.gather(a, b, c)
 
         assert s.coerce_address("127.0.0.1:8000") == "tcp://127.0.0.1:8000"
         assert s.coerce_address("[::1]:8000") == "tcp://[::1]:8000"
@@ -592,7 +591,7 @@ def test_coerce_address():
         assert s.coerce_address("zzzt:8000", resolve=False) == "tcp://zzzt:8000"
 
         yield s.close()
-        yield [w.close() for w in [a, b, c]]
+        yield asyncio.gather(a.close(), b.close(), c.close())
 
 
 @pytest.mark.asyncio
@@ -677,7 +676,7 @@ def test_scatter_no_workers(c, s):
     assert time() < start + 1.5
 
     w = Worker(s.address, nthreads=3)
-    yield [c.scatter(data={"y": 2}, timeout=5), w]
+    yield asyncio.gather(c.scatter(data={"y": 2}, timeout=5), w)
 
     assert w.data["y"] == 2
     yield w.close()
@@ -793,7 +792,6 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="file descriptors not really a thing"
 )
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="intermittent failure")
 @gen_cluster(client=True, nthreads=[], timeout=240)
 def test_file_descriptors(c, s):
     yield gen.sleep(0.1)
@@ -803,7 +801,7 @@ def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = yield [Nanny(s.address, loop=s.loop) for i in range(N)]
+    nannies = yield asyncio.gather(*[Nanny(s.address, loop=s.loop) for _ in range(N)])
 
     while len(s.nthreads) < N:
         yield gen.sleep(0.1)
@@ -833,7 +831,7 @@ def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    yield [n.close() for n in nannies]
+    yield asyncio.gather(*[n.close() for n in nannies])
     yield c.close()
 
     assert not s.rpc.open
@@ -1329,12 +1327,12 @@ def test_retries(c, s, a, b):
 
     future = c.submit(varying(args), retries=1, pure=False)
     with pytest.raises(ZeroDivisionError) as exc_info:
-        res = yield future
+        yield future
     exc_info.match("two")
 
     future = c.submit(varying(args), retries=0, pure=False)
     with pytest.raises(ZeroDivisionError) as exc_info:
-        res = yield future
+        yield future
     exc_info.match("one")
 
 

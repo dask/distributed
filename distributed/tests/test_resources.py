@@ -1,3 +1,4 @@
+import asyncio
 from time import time
 
 from dask import delayed
@@ -19,8 +20,7 @@ def test_resources(c, s):
 
     a = Worker(s.address, loop=s.loop, resources={"GPU": 2})
     b = Worker(s.address, loop=s.loop, resources={"GPU": 1, "DB": 1})
-
-    yield [a, b]
+    yield asyncio.gather(a, b)
 
     assert s.resources == {"GPU": {a.address: 2, b.address: 1}, "DB": {b.address: 1}}
     assert s.worker_resources == {a.address: {"GPU": 2}, b.address: {"GPU": 1, "DB": 1}}

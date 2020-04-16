@@ -23,7 +23,7 @@ def test_lock(c, s, a, b):
             client.set_metadata("locked", False)
 
     futures = c.map(f, range(20))
-    results = yield futures
+    yield c.gather(futures)
     assert not s.extensions["locks"].events
     assert not s.extensions["locks"].ids
 

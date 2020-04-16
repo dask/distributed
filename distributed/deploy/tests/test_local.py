@@ -844,7 +844,6 @@ def test_asynchronous_property(loop):
         loop=loop,
     ) as cluster:
 
-        @gen.coroutine
         def _():
             assert cluster.asynchronous
 
