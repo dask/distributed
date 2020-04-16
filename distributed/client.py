@@ -1044,7 +1044,7 @@ class Client(Node):
 
         try:
             comm = await connect(
-                self.scheduler.address, timeout=timeout, **self.connection_args,
+                self.scheduler.address, timeout=timeout, **self.connection_args
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
@@ -1630,7 +1630,7 @@ class Client(Node):
                         actor=actor,
                         actors=actors,
                         pure=pure,
-                        **kwargs
+                        **kwargs,
                     )
                     for batch in partition_all(batch_size, *iterables)
                 ],
