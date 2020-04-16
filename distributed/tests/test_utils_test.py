@@ -58,9 +58,9 @@ def test_gen_cluster_cleans_up_client(loop):
     assert not dask.config.get("get", None)
 
     @gen_cluster(client=True)
-    def f(c, s, a, b):
+    async def f(c, s, a, b):
         assert dask.config.get("get", None)
-        yield c.submit(inc, 1)
+        await c.submit(inc, 1)
 
     f()
 
@@ -92,8 +92,8 @@ def test_gen_cluster_tls(e, s, a, b):
 
 
 @gen_test()
-def test_gen_test():
-    yield gen.sleep(0.01)
+async def test_gen_test():
+    await gen.sleep(0.01)
 
 
 @contextmanager
@@ -154,8 +154,8 @@ def test_new_config():
 
 def test_lingering_client():
     @gen_cluster()
-    def f(s, a, b):
-        yield Client(s.address, asynchronous=True)
+    async def f(s, a, b):
+        await Client(s.address, asynchronous=True)
 
     f()
 

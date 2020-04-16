@@ -143,8 +143,8 @@ async def test_adaptive_scale_down_override(cleanup):
 
 
 @gen_test()
-def test_min_max():
-    cluster = yield LocalCluster(
+async def test_min_max():
+    cluster = await LocalCluster(
         0,
         scheduler_port=0,
         silence_logs=False,
@@ -154,14 +154,14 @@ def test_min_max():
     )
     try:
         adapt = cluster.adapt(minimum=1, maximum=2, interval="20 ms", wait_count=10)
-        c = yield Client(cluster, asynchronous=True)
+        c = await Client(cluster, asynchronous=True)
 
         start = time()
         while not cluster.scheduler.workers:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
             assert time() < start + 1
 
-        yield gen.sleep(0.2)
+        await gen.sleep(0.2)
         assert len(cluster.scheduler.workers) == 1
         assert len(adapt.log) == 1 and adapt.log[-1][1] == {"status": "up", "n": 1}
 
@@ -169,11 +169,11 @@ def test_min_max():
 
         start = time()
         while len(cluster.scheduler.workers) < 2:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
             assert time() < start + 1
 
         assert len(cluster.scheduler.workers) == 2
-        yield gen.sleep(0.5)
+        await gen.sleep(0.5)
         assert len(cluster.scheduler.workers) == 2
         assert len(cluster.workers) == 2
         assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
@@ -182,12 +182,12 @@ def test_min_max():
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
             assert time() < start + 2
         assert adapt.log[-1][1]["status"] == "down"
     finally:
-        yield c.close()
-        yield cluster.close()
+        await c.close()
+        await cluster.close()
 
 
 @pytest.mark.asyncio
@@ -216,13 +216,13 @@ async def test_avoid_churn(cleanup):
 
 
 @gen_test(timeout=None)
-def test_adapt_quickly():
+async def test_adapt_quickly():
     """ We want to avoid creating and deleting workers frequently
 
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
     """
-    cluster = yield LocalCluster(
+    cluster = await LocalCluster(
         0,
         asynchronous=True,
         processes=False,
@@ -230,46 +230,46 @@ def test_adapt_quickly():
         silence_logs=False,
         dashboard_address=None,
     )
-    client = yield Client(cluster, asynchronous=True)
+    client = await Client(cluster, asynchronous=True)
     adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
     try:
         future = client.submit(slowinc, 1, delay=0.100)
-        yield wait(future)
+        await wait(future)
         assert len(adapt.log) == 1
 
         # Scale up when there is plenty of available work
         futures = client.map(slowinc, range(1000), delay=0.100)
         while len(adapt.log) == 1:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
         assert len(adapt.log) == 2
         assert adapt.log[-1][1]["status"] == "up"
         d = [x for x in adapt.log[-1] if isinstance(x, dict)][0]
         assert 2 < d["n"] <= adapt.maximum
 
         while len(cluster.workers) < adapt.maximum:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
 
         del futures
 
         while len(cluster.scheduler.tasks) > 1:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
 
-        yield cluster
+        await cluster
 
         while len(cluster.scheduler.workers) > 1 or len(cluster.worker_spec) > 1:
-            yield gen.sleep(0.01)
+            await gen.sleep(0.01)
 
         # Don't scale up for large sequential computations
-        x = yield client.scatter(1)
+        x = await client.scatter(1)
         log = list(cluster._adaptive.log)
         for i in range(100):
             x = client.submit(slowinc, x)
 
-        yield gen.sleep(0.1)
+        await gen.sleep(0.1)
         assert len(cluster.workers) == 1
     finally:
-        yield client.close()
-        yield cluster.close()
+        await client.close()
+        await cluster.close()
 
 
 @gen_test(timeout=None)

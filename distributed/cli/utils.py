@@ -50,10 +50,10 @@ def install_signal_handlers(loop=None, cleanup=None):
     old_handlers = {}
 
     def handle_signal(sig, frame):
-        def cleanup_and_stop():
+        async def cleanup_and_stop():
             try:
                 if cleanup is not None:
-                    yield cleanup(sig)
+                    await cleanup(sig)
             finally:
                 loop.stop()
 

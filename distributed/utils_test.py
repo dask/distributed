@@ -761,8 +761,8 @@ def gen_test(timeout=10):
     """ Coroutine test
 
     @gen_test(timeout=5)
-    def test_foo():
-        yield ...  # use tornado coroutines
+    async def test_foo():
+        await ...  # use tornado coroutines
     """
 
     def _(func):
@@ -862,8 +862,8 @@ def gen_cluster(
     """ Coroutine test with small cluster
 
     @gen_cluster()
-    def test_foo(scheduler, worker1, worker2):
-        yield ...  # use tornado coroutines
+    async def test_foo(scheduler, worker1, worker2):
+        await ...  # use tornado coroutines
 
     See also:
         start

@@ -16,18 +16,18 @@ from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 
 
 @gen_cluster(client=True)
-def test__as_completed(c, s, a, b):
+async def test__as_completed(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 1)
     z = c.submit(inc, 2)
 
     q = queue.Queue()
-    yield _as_completed([x, y, z], q)
+    await _as_completed([x, y, z], q)
 
     assert q.qsize() == 3
     assert {q.get(), q.get(), q.get()} == {x, y, z}
 
-    result = yield _first_completed([x, y, z])
+    result = await _first_completed([x, y, z])
     assert result in [x, y, z]
 
 
@@ -129,10 +129,10 @@ def test_as_completed_cancel_last(client):
     x = client.submit(inc, 1)
     y = client.submit(inc, 0.3)
 
-    def _():
-        yield gen.sleep(0.1)
-        yield w.cancel(asynchronous=True)
-        yield y.cancel(asynchronous=True)
+    async def _():
+        await gen.sleep(0.1)
+        await w.cancel(asynchronous=True)
+        await y.cancel(asynchronous=True)
 
     client.loop.add_callback(_)
 
@@ -143,7 +143,7 @@ def test_as_completed_cancel_last(client):
 
 
 @gen_cluster(client=True)
-def test_async_for_py2_equivalent(c, s, a, b):
+async def test_async_for_py2_equivalent(c, s, a, b):
     futures = c.map(sleep, [0.01] * 3, pure=False)
     seq = as_completed(futures)
     x, y, z = [el async for el in seq]
@@ -154,7 +154,7 @@ def test_async_for_py2_equivalent(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_as_completed_error_async(c, s, a, b):
+async def test_as_completed_error_async(c, s, a, b):
     x = c.submit(throws, 1)
     y = c.submit(inc, 1)
 
@@ -190,13 +190,13 @@ def test_as_completed_with_results(client):
 
 
 @gen_cluster(client=True)
-def test_as_completed_with_results_async(c, s, a, b):
+async def test_as_completed_with_results_async(c, s, a, b):
     x = c.submit(throws, 1)
     y = c.submit(inc, 5)
     z = c.submit(inc, 1)
 
     ac = as_completed([x, y, z], with_results=True)
-    yield y.cancel()
+    await y.cancel()
     with pytest.raises(RuntimeError) as exc:
         async for _ in ac:
             pass
@@ -241,7 +241,7 @@ async def test_str(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_as_completed_with_results_no_raise_async(c, s, a, b):
+async def test_as_completed_with_results_no_raise_async(c, s, a, b):
     x = c.submit(throws, 1)
     y = c.submit(inc, 5)
     z = c.submit(inc, 1)

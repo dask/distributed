@@ -761,13 +761,13 @@ def test_local_tls(loop, temporary):
 
 
 @gen_test()
-def test_scale_retires_workers():
+async def test_scale_retires_workers():
     class MyCluster(LocalCluster):
         def scale_down(self, *args, **kwargs):
             pass
 
     loop = IOLoop.current()
-    cluster = yield MyCluster(
+    cluster = await MyCluster(
         0,
         scheduler_port=0,
         processes=False,
@@ -776,26 +776,26 @@ def test_scale_retires_workers():
         loop=loop,
         asynchronous=True,
     )
-    c = yield Client(cluster, asynchronous=True)
+    c = await Client(cluster, asynchronous=True)
 
     assert not cluster.workers
 
-    yield cluster.scale(2)
+    await cluster.scale(2)
 
     start = time()
     while len(cluster.scheduler.workers) != 2:
-        yield gen.sleep(0.01)
+        await gen.sleep(0.01)
         assert time() < start + 3
 
-    yield cluster.scale(1)
+    await cluster.scale(1)
 
     start = time()
     while len(cluster.scheduler.workers) != 1:
-        yield gen.sleep(0.01)
+        await gen.sleep(0.01)
         assert time() < start + 3
 
-    yield c.close()
-    yield cluster.close()
+    await c.close()
+    await cluster.close()
 
 
 def test_local_tls_restart(loop):
@@ -844,7 +844,7 @@ def test_asynchronous_property(loop):
         loop=loop,
     ) as cluster:
 
-        def _():
+        async def _():
             assert cluster.asynchronous
 
         cluster.sync(_)

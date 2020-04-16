@@ -28,9 +28,9 @@ import distributed.cli.dask_scheduler
 def test_defaults(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as proc:
 
-        def f():
+        async def f():
             # Default behaviour is to listen on all addresses
-            yield assert_can_connect_from_everywhere_4_6(8786, timeout=5.0)
+            await assert_can_connect_from_everywhere_4_6(8786, timeout=5.0)
 
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             c.sync(f)
@@ -45,9 +45,9 @@ def test_defaults(loop):
 def test_hostport(loop):
     with popen(["dask-scheduler", "--no-dashboard", "--host", "127.0.0.1:8978"]):
 
-        def f():
+        async def f():
             # The scheduler's main port can't be contacted from the outside
-            yield assert_can_connect_locally_4(8978, timeout=5.0)
+            await assert_can_connect_locally_4(8978, timeout=5.0)
 
         with Client("127.0.0.1:8978", loop=loop) as c:
             assert len(c.nthreads()) == 0

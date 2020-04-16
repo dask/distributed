@@ -51,23 +51,23 @@ from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, capture
 
 
 def test_All(loop):
-    def throws():
+    async def throws():
         1 / 0
 
-    def slow():
-        yield gen.sleep(10)
+    async def slow():
+        await gen.sleep(10)
 
-    def inc(x):
+    async def inc(x):
         return x + 1
 
-    def f():
-        results = yield All([inc(i) for i in range(10)])
+    async def f():
+        results = await All([inc(i) for i in range(10)])
         assert results == list(range(1, 11))
 
         start = time()
         for tasks in [[throws(), slow()], [slow(), throws()]]:
             try:
-                yield All(tasks)
+                await All(tasks)
                 assert False
             except ZeroDivisionError:
                 pass
@@ -479,17 +479,17 @@ def test_two_loop_runners(loop_in_thread):
 
 
 @gen_test()
-def test_loop_runner_gen():
+async def test_loop_runner_gen():
     runner = LoopRunner(asynchronous=True)
     assert runner.loop is IOLoop.current()
     assert not runner.is_started()
-    yield gen.sleep(0.01)
+    await gen.sleep(0.01)
     runner.start()
     assert runner.is_started()
-    yield gen.sleep(0.01)
+    await gen.sleep(0.01)
     runner.stop()
     assert not runner.is_started()
-    yield gen.sleep(0.01)
+    await gen.sleep(0.01)
 
 
 def test_parse_bytes():
@@ -532,20 +532,20 @@ def test_parse_timedelta():
 
 
 @gen_test()
-def test_all_exceptions_logging():
-    def throws():
+async def test_all_exceptions_logging():
+    async def throws():
         raise Exception("foo1234")
 
     with captured_logger("") as sio:
         try:
-            yield All([throws() for _ in range(5)], quiet_exceptions=Exception)
+            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
         except Exception:
             pass
 
         import gc
 
         gc.collect()
-        yield gen.sleep(0.1)
+        await gen.sleep(0.1)
 
     assert "foo1234" not in sio.getvalue()
 
