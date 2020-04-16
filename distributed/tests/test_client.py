@@ -5966,16 +5966,3 @@ def test_as_completed_condition_loop(c, s, a, b):
 def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
-
-
-@gen_cluster(client=False)
-async def test_pickle_identity_issue3227(s, a, b):
-    """Ensure that, on a pickle round-trip, the default client is not reinitialised.
-    Specifically, make sure that hostname resolution won't cause get_client() to create
-    a new instance.
-    """
-    for host in ("127.0.0.1", "localhost"):
-        url = host + ":" + s.address.split(":")[1]
-        async with Client(url, asynchronous=True) as c1:
-            c2 = pickle.loads(pickle.dumps(c1))
-            assert c2 is c1
