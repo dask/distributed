@@ -69,7 +69,7 @@ def msgpack_dumps(x):
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b"".join(frames), **msgpack_opts)
+    return msgpack.loads(b"".join(frames), use_list=False, **msgpack_opts)
 
 
 def serialization_error_loads(header, frames):
@@ -147,7 +147,12 @@ def serialize(x, serializers=None, on_error="message", context=None):
         return x.header, x.frames
 
     # Check for "dask"-serializable data in dict/list/set
-    supported = check_dask_serializable(x)
+    # Note: "msgpack" will always convert lists to tuples
+    #       list (see GitHub PR#2000), so we need to use
+    #       "pickle" or "dask" for list objects
+    supported = (
+        isinstance(x, list) and "pickle" not in serializers
+    ) or check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
     if type(x) is dict and supported:
