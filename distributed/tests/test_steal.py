@@ -569,7 +569,9 @@ async def assert_balanced(inp, expected, c, s, *workers):
     ],
 )
 def test_balance(inp, expected):
-    test = lambda *args, **kwargs: assert_balanced(inp, expected, *args, **kwargs)
+    async def test(*args, **kwargs):
+        await assert_balanced(inp, expected, *args, **kwargs)
+
     test = gen_cluster(
         client=True,
         nthreads=[("127.0.0.1", 1)] * len(inp),

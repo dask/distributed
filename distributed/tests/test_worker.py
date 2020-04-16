@@ -837,7 +837,7 @@ def test_worker_dir(worker):
     with tmpfile() as fn:
 
         @gen_cluster(client=True, worker_kwargs={"local_directory": fn})
-        def test_worker_dir(c, s, a, b):
+        async def test_worker_dir(c, s, a, b):
             directories = [w.local_directory for w in s.workers.values()]
             assert all(d.startswith(fn) for d in directories)
             assert len(set(directories)) == 2  # distinct
@@ -1244,7 +1244,7 @@ async def test_avoid_memory_monitor_if_zero_limit(c, s):
         "distributed.worker.memory.target": False,
     },
 )
-def test_dict_data_if_no_spill_to_disk(s, w):
+async def test_dict_data_if_no_spill_to_disk(s, w):
     assert type(w.data) is dict
 
 

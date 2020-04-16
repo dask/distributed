@@ -102,7 +102,6 @@ def _get_global_client():
             return c
         else:
             del _global_clients[k]
-    del L
     return None
 
 

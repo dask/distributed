@@ -43,7 +43,7 @@ def test_cluster(loop):
 
 
 @gen_cluster(client=True)
-def test_gen_cluster(c, s, a, b):
+async def test_gen_cluster(c, s, a, b):
     assert isinstance(c, Client)
     assert isinstance(s, Scheduler)
     for w in [a, b]:
@@ -68,11 +68,16 @@ def test_gen_cluster_cleans_up_client(loop):
 
 
 @gen_cluster(client=False)
-def test_gen_cluster_without_client(s, a, b):
+async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+
+    async with Client(s.address, asynchronous=True) as c:
+        future = c.submit(lambda x: x + 1, 1)
+        result = await future
+        assert result == 2
 
 
 @gen_cluster(
@@ -81,7 +86,7 @@ def test_gen_cluster_without_client(s, a, b):
     nthreads=[("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)],
     security=tls_only_security(),
 )
-def test_gen_cluster_tls(e, s, a, b):
+async def test_gen_cluster_tls(e, s, a, b):
     assert isinstance(e, Client)
     assert isinstance(s, Scheduler)
     assert s.address.startswith("tls://")
@@ -177,16 +182,3 @@ def test_tls_cluster(tls_client):
 async def test_tls_scheduler(security, cleanup):
     async with Scheduler(security=security, host="localhost") as s:
         assert s.address.startswith("tls")
-
-
-@gen_cluster()
-async def test_gen_cluster_async(s, a, b):  # flake8: noqa
-    async with Client(s.address, asynchronous=True) as c:
-        future = c.submit(lambda x: x + 1, 1)
-        result = await future
-        assert result == 2
-
-
-@gen_test()
-async def test_gen_test_async():  # flake8: noqa
-    await asyncio.sleep(0.001)

@@ -215,7 +215,7 @@ async def test_avoid_churn(cleanup):
             assert len(adapt.log) == 1
 
 
-@gen_test(timeout=None)
+@pytest.mark.asyncio
 async def test_adapt_quickly():
     """ We want to avoid creating and deleting workers frequently
 
@@ -332,7 +332,7 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
-@gen_test(timeout=None)
+@pytest.mark.asyncio
 async def test_target_duration():
     """ Ensure that redefining adapt with a lower maximum removes workers """
     with dask.config.set(

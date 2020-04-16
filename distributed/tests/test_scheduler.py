@@ -49,7 +49,7 @@ occupancy = defaultdict(lambda: 0)
 
 
 @gen_cluster()
-def test_administration(s, a, b):
+async def test_administration(s, a, b):
     assert isinstance(s.address, str)
     assert s.address in str(s)
     assert str(sum(s.nthreads.values())) in repr(s)
@@ -478,7 +478,7 @@ def test_dumps_task():
 
 
 @gen_cluster()
-def test_ready_remove_worker(s, a, b):
+async def test_ready_remove_worker(s, a, b):
     s.update_graph(
         tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
         keys=["x-%d" % i for i in range(20)],
@@ -1279,7 +1279,7 @@ async def test_reschedule(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
-def test_reschedule_warns(c, s, a, b):
+async def test_reschedule_warns(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
         s.reschedule(key="__this-key-does-not-exist__")
 
@@ -1515,7 +1515,7 @@ async def test_gh2187(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_collect_versions(c, s, a, b):
+async def test_collect_versions(c, s, a, b):
     cs = s.clients[c.id]
     (w1, w2) = s.workers.values()
     assert cs.versions
@@ -1584,7 +1584,7 @@ async def test_bandwidth_clear(c, s, a, b):
 
 
 @gen_cluster()
-def test_workerstate_clean(s, a, b):
+async def test_workerstate_clean(s, a, b):
     ws = s.workers[a.address].clean()
     assert ws.address == a.address
     b = pickle.dumps(ws)

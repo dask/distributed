@@ -12,7 +12,7 @@ from distributed.utils_test import gen_tls_cluster, inc, double, slowinc, slowad
 
 
 @gen_tls_cluster(client=True)
-def test_basic(c, s, a, b):
+async def test_basic(c, s, a, b):
     pass
 
 

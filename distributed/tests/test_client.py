@@ -2293,7 +2293,10 @@ async def test_cancel_collection(c, s, a, b):
     await c.cancel(x)
     await c.cancel([x])
     assert all(f.cancelled() for f in L)
-    assert not s.tasks
+    start = time()
+    while s.tasks:
+        assert time() < start + 1
+        await time.sleep(0.01)
 
 
 def test_cancel(c):
