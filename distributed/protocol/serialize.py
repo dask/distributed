@@ -148,7 +148,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     # Check for "dask"-serializable data in dict/list/set
     # Note: "msgpack" will always convert lists to tuples
-    #       list (see GitHub PR#2000), so we need to use
+    #       (see GitHub #3716), so we need to use
     #       "pickle" or "dask" for list objects
     supported = (
         isinstance(x, list) and "msgpack" in serializers
