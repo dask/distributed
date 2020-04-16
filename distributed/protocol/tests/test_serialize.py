@@ -392,15 +392,18 @@ def test_compression_numpy_list():
 
 
 @pytest.mark.parametrize(
-    "test_pair",
+    "data,is_serializable",
     [
+        ([], False),
+        ({}, False),
         ({i: i for i in range(10)}, False),
         (set(range(10)), False),
         (tuple(range(100)), False),
         ({"x": MyObj(5)}, True),
         ({"x": {"y": MyObj(5)}}, True),
         pytest.param(
-            ([1, MyObj(5)], True),
+            [1, MyObj(5)],
+            True,
             marks=pytest.mark.xfail(reason="Only checks 0th element for now."),
         ),
         ([MyObj([0, 1, 2]), 1], True),
@@ -408,8 +411,8 @@ def test_compression_numpy_list():
         ({("x", i): MyObj(5) for i in range(100)}, True),
     ],
 )
-def test_check_dask_serializable(test_pair):
-    result = check_dask_serializable(test_pair[0])
-    expected = test_pair[1]
+def test_check_dask_serializable(data, is_serializable):
+    result = check_dask_serializable(data)
+    expected = is_serializable
 
     assert result == expected
