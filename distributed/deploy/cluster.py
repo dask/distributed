@@ -321,10 +321,10 @@ class Cluster:
         def update():
             status.value = self._widget_status()
 
-        cluster_repr_update = parse_timedelta(
-            dask.config.get("distributed.deploy.cluster-repr-update")
+        cluster_repr_interval = parse_timedelta(
+            dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
         )
-        pc = PeriodicCallback(update, cluster_repr_update * 1000, io_loop=self.loop)
+        pc = PeriodicCallback(update, cluster_repr_interval * 1000, io_loop=self.loop)
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
