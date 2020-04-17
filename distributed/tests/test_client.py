@@ -224,6 +224,10 @@ async def test_map_batch_size(c, s, a, b):
     result = await c.gather(result)
     assert result == list(range(1, 101))
 
+    result = c.map(add, range(100), range(100), batch_size=10)
+    result = await c.gather(result)
+    assert result == list(range(0, 200, 2))
+
 
 @gen_cluster(client=True)
 def test_compute_retries(c, s, a, b):

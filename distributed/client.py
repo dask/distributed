@@ -1615,11 +1615,14 @@ class Client(Node):
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
+            batches = list(
+                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
+            )
             return sum(
                 [
                     self.map(
                         func,
-                        batch,
+                        *batch,
                         key=key,
                         workers=workers,
                         retries=retries,
@@ -1632,7 +1635,7 @@ class Client(Node):
                         pure=pure,
                         **kwargs,
                     )
-                    for batch in partition_all(batch_size, *iterables)
+                    for batch in batches
                 ],
                 [],
             )
