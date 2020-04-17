@@ -228,6 +228,11 @@ async def test_map_batch_size(c, s, a, b):
     result = await c.gather(result)
     assert result == list(range(0, 200, 2))
 
+    # mismatch shape
+    result = c.map(add, range(100, 200), range(10), batch_size=2)
+    result = await c.gather(result)
+    assert result == list(range(100, 120, 2))
+
 
 @gen_cluster(client=True)
 def test_compute_retries(c, s, a, b):
