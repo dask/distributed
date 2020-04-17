@@ -222,7 +222,6 @@ def main(
         loop.run_sync(run)
     finally:
         scheduler.stop()
-
         logger.info("End scheduler at %r", scheduler.address)
 
 

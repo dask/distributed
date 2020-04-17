@@ -5,6 +5,7 @@ pytest.importorskip("requests")
 import os
 import requests
 import socket
+import signal
 import shutil
 import sys
 import tempfile
@@ -41,6 +42,11 @@ def test_defaults(loop):
 
         response = requests.get("http://127.0.0.1:8787/status/")
         assert response.status_code == 404
+
+        # clean exit
+        proc.send_signal(signal.SIGINT)
+
+    assert proc.returncode == 0
 
     with pytest.raises(Exception):
         response = requests.get("http://127.0.0.1:9786/info.json")
