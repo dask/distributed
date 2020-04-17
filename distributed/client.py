@@ -699,6 +699,7 @@ class Client(Node):
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
+            "scheduler-shutdown": self._scheduler_shutdown,
         }
 
         self._state_handlers = {
@@ -1263,6 +1264,8 @@ class Client(Node):
                     pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
+            if self.status == "closed":
+                return
 
             if (
                 self.scheduler_comm
@@ -1388,6 +1391,13 @@ class Client(Node):
         Client.close: close only this client
         """
         return self.sync(self._shutdown)
+
+    def _scheduler_shutdown(self):
+        @gen.coroutine
+        def _():
+            yield self._close(fast=True)
+
+        self.loop.add_callback(_)
 
     def get_executor(self, **kwargs):
         """

@@ -1139,7 +1139,7 @@ class Scheduler(ServerNode):
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 distributed.dashboard.scheduler.connect(
-                    self.http_application, self.http_server, self, prefix=http_prefix,
+                    self.http_application, self.http_server, self, prefix=http_prefix
                 )
 
         # Communication state
@@ -1482,7 +1482,9 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [%s]" % (self.address,))
         return self
 
-    async def close(self, comm=None, fast=False, close_workers=False):
+    async def close(
+        self, comm=None, fast=False, close_workers=False, close_clients=True
+    ):
         """ Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -1509,6 +1511,10 @@ class Scheduler(ServerNode):
                 else:
                     break
 
+        if close_clients:
+            for c in self.client_comms.values():
+                c.send({"op": "scheduler-shutdown"})
+
         await asyncio.gather(*[plugin.close() for plugin in self.plugins])
 
         for pc in self.periodic_callbacks.values():
@@ -1532,6 +1538,9 @@ class Scheduler(ServerNode):
 
         for future in futures:  # TODO: do all at once
             await future
+
+        if close_clients:
+            await asyncio.gather(*[c.close() for c in self.client_comms.values()])
 
         for comm in self.client_comms.values():
             comm.abort()
