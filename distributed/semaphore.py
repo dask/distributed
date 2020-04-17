@@ -3,7 +3,8 @@ from collections import defaultdict, deque
 import asyncio
 import dask
 from asyncio import TimeoutError
-from .utils import PeriodicCallback, log_errors, parse_timedelta
+from tornado.ioloop import PeriodicCallback
+from .utils import log_errors, parse_timedelta
 from .worker import get_client
 from .metrics import time
 import warnings
@@ -70,9 +71,7 @@ class SemaphoreExtension:
             default="s",
         )
         self._pc_lease_timeout = PeriodicCallback(
-            self._check_lease_timeout,
-            validation_callback_time,
-            io_loop=self.scheduler.loop,
+            self._check_lease_timeout, validation_callback_time,
         )
         self._pc_lease_timeout.start()
         self.lease_timeout = parse_timedelta(
@@ -340,9 +339,7 @@ class Semaphore:
         )
         self._refreshing_leases = False
         pc = PeriodicCallback(
-            self._refresh_leases,
-            callback_time=1000 * refresh_leases_interval,
-            io_loop=self.client.io_loop,
+            self._refresh_leases, callback_time=1000 * refresh_leases_interval,
         )
         self.refresh_callback = pc
         # Registering the pc to the client here is important for proper cleanup

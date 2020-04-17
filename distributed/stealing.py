@@ -3,11 +3,13 @@ import logging
 from math import log
 from time import time
 
+from tornado.ioloop import PeriodicCallback
+
 import dask
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, parse_timedelta, PeriodicCallback
+from .utils import log_errors, parse_timedelta
 
 from tlz import topk
 
@@ -41,11 +43,7 @@ class WorkStealing(SchedulerPlugin):
             dask.config.get("distributed.scheduler.work-stealing-interval"),
             default="ms",
         )
-        pc = PeriodicCallback(
-            callback=self.balance,
-            callback_time=callback_time,
-            io_loop=self.scheduler.loop,
-        )
+        pc = PeriodicCallback(callback=self.balance, callback_time=callback_time,)
         self._pc = pc
         self.scheduler.periodic_callbacks["stealing"] = pc
         self.scheduler.plugins.append(self)

@@ -12,7 +12,7 @@ import dask
 import tblib
 from tlz import merge
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from .comm import (
     connect,
@@ -31,7 +31,6 @@ from .utils import (
     truncate_exception,
     ignoring,
     shutting_down,
-    PeriodicCallback,
     parse_timedelta,
     has_keyword,
     CancelledError,
@@ -176,7 +175,7 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
+        pc = PeriodicCallback(self.monitor.update, 500)
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
@@ -186,7 +185,6 @@ class Server:
                 dask.config.get("distributed.admin.tick.interval"), default="ms"
             )
             * 1000,
-            io_loop=self.io_loop,
         )
         self.periodic_callbacks["tick"] = pc
 

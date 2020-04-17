@@ -2,13 +2,13 @@ import asyncio
 import logging
 import threading
 import warnings
+from tornado.ioloop import PeriodicCallback
 
 from dask.utils import format_bytes
 
 from .adaptive import Adaptive
 
 from ..utils import (
-    PeriodicCallback,
     log_errors,
     ignoring,
     sync,
@@ -319,7 +319,7 @@ class Cluster:
         def update():
             status.value = self._widget_status()
 
-        pc = PeriodicCallback(update, 500, io_loop=self.loop)
+        pc = PeriodicCallback(update, 500)
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
