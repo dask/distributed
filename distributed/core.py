@@ -1,8 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
-from concurrent.futures import CancelledError
 from functools import partial
-from inspect import isawaitable
+import inspect
 import logging
 import threading
 import traceback
@@ -10,10 +9,10 @@ import uuid
 import weakref
 
 import dask
-from toolz import merge
+import tblib
+from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 from .comm import (
     connect,
@@ -35,6 +34,7 @@ from .utils import (
     PeriodicCallback,
     parse_timedelta,
     has_keyword,
+    CancelledError,
 )
 from . import protocol
 
@@ -60,7 +60,7 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-class Server(object):
+class Server:
     """ Dask Distributed Server
 
     Superclass for endpoints in a distributed cluster, such as Worker
@@ -134,7 +134,7 @@ class Server(object):
         self.events = None
         self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
         self.listeners = []
         self.io_loop = io_loop or IOLoop.current()
@@ -302,7 +302,7 @@ class Server(object):
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    async def listen(self, port_or_addr=None, listen_args=None):
+    async def listen(self, port_or_addr=None, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -312,13 +312,9 @@ class Server(object):
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
-        listener = listen(
-            addr,
-            self.handle_comm,
-            deserialize=self.deserialize,
-            connection_args=listen_args,
+        listener = await listen(
+            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
         )
-        await listener.start()
         self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
@@ -406,7 +402,7 @@ class Server(object):
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if isawaitable(result):
+                        if inspect.isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
@@ -496,7 +492,9 @@ class Server(object):
         for pc in self.periodic_callbacks.values():
             pc.stop()
         for listener in self.listeners:
-            self.listener.stop()
+            future = self.listener.stop()
+            if inspect.isawaitable(future):
+                yield future
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
@@ -569,7 +567,7 @@ def addr_from_args(addr=None, ip=None, port=None):
     return normalize_address(addr)
 
 
-class rpc(object):
+class rpc:
     """ Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
@@ -605,7 +603,7 @@ class rpc(object):
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self._created = weakref.WeakSet()
         rpc.active.add(self)
 
@@ -643,7 +641,7 @@ class rpc(object):
                 self.address,
                 self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "rpc"
         self.comms[comm] = False  # mark as taken
@@ -728,7 +726,7 @@ class rpc(object):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
 
 
-class PooledRPCCall(object):
+class PooledRPCCall:
     """ The result of ConnectionPool()('host:port')
 
     See Also:
@@ -777,7 +775,7 @@ class PooledRPCCall(object):
         return "<pooled rpc to %r>" % (self.addr,)
 
 
-class ConnectionPool(object):
+class ConnectionPool:
     """ A maximum sized pool of Comm objects.
 
     This provides a connect method that mirrors the normal distributed.connect
@@ -831,11 +829,9 @@ class ConnectionPool(object):
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self.timeout = timeout
         self._n_connecting = 0
-        # Invariant: semaphore._value == limit - open - _n_connecting
-        self.semaphore = asyncio.Semaphore(self.limit)
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -870,6 +866,17 @@ class ConnectionPool(object):
             addr, self, serializers=self.serializers, deserializers=self.deserializers
         )
 
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        # Invariant: semaphore._value == limit - open - _n_connecting
+        self.semaphore = asyncio.Semaphore(self.limit)
+
     async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
@@ -895,7 +902,7 @@ class ConnectionPool(object):
                 addr,
                 timeout=timeout or self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
@@ -982,6 +989,14 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
+def collect_causes(e):
+    causes = []
+    while e.__cause__ is not None:
+        causes.append(e.__cause__)
+        e = e.__cause__
+    return causes
+
+
 def error_message(e, status="error"):
     """ Produce message to send back given an exception has occurred
 
@@ -998,6 +1013,7 @@ def error_message(e, status="error"):
     clean_exception: deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
+    tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:

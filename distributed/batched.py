@@ -12,7 +12,7 @@ from .utils import parse_timedelta
 logger = logging.getLogger(__name__)
 
 
-class BatchedSend(object):
+class BatchedSend:
     """ Batch messages in batches on a stream
 
     This takes an IOStream and an interval (in ms) and ensures that we send no
@@ -22,8 +22,8 @@ class BatchedSend(object):
     Batching several messages at once helps performance when sending
     a myriad of tiny messages.
 
-    Example
-    -------
+    Examples
+    --------
     >>> stream = yield connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)

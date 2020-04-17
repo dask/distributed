@@ -31,7 +31,7 @@ import sys
 import threading
 from time import sleep
 
-import toolz
+import tlz as toolz
 
 from .metrics import time
 from .utils import format_time, color_of, parse_timedelta
@@ -79,8 +79,8 @@ def process(frame, child, state, stop=None, omit=None):
     This recursively adds counts to the existing state dictionary and creates
     new entries for new functions.
 
-    Example
-    -------
+    Examples
+    --------
     >>> import sys, threading
     >>> ident = threading.get_ident()  # replace with your thread of interest
     >>> frame = sys._current_frames()[ident]
@@ -383,7 +383,7 @@ def plot_figure(data, **kwargs):
 
     source = ColumnDataSource(data=data)
 
-    fig = figure(tools="tap", **kwargs)
+    fig = figure(tools="tap,box_zoom,xwheel_zoom,reset", **kwargs)
     r = fig.quad(
         "left",
         "right",

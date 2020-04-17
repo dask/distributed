@@ -4,7 +4,7 @@ import pickle
 import msgpack
 import numpy as np
 import pytest
-from toolz import identity
+from tlz import identity
 
 from distributed import wait
 from distributed.protocol import (
@@ -21,12 +21,13 @@ from distributed.protocol import (
     register_serialization_family,
     dask_serialize,
 )
+from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
 from distributed.utils_test import inc, gen_test
 from distributed.comm.utils import to_frames, from_frames
 
 
-class MyObj(object):
+class MyObj:
     def __init__(self, data):
         self.data = data
 
@@ -151,7 +152,7 @@ def test_inter_worker_comms(c, s, a, b):
     assert o2.data == 123
 
 
-class Empty(object):
+class Empty:
     def __getstate__(self):
         raise Exception("Not picklable")
 
@@ -213,7 +214,7 @@ def test_malicious_exception():
         def __setstate__(self):
             return Exception("Sneaky deserialization code")
 
-    class MyClass(object):
+    class MyClass:
         def __getstate__(self):
             raise BadException()
 
@@ -258,7 +259,7 @@ def test_err_on_bad_deserializer():
         yield from_frames(frames, deserializers=["msgpack"])
 
 
-class MyObject(object):
+class MyObject:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
@@ -348,7 +349,7 @@ def test_context_specific_serialization_class(c, s, a, b):
 
 
 def test_serialize_raises():
-    class Foo(object):
+    class Foo:
         pass
 
     @dask_serialize.register(Foo)
@@ -359,3 +360,71 @@ def test_serialize_raises():
         deserialize(*serialize(Foo()))
 
     assert "Hello-123" in str(info.value)
+
+
+@pytest.mark.asyncio
+async def test_profile_nested_sizeof():
+    # https://github.com/dask/distributed/issues/1674
+    n = 500
+    original = outer = {}
+    inner = {}
+
+    for i in range(n):
+        outer["children"] = inner
+        outer, inner = inner, {}
+
+    msg = {"data": original}
+    frames = await to_frames(msg)
+
+
+def test_compression_numpy_list():
+    class MyObj:
+        pass
+
+    @dask_serialize.register(MyObj)
+    def _(x):
+        header = {"compression": [False]}
+        frames = [b""]
+        return header, frames
+
+    header, frames = serialize([MyObj(), MyObj()])
+    assert header["compression"] == [False, False]
+
+
+@pytest.mark.parametrize(
+    "data,is_serializable",
+    [
+        ([], False),
+        ({}, False),
+        ({i: i for i in range(10)}, False),
+        (set(range(10)), False),
+        (tuple(range(100)), False),
+        ({"x": MyObj(5)}, True),
+        ({"x": {"y": MyObj(5)}}, True),
+        pytest.param(
+            [1, MyObj(5)],
+            True,
+            marks=pytest.mark.xfail(reason="Only checks 0th element for now."),
+        ),
+        ([MyObj([0, 1, 2]), 1], True),
+        (tuple([MyObj(None)]), True),
+        ({("x", i): MyObj(5) for i in range(100)}, True),
+    ],
+)
+def test_check_dask_serializable(data, is_serializable):
+    result = check_dask_serializable(data)
+    expected = is_serializable
+
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "serializers",
+    [["msgpack"], ["pickle"], ["msgpack", "pickle"], ["pickle", "msgpack"]],
+)
+def test_serialize_lists(serializers):
+    data_in = ["a", 2, "c", None, "e", 6]
+    header, frames = serialize(data_in, serializers=serializers)
+    data_out = deserialize(header, frames)
+
+    assert data_in == data_out

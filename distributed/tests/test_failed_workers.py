@@ -1,10 +1,9 @@
-from concurrent.futures import CancelledError
 import os
 import random
 from time import sleep
 
 import pytest
-from toolz import partition_all, first
+from tlz import partition_all, first
 from tornado import gen
 
 from dask import delayed
@@ -12,7 +11,7 @@ from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
 from distributed.client import wait
 from distributed.metrics import time
-from distributed.utils import sync, ignoring
+from distributed.utils import sync, ignoring, CancelledError
 from distributed.utils_test import (
     gen_cluster,
     cluster,
@@ -26,7 +25,7 @@ from distributed.utils_test import loop  # noqa: F401
 
 
 def test_submit_after_failed_worker_sync(loop):
-    with cluster(active_rpc_timeout=10) as (s, [a, b]):
+    with cluster(active_rpc_timeout=10, disconnect_timeout=10) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -64,7 +63,7 @@ def test_submit_after_failed_worker(c, s, a, b):
 
 
 def test_gather_after_failed_worker(loop):
-    with cluster(active_rpc_timeout=10) as (s, [a, b]):
+    with cluster(active_rpc_timeout=10, disconnect_timeout=10) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -415,8 +414,9 @@ def test_restart_timeout_on_long_running_task(c, s, a):
     assert "timeout" not in text.lower()
 
 
-@gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "100ms"})
+@gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
 def test_worker_time_to_live(c, s, a, b):
+    assert set(s.workers) == {a.address, b.address}
     a.periodic_callbacks["heartbeat"].stop()
     yield gen.sleep(0.010)
     assert set(s.workers) == {a.address, b.address}
@@ -424,13 +424,6 @@ def test_worker_time_to_live(c, s, a, b):
     start = time()
     while set(s.workers) == {a.address, b.address}:
         yield gen.sleep(0.050)
-        assert time() < start + 1
+        assert time() < start + 2
 
     set(s.workers) == {b.address}
-
-    start = time()
-    while b.status == "running":
-        yield gen.sleep(0.050)
-        assert time() < start + 1
-
-    assert b.status in ("closed", "closing")

@@ -3,7 +3,7 @@ from collections import defaultdict, deque, OrderedDict
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
-from inspect import isawaitable
+import inspect
 import itertools
 import json
 import logging
@@ -19,16 +19,24 @@ import weakref
 import psutil
 import sortedcontainers
 
-try:
-    from cytoolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-except ImportError:
-    from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
-from toolz import valmap, second, compose, groupby
-from tornado import gen
+from tlz import (
+    frequencies,
+    merge,
+    pluck,
+    merge_sorted,
+    first,
+    merge_with,
+    valmap,
+    second,
+    compose,
+    groupby,
+    concat,
+)
 from tornado.ioloop import IOLoop
 
 import dask
 
+from . import profile
 from .batched import BatchedSend
 from .comm import (
     normalize_address,
@@ -39,10 +47,11 @@ from .comm import (
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from . import profile
+
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from .preloading import preload_modules
+from . import preloading
 from .proctitle import setproctitle
 from .security import Security
 from .utils import (
@@ -60,12 +69,17 @@ from .utils import (
     key_split_group,
     empty_context,
     tmpfile,
+    format_bytes,
+    format_time,
+    TimeoutError,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
+from . import versions as version_module
 
 from .publish import PublishExtension
 from .queues import QueueExtension
+from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
@@ -86,15 +100,13 @@ DEFAULT_EXTENSIONS = [
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
+    SemaphoreExtension,
 ]
-
-if dask.config.get("distributed.scheduler.work-stealing"):
-    DEFAULT_EXTENSIONS.append(WorkStealing)
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
-class ClientState(object):
+class ClientState:
     """
     A simple object holding information about a client.
 
@@ -115,12 +127,13 @@ class ClientState(object):
 
     """
 
-    __slots__ = ("client_key", "wants_what", "last_seen")
+    __slots__ = ("client_key", "wants_what", "last_seen", "versions")
 
-    def __init__(self, client):
+    def __init__(self, client, versions=None):
         self.client_key = client
         self.wants_what = set()
         self.last_seen = time()
+        self.versions = versions or {}
 
     def __repr__(self):
         return "<Client %r>" % (self.client_key,)
@@ -129,7 +142,7 @@ class ClientState(object):
         return self.client_key
 
 
-class WorkerState(object):
+class WorkerState:
     """
     A simple object holding information about a worker.
 
@@ -232,6 +245,7 @@ class WorkerState(object):
         "status",
         "time_delay",
         "used_resources",
+        "versions",
     )
 
     def __init__(
@@ -243,6 +257,7 @@ class WorkerState(object):
         memory_limit=0,
         local_directory=None,
         services=None,
+        versions=None,
         nanny=None,
         extra=None,
     ):
@@ -253,6 +268,7 @@ class WorkerState(object):
         self.memory_limit = memory_limit
         self.local_directory = local_directory
         self.services = services or {}
+        self.versions = versions or {}
         self.nanny = nanny
 
         self.status = "running"
@@ -270,6 +286,12 @@ class WorkerState(object):
         self.used_resources = {}
 
         self.extra = extra or {}
+
+    def __hash__(self):
+        return hash(self.address)
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.address == other.address
 
     @property
     def host(self):
@@ -322,7 +344,7 @@ class WorkerState(object):
         return self.nthreads
 
 
-class TaskState(object):
+class TaskState:
     """
     A simple object holding information about a task.
 
@@ -681,7 +703,7 @@ class TaskState(object):
                 pdb.set_trace()
 
 
-class TaskGroup(object):
+class TaskGroup:
     """ Collection tracking all tasks within a group
 
     Keys often have a structure like ``("x-123", 0)``
@@ -752,7 +774,7 @@ class TaskGroup(object):
         return sum(self.states.values())
 
 
-class TaskPrefix(object):
+class TaskPrefix:
     """ Collection tracking all tasks within a group
 
     Keys often have a structure like ``("x-123", 0)``
@@ -772,6 +794,11 @@ class TaskPrefix(object):
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: suspicious: int
+
+       Numbers of times a task was marked as suspicious with this prefix
+
+
     See Also
     --------
     TaskGroup
@@ -788,6 +815,7 @@ class TaskPrefix(object):
             )
         else:
             self.duration_average = None
+        self.suspicious = 0
 
     @property
     def states(self):
@@ -833,7 +861,7 @@ class TaskPrefix(object):
 
     @property
     def types(self):
-        return set.union(*[tg.types for tg in self.groups])
+        return set().union(*[tg.types for tg in self.groups])
 
 
 class _StateLegacyMapping(Mapping):
@@ -1034,8 +1062,11 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
+        dashboard=None,
+        http_prefix="/",
         preload=None,
         preload_argv=(),
+        plugins=(),
         **kwargs
     ):
         self._setup_logging(logger)
@@ -1079,21 +1110,36 @@ class Scheduler(ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preload = preload
         self.preload_argv = preload_argv
+        self._preload_modules = preloading.on_creation(self.preload)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
-        self.listen_args = self.security.get_listen_args("scheduler")
 
-        if dashboard_address is not None:
+        self._start_address = addresses_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+            default_port=self.default_port,
+        )
+
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.scheduler.http.routes"),
+            prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address, default_port=8787)
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard.scheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehScheduler,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.scheduler.connect(
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         # Communication state
@@ -1205,7 +1251,7 @@ class Scheduler(ServerNode):
         ]
 
         self.extensions = {}
-        self.plugins = []
+        self.plugins = list(plugins)
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -1256,6 +1302,7 @@ class Scheduler(ServerNode):
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "performance_report": self.performance_report,
+            "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
             "nbytes": self.get_nbytes,
@@ -1299,15 +1346,6 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        self._start_address = addresses_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-            default_port=self.default_port,
-        )
-
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1327,7 +1365,9 @@ class Scheduler(ServerNode):
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
-            extensions = DEFAULT_EXTENSIONS
+            extensions = list(DEFAULT_EXTENSIONS)
+            if dask.config.get("distributed.scheduler.work-stealing"):
+                extensions.append(WorkStealing)
         for ext in extensions:
             ext(self)
 
@@ -1387,6 +1427,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
@@ -1397,7 +1440,7 @@ class Scheduler(ServerNode):
 
         if self.status != "running":
             for addr in self._start_address:
-                await self.listen(addr, listen_args=self.listen_args)
+                await self.listen(addr, **self.security.get_listen_args("scheduler"))
                 self.ip = get_address_host(self.listen_address)
                 listen_ip = self.ip
 
@@ -1430,7 +1473,9 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
+        await preloading.on_start(self._preload_modules, self, argv=self.preload_argv)
+
+        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
         self.start_periodic_callbacks()
 
@@ -1452,6 +1497,8 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
+        await preloading.on_teardown(self._preload_modules, self)
+
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
@@ -1462,11 +1509,14 @@ class Scheduler(ServerNode):
                 else:
                     break
 
+        await asyncio.gather(*[plugin.close() for plugin in self.plugins])
+
         for pc in self.periodic_callbacks.values():
             pc.stop()
         self.periodic_callbacks.clear()
 
         self.stop_services()
+
         for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
@@ -1533,33 +1583,30 @@ class Scheduler(ServerNode):
         host = get_address_host(address)
         local_now = time()
         now = now or time()
-        metrics = metrics or {}
+        assert metrics
         host_info = host_info or {}
 
         self.host_info[host]["last-seen"] = local_now
         frac = 1 / len(self.workers)
-        try:
-            self.bandwidth = (
-                self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
-            )
-            for other, (bw, count) in metrics["bandwidth"]["workers"].items():
-                if (address, other) not in self.bandwidth_workers:
-                    self.bandwidth_workers[address, other] = bw / count
-                else:
-                    alpha = (1 - frac) ** count
-                    self.bandwidth_workers[address, other] = self.bandwidth_workers[
-                        address, other
-                    ] * alpha + bw * (1 - alpha)
-            for typ, (bw, count) in metrics["bandwidth"]["types"].items():
-                if typ not in self.bandwidth_types:
-                    self.bandwidth_types[typ] = bw / count
-                else:
-                    alpha = (1 - frac) ** count
-                    self.bandwidth_types[typ] = self.bandwidth_types[
-                        typ
-                    ] * alpha + bw * (1 - alpha)
-        except KeyError:
-            pass
+        self.bandwidth = (
+            self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
+        )
+        for other, (bw, count) in metrics["bandwidth"]["workers"].items():
+            if (address, other) not in self.bandwidth_workers:
+                self.bandwidth_workers[address, other] = bw / count
+            else:
+                alpha = (1 - frac) ** count
+                self.bandwidth_workers[address, other] = self.bandwidth_workers[
+                    address, other
+                ] * alpha + bw * (1 - alpha)
+        for typ, (bw, count) in metrics["bandwidth"]["types"].items():
+            if typ not in self.bandwidth_types:
+                self.bandwidth_types[typ] = bw / count
+            else:
+                alpha = (1 - frac) ** count
+                self.bandwidth_types[typ] = self.bandwidth_types[typ] * alpha + bw * (
+                    1 - alpha
+                )
 
         ws = self.workers[address]
 
@@ -1603,6 +1650,7 @@ class Scheduler(ServerNode):
         pid=0,
         services=None,
         local_directory=None,
+        versions=None,
         nanny=None,
         extra=None,
     ):
@@ -1616,18 +1664,6 @@ class Scheduler(ServerNode):
             if ws is not None:
                 raise ValueError("Worker already exists %s" % ws)
 
-            self.workers[address] = ws = WorkerState(
-                address=address,
-                pid=pid,
-                nthreads=nthreads,
-                memory_limit=memory_limit,
-                name=name,
-                local_directory=local_directory,
-                services=services,
-                nanny=nanny,
-                extra=extra,
-            )
-
             if name in self.aliases:
                 msg = {
                     "status": "error",
@@ -1637,6 +1673,19 @@ class Scheduler(ServerNode):
                 if comm:
                     await comm.write(msg)
                 return
+
+            self.workers[address] = ws = WorkerState(
+                address=address,
+                pid=pid,
+                nthreads=nthreads,
+                memory_limit=memory_limit,
+                name=name,
+                local_directory=local_directory,
+                services=services,
+                versions=versions,
+                nanny=nanny,
+                extra=extra,
+            )
 
             if "addresses" not in self.host_info[host]:
                 self.host_info[host].update({"addresses": set(), "nthreads": 0})
@@ -1699,15 +1748,27 @@ class Scheduler(ServerNode):
             self.log_event("all", {"action": "add-worker", "worker": address})
             logger.info("Register worker %s", ws)
 
+            msg = {
+                "status": "OK",
+                "time": time(),
+                "heartbeat-interval": heartbeat_interval(len(self.workers)),
+                "worker-plugins": self.worker_plugins,
+            }
+
+            version_warning = version_module.error_message(
+                version_module.get_versions(),
+                merge(
+                    {w: ws.versions for w, ws in self.workers.items()},
+                    {c: cs.versions for c, cs in self.clients.items() if cs.versions},
+                ),
+                versions,
+                client_name="This Worker",
+            )
+            if version_warning:
+                msg["warning"] = version_warning
+
             if comm:
-                await comm.write(
-                    {
-                        "status": "OK",
-                        "time": time(),
-                        "heartbeat-interval": heartbeat_interval(len(self.workers)),
-                        "worker-plugins": self.worker_plugins,
-                    }
-                )
+                await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
 
     def update_graph(
@@ -1956,20 +2017,21 @@ class Scheduler(ServerNode):
         """ Create a new task, and associated states """
         ts = TaskState(key, spec)
         ts._state = state
-        try:
-            tg = self.task_groups[ts.group_key]
-        except KeyError:
-            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
-        tg.add(ts)
         prefix_key = key_split(key)
         try:
             tp = self.task_prefixes[prefix_key]
         except KeyError:
-            tp = TaskPrefix(prefix_key)
-            tp.groups.append(tg)
-            self.task_prefixes[prefix_key] = tp
+            tp = self.task_prefixes[prefix_key] = TaskPrefix(prefix_key)
         ts.prefix = tp
-        tg.prefix = tp
+
+        group_key = ts.group_key
+        try:
+            tg = self.task_groups[group_key]
+        except KeyError:
+            tg = self.task_groups[group_key] = TaskGroup(group_key)
+            tg.prefix = tp
+            tp.groups.append(tg)
+        tg.add(ts)
         self.tasks[key] = ts
         return ts
 
@@ -2102,10 +2164,12 @@ class Scheduler(ServerNode):
         with log_errors():
             if self.status == "closed":
                 return
+
+            address = self.coerce_address(address)
+
             if address not in self.workers:
                 return "already-removed"
 
-            address = self.coerce_address(address)
             host = get_address_host(address)
 
             ws = self.workers[address]
@@ -2148,6 +2212,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts.suspicious += 1
+                    ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
@@ -2408,13 +2473,10 @@ class Scheduler(ServerNode):
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
+        comms = set()
         if client is not None:
             try:
-                comm = self.client_comms[client]
-                comm.send(msg)
-            except CommClosedError:
-                if self.status == "running":
-                    logger.critical("Tried writing to closed comm: %s", msg)
+                comms.add(self.client_comms[client])
             except KeyError:
                 pass
 
@@ -2422,14 +2484,14 @@ class Scheduler(ServerNode):
             ts = self.tasks.get(msg["key"])
         if ts is None:
             # Notify all clients
-            comms = self.client_comms.values()
+            comms |= set(self.client_comms.values())
         else:
             # Notify clients interested in key
-            comms = [
+            comms |= {
                 self.client_comms[c.client_key]
                 for c in ts.who_wants
                 if c.client_key in self.client_comms
-            ]
+            }
         for c in comms:
             try:
                 c.send(msg)
@@ -2438,7 +2500,7 @@ class Scheduler(ServerNode):
                 if self.status == "running":
                     logger.critical("Tried writing to closed comm: %s", msg)
 
-    async def add_client(self, comm, client=None):
+    async def add_client(self, comm, client=None, versions=None):
         """ Add client to network
 
         We listen to all future messages from this Comm.
@@ -2447,12 +2509,27 @@ class Scheduler(ServerNode):
         comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
-        self.clients[client] = ClientState(client)
+        self.clients[client] = ClientState(client, versions=versions)
+
+        for plugin in self.plugins[:]:
+            try:
+                plugin.add_client(scheduler=self, client=client)
+            except Exception as e:
+                logger.exception(e)
+
         try:
             bcomm = BatchedSend(interval="2ms", loop=self.loop)
             bcomm.start(comm)
             self.client_comms[client] = bcomm
-            bcomm.send({"op": "stream-start"})
+            msg = {"op": "stream-start"}
+            version_warning = version_module.error_message(
+                version_module.get_versions(),
+                {w: ws.versions for w, ws in self.workers.items()},
+                versions,
+            )
+            if version_warning:
+                msg["warning"] = version_warning
+            bcomm.send(msg)
 
             try:
                 await self.handle_stream(comm=comm, extra={"client": client})
@@ -2486,6 +2563,12 @@ class Scheduler(ServerNode):
                 keys=[ts.key for ts in cs.wants_what], client=cs.client_key
             )
             del self.clients[client]
+
+            for plugin in self.plugins[:]:
+                try:
+                    plugin.remove_client(scheduler=self, client=client)
+                except Exception as e:
+                    logger.exception(e)
 
         def remove_client_from_events():
             # If the client isn't registered anymore after the delay, remove from events
@@ -2557,7 +2640,7 @@ class Scheduler(ServerNode):
         if ts is None:
             return
         ws = self.workers[worker]
-        if ts.processing_on is not ws:
+        if ts.processing_on != ws:
             return
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
         self.transitions(r)
@@ -2700,7 +2783,7 @@ class Scheduler(ServerNode):
         while not self.workers:
             await asyncio.sleep(0.2)
             if time() > start + timeout:
-                raise gen.TimeoutError("No workers found")
+                raise TimeoutError("No workers found")
 
         if workers is None:
             nthreads = {w: ws.nthreads for w, ws in self.workers.items()}
@@ -2830,25 +2913,26 @@ class Scheduler(ServerNode):
                 if nanny_address is not None
             ]
 
-            try:
-                resps = All(
-                    [
-                        nanny.restart(
-                            close=True, timeout=timeout * 0.8, executor_wait=False
-                        )
-                        for nanny in nannies
-                    ]
-                )
-                resps = await gen.with_timeout(timedelta(seconds=timeout), resps)
-                if not all(resp == "OK" for resp in resps):
-                    logger.error(
-                        "Not all workers responded positively: %s", resps, exc_info=True
+            resps = All(
+                [
+                    nanny.restart(
+                        close=True, timeout=timeout * 0.8, executor_wait=False
                     )
-            except gen.TimeoutError:
+                    for nanny in nannies
+                ]
+            )
+            try:
+                resps = await asyncio.wait_for(resps, timeout)
+            except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
                 )
+            else:
+                if not all(resp == "OK" for resp in resps):
+                    logger.error(
+                        "Not all workers responded positively: %s", resps, exc_info=True
+                    )
             finally:
                 await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
@@ -2907,6 +2991,28 @@ class Scheduler(ServerNode):
             comm=comm, msg=msg, workers=[worker], serializers=serializers
         )
         return d[worker]
+
+    async def _delete_worker_data(self, worker_address, keys):
+        """ Delete data from a worker and update the corresponding worker/task states
+
+        Parameters
+        ----------
+        worker_address: str
+            Worker address to delete keys from
+        keys: List[str]
+            List of keys to delete on the specified worker
+        """
+        await retry_operation(
+            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+        )
+
+        ws = self.workers[worker_address]
+        tasks = {self.tasks[key] for key in keys}
+        ws.has_what -= tasks
+        for ts in tasks:
+            ts.who_has.remove(ws)
+            ws.nbytes -= ts.get_nbytes()
+        self.log_event(ws.address, {"action": "remove-worker-data", "keys": keys})
 
     async def rebalance(self, comm=None, keys=None, workers=None):
         """ Rebalance keys so that each worker stores roughly equal bytes
@@ -3011,7 +3117,7 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                        "keys": tuple(concat(r["keys"].keys() for r in result)),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -3024,18 +3130,8 @@ class Scheduler(ServerNode):
                     )
 
                 await asyncio.gather(
-                    *(
-                        retry_operation(
-                            self.rpc(addr=r).delete_data, keys=v, report=False
-                        )
-                        for r, v in to_senders.items()
-                    )
+                    *(self._delete_worker_data(r, v) for r, v in to_senders.items())
                 )
-
-                for sender, recipient, ts in msgs:
-                    ts.who_has.remove(sender)
-                    sender.has_what.remove(ts)
-                    sender.nbytes -= ts.get_nbytes()
 
                 return {"status": "OK"}
 
@@ -3098,27 +3194,10 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        retry_operation(
-                            self.rpc(addr=ws.address).delete_data,
-                            keys=[ts.key for ts in tasks],
-                            report=False,
-                        )
+                        self._delete_worker_data(ws.address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
                     )
                 )
-
-                for ws, tasks in del_worker_tasks.items():
-                    ws.has_what -= tasks
-                    for ts in tasks:
-                        ts.who_has.remove(ws)
-                        ws.nbytes -= ts.get_nbytes()
-                    self.log_event(
-                        ws.address,
-                        {
-                            "action": "replicate-remove",
-                            "keys": [ts.key for ts in tasks],
-                        },
-                    )
 
             # Copy not-yet-filled data
             while tasks:
@@ -3518,7 +3597,7 @@ class Scheduler(ServerNode):
             if teardown:
                 teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
-            if isawaitable(state):
+            if inspect.isawaitable(state):
                 state = await state
             try:
                 while self.status == "running":
@@ -3637,7 +3716,7 @@ class Scheduler(ServerNode):
         """
         return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
-    def get_task_duration(self, ts, default=0.5):
+    def get_task_duration(self, ts, default=None):
         """
         Get the estimated computation cost of the given task
         (not including any communication cost).
@@ -3645,6 +3724,10 @@ class Scheduler(ServerNode):
         duration = ts.prefix.duration_average
         if duration is None:
             self.unknown_durations[ts.prefix.name].add(ts)
+            if default is None:
+                default = parse_timedelta(
+                    dask.config.get("distributed.scheduler.unknown-task-duration")
+                )
             return default
 
         return duration
@@ -4020,7 +4103,7 @@ class Scheduler(ServerNode):
             if ws is None:
                 return {key: "released"}
 
-            if ws is not ts.processing_on:  # someone else has this task
+            if ws != ts.processing_on:  # someone else has this task
                 logger.info(
                     "Unexpected worker completed task, likely due to"
                     " work stealing.  Expected: %s, Got: %s, Key: %s",
@@ -4603,6 +4686,13 @@ class Scheduler(ServerNode):
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
+            if ts.state == "forgotten" and ts.group.name in self.task_groups:
+                # Remove TaskGroup if all tasks are in the forgotten state
+                tg = ts.group
+                if not any(tg.states.get(s) for s in ALL_TASK_STATES):
+                    ts.prefix.groups.remove(tg)
+                    del self.task_groups[tg.name]
+
             return recommendations
         except Exception as e:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
@@ -4935,7 +5025,8 @@ class Scheduler(ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None):
+    async def performance_report(self, comm=None, start=None, code=""):
+        stop = time()
         # Profiles
         compute, scheduler, workers = await asyncio.gather(
             *[
@@ -4974,8 +5065,39 @@ class Scheduler(ServerNode):
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
 
-        from bokeh.models import Panel, Tabs
+        from bokeh.models import Panel, Tabs, Div
 
+        # HTML
+        html = """
+        <h1> Dask Performance Report </h1>
+
+        <i> Select different tabs on the top for additional information </i>
+
+        <h2> Duration: {time} </h2>
+
+        <h2> Scheduler Information </h2>
+        <ul>
+          <li> Address: {address} </li>
+          <li> Workers: {nworkers} </li>
+          <li> Threads: {threads} </li>
+          <li> Memory: {memory} </li>
+        </ul>
+
+        <h2> Calling Code </h2>
+        <pre>
+{code}
+        </pre>
+        """.format(
+            time=format_time(stop - start),
+            address=self.address,
+            nworkers=len(self.workers),
+            threads=sum(w.nthreads for w in self.workers.values()),
+            memory=format_bytes(sum(w.memory_limit for w in self.workers.values())),
+            code=code,
+        )
+        html = Div(text=html)
+
+        html = Panel(child=html, title="Summary")
         compute = Panel(child=compute, title="Worker Profile (compute)")
         workers = Panel(child=workers, title="Worker Profile (administrative)")
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
@@ -4987,6 +5109,7 @@ class Scheduler(ServerNode):
 
         tabs = Tabs(
             tabs=[
+                html,
                 task_stream,
                 compute,
                 workers,
@@ -5112,9 +5235,13 @@ class Scheduler(ServerNode):
             close = time() > last_task + self.idle_timeout
 
         if close:
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration=None):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -5130,6 +5257,8 @@ class Scheduler(ServerNode):
         --------
         distributed.deploy.Adaptive
         """
+        if target_duration is None:
+            target_duration = dask.config.get("distributed.adaptive.target-duration")
         target_duration = parse_timedelta(target_duration)
 
         # CPU

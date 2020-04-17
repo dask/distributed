@@ -12,7 +12,7 @@ except ImportError:  # Python 2.7 fix
 
 from threading import Thread
 
-from toolz import merge
+from tlz import merge
 
 from tornado import gen
 
@@ -209,7 +209,7 @@ def async_ssh(cmd_dict):
 
 
 def start_scheduler(
-    logdir, addr, port, ssh_username, ssh_port, ssh_private_key, remote_python=None
+    logdir, addr, port, ssh_username, ssh_port, ssh_private_key, remote_python=None,
 ):
     cmd = "{python} -m distributed.cli.dask_scheduler --port {port}".format(
         python=remote_python or sys.executable, port=port, logdir=logdir
@@ -270,6 +270,7 @@ def start_worker(
     nanny_port,
     remote_python=None,
     remote_dask_worker="distributed.cli.dask_worker",
+    local_directory=None,
 ):
 
     cmd = (
@@ -303,6 +304,11 @@ def start_worker(
         nanny_port=nanny_port,
     )
 
+    if local_directory is not None:
+        cmd += " --local-directory {local_directory}".format(
+            local_directory=local_directory
+        )
+
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
         cmd = "mkdir -p {logdir} && ".format(logdir=logdir) + cmd
@@ -335,7 +341,7 @@ def start_worker(
     return merge(cmd_dict, {"thread": thread})
 
 
-class SSHCluster(object):
+class SSHCluster:
     def __init__(
         self,
         scheduler_addr,
@@ -353,6 +359,7 @@ class SSHCluster(object):
         worker_port=None,
         nanny_port=None,
         remote_dask_worker="distributed.cli.dask_worker",
+        local_directory=None,
     ):
 
         self.scheduler_addr = scheduler_addr
@@ -372,6 +379,7 @@ class SSHCluster(object):
         self.worker_port = worker_port
         self.nanny_port = nanny_port
         self.remote_dask_worker = remote_dask_worker
+        self.local_directory = local_directory
 
         # Generate a universal timestamp to use for log files
         import datetime
@@ -455,6 +463,7 @@ class SSHCluster(object):
                 self.nanny_port,
                 self.remote_python,
                 self.remote_dask_worker,
+                self.local_directory,
             )
         )
 

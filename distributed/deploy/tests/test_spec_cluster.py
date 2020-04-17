@@ -4,11 +4,12 @@ from time import sleep
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
+from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import close_clusters, ProcessInterface, run_spec
 from distributed.metrics import time
 from distributed.utils_test import loop, cleanup  # noqa: F401
 from distributed.utils import is_valid_xml
-import toolz
+import tlz as toolz
 import pytest
 
 
@@ -84,9 +85,10 @@ def test_spec_sync(loop):
 
 
 def test_loop_started():
-    cluster = SpecCluster(
+    with SpecCluster(
         worker_spec, scheduler={"cls": Scheduler, "options": {"port": 0}}
-    )
+    ) as cluster:
+        pass
 
 
 @pytest.mark.asyncio
@@ -212,6 +214,7 @@ async def test_restart(cleanup):
                 assert len(cluster.workers) == 2
 
 
+@pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
 @pytest.mark.asyncio
 async def test_broken_worker():
     with pytest.raises(Exception) as info:
@@ -225,6 +228,7 @@ async def test_broken_worker():
     assert "Broken" in str(info.value)
 
 
+@pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
 @pytest.mark.slow
 def test_spec_close_clusters(loop):
     workers = {0: {"cls": Worker}}
@@ -278,7 +282,7 @@ async def test_logs(cleanup):
         cluster.scale(2)
         await cluster
 
-        logs = await cluster.logs()
+        logs = await cluster.get_logs()
         assert is_valid_xml("<div>" + logs._repr_html_() + "</div>")
         assert "Scheduler" in logs
         for worker in cluster.scheduler.workers:
@@ -286,17 +290,17 @@ async def test_logs(cleanup):
 
         assert "Registered" in str(logs)
 
-        logs = await cluster.logs(scheduler=True, workers=False)
+        logs = await cluster.get_logs(scheduler=True, workers=False)
         assert list(logs) == ["Scheduler"]
 
-        logs = await cluster.logs(scheduler=False, workers=False)
+        logs = await cluster.get_logs(scheduler=False, workers=False)
         assert list(logs) == []
 
-        logs = await cluster.logs(scheduler=False, workers=True)
+        logs = await cluster.get_logs(scheduler=False, workers=True)
         assert set(logs) == set(cluster.scheduler.workers)
 
         w = toolz.first(cluster.scheduler.workers)
-        logs = await cluster.logs(scheduler=False, workers=[w])
+        logs = await cluster.get_logs(scheduler=False, workers=[w])
         assert set(logs) == {w}
 
 

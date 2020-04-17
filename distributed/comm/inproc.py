@@ -7,7 +7,6 @@ import threading
 import weakref
 import warnings
 
-from tornado import locks
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
@@ -25,7 +24,7 @@ ConnectionRequest = namedtuple(
 )
 
 
-class Manager(object):
+class Manager:
     """
     An object coordinating listeners and their addresses.
     """
@@ -87,7 +86,7 @@ class QueueEmpty(Exception):
     pass
 
 
-class Queue(object):
+class Queue:
     """
     A single-reader, single-writer, non-threadsafe, peekable queue.
     """
@@ -298,7 +297,7 @@ class InProcConnector(Connector):
             s2c_q=Queue(),
             c_loop=IOLoop.current(),
             c_addr=self.manager.new_address(),
-            conn_event=locks.Event(),
+            conn_event=asyncio.Event(),
         )
         listener.connect_threadsafe(conn_req)
         # Wait for connection acknowledgement

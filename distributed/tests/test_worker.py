@@ -1,25 +1,23 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 import importlib
 import logging
 from numbers import Number
 from operator import add
 import os
 import psutil
-import shutil
 import sys
 from time import sleep
 import traceback
+import asyncio
 
 import dask
 from dask import delayed
 from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
-from toolz import pluck, sliding_window, first
+from tlz import pluck, sliding_window, first
 import tornado
 from tornado import gen
-from tornado.ioloop import TimeoutError
 
 from distributed import (
     Client,
@@ -32,11 +30,11 @@ from distributed import (
     wait,
 )
 from distributed.compatibility import WINDOWS
-from distributed.core import rpc
+from distributed.core import rpc, CommClosedError
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
-from distributed.utils import tmpfile
+from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     inc,
@@ -59,12 +57,11 @@ from distributed.utils_test import (  # noqa: F401
 )
 
 
-def test_worker_nthreads():
-    w = Worker("127.0.0.1", 8019)
-    try:
-        assert w.executor._max_workers == CPU_COUNT
-    finally:
-        shutil.rmtree(w.local_directory)
+@pytest.mark.asyncio
+async def test_worker_nthreads(cleanup):
+    async with Scheduler() as s:
+        async with Worker(s.address) as w:
+            assert w.executor._max_workers == CPU_COUNT
 
 
 @gen_cluster()
@@ -76,18 +73,20 @@ def test_str(s, a, b):
     assert str(len(a.executing)) in repr(a)
 
 
-def test_identity():
-    w = Worker("127.0.0.1", 8019)
-    ident = w.identity(None)
-    assert "Worker" in ident["type"]
-    assert ident["scheduler"] == "tcp://127.0.0.1:8019"
-    assert isinstance(ident["nthreads"], int)
-    assert isinstance(ident["memory_limit"], Number)
+@pytest.mark.asyncio
+async def test_identity(cleanup):
+    async with Scheduler() as s:
+        async with Worker(s.address) as w:
+            ident = w.identity(None)
+            assert "Worker" in ident["type"]
+            assert ident["scheduler"] == s.address
+            assert isinstance(ident["nthreads"], int)
+            assert isinstance(ident["memory_limit"], Number)
 
 
 @gen_cluster(client=True)
 def test_worker_bad_args(c, s, a, b):
-    class NoReprObj(object):
+    class NoReprObj:
         """ This object cannot be properly represented as a string. """
 
         def __str__(self):
@@ -321,20 +320,17 @@ def test_worker_with_port_zero():
 
 
 @pytest.mark.slow
-def test_worker_waits_for_scheduler(loop):
-    @gen.coroutine
-    def f():
-        w = Worker("127.0.0.1", 8007)
-        try:
-            yield gen.with_timeout(timedelta(seconds=3), w)
-        except TimeoutError:
-            pass
-        else:
-            assert False
-        assert w.status not in ("closed", "running")
-        yield w.close(timeout=0.1)
-
-    loop.run_sync(f)
+@pytest.mark.asyncio
+async def test_worker_waits_for_scheduler(cleanup):
+    w = Worker("127.0.0.1:8724")
+    try:
+        await asyncio.wait_for(w, 3)
+    except TimeoutError:
+        pass
+    else:
+        assert False
+    assert w.status not in ("closed", "running")
+    await w.close(timeout=0.1)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -371,6 +367,32 @@ def test_error_message():
         cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
         assert len(cut_text) == max_error_len
         assert len(msg["text"]) > 10100  # default + 100
+
+
+@gen_cluster(client=True)
+def test_chained_error_message(c, s, a, b):
+    def chained_exception_fn():
+        class MyException(Exception):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __str__(self):
+                return "MyException(%s)" % self.msg
+
+        exception = MyException("Foo")
+        inner_exception = MyException("Bar")
+
+        try:
+            raise inner_exception
+        except Exception as e:
+            raise exception from e
+
+    f = c.submit(chained_exception_fn)
+    try:
+        yield f
+    except Exception as e:
+        assert e.__cause__ is not None
+        assert "Bar" in str(e.__cause__)
 
 
 @gen_cluster()
@@ -507,19 +529,21 @@ def test_close_on_disconnect(s, w):
         assert time() < start + 5
 
 
-def test_memory_limit_auto():
-    a = Worker("127.0.0.1", 8099, nthreads=1)
-    b = Worker("127.0.0.1", 8099, nthreads=2)
-    c = Worker("127.0.0.1", 8099, nthreads=100)
-    d = Worker("127.0.0.1", 8099, nthreads=200)
+@pytest.mark.asyncio
+async def test_memory_limit_auto():
+    async with Scheduler() as s:
+        async with Worker(s.address, nthreads=1) as a, Worker(
+            s.address, nthreads=2
+        ) as b, Worker(s.address, nthreads=100) as c, Worker(
+            s.address, nthreads=200
+        ) as d:
+            assert isinstance(a.memory_limit, Number)
+            assert isinstance(b.memory_limit, Number)
 
-    assert isinstance(a.memory_limit, Number)
-    assert isinstance(b.memory_limit, Number)
+            if CPU_COUNT > 1:
+                assert a.memory_limit < b.memory_limit
 
-    if CPU_COUNT > 1:
-        assert a.memory_limit < b.memory_limit
-
-    assert c.memory_limit == d.memory_limit
+            assert c.memory_limit == d.memory_limit
 
 
 @gen_cluster(client=True)
@@ -757,13 +781,13 @@ def test_hold_onto_dependents(c, s, a, b):
 
 @pytest.mark.slow
 @gen_cluster(client=False, nthreads=[])
-def test_worker_death_timeout(s):
+async def test_worker_death_timeout(s):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
-        yield s.close()
+        await s.close()
         w = Worker(s.address, death_timeout=1)
 
-    with pytest.raises(gen.TimeoutError) as info:
-        yield w
+    with pytest.raises(TimeoutError) as info:
+        await w
 
     assert "Worker" in str(info.value)
     assert "timed out" in str(info.value) or "failed to start" in str(info.value)
@@ -834,7 +858,7 @@ def test_worker_dir(worker):
 
 @gen_cluster(client=True)
 def test_dataframe_attribute_error(c, s, a, b):
-    class BadSize(object):
+    class BadSize:
         def __init__(self, data):
             self.data = data
 
@@ -848,7 +872,7 @@ def test_dataframe_attribute_error(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_fail_write_to_disk(c, s, a, b):
-    class Bad(object):
+    class Bad:
         def __getstate__(self):
             raise TypeError()
 
@@ -877,7 +901,7 @@ def test_fail_write_many_to_disk(c, s, a):
     yield gen.sleep(0.1)
     assert not a.paused
 
-    class Bad(object):
+    class Bad:
         def __init__(self, x):
             pass
 
@@ -999,39 +1023,25 @@ def test_worker_fds(s):
 
 @gen_cluster(nthreads=[])
 async def test_service_hosts_match_worker(s):
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehWorker
-
-    async with Worker(
-        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://0.0.0.0"
-    ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+    async with Worker(s.address, host="tcp://0.0.0.0") as w:
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
     async with Worker(
-        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://127.0.0.1"
+        s.address, host="tcp://127.0.0.1", dashboard_address="0.0.0.0:0"
     ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    async with Worker(
-        s.address, services={("dashboard", 0): BokehWorker}, host="tcp://127.0.0.1"
-    ) as w:
-        sock = first(w.services["dashboard"].server._http._sockets.values())
+    async with Worker(s.address, host="tcp://127.0.0.1") as w:
+        sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] == "127.0.0.1"
 
 
 @gen_cluster(nthreads=[])
-def test_start_services(s):
-    pytest.importorskip("bokeh")
-    from distributed.dashboard import BokehWorker
-
-    services = {("dashboard", ":1234"): BokehWorker}
-
-    w = yield Worker(s.address, services=services)
-
-    assert w.services["dashboard"].server.port == 1234
-    yield w.close()
+async def test_start_services(s):
+    async with Worker(s.address, dashboard_address=1234) as w:
+        assert w.http_server.port == 1234
 
 
 @gen_test()
@@ -1095,7 +1105,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     memory = psutil.Process().memory_info().rss
     a.memory_limit = memory / 0.7 + 400e6
 
-    class BadAccounting(object):
+    class BadAccounting:
         def __init__(self, data):
             self.data = data
 
@@ -1116,6 +1126,11 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(
+    sys.version_info[:2] == (3, 8),
+    reason="Sporadic failure on Python 3.8",
+    strict=False,
+)
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1168,9 +1183,10 @@ def test_statistical_profiling_cycle(c, s, a, b):
     x = yield a.get_profile(start=time() + 10, stop=time() + 20)
     assert not x["count"]
 
-    x = yield a.get_profile(start=0, stop=time())
+    x = yield a.get_profile(start=0, stop=time() + 10)
+    recent = a.profile_recent["count"]
     actual = sum(p["count"] for _, p in a.profile_history) + a.profile_recent["count"]
-    x2 = yield a.get_profile(start=0, stop=time())
+    x2 = yield a.get_profile(start=0, stop=time() + 10)
     assert x["count"] <= actual <= x2["count"]
 
     y = yield a.get_profile(start=end - 0.300, stop=time())
@@ -1203,16 +1219,18 @@ def test_reschedule(c, s, a, b):
     assert all(f.key in b.data for f in futures)
 
 
-def test_deque_handler():
+@pytest.mark.asyncio
+async def test_deque_handler(cleanup):
     from distributed.worker import logger
 
-    w = Worker("127.0.0.1", 8019)
-    deque_handler = w._deque_handler
-    logger.info("foo456")
-    assert deque_handler.deque
-    msg = deque_handler.deque[-1]
-    assert "distributed.worker" in deque_handler.format(msg)
-    assert any(msg.msg == "foo456" for msg in deque_handler.deque)
+    async with Scheduler() as s:
+        async with Worker(s.address) as w:
+            deque_handler = w._deque_handler
+            logger.info("foo456")
+            assert deque_handler.deque
+            msg = deque_handler.deque[-1]
+            assert "distributed.worker" in deque_handler.format(msg)
+            assert any(msg.msg == "foo456" for msg in deque_handler.deque)
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -1598,3 +1616,26 @@ async def test_update_latency(cleanup):
 
             if w.digests is not None:
                 assert w.digests["latency"].size() > 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reconnect", [True, False])
+async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
+    with captured_logger("distributed.worker", level=logging.WARNING) as logger:
+        async with await Scheduler() as s:
+
+            def bad_heartbeat_worker(*args, **kwargs):
+                raise CommClosedError()
+
+            async with await Worker(s.address, reconnect=reconnect) as w:
+                # Trigger CommClosedError during worker heartbeat
+                monkeypatch.setattr(
+                    w.scheduler, "heartbeat_worker", bad_heartbeat_worker
+                )
+
+                await w.heartbeat()
+                if reconnect:
+                    assert w.status == "running"
+                else:
+                    assert w.status == "closed"
+    assert "Heartbeat to scheduler failed" in logger.getvalue()

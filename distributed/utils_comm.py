@@ -8,7 +8,7 @@ import random
 from dask.optimization import SubgraphCallable
 import dask.config
 from dask.utils import parse_timedelta
-from toolz import merge, concat, groupby, drop
+from tlz import merge, concat, groupby, drop
 
 from .core import rpc
 from .utils import All, tokey
@@ -96,7 +96,7 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     return (results, bad_keys, list(missing_workers))
 
 
-class WrappedKey(object):
+class WrappedKey:
     """ Interface for a key in a dask graph.
 
     Subclasses must have .key attribute that refers to a key in a dask graph.
@@ -312,15 +312,6 @@ def subs_multiple(o, d):
             return o
 
 
-retry_count = dask.config.get("distributed.comm.retry.count")
-retry_delay_min = parse_timedelta(
-    dask.config.get("distributed.comm.retry.delay.min"), default="s"
-)
-retry_delay_max = parse_timedelta(
-    dask.config.get("distributed.comm.retry.delay.max"), default="s"
-)
-
-
 async def retry(
     coro,
     count,
@@ -383,6 +374,14 @@ async def retry_operation(coro, *args, operation=None, **kwargs):
     """
     Retry an operation using the configuration values for the retry parameters
     """
+
+    retry_count = dask.config.get("distributed.comm.retry.count")
+    retry_delay_min = parse_timedelta(
+        dask.config.get("distributed.comm.retry.delay.min"), default="s"
+    )
+    retry_delay_max = parse_timedelta(
+        dask.config.get("distributed.comm.retry.delay.max"), default="s"
+    )
     return await retry(
         partial(coro, *args, **kwargs),
         count=retry_count,

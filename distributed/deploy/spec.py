@@ -7,7 +7,6 @@ import weakref
 
 import dask
 from tornado import gen
-from tornado.locks import Event
 
 from .adaptive import Adaptive
 from .cluster import Cluster
@@ -19,6 +18,7 @@ from ..utils import (
     parse_bytes,
     parse_timedelta,
     import_term,
+    TimeoutError,
 )
 from ..scheduler import Scheduler
 from ..security import Security
@@ -41,7 +41,7 @@ class ProcessInterface:
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
     def __await__(self):
         async def _():
@@ -91,7 +91,7 @@ class ProcessInterface:
         await self.close()
 
 
-class NoOpAwaitable(object):
+class NoOpAwaitable:
     """An awaitable object that always returns None.
 
     Useful to return from a method that can be called in both asynchronous and
@@ -268,12 +268,12 @@ class SpecCluster(Cluster):
 
         if self.scheduler_spec is None:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard  # noqa: F401
             except ImportError:
-                services = {}
+                pass
             else:
-                services = {("dashboard", 8787): BokehScheduler}
-            self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
+                options = {"dashboard": True}
+            self.scheduler_spec = {"cls": Scheduler, "options": options}
 
         cls = self.scheduler_spec["cls"]
         if isinstance(cls, str):
@@ -396,13 +396,14 @@ class SpecCluster(Cluster):
 
         await super()._close()
 
-    def __enter__(self):
-        self.sync(self._correct_state)
+    async def __aenter__(self):
+        await self
+        await self._correct_state()
         assert self.status == "running"
         return self
 
     def __exit__(self, typ, value, traceback):
-        self.close()
+        super().__exit__(typ, value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
@@ -602,6 +603,6 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring(gen.TimeoutError):
+        with ignoring((gen.TimeoutError, TimeoutError)):
             if cluster.status != "closed":
                 cluster.close(timeout=10)

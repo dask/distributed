@@ -1,14 +1,14 @@
 import atexit
-from datetime import timedelta
 import logging
 import os
 from queue import Queue as PyQueue
 import re
 import threading
 import weakref
+import asyncio
 import dask
 
-from .utils import mp_context
+from .utils import mp_context, TimeoutError
 
 from tornado import gen
 from tornado.concurrent import Future
@@ -40,13 +40,13 @@ def _call_and_set_future(loop, future, func, *args, **kwargs):
         _loop_add_callback(loop, future.set_result, res)
 
 
-class _ProcessState(object):
+class _ProcessState:
     is_alive = False
     pid = None
     exitcode = None
 
 
-class AsyncProcess(object):
+class AsyncProcess:
     """
     A coroutine-compatible multiprocessing.Process-alike.
     All normally blocking methods are wrapped in Tornado coroutines.
@@ -282,8 +282,8 @@ class AsyncProcess(object):
             yield self._exit_future
         else:
             try:
-                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-            except gen.TimeoutError:
+                yield asyncio.wait_for(self._exit_future, timeout)
+            except TimeoutError:
                 pass
 
     def close(self):

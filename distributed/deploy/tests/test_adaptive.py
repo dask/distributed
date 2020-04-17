@@ -1,3 +1,5 @@
+import gc
+import math
 from time import sleep
 
 import dask
@@ -150,6 +152,7 @@ def test_min_max():
         processes=False,
         dashboard_address=None,
         asynchronous=True,
+        threads_per_worker=1,
     )
     try:
         adapt = cluster.adapt(minimum=1, maximum=2, interval="20 ms", wait_count=10)
@@ -178,6 +181,7 @@ def test_min_max():
         assert len(adapt.log) == 2 and all(d["status"] == "up" for _, d in adapt.log)
 
         del futures
+        gc.collect()
 
         start = time()
         while len(cluster.scheduler.workers) != 1:
@@ -272,33 +276,29 @@ def test_adapt_quickly():
 
 
 @gen_test(timeout=None)
-def test_adapt_down():
+async def test_adapt_down():
     """ Ensure that redefining adapt with a lower maximum removes workers """
-    cluster = yield LocalCluster(
+    async with LocalCluster(
         0,
         asynchronous=True,
         processes=False,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
-    )
-    client = yield Client(cluster, asynchronous=True)
-    cluster.adapt(interval="20ms", maximum=5)
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            cluster.adapt(interval="20ms", maximum=5)
 
-    try:
-        futures = client.map(slowinc, range(1000), delay=0.1)
-        while len(cluster.scheduler.workers) < 5:
-            yield gen.sleep(0.1)
+            futures = client.map(slowinc, range(1000), delay=0.1)
+            while len(cluster.scheduler.workers) < 5:
+                await gen.sleep(0.1)
 
-        cluster.adapt(maximum=2)
+            cluster.adapt(maximum=2)
 
-        start = time()
-        while len(cluster.scheduler.workers) != 2:
-            yield gen.sleep(0.1)
-            assert time() < start + 1
-    finally:
-        yield client.close()
-        yield cluster.close()
+            start = time()
+            while len(cluster.scheduler.workers) != 2:
+                await gen.sleep(0.1)
+                assert time() < start + 1
 
 
 @gen_test(timeout=30)
@@ -419,3 +419,14 @@ async def test_adapt_cores_memory(cleanup):
         )
         assert adapt.minimum == 3
         assert adapt.maximum == 5
+
+
+def test_adaptive_config():
+    with dask.config.set(
+        {"distributed.adaptive.minimum": 10, "distributed.adaptive.wait-count": 8}
+    ):
+        adapt = Adaptive(interval="5s")
+        assert adapt.minimum == 10
+        assert adapt.maximum == math.inf
+        assert adapt.interval == 5
+        assert adapt.wait_count == 8

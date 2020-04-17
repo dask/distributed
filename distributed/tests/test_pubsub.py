@@ -3,7 +3,7 @@ from time import sleep
 
 import pytest
 from tornado import gen
-import toolz
+import tlz as toolz
 
 from distributed import Pub, Sub, wait, get_worker, TimeoutError
 from distributed.utils_test import gen_cluster
@@ -124,6 +124,8 @@ def test_timeouts(c, s, a, b):
         yield sub.get(timeout=0.1)
     stop = time()
     assert stop - start < 1
+    with pytest.raises(TimeoutError):
+        yield sub.get(timeout=0.01)
 
 
 @gen_cluster(client=True)

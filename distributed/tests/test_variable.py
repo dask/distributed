@@ -2,14 +2,18 @@ import asyncio
 import random
 from time import sleep
 import sys
+import logging
 
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 
-from distributed import Client, Variable, worker_client, Nanny, wait
+from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
 from distributed.metrics import time
+from distributed.compatibility import WINDOWS
 from distributed.utils_test import gen_cluster, inc, div
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import captured_logger
 
 
 @gen_cluster(client=True)
@@ -35,6 +39,17 @@ def test_variable(c, s, a, b):
     while s.tasks:
         yield gen.sleep(0.01)
         assert time() < start + 5
+
+
+@gen_cluster(client=True)
+async def test_delete_unset_variable(c, s, a, b):
+    x = Variable()
+    assert x.client is c
+    with captured_logger(logging.getLogger("distributed.utils")) as logger:
+        x.delete()
+        await c.close()
+    text = logger.getvalue()
+    assert "KeyError" not in text
 
 
 @gen_cluster(client=True)
@@ -83,20 +98,34 @@ def test_hold_futures(s, a, b):
 def test_timeout(c, s, a, b):
     v = Variable("v")
 
-    start = time()
-    with pytest.raises(gen.TimeoutError):
-        yield v.get(timeout=0.1)
-    stop = time()
-    assert 0.1 < stop - start < 2.0
+    start = IOLoop.current().time()
+    with pytest.raises(TimeoutError):
+        yield v.get(timeout=0.2)
+    stop = IOLoop.current().time()
+
+    if WINDOWS:  # timing is weird with asyncio and Windows
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
+
+    with pytest.raises(TimeoutError):
+        yield v.get(timeout=0.01)
 
 
 def test_timeout_sync(client):
     v = Variable("v")
-    start = time()
-    with pytest.raises(gen.TimeoutError):
-        v.get(timeout=0.1)
-    stop = time()
-    assert 0.1 < stop - start < 2.0
+    start = IOLoop.current().time()
+    with pytest.raises(TimeoutError):
+        v.get(timeout=0.2)
+    stop = IOLoop.current().time()
+
+    if WINDOWS:
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
+
+    with pytest.raises(TimeoutError):
+        v.get(timeout=0.01)
 
 
 @gen_cluster(client=True)
