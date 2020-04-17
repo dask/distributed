@@ -1139,7 +1139,7 @@ class Scheduler(ServerNode):
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 distributed.dashboard.scheduler.connect(
-                    self.http_application, self.http_server, self, prefix=http_prefix,
+                    self.http_application, self.http_server, self, prefix=http_prefix
                 )
 
         # Communication state
@@ -1539,7 +1539,8 @@ class Scheduler(ServerNode):
         for future in futures:  # TODO: do all at once
             await future
 
-        await asyncio.gather(*[c.close() for c in self.client_comms.values()])
+        if close_clients:
+            await asyncio.gather(*[c.close() for c in self.client_comms.values()])
 
         for comm in self.client_comms.values():
             comm.abort()
