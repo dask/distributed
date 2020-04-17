@@ -146,16 +146,22 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    # Check for "dask"-serializable data in dict/list/set
-    # Note: "msgpack" will always convert lists to tuples
-    #       (see GitHub #3716), so we need to use
-    #       "pickle" or "dask" for list objects
-    supported = (
-        isinstance(x, list) and "msgpack" in serializers
-    ) or check_dask_serializable(x)
+    if type(x) in (list, set, tuple, dict):
+        iterate_collection = False
+        if type(x) is list and "msgpack" in serializers:
+            # Note: "msgpack" will always convert lists to tuples
+            #       (see GitHub #3716), so we should iterate
+            #       through the list if "msgpack" comes before "pickle"
+            #       in the list of serializers.
+            iterate_collection = ("pickle" not in serializers) or (
+                serializers.index("pickle") > serializers.index("msgpack")
+            )
+        if not iterate_collection:
+            # Check for "dask"-serializable data in dict/list/set
+            iterate_collection = check_dask_serializable(x)
 
     # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and supported:
+    if type(x) is dict and iterate_collection:
         try:
             msgpack.dumps(list(x.keys()))
         except Exception:
@@ -165,9 +171,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     if (
         type(x) in (list, set, tuple)
-        and supported
+        and iterate_collection
         or type(x) is dict
-        and supported
+        and iterate_collection
         and dict_safe
     ):
         if isinstance(x, dict):
