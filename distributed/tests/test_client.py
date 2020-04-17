@@ -2296,7 +2296,7 @@ async def test_cancel_collection(c, s, a, b):
     start = time()
     while s.tasks:
         assert time() < start + 1
-        await time.sleep(0.01)
+        await asyncio.sleep(0.01)
 
 
 def test_cancel(c):

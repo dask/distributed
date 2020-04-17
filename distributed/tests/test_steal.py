@@ -108,10 +108,9 @@ async def test_worksteal_many_thieves(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
-    futures = c.map(inc, [1, 2], workers=a.address, allow_other_workers=True)
+    futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
     await wait(futures)
-    assert len(a.data) == 2, [len(a.data), len(b.data)]
-    assert len(b.data) == 0, [len(a.data), len(b.data)]
+    assert len(a.data) >= 95, [len(a.data), len(b.data)]
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
@@ -120,8 +119,8 @@ async def test_eventually_steal_unknown_functions(c, s, a, b):
         slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
     await wait(futures)
-    assert len(a.data) >= 3
-    assert len(b.data) >= 3
+    assert len(a.data) >= 3, [len(a.data), len(b.data)]
+    assert len(b.data) >= 3, [len(a.data), len(b.data)]
 
 
 @pytest.mark.skip(reason="")
