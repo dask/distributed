@@ -280,3 +280,24 @@ def test_schema():
         schema = yaml.safe_load(f)
 
     jsonschema.validate(config, schema)
+
+
+def test_schema_is_complete():
+    config_fn = os.path.join(os.path.dirname(__file__), "..", "distributed.yaml")
+    schema_fn = os.path.join(os.path.dirname(__file__), "..", "distributed-schema.yaml")
+
+    with open(config_fn) as f:
+        config = yaml.safe_load(f)
+
+    with open(schema_fn) as f:
+        schema = yaml.safe_load(f)
+
+    skip = {"default-task-durations", "bokeh-application"}
+
+    def test_matches(c, s):
+        assert set(c) == set(s["properties"])
+        for k, v in c.items():
+            if isinstance(v, dict) and k not in skip:
+                test_matches(c[k], s["properties"][k])
+
+    test_matches(config, schema)
