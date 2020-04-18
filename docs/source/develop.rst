@@ -27,24 +27,10 @@ On Windows:
 1. Install anaconda or miniconda
 2. ::
 
-    conda create -n dask-distributed python=3.8 tornado=6
+    conda create -n dask-distributed -c conda-forge -c defaults python=3.8 tornado=6
     conda activate dask-distributed
     conda env update --file continuous_integration/environment-windows.yml
     python -m pip install .
-
-Alternative instructions, without using conda::
-
-   git clone git@github.com:{your-fork}/distributed.git
-   cd distributed
-   python -m venv $HOME/distributed
-   export PATH=$HOME/distributed/bin:$PATH
-   python -m pip install -U -r requirements.txt
-   python -m pip install -U -r dev-requirements.txt
-   python -m pip install -e .
-
-.. note::
-   There may be subtle differences between pip and conda; the distributed CI uses conda.
-
 
 To keep a fork in sync with the upstream source::
 

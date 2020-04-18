@@ -32,11 +32,7 @@ conda config --set always_yes yes --set quiet yes --set changeps1 no
 conda update conda
 
 # Create conda environment
-conda create -n dask-distributed -c pkgs/main python=$PYTHON
-source activate dask-distributed
-
-# Install dependencies
-conda install -c conda-forge \
+conda create -n dask-distributed -c conda-forge -c defaults \
     asyncssh \
     bokeh \
     click \
@@ -48,42 +44,47 @@ conda install -c conda-forge \
     ipywidgets \
     joblib \
     jupyter_client \
-    msgpack-python \
+    'msgpack-python>=0.6.0' \
     netcdf4 \
     paramiko \
     prometheus_client \
     psutil \
-    pytest \
+    'pytest>=4' \
+    pytest-asyncio \
+    pytest-faulthandler \
+    pytest-repeat \
     pytest-timeout \
+    python=$PYTHON \
     requests \
     scikit-learn \
     scipy \
-    tblib \
+    sortedcollections \
+    'tblib>=1.5.0' \
     toolz \
     tornado=$TORNADO \
     zstandard \
     $PACKAGES
+
+source activate dask-distributed
 
 # stacktrace is not currently avaiable for Python 3.8.
 # Remove the version check block below when it is avaiable.
 if [[ $PYTHON != 3.8 ]]; then
     # For low-level profiler, install libunwind and stacktrace from conda-forge
     # For stacktrace we use --no-deps to avoid upgrade of python
-    conda install -c pkgs/main -c conda-forge libunwind
-    conda install --no-deps -c pkgs/main -c numba -c conda-forge stacktrace
+    conda install -c conda-forge -c defaults libunwind
+    conda install --no-deps -c conda-forge -c defaults -c numba stacktrace
 fi
 
-python -m pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
 python -m pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
-python -m pip install -q sortedcollections --no-deps
 python -m pip install -q keras --upgrade --no-deps
 
 if [[ $CRICK == true ]]; then
-    conda install -c pkgs/main cython
+    conda install -c conda-forge -c defaults cython
     python -m pip install -q git+https://github.com/jcrist/crick.git
 fi
 
