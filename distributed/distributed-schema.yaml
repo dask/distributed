@@ -207,6 +207,10 @@ properties:
                 type: string
                 description: |
                   The time to wait until an acquired semaphore is released if the Client goes out of scope
+              lease-timeout:
+                type: string
+                description: |
+                  The timeout after which a lease will be released if not refreshed
 
           http:
             type: object
