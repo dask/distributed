@@ -60,6 +60,7 @@ class SemaphoreExtension:
                 "semaphore_release": self.release,
                 "semaphore_close": self.close,
                 "semaphore_refresh_leases": self.refresh_leases,
+                "semaphore_value": self.get_value,
             }
         )
 
@@ -78,6 +79,9 @@ class SemaphoreExtension:
         self.lease_timeout = parse_timedelta(
             dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s",
         )
+
+    async def get_value(self, comm=None, name=None):
+        return len(self.leases[name])
 
     # `comm` here is required by the handler interface
     def create(self, comm=None, name=None, max_leases=None):
@@ -416,6 +420,12 @@ class Semaphore:
         return self.client.sync(
             self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id,
         )
+
+    def get_value(self):
+        """
+        Return the number of currently registered leases.
+        """
+        return self.client.sync(self.client.scheduler.semaphore_value, name=self.name)
 
     def __enter__(self):
         self.acquire()

@@ -10,6 +10,7 @@ from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
     client,
     cluster,
+    async_wait_for,
     cluster_fixture,
     gen_cluster,
     slowidentity,
@@ -316,7 +317,7 @@ async def test_retry_acquire(c, s, a, b):
     client=True,
     config={
         "distributed.scheduler.locks.lease-timeout": "100ms",
-        "distributed.scheduler.locks.lease-validation-interval": "10ms",
+        "distributed.scheduler.locks.lease-validation-interval": "100ms",
     },
 )
 async def test_oversubscribing_leases(c, s, a, b):
@@ -364,14 +365,15 @@ async def test_oversubscribing_leases(c, s, a, b):
             # lease-timeout. This is twice the lease timeout to ensurre that the
             # leases are actually timed out
             slowidentity(delay=0.2)
-            old_value = client.set_metadata(x, "locked")
 
             # Now the GIL is free again, i.e. we enable the callback again
             sem.refresh_callback.start()
 
             # This is the poormans Event.wait()
-            while not client.get_metadata("release"):
-                slowidentity(delay=0.02)
+            async def _wait():
+                return client.get_metadata("release") is True
+
+            async_wait_for(_wait, timeout=2)
             return x
 
     def observe_state(sem):
@@ -382,22 +384,16 @@ async def test_oversubscribing_leases(c, s, a, b):
         try to acquire and hopefully fail showing that the semaphore is
         protected if the oversubscription is recognized.
         """
-        client = get_client()
-        x_locked = False
-        y_locked = False
-        # We wait until we're in an oversubscribed state, i.e. both tasks
-        # are executed although there should only be one allowed
-        while not x_locked and y_locked:
-            slowidentity(delay=0.005)
-            x_locked = client.get_metadata(0) == "locked"
-            y_locked = client.get_metadata(1) == "locked"
 
-        # Once both are locked we should give the refresh time to notify the scheduler
-        # This parameter should be larger than ``lease-validation-interval``
-        slowidentity(delay=0.15)
+        async def sem_oversubscribed():
+            return await sem.get_value() > 1
+
+        async_wait_for(sem_oversubscribed, timeout=2)
         # Once we're in an oversubscribed state, we must not be able to
         # acquire a lease.
         assert not sem.acquire(timeout=0)
+
+        client = get_client()
         client.set_metadata("release", True)
 
     observer = await Worker(s.address)
@@ -409,6 +405,8 @@ async def test_oversubscribing_leases(c, s, a, b):
 
     payload, observer = await c.gather([futures, fut_observe])
     assert sorted(payload) == [0, 1]
+    # Back to normal
+    assert await sem.get_value() == 0
 
 
 @gen_cluster(client=True,)
@@ -422,3 +420,15 @@ async def test_timeout_zero(c, s, a, b):
     assert await sem.acquire(timeout=0)
     assert not await sem.acquire(timeout=0)
     await sem.release()
+
+
+@gen_cluster(client=True)
+async def test_getvalue(c, s, a, b):
+
+    sem = await Semaphore()
+
+    assert await sem.get_value() == 0
+    await sem.acquire()
+    assert await sem.get_value() == 1
+    await sem.release()
+    assert await sem.get_value() == 0
