@@ -106,7 +106,7 @@ class SemaphoreExtension:
             for id_ in lease_ids:
                 if id_ not in self.leases[name]:
                     logger.critical(
-                        f"Trying to refresh an unknown lease ID {id_} for {name}. This might be due to leases "
+                        f"Refreshing an unknown lease ID {id_} for {name}. This might be due to leases "
                         f"timing out and may cause overbooking of the semaphore!"
                         f"This is often caused by long-running GIL-holding in the task which acquired the lease."
                     )
@@ -353,6 +353,7 @@ class Semaphore:
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
         pc.start()
+        self.refresh_leases = True
 
     def __await__(self):
         async def create_semaphore():
@@ -362,19 +363,16 @@ class Semaphore:
         return create_semaphore().__await__()
 
     async def _refresh_leases(self):
-        if self.client.scheduler is not None and not self._refreshing_leases:
-            self._refreshing_leases = True
-            if self._leases:
-                logger.debug(
-                    "%s refreshing leases for %s with IDs %s",
-                    self.client.id,
-                    self.name,
-                    self._leases,
-                )
-                await self.client.scheduler.semaphore_refresh_leases(
-                    lease_ids=list(self._leases), name=self.name
-                )
-            self._refreshing_leases = False
+        if self.refresh_leases and self._leases:
+            logger.debug(
+                "%s refreshing leases for %s with IDs %s",
+                self.client.id,
+                self.name,
+                self._leases,
+            )
+            await self.client.scheduler.semaphore_refresh_leases(
+                lease_ids=list(self._leases), name=self.name
+            )
 
     async def _acquire(self, timeout=None):
         lease_id = uuid.uuid4().hex

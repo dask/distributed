@@ -2,7 +2,7 @@ import pickle
 import dask
 import pytest
 from dask.distributed import Client
-
+from time import sleep
 from distributed import Semaphore
 from distributed.comm import Comm
 from distributed.core import ConnectionPool
@@ -11,6 +11,7 @@ from distributed.utils_test import (  # noqa: F401
     client,
     cluster,
     async_wait_for,
+    captured_logger,
     cluster_fixture,
     gen_cluster,
     slowidentity,
@@ -347,6 +348,7 @@ async def test_oversubscribing_leases(c, s, a, b):
     # metadata check with a sleep loop is not elegant but practical.
     await c.set_metadata("release", False)
     sem = await Semaphore()
+    sem.refresh_callback.stop()
 
     def guaranteed_lease_timeout(x, sem):
         """
@@ -357,7 +359,7 @@ async def test_oversubscribing_leases(c, s, a, b):
         all leases will eventually timeout. The function will only
         release/return once the "Event" is set, i.e. our observer is done.
         """
-        sem.refresh_callback.stop()
+        sem.refresh_leases = False
         client = get_client()
 
         with sem:
@@ -366,14 +368,16 @@ async def test_oversubscribing_leases(c, s, a, b):
             # leases are actually timed out
             slowidentity(delay=0.2)
 
+            assert sem._leases
             # Now the GIL is free again, i.e. we enable the callback again
-            sem.refresh_callback.start()
+            sem.refresh_leases = True
+            sleep(0.1)
 
             # This is the poormans Event.wait()
-            async def _wait():
-                return client.get_metadata("release") is True
+            while client.get_metadata("release") is not True:
+                sleep(0.05)
 
-            async_wait_for(_wait, timeout=2)
+            assert sem.get_value() >= 1
             return x
 
     def observe_state(sem):
@@ -384,11 +388,12 @@ async def test_oversubscribing_leases(c, s, a, b):
         try to acquire and hopefully fail showing that the semaphore is
         protected if the oversubscription is recognized.
         """
+        sem.refresh_callback.stop()
+        # We wait until we're in an oversubscribed state, i.e. both tasks
+        # are executed although there should only be one allowed
+        while not sem.get_value() > 1:
+            sleep(0.2)
 
-        async def sem_oversubscribed():
-            return await sem.get_value() > 1
-
-        async_wait_for(sem_oversubscribed, timeout=2)
         # Once we're in an oversubscribed state, we must not be able to
         # acquire a lease.
         assert not sem.acquire(timeout=0)
@@ -403,7 +408,15 @@ async def test_oversubscribing_leases(c, s, a, b):
     )
     fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
 
-    payload, observer = await c.gather([futures, fut_observe])
+    with captured_logger("distributed.semaphore") as caplog:
+        payload, observer = await c.gather([futures, fut_observe])
+
+    logs = caplog.getvalue().split("\n")
+    timeouts = [log for log in logs if "timed out" in log]
+    refresh_unknown = [log for log in logs if "Refreshing an unknown lease ID" in log]
+    assert len(timeouts) == 2
+    assert len(refresh_unknown) == 2
+
     assert sorted(payload) == [0, 1]
     # Back to normal
     assert await sem.get_value() == 0
