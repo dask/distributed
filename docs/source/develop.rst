@@ -7,6 +7,7 @@ and documentation and style standards are available at the `Dask developer
 guidelines`_ in the main documentation.
 
 .. _Dask: http://dask.org
+.. _`Dask developer guidelines`: http://docs.dask.org/en/latest/develop.html
 
 Install
 -------
