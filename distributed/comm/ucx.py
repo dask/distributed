@@ -69,7 +69,7 @@ def init_once():
             import numba.cuda
 
             def rmm_cuda_array(n):
-                a = rmm.device_array((n,), dtype=np.uint8)
+                a = rmm.device_array(n, dtype="u1")
                 weakref.finalize(a, numba.cuda.current_context)
                 return a
 
@@ -79,7 +79,7 @@ def init_once():
             import numba.cuda
 
             def numba_cuda_array(n):
-                a = numba.cuda.device_array((n,), dtype=np.uint8)
+                a = numba.cuda.device_array((n,), dtype="u1")
                 weakref.finalize(a, numba.cuda.current_context)
                 return a
 
@@ -225,7 +225,7 @@ class UCX(Comm):
                 frames = [
                     cuda_array(each_size)
                     if is_cuda
-                    else np.empty(each_size, dtype=np.uint8)
+                    else np.empty(each_size, dtype="u1")
                     for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist())
                 ]
                 recv_frames = [
