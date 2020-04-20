@@ -10,7 +10,6 @@ import struct
 import weakref
 
 import dask
-import numpy as np
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -34,6 +33,7 @@ logger = logging.getLogger(__name__)
 # required to ensure Dask configuration gets propagated to UCX, which needs
 # variables to be set before being imported.
 ucp = None
+host_array = None
 device_array = None
 
 
@@ -47,7 +47,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, device_array
+    global ucp, host_array, device_array
     if ucp is not None:
         return
 
@@ -60,7 +60,15 @@ def init_once():
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
-    # Find the function, `device_array()`, to use when allocating new CUDA arrays
+    # Find the function, `host_array()`, to use when allocating new host arrays
+    try:
+        import numpy
+
+        host_array = lambda n: numpy.empty((n,), dtype="u1")
+    except ImportError:
+        host_array = lambda n: bytearray(n)
+
+    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
         import rmm
 
@@ -233,7 +241,7 @@ class UCX(Comm):
                 frames = [
                     device_array(each_size)
                     if is_cuda
-                    else np.empty(each_size, dtype="u1")
+                    else host_array(each_size)
                     for is_cuda, each_size in zip(cuda_frames, sizes)
                 ]
                 recv_frames = [
