@@ -239,9 +239,7 @@ class UCX(Comm):
             else:
                 # Recv frames
                 frames = [
-                    device_array(each_size)
-                    if is_cuda
-                    else host_array(each_size)
+                    device_array(each_size) if is_cuda else host_array(each_size)
                     for is_cuda, each_size in zip(cuda_frames, sizes)
                 ]
                 recv_frames = [
