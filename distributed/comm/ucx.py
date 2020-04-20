@@ -6,6 +6,7 @@ See :ref:`communications` for more.
 .. _UCX: https://github.com/openucx/ucx
 """
 import logging
+import struct
 import weakref
 
 import dask
@@ -174,14 +175,13 @@ class UCX(Comm):
                 ]
 
                 # Send meta data
-                cuda_frames = np.array(
-                    [hasattr(f, "__cuda_array_interface__") for f in frames],
-                    dtype=np.bool,
+                cuda_frames = tuple(
+                    hasattr(f, "__cuda_array_interface__") for f in frames
                 )
-                await self.ep.send(np.array([len(frames)], dtype=np.uint64))
-                await self.ep.send(cuda_frames)
+                await self.ep.send(struct.pack("Q", len(frames)))
+                await self.ep.send(struct.pack(len(cuda_frames) * "?", *cuda_frames))
                 await self.ep.send(
-                    np.array([nbytes(f) for f in frames], dtype=np.uint64)
+                    struct.pack(len(frames) * "Q", *(nbytes(f) for f in frames))
                 )
 
                 # Send frames
@@ -191,7 +191,7 @@ class UCX(Comm):
                 #  syncing the default stream will wait for other non-blocking CUDA streams.
                 # Note this is only sufficient if the memory being sent is not currently in use on
                 # non-blocking CUDA streams.
-                if cuda_frames.any():
+                if any(cuda_frames):
                     synchronize_stream(0)
 
                 for each_frame in send_frames:
@@ -211,12 +211,20 @@ class UCX(Comm):
 
             try:
                 # Recv meta data
-                nframes = np.empty(1, dtype=np.uint64)
+                nframes_fmt = "Q"
+                nframes = bytearray(struct.calcsize(nframes_fmt))
                 await self.ep.recv(nframes)
-                cuda_frames = np.empty(nframes[0], dtype=np.bool)
+                (nframes,) = struct.unpack(nframes_fmt, nframes)
+
+                cuda_frames_fmt = nframes * "?"
+                cuda_frames = bytearray(struct.calcsize(cuda_frames_fmt))
                 await self.ep.recv(cuda_frames)
-                sizes = np.empty(nframes[0], dtype=np.uint64)
+                cuda_frames = struct.unpack(cuda_frames_fmt, cuda_frames)
+
+                sizes_fmt = nframes * "Q"
+                sizes = bytearray(struct.calcsize(sizes_fmt))
                 await self.ep.recv(sizes)
+                sizes = struct.unpack(sizes_fmt, sizes)
             except (ucp.exceptions.UCXBaseException, CancelledError):
                 self.abort()
                 raise CommClosedError("While reading, the connection was closed")
@@ -226,7 +234,7 @@ class UCX(Comm):
                     cuda_array(each_size)
                     if is_cuda
                     else np.empty(each_size, dtype="u1")
-                    for is_cuda, each_size in zip(cuda_frames.tolist(), sizes.tolist())
+                    for is_cuda, each_size in zip(cuda_frames, sizes)
                 ]
                 recv_frames = [
                     each_frame for each_frame in frames if len(each_frame) > 0
@@ -234,7 +242,7 @@ class UCX(Comm):
 
                 # It is necessary to first populate `frames` with CUDA arrays and synchronize
                 # the default stream before starting receiving to ensure buffers have been allocated
-                if cuda_frames.any():
+                if any(cuda_frames):
                     synchronize_stream(0)
 
                 for each_frame in recv_frames:
