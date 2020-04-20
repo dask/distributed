@@ -67,12 +67,12 @@ class SemaphoreExtension:
 
         self.scheduler.extensions["semaphores"] = self
 
-        validation_callback_time = 1000 * parse_timedelta(
+        validation_callback_time = parse_timedelta(
             dask.config.get("distributed.scheduler.locks.lease-validation-interval"),
             default="s",
         )
         self._pc_lease_timeout = PeriodicCallback(
-            self._check_lease_timeout, validation_callback_time,
+            self._check_lease_timeout, validation_callback_time * 1000,
         )
         self._pc_lease_timeout.start()
         self.lease_timeout = parse_timedelta(
@@ -343,7 +343,7 @@ class Semaphore:
         )
         self._refreshing_leases = False
         pc = PeriodicCallback(
-            self._refresh_leases, callback_time=1000 * refresh_leases_interval,
+            self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
         self.refresh_callback = pc
         # Registering the pc to the client here is important for proper cleanup

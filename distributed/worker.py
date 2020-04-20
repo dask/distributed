@@ -473,9 +473,6 @@ class Worker(ServerNode):
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
 
-        self.memory_monitor_interval = parse_timedelta(
-            memory_monitor_interval, default="ms"
-        )
         self.extensions = dict()
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -667,6 +664,9 @@ class Worker(ServerNode):
 
         self._address = contact_address
 
+        self.memory_monitor_interval = parse_timedelta(
+            memory_monitor_interval, default="ms"
+        )
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(
@@ -683,13 +683,10 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        pc = PeriodicCallback(
-            self.trigger_profile,
-            parse_timedelta(
-                dask.config.get("distributed.worker.profile.interval"), default="ms"
-            )
-            * 1000,
+        profile_trigger_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
         )
+        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
         self.periodic_callbacks["profile"] = pc
 
         pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)

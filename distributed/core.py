@@ -179,13 +179,10 @@ class Server:
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(
-            self._measure_tick,
-            parse_timedelta(
-                dask.config.get("distributed.admin.tick.interval"), default="ms"
-            )
-            * 1000,
+        measure_tick_interval = parse_timedelta(
+            dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
+        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
         self.periodic_callbacks["tick"] = pc
 
         self.thread_id = 0
