@@ -69,7 +69,7 @@ def init_once():
             import numba.cuda
 
             def rmm_cuda_array(n):
-                a = rmm.device_array(n, dtype=np.uint8)
+                a = rmm.device_array((n,), dtype=np.uint8)
                 weakref.finalize(a, numba.cuda.current_context)
                 return a
 
