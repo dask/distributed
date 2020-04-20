@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # required to ensure Dask configuration gets propagated to UCX, which needs
 # variables to be set before being imported.
 ucp = None
-cuda_array = None
+device_array = None
 
 
 def synchronize_stream(stream=0):
@@ -47,7 +47,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, cuda_array
+    global ucp, device_array
     if ucp is not None:
         return
 
@@ -60,34 +60,34 @@ def init_once():
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
-    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
+    # Find the function, `device_array()`, to use when allocating new CUDA arrays
     try:
         import rmm
 
         if hasattr(rmm, "DeviceBuffer"):
-            cuda_array = lambda n: rmm.DeviceBuffer(size=n)
+            device_array = lambda n: rmm.DeviceBuffer(size=n)
         else:  # pre-0.11.0
             import numba.cuda
 
-            def rmm_cuda_array(n):
+            def rmm_device_array(n):
                 a = rmm.device_array(n, dtype="u1")
                 weakref.finalize(a, numba.cuda.current_context)
                 return a
 
-            cuda_array = rmm_cuda_array
+            device_array = rmm_device_array
     except ImportError:
         try:
             import numba.cuda
 
-            def numba_cuda_array(n):
+            def numba_device_array(n):
                 a = numba.cuda.device_array((n,), dtype="u1")
                 weakref.finalize(a, numba.cuda.current_context)
                 return a
 
-            cuda_array = numba_cuda_array
+            device_array = numba_device_array
         except ImportError:
 
-            def cuda_array(n):
+            def device_array(n):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
@@ -231,7 +231,7 @@ class UCX(Comm):
             else:
                 # Recv frames
                 frames = [
-                    cuda_array(each_size)
+                    device_array(each_size)
                     if is_cuda
                     else np.empty(each_size, dtype="u1")
                     for is_cuda, each_size in zip(cuda_frames, sizes)
