@@ -213,8 +213,8 @@ class UCX(Comm):
                 # Recv meta data
                 nframes = np.empty(1, dtype=np.uint64)
                 await self.ep.recv(nframes)
-                is_cudas = np.empty(nframes[0], dtype=np.bool)
-                await self.ep.recv(is_cudas)
+                cuda_frames = np.empty(nframes[0], dtype=np.bool)
+                await self.ep.recv(cuda_frames)
                 sizes = np.empty(nframes[0], dtype=np.uint64)
                 await self.ep.recv(sizes)
             except (ucp.exceptions.UCXBaseException, CancelledError):
@@ -226,7 +226,7 @@ class UCX(Comm):
                     cuda_array(each_size)
                     if is_cuda
                     else np.empty(each_size, dtype="u1")
-                    for is_cuda, each_size in zip(is_cudas.tolist(), sizes.tolist())
+                    for is_cuda, each_size in zip(cuda_frames.tolist(), sizes.tolist())
                 ]
                 recv_frames = [
                     each_frame for each_frame in frames if len(each_frame) > 0
@@ -234,7 +234,7 @@ class UCX(Comm):
 
                 # It is necessary to first populate `frames` with CUDA arrays and synchronize
                 # the default stream before starting receiving to ensure buffers have been allocated
-                if is_cudas.any():
+                if cuda_frames.any():
                     synchronize_stream(0)
 
                 for each_frame in recv_frames:
