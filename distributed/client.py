@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
+from contextvars import ContextVar
 import copy
 import errno
 from functools import partial
@@ -90,6 +91,7 @@ logger = logging.getLogger(__name__)
 _global_clients = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
+_deserialize_client = ContextVar("_deserialize_client", default=None)
 
 DEFAULT_EXTENSIONS = [PubSubClientExtension]
 
@@ -163,7 +165,7 @@ class Future(WrappedKey):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
-        self.client = client or _get_global_client()
+        self.client = client or _deserialize_client.get() or _get_global_client()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
 
@@ -354,11 +356,11 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return (self.key, self.client.scheduler.address)
+        return self.key, self.client.scheduler.address
 
     def __setstate__(self, state):
         key, address = state
-        c = get_client(address)
+        c = _deserialize_client.get() or get_client(address)
         Future.__init__(self, key, c)
         c._send_to_scheduler(
             {
@@ -2175,8 +2177,7 @@ class Client(Node):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    @gen.coroutine
-    def _publish_dataset(self, *args, name=None, **kwargs):
+    async def _publish_dataset(self, *args, name=None, **kwargs):
         with log_errors():
             coroutines = []
 
@@ -2202,7 +2203,7 @@ class Client(Node):
             for name, data in kwargs.items():
                 add_coro(name, data)
 
-            yield coroutines
+            await asyncio.gather(*coroutines)
 
     def publish_dataset(self, *args, **kwargs):
         """
@@ -2282,7 +2283,27 @@ class Client(Node):
         return self.sync(self.scheduler.publish_list, **kwargs)
 
     async def _get_dataset(self, name):
-        out = await self.scheduler.publish_get(name=name, client=self.id)
+        if sys.version_info >= (3, 7):
+            # Insulate contextvars change with a task
+            async def _():
+                _deserialize_client.set(self)
+                return await self.scheduler.publish_get(name=name, client=self.id)
+
+            out = await asyncio.create_task(_())
+        else:
+            # Python 3.6; creating a task doesn't copy the context.
+            # We can still detect a race condition though.
+            if _deserialize_client.get() not in (self, None):
+                raise RuntimeError(  # pragma: nocover
+                    "Detected race condition where get_dataset() is invoked in "
+                    "parallel by multiple clients. Please upgrade to Python 3.7+."
+                )
+            tok = _deserialize_client.set(self)
+            try:
+                out = await self.scheduler.publish_get(name=name, client=self.id)
+            finally:
+                _deserialize_client.reset(tok)
+
         if out is None:
             raise KeyError(f"Dataset '{name}' not found")
         return out["data"]

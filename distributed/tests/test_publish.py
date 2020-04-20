@@ -246,3 +246,34 @@ async def test_pickle_safe(c, s, a, b):
 
         with pytest.raises(TypeError):
             await c2.get_dataset("z")
+
+
+@gen_cluster(client=True)
+async def test_deserialize_client(c, s, a, b):
+    """Test that the client attached to Futures returned by Client.get_dataset is always
+    the instance of the client that invoked the method.
+    Specifically:
+
+    - when the client is defined by hostname, test that it is not accidentally
+      reinitialised by IP;
+    - when multiple clients are connected to the same scheduler, test that they don't
+      interfere with each other.
+
+    See: https://github.com/dask/distributed/issues/3227
+    """
+    future = await c.scatter("123")
+    await c.publish_dataset(foo=future)
+    future = await c.get_dataset("foo")
+    assert future.client is c
+
+    for addr in (s.address, "localhost:" + s.address.split(":")[-1]):
+        async with Client(addr, asynchronous=True) as c2:
+            future = await c.get_dataset("foo")
+            assert future.client is c
+            future = await c2.get_dataset("foo")
+            assert future.client is c2
+
+    # Ensure cleanup
+    from distributed.client import _deserialize_client
+
+    assert _deserialize_client.get() is None
