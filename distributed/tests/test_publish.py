@@ -213,6 +213,23 @@ def test_datasets_iter(client):
     client.publish_dataset(**{str(key): key for key in keys})
     for n, key in enumerate(client.datasets):
         assert key == str(n)
+    with pytest.raises(TypeError):
+        client.datasets.__aiter__()
+
+
+@gen_cluster(client=True)
+async def test_datasets_async(c, s, a, b):
+    await c.publish_dataset(foo=1, bar=2)
+    assert await c.datasets["foo"] == 1
+    assert {k async for k in c.datasets} == {"foo", "bar"}
+    with pytest.raises(TypeError):
+        c.datasets["baz"] = 3
+    with pytest.raises(TypeError):
+        del c.datasets["foo"]
+    with pytest.raises(TypeError):
+        next(iter(c.datasets))
+    with pytest.raises(TypeError):
+        len(c.datasets)
 
 
 @gen_cluster(client=True)
