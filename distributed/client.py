@@ -38,7 +38,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -73,7 +73,6 @@ from .utils import (
     key_split,
     thread_state,
     no_default,
-    PeriodicCallback,
     LoopRunner,
     parse_timedelta,
     shutting_down,
@@ -678,12 +677,16 @@ class Client(Node):
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
         heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
 
+        scheduler_info_interval = parse_timedelta(
+            dask.config.get("distributed.client.scheduler-info-interval", default="ms")
+        )
+
         self._periodic_callbacks = dict()
         self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
-            self._update_scheduler_info, 2000, io_loop=self.loop
+            self._update_scheduler_info, scheduler_info_interval * 1000,
         )
         self._periodic_callbacks["heartbeat"] = PeriodicCallback(
-            self._heartbeat, heartbeat_interval * 1000, io_loop=self.loop
+            self._heartbeat, heartbeat_interval * 1000
         )
 
         self._start_arg = address
