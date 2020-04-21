@@ -295,7 +295,19 @@ def test_schema_is_complete():
     skip = {"default-task-durations", "bokeh-application"}
 
     def test_matches(c, s):
-        assert set(c) == set(s["properties"])
+        if set(c) != set(s["properties"]):
+            raise ValueError(
+                "\nThe distributed.yaml and distributed-schema.yaml files are not in sync.\n"
+                "This usually happens when we add a new configuration value,\n"
+                "but don't add the schema of that value to the distributed-schema.yaml file\n"
+                "Please modify these files to include the missing values: \n\n"
+                "    distributed.yaml:        {}\n"
+                "    distributed-schema.yaml: {}\n\n"
+                "Examples in these files should be a good start, \n"
+                "even if you are not familiar with the jsonschema spec".format(
+                    sorted(c), sorted(s["properties"])
+                )
+            )
         for k, v in c.items():
             if isinstance(v, dict) and k not in skip:
                 test_matches(c[k], s["properties"][k])

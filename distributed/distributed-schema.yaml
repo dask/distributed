@@ -458,6 +458,10 @@ properties:
               The client sends a periodic heartbeat message to the scheduler.
               If it misses enough of these then the scheduler assumes that it has gone.
 
+          scheduler-info-interval:
+            type: string
+            description: Interval between scheduler-info updates
+
       deploy:
         type: object
         description: Configuration settings for general Dask deployment
@@ -468,6 +472,10 @@ properties:
               Interval after which to hard-close a lost worker job
 
               Otherwise we wait for a while to see if a worker will reappear
+
+          cluster-repr-interval:
+            type: string
+            description: Interval between calls to update cluster-repr for the widget
 
       adaptive:
         type: object
