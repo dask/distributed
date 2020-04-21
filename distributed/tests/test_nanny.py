@@ -27,6 +27,7 @@ from distributed.utils_test import (  # noqa: F401
     captured_logger,
     cleanup,
 )
+from distributed.worker import parse_worker_ports
 
 
 @gen_cluster(nthreads=[])
@@ -503,3 +504,33 @@ async def test_config(cleanup):
             async with Client(s.address, asynchronous=True) as client:
                 config = await client.run(dask.config.get, "foo")
                 assert config[n.worker_address] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_nanny_port_range(cleanup):
+    async with Scheduler() as s:
+        async with Client(s.address, asynchronous=True) as client:
+            nanny_port = "9867:9868"
+            worker_port = "9869:9870"
+            async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n1:
+                assert n1.port == 9867  # Selects first port in range
+                async with Nanny(
+                    s.address, port=nanny_port, worker_port=worker_port
+                ) as n2:
+                    assert n2.port == 9868  # Selects next port in range
+                    with pytest.raises(
+                        ValueError, match="Could not start nanny"
+                    ):  # No more ports left
+                        async with Nanny(
+                            s.address, port=nanny_port, worker_port=worker_port
+                        ):
+                            pass
+
+                    # Ensure Worker ports are in worker_port range
+                    def get_worker_port(dask_worker):
+                        return dask_worker.port
+
+                    worker_ports = await client.run(get_worker_port)
+                    assert list(worker_ports.values()) == parse_worker_ports(
+                        worker_port
+                    )

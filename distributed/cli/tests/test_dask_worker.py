@@ -15,6 +15,7 @@ from distributed.metrics import time
 from distributed.utils import sync, tmpfile
 from distributed.utils_test import popen, terminate_process, wait_for_port
 from distributed.utils_test import loop, cleanup  # noqa: F401
+from distributed.worker import parse_worker_ports
 
 
 def test_nanny_worker_ports(loop):
@@ -50,8 +51,8 @@ def test_nanny_worker_ports(loop):
 def test_nanny_worker_port_range(loop):
     with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
         nprocs = 3
-        worker_port_start = 9684
-        nanny_port_start = 9688
+        worker_port = "9684:9686"
+        nanny_port = "9688:9690"
         with popen(
             [
                 "dask-worker",
@@ -61,9 +62,9 @@ def test_nanny_worker_port_range(loop):
                 "--host",
                 "127.0.0.1",
                 "--worker-port",
-                f"{worker_port_start}:{worker_port_start + nprocs}",
+                worker_port,
                 "--nanny-port",
-                f"{nanny_port_start}:{nanny_port_start + nprocs}",
+                nanny_port,
                 "--no-dashboard",
             ]
         ) as worker:
@@ -73,22 +74,26 @@ def test_nanny_worker_port_range(loop):
                     sleep(0.1)
                     assert time() - start < 5
 
-                info = c.scheduler_info()
-                for i in range(nprocs):
-                    worker_address = f"tcp://127.0.0.1:{worker_port_start + i}"
-                    nanny_address = f"tcp://127.0.0.1:{nanny_port_start + i}"
-                    assert info["workers"][worker_address]["nanny"] == nanny_address
+                def get_port(dask_worker):
+                    return dask_worker.port
+
+                expected_worker_ports = set(parse_worker_ports(worker_port))
+                worker_ports = c.run(get_port)
+                assert set(worker_ports.values()) == expected_worker_ports
+
+                expected_nanny_ports = set(parse_worker_ports(nanny_port))
+                nanny_ports = c.run(get_port, nanny=True)
+                assert set(nanny_ports.values()) == expected_nanny_ports
 
 
 def test_nanny_worker_port_range_too_many_workers_raises(loop):
     with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
-        nprocs = 5
         with popen(
             [
                 "dask-worker",
                 "127.0.0.1:9359",
                 "--nprocs",
-                f"{nprocs}",
+                "7",
                 "--host",
                 "127.0.0.1",
                 "--worker-port",
@@ -99,46 +104,9 @@ def test_nanny_worker_port_range_too_many_workers_raises(loop):
             ]
         ) as worker:
             assert any(
-                b"More worker processes were requested than ports supplied"
-                in worker.stderr.readline()
-                for _ in range(20)
+                b"Could not start worker" in worker.stderr.readline()
+                for _ in range(100)
             )
-
-
-def test_multiple_nprocs_requires_port_range(loop):
-    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
-        with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs=2", "--worker-port=9684"]
-        ) as worker:
-            assert any(
-                b"You must specify multiple ports when nprocs > 1"
-                in worker.stderr.readline()
-                for i in range(20)
-            )
-
-
-def test__normalize_worker_ports():
-    assert distributed.cli.dask_worker._normalize_worker_ports(port=None, nprocs=3) == [
-        0,
-        0,
-        0,
-    ]
-    assert distributed.cli.dask_worker._normalize_worker_ports(port=100, nprocs=1) == [
-        100
-    ]
-    assert distributed.cli.dask_worker._normalize_worker_ports(
-        port="100", nprocs=1
-    ) == [100]
-    assert distributed.cli.dask_worker._normalize_worker_ports(
-        port="100:110", nprocs=3
-    ) == [100, 101, 102]
-
-    # Fails when more processes are requested than specified ports
-    with pytest.raises(ValueError):
-        distributed.cli.dask_worker._normalize_worker_ports(port=100, nprocs=2)
-
-    with pytest.raises(ValueError):
-        distributed.cli.dask_worker._normalize_worker_ports(port="100:110", nprocs=12)
 
 
 def test_memory_limit(loop):

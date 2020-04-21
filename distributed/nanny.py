@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -33,7 +34,7 @@ from .utils import (
     ignoring,
     TimeoutError,
 )
-from .worker import run, parse_memory_limit, Worker
+from .worker import run, parse_memory_limit, Worker, parse_worker_ports
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class Nanny(ServerNode):
         port=None,
         protocol=None,
         config=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
@@ -212,13 +213,10 @@ class Nanny(ServerNode):
         ):
             host = get_ip(get_address_host(self.scheduler.address))
 
-        self._start_address = address_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-        )
+        self._start_port = port
+        self._start_host = host
+        self._interface = interface
+        self._protocol = protocol
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
@@ -259,9 +257,33 @@ class Nanny(ServerNode):
 
         await super().start()
 
-        await self.listen(
-            self._start_address, **self.security.get_listen_args("worker")
-        )
+        ports = parse_worker_ports(self._start_port)
+        for port in ports:
+            start_address = address_from_user_args(
+                host=self._start_host,
+                port=port,
+                interface=self._interface,
+                protocol=self._protocol,
+                security=self.security,
+            )
+            try:
+                await self.listen(
+                    start_address, **self.security.get_listen_args("worker")
+                )
+            except OSError as e:
+                if len(ports) > 1 and e.errno == errno.EADDRINUSE:
+                    continue
+                else:
+                    raise e
+            else:
+                self._start_address = start_address
+                break
+        else:
+            raise ValueError(
+                f"Could not start nanny on host {self._start_host}"
+                f"with port {self._start_port}"
+            )
+
         self.ip = get_address_host(self.address)
 
         await preloading.on_start(

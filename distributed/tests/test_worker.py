@@ -33,7 +33,13 @@ from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+    parse_worker_ports,
+)
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -317,6 +323,31 @@ def test_worker_with_port_zero():
     assert w.port > 1024
 
     yield w.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_port_range(cleanup):
+    async with Scheduler() as s:
+        port = "9867:9868"
+        async with Worker(s.address, port=port) as w1:
+            assert w1.port == 9867  # Selects first port in range
+            async with Worker(s.address, port=port) as w2:
+                assert w2.port == 9868  # Selects next port in range
+                with pytest.raises(
+                    ValueError, match="Could not start worker"
+                ):  # No more ports left
+                    async with Worker(s.address, port=port):
+                        pass
+
+
+def test_parse_worker_ports():
+    assert parse_worker_ports(None) == [None]
+    assert parse_worker_ports(23) == [23]
+    assert parse_worker_ports("45") == [45]
+    assert parse_worker_ports("100:103") == [100, 101, 102, 103]
+
+    with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
+        parse_worker_ports("103:100")
 
 
 @pytest.mark.slow
