@@ -35,7 +35,6 @@ extensions = [
     "sphinx.ext.intersphinx",
     "numpydoc",
     "sphinx_click.ext",
-    "sphinx-jsonschema",
 ]
 
 numpydoc_show_class_members = False
@@ -394,7 +393,7 @@ redirect_files = [
     ("joblib.html", "https://ml.dask.org/joblib.html"),
     ("setup.html", "https://docs.dask.org/en/latest/setup.html"),
     ("ec2.html", "https://docs.dask.org/en/latest/setup/cloud.html"),
-    # ("configuration.html", "https://docs.dask.org/en/latest/configuration.html"),
+    ("configuration.html", "https://docs.dask.org/en/latest/configuration.html"),
     (
         "local-cluster.html",
         "https://docs.dask.org/en/latest/setup/single-distributed.html",
