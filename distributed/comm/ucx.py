@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 ucp = None
 host_array = None
 device_array = None
+as_device_array = None
 
 
 def synchronize_stream(stream=0):
@@ -47,7 +48,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array
+    global ucp, host_array, device_array, as_device_array
     if ucp is not None:
         return
 
@@ -98,6 +99,23 @@ def init_once():
             def device_array(n):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
+                )
+
+    # Find the function, `as_device_array()`
+    try:
+        import cupy
+
+        as_device_array = lambda a: cupy.asarray(a)
+    except ImportError:
+        try:
+            import numba.cuda
+
+            as_device_array = lambda a: numba.cuda.as_cuda_array(a)
+        except ImportError:
+
+            def as_device_array(n):
+                raise RuntimeError(
+                    "In order to send/recv CUDA arrays, CuPy or Numba is required"
                 )
 
     pool_size_str = dask.config.get("rmm.pool-size")
