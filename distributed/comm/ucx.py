@@ -178,6 +178,7 @@ class UCX(Comm):
                 frames = await to_frames(
                     msg, serializers=serializers, on_error=on_error
                 )
+                nframes = len(frames)
                 cuda_frames = tuple(
                     hasattr(f, "__cuda_array_interface__") for f in frames
                 )
@@ -186,10 +187,10 @@ class UCX(Comm):
                 ]
 
                 # Send meta data
-                await self.ep.send(struct.pack("Q", len(frames)))
-                await self.ep.send(struct.pack(len(cuda_frames) * "?", *cuda_frames))
+                await self.ep.send(struct.pack("Q", nframes))
+                await self.ep.send(struct.pack(nframes * "?", *cuda_frames))
                 await self.ep.send(
-                    struct.pack(len(frames) * "Q", *(nbytes(f) for f in frames))
+                    struct.pack(nframes * "Q", *(nbytes(f) for f in frames))
                 )
 
                 # Send frames
