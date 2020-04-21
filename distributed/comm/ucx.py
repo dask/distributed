@@ -222,17 +222,17 @@ class UCX(Comm):
             try:
                 # Recv meta data
                 nframes_fmt = "Q"
-                nframes = bytearray(struct.calcsize(nframes_fmt))
+                nframes = host_array(struct.calcsize(nframes_fmt))
                 await self.ep.recv(nframes)
                 (nframes,) = struct.unpack(nframes_fmt, nframes)
 
                 cuda_frames_fmt = nframes * "?"
-                cuda_frames = bytearray(struct.calcsize(cuda_frames_fmt))
+                cuda_frames = host_array(struct.calcsize(cuda_frames_fmt))
                 await self.ep.recv(cuda_frames)
                 cuda_frames = struct.unpack(cuda_frames_fmt, cuda_frames)
 
                 sizes_fmt = nframes * "Q"
-                sizes = bytearray(struct.calcsize(sizes_fmt))
+                sizes = host_array(struct.calcsize(sizes_fmt))
                 await self.ep.recv(sizes)
                 sizes = struct.unpack(sizes_fmt, sizes)
             except (ucp.exceptions.UCXBaseException, CancelledError):
