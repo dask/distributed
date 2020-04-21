@@ -184,7 +184,9 @@ class UCX(Comm):
                 )
                 sizes = tuple(nbytes(f) for f in frames)
                 send_frames = [
-                    each_frame for each_frame in frames if len(each_frame) > 0
+                    each_frame
+                    for each_frame, each_size in zip(frames, sizes)
+                    if each_size
                 ]
 
                 # Send meta data
