@@ -2,13 +2,14 @@ import asyncio
 import logging
 import threading
 import warnings
+from tornado.ioloop import PeriodicCallback
 
+import dask.config
 from dask.utils import format_bytes
 
 from .adaptive import Adaptive
 
 from ..utils import (
-    PeriodicCallback,
     log_errors,
     ignoring,
     sync,
@@ -16,6 +17,7 @@ from ..utils import (
     Logs,
     thread_state,
     format_dashboard_link,
+    parse_timedelta,
 )
 
 
@@ -319,7 +321,10 @@ class Cluster:
         def update():
             status.value = self._widget_status()
 
-        pc = PeriodicCallback(update, 500, io_loop=self.loop)
+        cluster_repr_interval = parse_timedelta(
+            dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
+        )
+        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
