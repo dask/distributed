@@ -398,22 +398,9 @@ async def geninc(x, delay=0.02):
     return x + 1
 
 
-def compile_snippet(code, dedent=True):
-    if dedent:
-        code = textwrap.dedent(code)
-    code = compile(code, "<dynamic>", "exec")
-    ns = globals()
-    exec(code, ns, ns)
-
-
-compile_snippet(
-    """
-    async def asyncinc(x, delay=0.02):
-        await asyncio.sleep(delay)
-        return x + 1
-    """
-)
-assert asyncinc  # noqa: F821
+async def asyncinc(x, delay=0.02):
+    await asyncio.sleep(delay)
+    return x + 1
 
 
 _readone_queues = {}
