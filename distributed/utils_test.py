@@ -34,6 +34,7 @@ import pytest
 
 import dask
 from tlz import merge, memoize, assoc
+from tornado import gen
 from tornado.ioloop import IOLoop
 
 from . import system
@@ -768,9 +769,11 @@ def gen_test(timeout=10):
     def _(func):
         def test_func():
             with clean() as loop:
-                if not iscoroutinefunction(func):
-                    raise ValueError("@gen_test should wrap async def functions")
-                loop.run_sync(func, timeout=timeout)
+                if iscoroutinefunction(func):
+                    cor = func
+                else:
+                    cor = gen.coroutine(func)
+                loop.run_sync(cor, timeout=timeout)
 
         return test_func
 
@@ -877,10 +880,10 @@ def gen_cluster(
     )
 
     def _(func):
-        def test_func():
-            if not iscoroutinefunction(func):
-                raise ValueError("@gen_cluster should wrap async def functions")
+        if not iscoroutinefunction(func):
+            func = gen.coroutine(func)
 
+        def test_func():
             result = None
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
