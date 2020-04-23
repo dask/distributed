@@ -5,6 +5,7 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
+import itertools
 import logging
 import struct
 import weakref
@@ -35,8 +36,10 @@ logger = logging.getLogger(__name__)
 ucp = None
 host_array = None
 host_concat = None
+host_split = None
 device_array = None
 device_concat = None
+device_split = None
 
 
 def synchronize_stream(stream=0):
@@ -68,6 +71,7 @@ def init_once():
 
         host_array = lambda n: numpy.empty((n,), dtype="u1")
         host_concat = lambda arys: numpy.concatenate(arys, axis=None)
+        host_split = lambda ary, indices: [e.copy() for e in numpy.split(ary, indices)]
     except ImportError:
         host_array = lambda n: bytearray(n)
 
@@ -81,6 +85,20 @@ def init_once():
                     r_view[:each_size] = each_ary[:]
                     r_view = r_view[each_size:]
             return r
+
+        def host_split(a, indices):
+            arys = []
+            a_view = memoryview(a)
+            indices = list(indices)
+            for each_ij in zip([0] + indices, indices + [ary.size]):
+                each_size = each_ij[1] - each_ij[0]
+                each_slice = slice(*each_ij)
+                each_ary = host_array(each_size)
+                if each_size:
+                    each_ary_view = memoryview(each_ary)
+                    each_ary_view[:] = a_view[each_slice]
+                arys.append(each_ary)
+            return arys
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
@@ -119,6 +137,7 @@ def init_once():
         import cupy
 
         device_concat = lambda arys: cupy.concatenate(arys, axis=None)
+        device_split = lambda ary, indices: [e.copy() for e in cupy.split(ary, indices)]
     except ImportError:
         try:
             import numba.cuda
@@ -133,6 +152,21 @@ def init_once():
                         r_view[:each_size] = each_ary[:]
                         r_view = r_view[each_size:]
                 return r
+
+            def device_split(a, indices):
+                arys = []
+                a_view = numba.cuda.as_cuda_array(a)
+                indices = list(indices)
+                for each_ij in zip([0] + indices, indices + [ary.size]):
+                    each_size = each_ij[1] - each_ij[0]
+                    each_slice = slice(*each_ij)
+                    each_ary = device_array(each_size)
+                    if each_size:
+                        each_ary_view = numba.cuda.as_cuda_array(each_ary)
+                        each_ary_view[:] = a_view[each_slice]
+                    arys.append(each_ary)
+                return arys
+
         except ImportError:
 
             def device_concat(n):
@@ -305,20 +339,16 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                host_frames = host_array(
-                    sum(
-                        each_size
-                        for is_cuda, each_size in zip(cuda_frames, sizes)
-                        if not is_cuda
-                    )
-                )
-                device_frames = device_array(
-                    sum(
-                        each_size
-                        for is_cuda, each_size in zip(cuda_frames, sizes)
-                        if is_cuda
-                    )
-                )
+                host_frame_sizes = []
+                device_frames_sizes = []
+                for is_cuda, each_size in zip(cuda_frames, sizes):
+                    if is_cuda:
+                        device_frame_sizes.append(each_size)
+                    else:
+                        host_frame_sizes.append(each_size)
+
+                host_frames = host_array(sum(host_frame_sizes))
+                device_frames = device_array(sum(device_frames_sizes))
 
                 # It is necessary to first populate `frames` with CUDA arrays and synchronize
                 # the default stream before starting receiving to ensure buffers have been allocated
@@ -330,22 +360,34 @@ class UCX(Comm):
                 if nbytes(device_frames):
                     await self.ep.recv(device_frames)
 
-                frames = [
-                    device_array(each_size) if is_cuda else host_array(each_size)
-                    for is_cuda, each_size in zip(cuda_frames, sizes)
-                ]
-                host_frames_view = memoryview(host_frames)
-                device_frames_view = as_device_array(device_frames)
-                for each_frame, is_cuda, each_size in zip(frames, cuda_frames, sizes):
-                    if each_size:
-                        if is_cuda:
-                            each_frame_view = as_device_array(each_frame)
-                            each_frame_view[:] = device_frames_view[:each_size]
-                            device_frames_view = device_frames_view[each_size:]
-                        else:
-                            each_frame_view = memoryview(each_frame)
-                            each_frame_view[:] = host_frames_view[:each_size]
-                            host_frames_view = host_frames_view[each_size:]
+                host_frames = host_split(
+                    host_frames, itertools.accumulate(host_frame_sizes)
+                )
+
+                if len(host_frame_sizes) == 0:
+                    host_frames = []
+                elif len(host_frame_sizes) == 1:
+                    host_frames = [host_frames]
+                else:
+                    host_frames = host_split(
+                        host_frames, itertools.accumulate(host_frame_sizes)
+                    )
+
+                if len(device_frame_sizes) == 0:
+                    device_frames = []
+                elif len(device_frame_sizes) == 1:
+                    device_frames = [device_frames]
+                else:
+                    device_frames = device_split(
+                        device_frames, itertools.accumulate(device_frame_sizes)
+                    )
+
+                frames = []
+                for is_cuda in cuda_frames:
+                    if is_cuda:
+                        frames.append(device_frames.pop(0))
+                    else:
+                        frames.append(host_frames.pop(0))
 
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
