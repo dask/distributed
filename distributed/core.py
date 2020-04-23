@@ -1,5 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
+from collections.abc import Iterable
+import errno
 from functools import partial
 import inspect
 import logging
@@ -305,16 +307,32 @@ class Server:
     async def listen(self, port_or_addr=None, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
+
         if isinstance(port_or_addr, int):
-            addr = unparse_host_port(self.default_ip, port_or_addr)
+            addresses = [unparse_host_port(self.default_ip, port_or_addr)]
         elif isinstance(port_or_addr, tuple):
-            addr = unparse_host_port(*port_or_addr)
+            addresses = [unparse_host_port(*port_or_addr)]
+        elif isinstance(port_or_addr, str):
+            addresses = [port_or_addr]
         else:
-            addr = port_or_addr
-            assert isinstance(addr, str)
-        listener = await listen(
-            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
-        )
+            addresses = port_or_addr
+            assert isinstance(addresses, Iterable)
+        for addr in addresses:
+            try:
+                listener = await listen(
+                    addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
+                )
+            except OSError as e:
+                if len(addresses) > 1 and e.errno == errno.EADDRINUSE:
+                    continue
+                else:
+                    raise e
+            else:
+                break
+        else:
+            raise ValueError(
+                f"Could not start {type(self).__name__} on one of the following addresses: {addresses}"
+            )
         self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):

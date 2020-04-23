@@ -519,7 +519,7 @@ async def test_nanny_port_range(cleanup):
                 ) as n2:
                     assert n2.port == 9868  # Selects next port in range
                     with pytest.raises(
-                        ValueError, match="Could not start nanny"
+                        ValueError, match="Could not start Nanny"
                     ):  # No more ports left
                         async with Nanny(
                             s.address, port=nanny_port, worker_port=worker_port

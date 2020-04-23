@@ -3,7 +3,6 @@ import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
-import errno
 from functools import partial
 import heapq
 from inspect import isawaitable
@@ -30,7 +29,7 @@ from tornado.ioloop import IOLoop
 from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
-from .comm.addressing import address_from_user_args
+from .comm.addressing import addresses_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .http import get_handlers
@@ -1013,32 +1012,16 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        ports = parse_worker_ports(self._start_port)
-        for port in ports:
-            start_address = address_from_user_args(
-                host=self._start_host,
-                port=port,
-                interface=self._interface,
-                protocol=self._protocol,
-                security=self.security,
-            )
-            try:
-                await self.listen(
-                    start_address, **self.security.get_listen_args("worker")
-                )
-            except OSError as e:
-                if len(ports) > 1 and e.errno == errno.EADDRINUSE:
-                    continue
-                else:
-                    raise e
-            else:
-                self._start_address = start_address
-                break
-        else:
-            raise ValueError(
-                f"Could not start worker on host {self._start_host}"
-                f"with port {self._start_port}"
-            )
+        self._start_address = addresses_from_user_args(
+            host=self._start_host,
+            port=parse_worker_ports(self._start_port),
+            interface=self._interface,
+            protocol=self._protocol,
+            security=self.security,
+        )
+        await self.listen(
+            self._start_address, **self.security.get_listen_args("worker")
+        )
 
         # Start HTTP server associated with this Worker node
         routes = get_handlers(

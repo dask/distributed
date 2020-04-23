@@ -104,7 +104,7 @@ def test_nanny_worker_port_range_too_many_workers_raises(loop):
             ]
         ) as worker:
             assert any(
-                b"Could not start worker" in worker.stderr.readline()
+                b"Could not start Worker" in worker.stderr.readline()
                 for _ in range(100)
             )
 
