@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 # variables to be set before being imported.
 ucp = None
 host_array = None
+host_concat = None
 device_array = None
-as_device_array = None
+device_concat = None
 
 
 def synchronize_stream(stream=0):
@@ -48,7 +49,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array, as_device_array
+    global ucp, host_array, host_concat, device_array, device_concat
     if ucp is not None:
         return
 
@@ -66,8 +67,20 @@ def init_once():
         import numpy
 
         host_array = lambda n: numpy.empty((n,), dtype="u1")
+        host_concat = lambda arys: numpy.concatenate(arys, axis=None)
     except ImportError:
         host_array = lambda n: bytearray(n)
+
+        def host_concat(arys):
+            arys = [memoryview(a) for a in arys]
+            sizes = [nbytes(a) for a in arys]
+            r = host_array(sum(sizes))
+            r_view = memoryview(r)
+            for each_ary, each_size in zip(arys, sizes):
+                if each_size:
+                    r_view[:each_size] = each_ary[:]
+                    r_view = r_view[each_size:]
+            return r
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
@@ -105,15 +118,24 @@ def init_once():
     try:
         import cupy
 
-        as_device_array = lambda a: cupy.asarray(a)
+        device_concat = lambda arys: cupy.concatenate(arys, axis=None)
     except ImportError:
         try:
             import numba.cuda
 
-            as_device_array = lambda a: numba.cuda.as_cuda_array(a)
+            def device_concat(arys):
+                arys = [numba.cuda.as_cuda_array(a) for a in arys]
+                sizes = [nbytes(a) for a in arys]
+                r = device_array(sum(sizes))
+                r_view = r[:]
+                for each_ary, each_size in zip(arys, sizes):
+                    if each_size:
+                        r_view[:each_size] = each_ary[:]
+                        r_view = r_view[each_size:]
+                return r
         except ImportError:
 
-            def as_device_array(n):
+            def device_concat(n):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, CuPy or Numba is required"
                 )
@@ -197,45 +219,33 @@ class UCX(Comm):
                     msg, serializers=serializers, on_error=on_error
                 )
                 nframes = len(frames)
-                cuda_frames = tuple(
-                    hasattr(f, "__cuda_array_interface__") for f in frames
-                )
-                sizes = tuple(nbytes(f) for f in frames)
 
-                host_frames = host_array(0)
-                device_frames = device_array(0)
-                if nframes == 1:
-                    if cuda_frames[0]:
-                        device_frames = frames[0]
+                cuda_frames = []
+                sizes = []
+                device_frames = []
+                host_frames = []
+                for each_frame in frames:
+                    is_cuda = hasattr(each_frame, "__cuda_array_interface__")
+                    cuda_frames.append(is_cuda)
+                    sizes.append(nbytes(each_frame))
+                    if is_cuda:
+                        device_frames.append(each_frame)
                     else:
-                        host_frames = frames[0]
-                elif nframes > 1:
-                    host_frames_size = 0
-                    device_frames_size = 0
-                    for is_cuda, each_size in zip(cuda_frames, sizes):
-                        if is_cuda:
-                            device_frames_size += each_size
-                        else:
-                            host_frames_size += each_size
+                        host_frames.append(each_frame)
 
-                    host_frames = host_array(host_frames_size)
-                    device_frames = device_array(device_frames_size)
+                if len(device_frames) == 0:
+                    device_frames = device_array(0)
+                elif len(device_frames) == 1:
+                    device_frames = device_frames[0]
+                else:
+                    device_frames = device_concat(device_frames)
 
-                    # Pack frames
-                    host_frames_view = memoryview(host_frames)
-                    device_frames_view = as_device_array(device_frames)
-                    for each_frame, is_cuda, each_size in zip(
-                        frames, cuda_frames, sizes
-                    ):
-                        if each_size:
-                            if is_cuda:
-                                each_frame_view = as_device_array(each_frame)
-                                device_frames_view[:each_size] = each_frame_view[:]
-                                device_frames_view = device_frames_view[each_size:]
-                            else:
-                                each_frame_view = memoryview(each_frame).cast("B")
-                                host_frames_view[:each_size] = each_frame_view[:]
-                                host_frames_view = host_frames_view[each_size:]
+                if len(host_frames) == 0:
+                    host_frames = host_array(0)
+                elif len(host_frames) == 1:
+                    host_frames = host_frames[0]
+                else:
+                    host_frames = host_concat(host_frames)
 
                 # Send meta data
 
