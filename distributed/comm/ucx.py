@@ -201,20 +201,17 @@ class UCX(Comm):
                     hasattr(f, "__cuda_array_interface__") for f in frames
                 )
                 sizes = tuple(nbytes(f) for f in frames)
-                host_frames = host_array(
-                    sum(
-                        each_size
-                        for is_cuda, each_size in zip(cuda_frames, sizes)
-                        if not is_cuda
-                    )
-                )
-                device_frames = device_array(
-                    sum(
-                        each_size
-                        for is_cuda, each_size in zip(cuda_frames, sizes)
-                        if is_cuda
-                    )
-                )
+
+                host_frames_size = 0
+                device_frames_size = 0
+                for is_cuda, each_size in zip(cuda_frames, sizes):
+                    if is_cuda:
+                        device_frames_size += each_size
+                    else:
+                        host_frames_size += each_size
+
+                host_frames = host_array(host_frames_size)
+                device_frames = device_array(device_frames_size)
 
                 # Pack frames
                 host_frames_view = memoryview(host_frames)
