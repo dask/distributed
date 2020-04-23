@@ -406,17 +406,14 @@ def compile_snippet(code, dedent=True):
     exec(code, ns, ns)
 
 
-if sys.version_info >= (3, 5):
-    compile_snippet(
-        """
-        async def asyncinc(x, delay=0.02):
-            await asyncio.sleep(delay)
-            return x + 1
-        """
-    )
-    assert asyncinc  # noqa: F821
-else:
-    asyncinc = None
+compile_snippet(
+    """
+    async def asyncinc(x, delay=0.02):
+        await asyncio.sleep(delay)
+        return x + 1
+    """
+)
+assert asyncinc  # noqa: F821
 
 
 _readone_queues = {}
@@ -1004,12 +1001,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            if sys.version_info[0] == 3:
-                proc.wait(10)
-            else:
-                start = time()
-                while proc.poll() is None and time() < start + 10:
-                    sleep(0.02)
+            proc.wait(10)
         finally:
             # Make sure we don't leave the process lingering around
             with ignoring(OSError):

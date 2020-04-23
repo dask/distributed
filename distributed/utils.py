@@ -1039,10 +1039,7 @@ def import_file(path):
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
             sys.path.insert(0, path)
-        if sys.version_info >= (3, 6):
-            names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
-        else:
-            names = (mod_info[1] for mod_info in pkgutil.iter_modules([path]))
+        names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
     loaded = []
@@ -1285,11 +1282,7 @@ def color_of(x, palette=palette):
 
 
 def iscoroutinefunction(f):
-    if gen.is_coroutine_function(f):
-        return True
-    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
-        return True
-    return False
+    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager
