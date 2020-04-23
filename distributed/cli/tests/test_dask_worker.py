@@ -93,19 +93,18 @@ def test_nanny_worker_port_range_too_many_workers_raises(loop):
                 "dask-worker",
                 "127.0.0.1:9359",
                 "--nprocs",
-                "7",
+                "3",
                 "--host",
                 "127.0.0.1",
                 "--worker-port",
-                "9684:9687",
+                "9684:9685",
                 "--nanny-port",
-                "9688:9702",
+                "9686:9687",
                 "--no-dashboard",
             ]
         ) as worker:
             assert any(
-                b"Could not start Worker" in worker.stderr.readline()
-                for _ in range(100)
+                b"Could not start" in worker.stderr.readline() for _ in range(100)
             )
 
 
