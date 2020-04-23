@@ -202,30 +202,40 @@ class UCX(Comm):
                 )
                 sizes = tuple(nbytes(f) for f in frames)
 
-                host_frames_size = 0
-                device_frames_size = 0
-                for is_cuda, each_size in zip(cuda_frames, sizes):
-                    if is_cuda:
-                        device_frames_size += each_size
+                host_frames = host_array(0)
+                device_frames = device_array(0)
+                if nframes == 1:
+                    if cuda_frames[0]:
+                        device_frames = frames[0]
                     else:
-                        host_frames_size += each_size
-
-                host_frames = host_array(host_frames_size)
-                device_frames = device_array(device_frames_size)
-
-                # Pack frames
-                host_frames_view = memoryview(host_frames)
-                device_frames_view = as_device_array(device_frames)
-                for each_frame, is_cuda, each_size in zip(frames, cuda_frames, sizes):
-                    if each_size:
+                        host_frames = frames[0]
+                elif nframes > 1:
+                    host_frames_size = 0
+                    device_frames_size = 0
+                    for is_cuda, each_size in zip(cuda_frames, sizes):
                         if is_cuda:
-                            each_frame_view = as_device_array(each_frame)
-                            device_frames_view[:each_size] = each_frame_view[:]
-                            device_frames_view = device_frames_view[each_size:]
+                            device_frames_size += each_size
                         else:
-                            each_frame_view = memoryview(each_frame).cast("B")
-                            host_frames_view[:each_size] = each_frame_view[:]
-                            host_frames_view = host_frames_view[each_size:]
+                            host_frames_size += each_size
+
+                    host_frames = host_array(host_frames_size)
+                    device_frames = device_array(device_frames_size)
+
+                    # Pack frames
+                    host_frames_view = memoryview(host_frames)
+                    device_frames_view = as_device_array(device_frames)
+                    for each_frame, is_cuda, each_size in zip(
+                        frames, cuda_frames, sizes
+                    ):
+                        if each_size:
+                            if is_cuda:
+                                each_frame_view = as_device_array(each_frame)
+                                device_frames_view[:each_size] = each_frame_view[:]
+                                device_frames_view = device_frames_view[each_size:]
+                            else:
+                                each_frame_view = memoryview(each_frame).cast("B")
+                                host_frames_view[:each_size] = each_frame_view[:]
+                                host_frames_view = host_frames_view[each_size:]
 
                 # Send meta data
 
