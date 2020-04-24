@@ -30,10 +30,11 @@ from .utils import (
     json_load_robust,
     PeriodicCallback,
     parse_timedelta,
+    parse_ports,
     ignoring,
     TimeoutError,
 )
-from .worker import run, parse_memory_limit, Worker, parse_worker_ports
+from .worker import run, parse_memory_limit, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +259,7 @@ class Nanny(ServerNode):
 
         _start_addresses = addresses_from_user_args(
             host=self._start_host,
-            port=parse_worker_ports(self._start_port),
+            port=parse_ports(self._start_port),
             interface=self._interface,
             protocol=self._protocol,
             security=self.security,

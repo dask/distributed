@@ -12,10 +12,9 @@ from time import sleep
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
 from distributed.metrics import time
-from distributed.utils import sync, tmpfile
+from distributed.utils import sync, tmpfile, parse_ports
 from distributed.utils_test import popen, terminate_process, wait_for_port
 from distributed.utils_test import loop, cleanup  # noqa: F401
-from distributed.worker import parse_worker_ports
 
 
 def test_nanny_worker_ports(loop):
@@ -77,11 +76,11 @@ def test_nanny_worker_port_range(loop):
                 def get_port(dask_worker):
                     return dask_worker.port
 
-                expected_worker_ports = set(parse_worker_ports(worker_port))
+                expected_worker_ports = set(parse_ports(worker_port))
                 worker_ports = c.run(get_port)
                 assert set(worker_ports.values()) == expected_worker_ports
 
-                expected_nanny_ports = set(parse_worker_ports(nanny_port))
+                expected_nanny_ports = set(parse_ports(nanny_port))
                 nanny_ports = c.run(get_port, nanny=True)
                 assert set(nanny_ports.values()) == expected_nanny_ports
 

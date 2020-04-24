@@ -38,7 +38,6 @@ from distributed.worker import (
     error_message,
     logger,
     parse_memory_limit,
-    parse_worker_ports,
 )
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
@@ -339,16 +338,6 @@ async def test_worker_port_range(cleanup):
                 ):  # No more ports left
                     async with Worker(s.address, port=port):
                         pass
-
-
-def test_parse_worker_ports():
-    assert parse_worker_ports(None) == [None]
-    assert parse_worker_ports(23) == [23]
-    assert parse_worker_ports("45") == [45]
-    assert parse_worker_ports("100:103") == [100, 101, 102, 103]
-
-    with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
-        parse_worker_ports("103:100")
 
 
 @pytest.mark.slow

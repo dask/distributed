@@ -58,6 +58,7 @@ from .utils import (
     PeriodicCallback,
     parse_bytes,
     parse_timedelta,
+    parse_ports,
     iscoroutinefunction,
     warn_on_duration,
     LRU,
@@ -1014,7 +1015,7 @@ class Worker(ServerNode):
 
         _start_addresses = addresses_from_user_args(
             host=self._start_host,
-            port=parse_worker_ports(self._start_port),
+            port=parse_ports(self._start_port),
             interface=self._interface,
             protocol=self._protocol,
             security=self.security,
@@ -3191,25 +3192,6 @@ def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
         memory_limit = int(memory_limit)
 
     return min(memory_limit, system.MEMORY_LIMIT)
-
-
-def parse_worker_ports(port):
-    if isinstance(port, str) and ":" not in port:
-        port = int(port)
-
-    if isinstance(port, (int, type(None))):
-        port = [port]
-    else:
-        port_start, port_stop = map(int, port.split(":"))
-        if port_stop <= port_start:
-            raise ValueError(
-                "When specifying a range of ports like port_start:port_stop, "
-                "port_stop must be greater than port_start, but got "
-                f"port_start={port_start} and port_stop={port_stop}"
-            )
-        port = list(range(port_start, port_stop + 1))
-
-    return port
 
 
 async def get_data_from_worker(

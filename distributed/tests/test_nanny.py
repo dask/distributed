@@ -19,7 +19,7 @@ from distributed import Nanny, rpc, Scheduler, Worker, Client, wait
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import ignoring, tmpfile, TimeoutError
+from distributed.utils import ignoring, tmpfile, TimeoutError, parse_ports
 from distributed.utils_test import (  # noqa: F401
     gen_cluster,
     gen_test,
@@ -27,7 +27,6 @@ from distributed.utils_test import (  # noqa: F401
     captured_logger,
     cleanup,
 )
-from distributed.worker import parse_worker_ports
 
 
 @gen_cluster(nthreads=[])
@@ -531,6 +530,4 @@ async def test_nanny_port_range(cleanup):
                         return dask_worker.port
 
                     worker_ports = await client.run(get_worker_port)
-                    assert list(worker_ports.values()) == parse_worker_ports(
-                        worker_port
-                    )
+                    assert list(worker_ports.values()) == parse_ports(worker_port)
