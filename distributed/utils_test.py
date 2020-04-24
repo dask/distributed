@@ -18,7 +18,6 @@ import socket
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 from time import sleep
 import uuid

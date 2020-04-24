@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import functools
 from hashlib import md5
 import html
-import inspect
 import json
 import logging
 import multiprocessing
