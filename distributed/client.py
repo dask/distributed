@@ -2621,7 +2621,7 @@ class Client(Node):
             actors=actors,
         )
 
-        for key in keys:
+        for key in set(flatten([keys])):
             if not key in dict(dsk):
                 raise KeyError("Key '%s' not found in the dask graph" % key)
 
