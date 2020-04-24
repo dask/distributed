@@ -628,7 +628,7 @@ def test_get_sync(c):
     try:
         c.get({"y": (inc, 1)}, "z")
     except Exception as e:
-        assert "KeyError" in str(e)
+        assert "not found in the dask graph" in str(e)
 
 
 def test_no_future_references(c):
