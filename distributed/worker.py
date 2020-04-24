@@ -1012,15 +1012,15 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        self._start_address = addresses_from_user_args(
+        _start_addresses = addresses_from_user_args(
             host=self._start_host,
             port=parse_worker_ports(self._start_port),
             interface=self._interface,
             protocol=self._protocol,
             security=self.security,
         )
-        await self.listen(
-            self._start_address, **self.security.get_listen_args("worker")
+        self._start_address = await self.listen(
+            _start_addresses, **self.security.get_listen_args("worker")
         )
 
         # Start HTTP server associated with this Worker node

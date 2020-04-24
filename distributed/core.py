@@ -334,6 +334,7 @@ class Server:
                 f"Could not start {type(self).__name__} on one of the following addresses: {addresses}"
             )
         self.listeners.append(listener)
+        return addr
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
         """ Dispatch new communications to coroutine-handlers
