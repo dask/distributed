@@ -2620,6 +2620,11 @@ class Client(Node):
             user_priority=priority,
             actors=actors,
         )
+
+        for key in keys:
+            if not key in dict(dsk):
+                raise KeyError("Key '%s' not found in the dask graph" % key)
+
         packed = pack_data(keys, futures)
         if sync:
             if getattr(thread_state, "key", False):

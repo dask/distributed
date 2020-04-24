@@ -625,6 +625,10 @@ async def test_get(c, s, a, b):
 
 def test_get_sync(c):
     assert c.get({"x": (inc, 1)}, "x") == 2
+    try:
+        c.get({"y": (inc, 1)}, "z")
+    except Exception as e:
+        assert "KeyError" in str(e)
 
 
 def test_no_future_references(c):
