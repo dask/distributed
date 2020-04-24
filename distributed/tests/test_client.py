@@ -625,10 +625,13 @@ async def test_get(c, s, a, b):
 
 def test_get_sync(c):
     assert c.get({"x": (inc, 1)}, "x") == 2
-    try:
-        c.get({"y": (inc, 1)}, "z")
-    except Exception as e:
-        assert "not found in the dask graph" in str(e)
+
+
+def test_get_unknown_key(c):
+    result = delayed(add)(1, 2)
+    graph = result.__dask_graph__()
+    with pytest.raises(KeyError):
+        c.get(graph, ["does_not_exist"])
 
 
 def test_no_future_references(c):

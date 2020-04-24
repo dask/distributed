@@ -2609,9 +2609,15 @@ class Client(Node):
         --------
         Client.compute: Compute asynchronous collections
         """
+        keys_flatten = set(flatten([keys]))
+
+        for key in keys_flatten:
+            if key not in dsk:
+                raise KeyError("Key '%s' not found in the dask graph" % key)
+
         futures = self._graph_to_futures(
             dsk,
-            keys=set(flatten([keys])),
+            keys=keys_flatten,
             restrictions=restrictions,
             loose_restrictions=loose_restrictions,
             resources=resources,
@@ -2620,10 +2626,6 @@ class Client(Node):
             user_priority=priority,
             actors=actors,
         )
-
-        for key in set(flatten([keys])):
-            if not key in dict(dsk):
-                raise KeyError("Key '%s' not found in the dask graph" % key)
 
         packed = pack_data(keys, futures)
         if sync:
