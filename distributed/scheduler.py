@@ -1815,7 +1815,11 @@ class Scheduler(ServerNode):
                 if any(
                     dep not in self.tasks and dep not in tasks for dep in deps
                 ):  # bad key
-                    logger.info("User asked for computation on lost data, %s", k)
+                    logger.info(
+                        "User asked for computation %s lost data %s",
+                        k,
+                        [dep for dep in deps if dep not in self.tasks],
+                    )
                     del tasks[k]
                     del dependencies[k]
                     if k in keys:
