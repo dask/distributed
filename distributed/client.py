@@ -1985,6 +1985,7 @@ class Client(Node):
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
 
+        out = {k: Future(k, self, inform=False) for k in data}
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
 
@@ -2024,7 +2025,6 @@ class Client(Node):
                     timeout=timeout,
                 )
 
-        out = {k: Future(k, self, inform=False) for k in data}
         for key, typ in types.items():
             self.futures[key].finish(type=typ)
 
