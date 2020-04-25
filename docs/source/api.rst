@@ -43,6 +43,7 @@ API
    Client.submit
    Client.unpublish_dataset
    Client.upload_file
+   Client.wait_for_workers
    Client.who_has
 
 .. currentmodule:: distributed
@@ -193,6 +194,8 @@ Other
 .. autoclass:: get_task_stream
 
 .. autoclass:: Lock
+   :members:
+.. autoclass:: Semaphore
    :members:
 .. autoclass:: Queue
    :members:

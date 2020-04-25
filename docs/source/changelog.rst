@@ -1,6 +1,73 @@
 Changelog
 =========
 
+2.15.0 - 2020-04-24
+-------------------
+
+- Reinstate support for legacy ``@gen_cluster`` functions (:pr:`3738`) `crusaderky`_
+- Relax NumPy requirement in UCX (:pr:`3731`) `jakirkham`_
+- Add Configuration Schema (:pr:`3696`) `Matthew Rocklin`_
+- Reuse CI scripts for local installation process (:pr:`3698`) `crusaderky`_
+- Use ``PeriodicCallback`` class from tornado (:pr:`3725`) `James Bourbeau`_
+- Add ``remote_python`` option in ssh cmd (:pr:`3709`) `Abdulelah Bin Mahfoodh`_
+- Configurable polling interval for cluster widget (:pr:`3723`) `Julia Signell`_
+- Fix copy-paste in docs (:pr:`3728`) `Julia Signell`_
+- Replace ``gen.coroutine`` with async-await in tests (:pr:`3706`) `crusaderky`_
+- Fix flaky ``test_oversubscribing_leases`` (:pr:`3726`) `Florian Jetter`_
+- Add ``batch_size`` to ``Client.map`` (:pr:`3650`) `Tom Augspurger`_
+- Adjust semaphore test timeouts (:pr:`3720`) `Florian Jetter`_
+- Dask-serialize dicts longer than five elements (:pr:`3689`) `Richard J Zamora`_
+- Force ``threads_per_worker`` (:pr:`3715`) `crusaderky`_
+- Idempotent semaphore acquire with retries (:pr:`3690`) `Florian Jetter`_
+- Always use ``readinto`` in TCP (:pr:`3711`) `jakirkham`_
+- Avoid ``DeprecationWarning`` from pandas (:pr:`3712`) `Tom Augspurger`_
+- Allow modification of ``distributed.comm.retry`` at runtime (:pr:`3705`) `Florian Jetter`_
+- Do not log an error on unset variable delete (:pr:`3652`) `Jonathan J. Helmus`_
+- Add ``remote_python`` keyword to the new ``SSHCluster`` (:pr:`3701`) `Abdulelah Bin Mahfoodh`_
+- Replace Example with Examples in docstrings (:pr:`3697`) `Matthew Rocklin`_
+- Add ``Cluster`` ``__enter__`` and ``__exit__`` methods (:pr:`3699`) `Matthew Rocklin`_
+- Fix propagating inherit config in ``SSHCluster`` for non-bash shells (:pr:`3688`) `Abdulelah Bin Mahfoodh`_
+- Add ``Client.wait_to_workers`` to ``Client`` autosummary table (:pr:`3692`) `James Bourbeau`_
+- Replace Bokeh Server with Tornado HTTPServer (:pr:`3658`) `Matthew Rocklin`_
+- Fix ``dask-ssh`` after removing ``local-directory`` from ``dask_scheduler`` cli (:pr:`3684`) `Abdulelah Bin Mahfoodh`_
+- Support preload modules in ``Nanny`` (:pr:`3678`) `Matthew Rocklin`_
+- Refactor semaphore internals: make ``_get_lease`` synchronous (:pr:`3679`) `Lucas Rademaker`_
+- Don't make task graphs too big (:pr:`3671`) `Martin Durant`_
+- Pass through ``connection``/``listen_args`` as splatted keywords (:pr:`3674`) `Matthew Rocklin`_
+- Run preload at import, start, and teardown (:pr:`3673`) `Matthew Rocklin`_
+- Use relative URL in scheduler dashboard (:pr:`3676`) `Nicholas Smith`_
+- Expose ``Security`` object as public API (:pr:`3675`) `Matthew Rocklin`_
+- Add zoom tools to profile plots (:pr:`3672`) `James Bourbeau`_
+- Update ``Scheduler.rebalance`` return value when data is missing (:pr:`3670`) `James Bourbeau`_
+
+
+2.14.0 - 2020-04-03
+-------------------
+
+- Enable more UCX tests (:pr:`3667`) `jakirkham`_
+- Remove openssl 1.1.1d pin for Travis (:pr:`3668`) `Jonathan J. Helmus`_
+- More documentation for ``Semaphore`` (:pr:`3664`) `Florian Jetter`_
+- Get CUDA context to finalize Numba ``DeviceNDArray`` (:pr:`3666`) `jakirkham`_
+- Add Resouces option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
+- Add ``Semaphore`` extension (:pr:`3573`) `Lucas Rademaker`_
+- Replace ``ncores`` with ``nthreads`` in work stealing tests (:pr:`3615`) `James Bourbeau`_
+- Clean up some test warnings (:pr:`3662`) `Matthew Rocklin`_
+- Write "why killed" docs (:pr:`3596`) `Martin Durant`_
+- Update Python version checking (:pr:`3660`) `James Bourbeau`_
+- Add newlines to ensure code formatting for ``retire_workers`` (:pr:`3661`) `Rami Chowdhury`_
+- Clean up performance report test (:pr:`3655`) `Matthew Rocklin`_
+- Avoid diagnostics time in performance report (:pr:`3654`) `Matthew Rocklin`_
+- Introduce config for default task duration (:pr:`3642`) `Gabriel Sailer`_
+- UCX simplify receiving frames in ``comm`` (:pr:`3651`) `jakirkham`_
+- Bump checkout GitHub action to v2 (:pr:`3649`) `James Bourbeau`_
+- Handle exception in ``faulthandler`` (:pr:`3646`) `Jacob Tomlinson`_
+- Add prometheus metric for suspicious tasks (:pr:`3550`) `Gabriel Sailer`_
+- Remove ``local-directory`` keyword (:pr:`3620`) `Prasun Anand`_
+- Don't create output Futures in Client when there are mixed Client Futures (:pr:`3643`) `James Bourbeau`_
+- Add link to ``contributing.md`` (:pr:`3621`) `Prasun Anand`_
+- Update bokeh dependency in CI builds (:pr:`3637`) `James Bourbeau`_
+
+
 2.13.0 - 2020-03-25
 -------------------
 
@@ -1641,3 +1708,9 @@ significantly without many new features.
 .. _`Matthias Urlichs`: https://github.com/smurfix
 .. _`Krishan Bhasin`: https://github.com/KrishanBhasin
 .. _`Abdulelah Bin Mahfoodh`: https://github.com/abduhbm
+.. _`jakirkham`: https://github.com/jakirkham
+.. _`Prasun Anand`: https://github.com/prasunanand
+.. _`Jonathan J. Helmus`: https://github.com/jjhelmus
+.. _`Rami Chowdhury`: https://github.com/necaris
+.. _`crusaderky`: https://github.com/crusaderky
+.. _`Nicholas Smith`: https://github.com/nsmith-

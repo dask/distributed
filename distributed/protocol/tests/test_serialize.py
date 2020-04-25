@@ -21,6 +21,7 @@ from distributed.protocol import (
     register_serialization_family,
     dask_serialize,
 )
+from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
 from distributed.utils_test import inc, gen_test
 from distributed.comm.utils import to_frames, from_frames
@@ -119,34 +120,34 @@ from dask import delayed
 
 
 @gen_cluster(client=True)
-def test_object_in_graph(c, s, a, b):
+async def test_object_in_graph(c, s, a, b):
     o = MyObj(123)
     v = delayed(o)
     v2 = delayed(identity)(v)
 
     future = c.compute(v2)
-    result = yield future
+    result = await future
 
     assert isinstance(result, MyObj)
     assert result.data == 123
 
 
 @gen_cluster(client=True)
-def test_scatter(c, s, a, b):
+async def test_scatter(c, s, a, b):
     o = MyObj(123)
-    [future] = yield c._scatter([o])
-    yield c._replicate(o)
-    o2 = yield c._gather(future)
+    [future] = await c._scatter([o])
+    await c._replicate(o)
+    o2 = await c._gather(future)
     assert isinstance(o2, MyObj)
     assert o2.data == 123
 
 
 @gen_cluster(client=True)
-def test_inter_worker_comms(c, s, a, b):
+async def test_inter_worker_comms(c, s, a, b):
     o = MyObj(123)
-    [future] = yield c._scatter([o], workers=a.address)
+    [future] = await c._scatter([o], workers=a.address)
     future2 = c.submit(identity, future, workers=b.address)
-    o2 = yield c._gather(future2)
+    o2 = await c._gather(future2)
     assert isinstance(o2, MyObj)
     assert o2.data == 123
 
@@ -248,14 +249,14 @@ def test_errors():
 
 
 @gen_test()
-def test_err_on_bad_deserializer():
-    frames = yield to_frames({"x": to_serialize(1234)}, serializers=["pickle"])
+async def test_err_on_bad_deserializer():
+    frames = await to_frames({"x": to_serialize(1234)}, serializers=["pickle"])
 
-    result = yield from_frames(frames, deserializers=["pickle", "foo"])
+    result = await from_frames(frames, deserializers=["pickle", "foo"])
     assert result == {"x": 1234}
 
-    with pytest.raises(TypeError) as info:
-        yield from_frames(frames, deserializers=["msgpack"])
+    with pytest.raises(TypeError):
+        await from_frames(frames, deserializers=["msgpack"])
 
 
 class MyObject:
@@ -289,7 +290,7 @@ def my_loads(header, frames):
     client_kwargs={"serializers": ["my-ser", "pickle"]},
     worker_kwargs={"serializers": ["my-ser", "pickle"]},
 )
-def test_context_specific_serialization(c, s, a, b):
+async def test_context_specific_serialization(c, s, a, b):
     register_serialization_family("my-ser", my_dumps, my_loads)
 
     try:
@@ -297,7 +298,7 @@ def test_context_specific_serialization(c, s, a, b):
         x = c.submit(MyObject, x=1, y=2, workers=a.address)
         y = c.submit(lambda x: x, x, workers=b.address)
 
-        yield wait(y)
+        await wait(y)
 
         key = y.key
 
@@ -306,11 +307,11 @@ def test_context_specific_serialization(c, s, a, b):
             my_obj = dask_worker.data[key]
             return my_obj.context
 
-        result = yield c.run(check, workers=[b.address])
+        result = await c.run(check, workers=[b.address])
         expected = {"sender": a.address, "recipient": b.address}
         assert result[b.address]["sender"] == a.address  # see origin worker
 
-        z = yield y  # bring object to local process
+        z = await y  # bring object to local process
 
         assert z.x == 1 and z.y == 2
         assert z.context["sender"] == b.address
@@ -321,14 +322,14 @@ def test_context_specific_serialization(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_context_specific_serialization_class(c, s, a, b):
+async def test_context_specific_serialization_class(c, s, a, b):
     register_serialization(MyObject, my_dumps, my_loads)
 
     # Create the object on A, force communication to B
     x = c.submit(MyObject, x=1, y=2, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
 
-    yield wait(y)
+    await wait(y)
 
     key = y.key
 
@@ -337,11 +338,11 @@ def test_context_specific_serialization_class(c, s, a, b):
         my_obj = dask_worker.data[key]
         return my_obj.context
 
-    result = yield c.run(check, workers=[b.address])
+    result = await c.run(check, workers=[b.address])
     expected = {"sender": a.address, "recipient": b.address}
     assert result[b.address]["sender"] == a.address  # see origin worker
 
-    z = yield y  # bring object to local process
+    z = await y  # bring object to local process
 
     assert z.x == 1 and z.y == 2
     assert z.context["sender"] == b.address
@@ -388,3 +389,42 @@ def test_compression_numpy_list():
 
     header, frames = serialize([MyObj(), MyObj()])
     assert header["compression"] == [False, False]
+
+
+@pytest.mark.parametrize(
+    "data,is_serializable",
+    [
+        ([], False),
+        ({}, False),
+        ({i: i for i in range(10)}, False),
+        (set(range(10)), False),
+        (tuple(range(100)), False),
+        ({"x": MyObj(5)}, True),
+        ({"x": {"y": MyObj(5)}}, True),
+        pytest.param(
+            [1, MyObj(5)],
+            True,
+            marks=pytest.mark.xfail(reason="Only checks 0th element for now."),
+        ),
+        ([MyObj([0, 1, 2]), 1], True),
+        (tuple([MyObj(None)]), True),
+        ({("x", i): MyObj(5) for i in range(100)}, True),
+    ],
+)
+def test_check_dask_serializable(data, is_serializable):
+    result = check_dask_serializable(data)
+    expected = is_serializable
+
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "serializers",
+    [["msgpack"], ["pickle"], ["msgpack", "pickle"], ["pickle", "msgpack"]],
+)
+def test_serialize_lists(serializers):
+    data_in = ["a", 2, "c", None, "e", 6]
+    header, frames = serialize(data_in, serializers=serializers)
+    data_out = deserialize(header, frames)
+
+    assert data_in == data_out

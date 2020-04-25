@@ -268,12 +268,12 @@ class SpecCluster(Cluster):
 
         if self.scheduler_spec is None:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard  # noqa: F401
             except ImportError:
-                services = {}
+                pass
             else:
-                services = {("dashboard", 8787): BokehScheduler}
-            self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
+                options = {"dashboard": True}
+            self.scheduler_spec = {"cls": Scheduler, "options": options}
 
         cls = self.scheduler_spec["cls"]
         if isinstance(cls, str):
@@ -396,13 +396,14 @@ class SpecCluster(Cluster):
 
         await super()._close()
 
-    def __enter__(self):
-        self.sync(self._correct_state)
+    async def __aenter__(self):
+        await self
+        await self._correct_state()
         assert self.status == "running"
         return self
 
     def __exit__(self, typ, value, traceback):
-        self.close()
+        super().__exit__(typ, value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
@@ -550,7 +551,7 @@ class SpecCluster(Cluster):
         minimum_memory : str
             Minimum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
-        maximum_cores : int
+        maximum_memory : str
             Maximum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
 
