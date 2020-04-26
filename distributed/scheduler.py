@@ -2523,11 +2523,27 @@ class Scheduler(ServerNode):
             bcomm.start(comm)
             self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
+            scheduler_versions = version_module.get_versions()
             version_warning = version_module.error_message(
-                version_module.get_versions(),
+                scheduler_versions,
                 {w: ws.versions for w, ws in self.workers.items()},
                 versions,
             )
+            # NOTE: whether or not this throws or merely warns should be
+            # configurable. It would also be great to have an error on
+            # a major version mismatch, which could cause errors.
+            client_versions = versions
+            if client_versions:
+                from .protocol import compression
+
+                if not client_versions.get(compression.default_compression, None):
+                    version_warning = version_warning or ""
+                    version_warning += """
+
+DANGER! The scheduler's default compression method is not available
+in this client! You may not be able to receive large result sets!
+                    """
+
             if version_warning:
                 msg["warning"] = version_warning
             bcomm.send(msg)
