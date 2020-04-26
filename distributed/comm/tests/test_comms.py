@@ -9,7 +9,7 @@ import warnings
 import pkg_resources
 import pytest
 
-from tornado import ioloop, queues
+from tornado import ioloop
 from tornado.concurrent import Future
 
 import distributed
@@ -77,18 +77,15 @@ tls_kwargs = dict(
 
 
 @pytest.mark.asyncio
-async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwargs):
-    q = queues.Queue()
+async def get_comm_pair(listen_addr, listen_args={}, connect_args={}, **kwargs):
+    q = asyncio.Queue()
 
-    def handle_comm(comm):
-        q.put(comm)
+    async def handle_comm(comm):
+        await q.put(comm)
 
-    listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
-    await listener.start()
+    listener = await listen(listen_addr, handle_comm, **listen_args, **kwargs)
 
-    comm = await connect(
-        listener.contact_address, connection_args=connect_args, **kwargs
-    )
+    comm = await connect(listener.contact_address, **connect_args, **kwargs)
     serv_comm = await q.get()
     return (comm, serv_comm)
 
@@ -221,8 +218,7 @@ async def test_tcp_specific():
         await comm.write(msg)
         await comm.close()
 
-    listener = tcp.TCPListener("localhost", handle_comm)
-    await listener.start()
+    listener = await tcp.TCPListener("localhost", handle_comm)
     host, port = listener.get_host_port()
     assert host in ("localhost", "127.0.0.1", "::1")
     assert port > 0
@@ -269,8 +265,7 @@ async def test_tls_specific():
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
 
-    listener = tcp.TLSListener("localhost", handle_comm, ssl_context=server_ctx)
-    await listener.start()
+    listener = await tcp.TLSListener("localhost", handle_comm, ssl_context=server_ctx)
     host, port = listener.get_host_port()
     assert host in ("localhost", "127.0.0.1", "::1")
     assert port > 0
@@ -333,9 +328,7 @@ async def test_comm_failure_threading():
     sleep_future = sleep_for_60ms()
     with pytest.raises(IOError):
         await connect(
-            "tls://localhost:28400",
-            0.052,
-            connection_args={"ssl_context": get_client_ssl_context()},
+            "tls://localhost:28400", 0.052, ssl_context=get_client_ssl_context(),
         )
     max_thread_count = await sleep_future
     assert max_thread_count <= 2 + original_thread_count
@@ -361,8 +354,7 @@ async def check_inproc_specific(run_client):
             await comm.write(msg)
         await comm.close()
 
-    listener = inproc.InProcListener(listener_addr, handle_comm)
-    await listener.start()
+    listener = await inproc.InProcListener(listener_addr, handle_comm)
     assert (
         listener.listen_address
         == listener.contact_address
@@ -443,8 +435,8 @@ async def check_client_server(
     addr,
     check_listen_addr=None,
     check_contact_addr=None,
-    listen_args=None,
-    connect_args=None,
+    listen_args={},
+    connect_args={},
 ):
     """
     Abstract client / server test.
@@ -468,8 +460,7 @@ async def check_client_server(
     listen_args = listen_args or {"xxx": "bar"}
     connect_args = connect_args or {"xxx": "foo"}
 
-    listener = listen(addr, handle_comm, connection_args=listen_args)
-    await listener.start()
+    listener = await listen(addr, handle_comm, **listen_args)
 
     # Check listener properties
     bound_addr = listener.listen_address
@@ -493,7 +484,7 @@ async def check_client_server(
     l = []
 
     async def client_communicate(key, delay=0):
-        comm = await connect(listener.contact_address, connection_args=connect_args)
+        comm = await connect(listener.contact_address, **connect_args)
         assert comm.peer_address == listener.contact_address
 
         await comm.write({"op": "ping", "data": key})
@@ -647,19 +638,15 @@ async def test_tls_reject_certificate():
         await comm.close()
 
     # Listener refuses a connector not signed by the CA
-    listener = listen("tls://", handle_comm, connection_args={"ssl_context": serv_ctx})
-    await listener.start()
+    listener = await listen("tls://", handle_comm, ssl_context=serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
         comm = await connect(
-            listener.contact_address,
-            timeout=0.5,
-            connection_args={"ssl_context": bad_cli_ctx},
+            listener.contact_address, timeout=0.5, ssl_context=bad_cli_ctx,
         )
         await comm.write({"x": "foo"})  # TODO: why is this necessary in Tornado 6 ?
 
-    # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
-    if sys.version_info >= (3,) and os.name != "nt":
+    if os.name != "nt":
         try:
             # See https://serverfault.com/questions/793260/what-does-tlsv1-alert-unknown-ca-mean
             assert "unknown ca" in str(excinfo.value)
@@ -672,26 +659,17 @@ async def test_tls_reject_certificate():
                 raise
 
     # Sanity check
-    comm = await connect(
-        listener.contact_address, timeout=2, connection_args={"ssl_context": cli_ctx}
-    )
+    comm = await connect(listener.contact_address, timeout=2, ssl_context=cli_ctx,)
     await comm.close()
 
     # Connector refuses a listener not signed by the CA
-    listener = listen(
-        "tls://", handle_comm, connection_args={"ssl_context": bad_serv_ctx}
-    )
-    await listener.start()
+    listener = await listen("tls://", handle_comm, ssl_context=bad_serv_ctx)
 
     with pytest.raises(EnvironmentError) as excinfo:
         await connect(
-            listener.contact_address,
-            timeout=2,
-            connection_args={"ssl_context": cli_ctx},
+            listener.contact_address, timeout=2, ssl_context=cli_ctx,
         )
-    # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
-    if sys.version_info >= (3,):
-        assert "certificate verify failed" in str(excinfo.value)
+    assert "certificate verify failed" in str(excinfo.value)
 
 
 #
@@ -699,21 +677,18 @@ async def test_tls_reject_certificate():
 #
 
 
-async def check_comm_closed_implicit(
-    addr, delay=None, listen_args=None, connect_args=None
-):
+async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_args={}):
     async def handle_comm(comm):
         await comm.close()
 
-    listener = listen(addr, handle_comm, connection_args=listen_args)
-    await listener.start()
+    listener = await listen(addr, handle_comm, **listen_args)
     contact_addr = listener.contact_address
 
-    comm = await connect(contact_addr, connection_args=connect_args)
+    comm = await connect(contact_addr, **connect_args)
     with pytest.raises(CommClosedError):
         await comm.write({})
 
-    comm = await connect(contact_addr, connection_args=connect_args)
+    comm = await connect(contact_addr, **connect_args)
     with pytest.raises(CommClosedError):
         await comm.read()
 
@@ -733,7 +708,7 @@ async def test_inproc_comm_closed_implicit():
     await check_comm_closed_implicit(inproc.new_address())
 
 
-async def check_comm_closed_explicit(addr, listen_args=None, connect_args=None):
+async def check_comm_closed_explicit(addr, listen_args={}, connect_args={}):
     a, b = await get_comm_pair(addr, listen_args=listen_args, connect_args=connect_args)
     a_read = a.read()
     b_read = b.read()
@@ -785,8 +760,7 @@ async def test_inproc_comm_closed_explicit_2():
         else:
             await comm.close()
 
-    listener = listen("inproc://", handle_comm)
-    await listener.start()
+    listener = await listen("inproc://", handle_comm)
     contact_addr = listener.contact_address
 
     comm = await connect(contact_addr)
@@ -854,8 +828,7 @@ async def check_many_listeners(addr):
     N = 100
 
     for i in range(N):
-        listener = listen(addr, handle_comm)
-        await listener.start()
+        listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
     assert len(set(l.listen_address for l in listeners)) == N
@@ -883,7 +856,7 @@ async def test_inproc_many_listeners():
 
 
 async def check_listener_deserialize(addr, deserialize, in_value, check_out):
-    q = queues.Queue()
+    q = asyncio.Queue()
 
     async def handle_comm(comm):
         msg = await comm.read()

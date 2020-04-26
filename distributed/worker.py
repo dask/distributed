@@ -24,7 +24,7 @@ from dask.system import CPU_COUNT
 
 from tlz import pluck, merge, first, keymap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import profile, comm, system
 from .batched import BatchedSend
@@ -32,9 +32,10 @@ from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from .preloading import preload_modules
+from . import preloading
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
 from .pubsub import PubSubWorkerExtension
@@ -54,7 +55,6 @@ from .utils import (
     json_load_robust,
     key_split,
     offload,
-    PeriodicCallback,
     parse_bytes,
     parse_timedelta,
     iscoroutinefunction,
@@ -318,6 +318,8 @@ class Worker(ServerNode):
         port=None,
         protocol=None,
         dashboard_address=None,
+        dashboard=False,
+        http_prefix="/",
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
@@ -452,7 +454,7 @@ class Worker(ServerNode):
         # Target interface on which we contact the scheduler by default
         # TODO: it is unfortunate that we special-case inproc here
         if not host and not interface and not scheduler_addr.startswith("inproc://"):
-            host = get_ip(get_address_host(scheduler_addr))
+            host = get_ip(get_address_host(scheduler_addr.split("://")[-1]))
 
         self._start_address = address_from_user_args(
             host=host,
@@ -470,15 +472,7 @@ class Worker(ServerNode):
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
-        self.preload = preload
-        if self.preload is None:
-            self.preload = dask.config.get("distributed.worker.preload")
-        self.preload_argv = preload_argv
-        if self.preload_argv is None:
-            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-        self.memory_monitor_interval = parse_timedelta(
-            memory_monitor_interval, default="ms"
-        )
+
         self.extensions = dict()
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -504,10 +498,19 @@ class Worker(ServerNode):
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
+        self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
+        self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+        self._preload_modules = preloading.on_creation(
+            self.preload, file_dir=self.local_directory
+        )
+
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
@@ -583,15 +586,21 @@ class Worker(ServerNode):
         self.services = {}
         self.service_specs = services or {}
 
-        if dashboard_address is not None:
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.worker.http.routes"),
+            prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address)
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehWorker
+                import distributed.dashboard.worker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehWorker,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.worker.connect(
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         self.metrics = dict(metrics) if metrics else {}
@@ -646,23 +655,22 @@ class Worker(ServerNode):
             "worker": self,
         }
 
-        pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
+        pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks["heartbeat"] = pc
         pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}),
-            60000,
-            io_loop=self.io_loop,
+            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000,
         )
         self.periodic_callbacks["keep-alive"] = pc
 
         self._address = contact_address
 
+        self.memory_monitor_interval = parse_timedelta(
+            memory_monitor_interval, default="ms"
+        )
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(
-                self.memory_monitor,
-                self.memory_monitor_interval * 1000,
-                io_loop=self.io_loop,
+                self.memory_monitor, self.memory_monitor_interval * 1000,
             )
             self.periodic_callbacks["memory"] = pc
 
@@ -675,19 +683,13 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        pc = PeriodicCallback(
-            self.trigger_profile,
-            parse_timedelta(
-                dask.config.get("distributed.worker.profile.interval"), default="ms"
-            )
-            * 1000,
-            io_loop=self.io_loop,
+        profile_trigger_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
         )
+        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
         self.periodic_callbacks["profile"] = pc
 
-        pc = PeriodicCallback(
-            self.cycle_profile, profile_cycle_interval * 1000, io_loop=self.io_loop
-        )
+        pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
         self.periodic_callbacks["profile-cycle"] = pc
 
         self.plugins = {}
@@ -811,9 +813,7 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                comm = await connect(
-                    self.scheduler.address, connection_args=self.connection_args
-                )
+                comm = await connect(self.scheduler.address, **self.connection_args)
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -1012,21 +1012,23 @@ class Worker(ServerNode):
             return
         assert self.status is None, self.status
 
+        await super().start()
+
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        await self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(
+            self._start_address, **self.security.get_listen_args("worker")
+        )
         self.ip = get_address_host(self.address)
 
         if self.name is None:
             self.name = self.address
 
-        preload_modules(
-            self.preload,
-            parameter=self,
-            file_dir=self.local_directory,
-            argv=self.preload_argv,
+        await preloading.on_start(
+            self._preload_modules, self, argv=self.preload_argv,
         )
+
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
@@ -1083,6 +1085,8 @@ class Worker(ServerNode):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
 
+            await preloading.on_teardown(self._preload_modules, self)
+
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
                     await r.close_gracefully()
@@ -1110,8 +1114,7 @@ class Worker(ServerNode):
             await self.scheduler.close_rpc()
             self._workdir.release()
 
-            for k, v in self.services.items():
-                v.stop()
+            self.stop_services()
 
             if (
                 self.batched_stream
@@ -1158,7 +1161,7 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
-    async def terminate(self, comm, report=True, **kwargs):
+    async def terminate(self, comm=None, report=True, **kwargs):
         await self.close(report=report, **kwargs)
         return "OK"
 
@@ -1178,7 +1181,7 @@ class Worker(ServerNode):
 
             async def batched_send_connect():
                 comm = await connect(
-                    address, connection_args=self.connection_args  # TODO, serialization
+                    address, **self.connection_args  # TODO, serialization
                 )
                 comm.name = "Worker->Worker"
                 await comm.write({"op": "connection_stream"})
@@ -1836,13 +1839,16 @@ class Worker(ServerNode):
 
     def send_task_state_to_scheduler(self, key):
         if key in self.data or self.actors.get(key):
-            try:
-                value = self.data[key]
-            except KeyError:
-                value = self.actors[key]
-            nbytes = self.nbytes[key] or sizeof(value)
-            typ = self.types.get(key) or type(value)
-            del value
+            nbytes = self.nbytes.get(key)
+            typ = self.types.get(key)
+            if nbytes is None or typ is None:
+                try:
+                    value = self.data[key]
+                except KeyError:
+                    value = self.actors[key]
+                nbytes = self.nbytes[key] = sizeof(value)
+                typ = self.types[key] = type(value)
+                del value
             try:
                 typ_serialized = dumps_function(typ)
             except PicklingError:
@@ -2293,6 +2299,7 @@ class Worker(ServerNode):
     # Execute Task #
     ################
 
+    # FIXME: this breaks if changed to async def...
     @gen.coroutine
     def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
         """ Safely run function in thread pool executor

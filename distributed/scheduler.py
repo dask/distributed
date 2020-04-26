@@ -3,7 +3,7 @@ from collections import defaultdict, deque, OrderedDict
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
-from inspect import isawaitable
+import inspect
 import itertools
 import json
 import logging
@@ -30,11 +30,13 @@ from tlz import (
     second,
     compose,
     groupby,
+    concat,
 )
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 
+from . import profile
 from .batched import BatchedSend
 from .comm import (
     normalize_address,
@@ -45,10 +47,11 @@ from .comm import (
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from . import profile
+
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from .preloading import preload_modules
+from . import preloading
 from .proctitle import setproctitle
 from .security import Security
 from .utils import (
@@ -61,7 +64,6 @@ from .utils import (
     no_default,
     parse_timedelta,
     parse_bytes,
-    PeriodicCallback,
     shutting_down,
     key_split_group,
     empty_context,
@@ -76,6 +78,7 @@ from . import versions as version_module
 
 from .publish import PublishExtension
 from .queues import QueueExtension
+from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
@@ -87,7 +90,9 @@ logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-DEFAULT_DATA_SIZE = dask.config.get("distributed.scheduler.default-data-size")
+DEFAULT_DATA_SIZE = parse_bytes(
+    dask.config.get("distributed.scheduler.default-data-size")
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -96,6 +101,7 @@ DEFAULT_EXTENSIONS = [
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
+    SemaphoreExtension,
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -789,6 +795,11 @@ class TaskPrefix:
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: suspicious: int
+
+       Numbers of times a task was marked as suspicious with this prefix
+
+
     See Also
     --------
     TaskGroup
@@ -805,6 +816,7 @@ class TaskPrefix:
             )
         else:
             self.duration_average = None
+        self.suspicious = 0
 
     @property
     def states(self):
@@ -1051,6 +1063,8 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
+        dashboard=None,
+        http_prefix="/",
         preload=None,
         preload_argv=(),
         plugins=(),
@@ -1097,21 +1111,36 @@ class Scheduler(ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preload = preload
         self.preload_argv = preload_argv
+        self._preload_modules = preloading.on_creation(self.preload)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
-        self.listen_args = self.security.get_listen_args("scheduler")
 
-        if dashboard_address is not None:
+        self._start_address = addresses_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+            default_port=self.default_port,
+        )
+
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.scheduler.http.routes"),
+            prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address, default_port=8787)
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard.scheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehScheduler,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.scheduler.connect(
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         # Communication state
@@ -1318,15 +1347,6 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        self._start_address = addresses_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-            default_port=self.default_port,
-        )
-
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1338,11 +1358,11 @@ class Scheduler(ServerNode):
         )
 
         if self.worker_ttl:
-            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl, io_loop=loop)
+            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl)
             self.periodic_callbacks["worker-ttl"] = pc
 
         if self.idle_timeout:
-            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4, io_loop=loop)
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4)
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
@@ -1408,6 +1428,9 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
+
+        await super().start()
+
         enable_gc_diagnosis()
 
         self.clear_task_state()
@@ -1418,7 +1441,7 @@ class Scheduler(ServerNode):
 
         if self.status != "running":
             for addr in self._start_address:
-                await self.listen(addr, listen_args=self.listen_args)
+                await self.listen(addr, **self.security.get_listen_args("scheduler"))
                 self.ip = get_address_host(self.listen_address)
                 listen_ip = self.ip
 
@@ -1451,7 +1474,7 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
+        await preloading.on_start(self._preload_modules, self, argv=self.preload_argv)
 
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
@@ -1475,6 +1498,8 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
+        await preloading.on_teardown(self._preload_modules, self)
+
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
@@ -1492,6 +1517,7 @@ class Scheduler(ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
+
         for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
@@ -2187,6 +2213,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts.suspicious += 1
+                    ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
@@ -3091,7 +3118,7 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                        "keys": tuple(concat(r["keys"].keys() for r in result)),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -3571,7 +3598,7 @@ class Scheduler(ServerNode):
             if teardown:
                 teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
-            if isawaitable(state):
+            if inspect.isawaitable(state):
                 state = await state
             try:
                 while self.status == "running":
@@ -3690,7 +3717,7 @@ class Scheduler(ServerNode):
         """
         return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
-    def get_task_duration(self, ts, default=0.5):
+    def get_task_duration(self, ts, default=None):
         """
         Get the estimated computation cost of the given task
         (not including any communication cost).
@@ -3698,6 +3725,10 @@ class Scheduler(ServerNode):
         duration = ts.prefix.duration_average
         if duration is None:
             self.unknown_durations[ts.prefix.name].add(ts)
+            if default is None:
+                default = parse_timedelta(
+                    dask.config.get("distributed.scheduler.unknown-task-duration")
+                )
             return default
 
         return duration
@@ -4996,6 +5027,7 @@ class Scheduler(ServerNode):
         return {"counts": counts, "keys": keys}
 
     async def performance_report(self, comm=None, start=None, code=""):
+        stop = time()
         # Profiles
         compute, scheduler, workers = await asyncio.gather(
             *[
@@ -5057,7 +5089,7 @@ class Scheduler(ServerNode):
 {code}
         </pre>
         """.format(
-            time=format_time(time() - start),
+            time=format_time(stop - start),
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),
@@ -5204,9 +5236,13 @@ class Scheduler(ServerNode):
             close = time() > last_task + self.idle_timeout
 
         if close:
+            logger.info(
+                "Scheduler closing after being idle for %s",
+                format_time(self.idle_timeout),
+            )
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration=None):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -5222,6 +5258,8 @@ class Scheduler(ServerNode):
         --------
         distributed.deploy.Adaptive
         """
+        if target_duration is None:
+            target_duration = dask.config.get("distributed.adaptive.target-duration")
         target_duration = parse_timedelta(target_duration)
 
         # CPU
