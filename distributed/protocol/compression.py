@@ -10,6 +10,13 @@ import random
 import dask
 from tlz import identity
 
+
+class InvalidCompressionMethodError(ValueError):
+    def __init__(self, method):
+        self.method = method
+        super().__init__("Invalid compression method: %s" % method)
+
+
 try:
     import blosc
 
@@ -211,6 +218,14 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 def decompress(header, frames):
     """ Decompress frames according to information in the header """
     return [
-        compressions[c]["decompress"](frame)
+        _decompress_frame(c, frame)
         for c, frame in zip(header["compression"], frames)
     ]
+
+
+def _decompress_frame(method, frame):
+    """Decompress a single frame"""
+    compressor = compressions.get(method, None)
+    if compressor is None:
+        raise InvalidCompressionMethodError(method)
+    return compressor["decompress"](frame)
