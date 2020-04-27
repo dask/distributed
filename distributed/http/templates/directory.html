@@ -31,10 +31,11 @@
       </li>
       <li>Scheduler HTTP
         <ul>
+          <li>"/health": check server is alive</li>
           <li>"/info/main/workers.html" basic info about workers and links to their dashboards and logs</li>
           <li>"info/worker/(worker).html": more detail about given worker, keyed by TCP address; links to tasks</li>
           <li>"info/task/(task).html": details about a task on the cluster, by dask key; links to worker,
-            related tasks, and client</li>:
+            related tasks, and client</li>
           <li>"/info/call-stacks/(worker).html": tasks currently handled by given worker</li>
           <li>"/info/call-stack/(task).html": state of task (where it is running)</li>
           <li>"/info/main/logs.html": scheduler logs</li>
@@ -69,6 +70,16 @@
           <li>"/individual-gpu-utilization" (GPU only)</li>
         </ul>
       </li>
+      <li>Worker HTTP</li>
+        <ul>
+          <li>"/status": </li>
+          <li>"/counters": </li>
+          <li>"/crossfilter": </li>
+          <li>"/system": </li>
+          <li>"/profile": </li>
+          <li>"/profile-server": </li>
+          <li>"/metrics": prometheus endpoint</li>
+        </ul>
     </ul>
   </body>
 </html>
