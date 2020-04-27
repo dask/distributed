@@ -742,7 +742,7 @@ class Client(Node):
         # Python 3.6; contextvars are thread-local but not Task-local.
         # We can still detect a race condition.
         if sys.version_info < (3, 7) and _current_client.get() not in (self, None):
-            raise RuntimeError(  # pragma: nocover
+            raise RuntimeError(
                 "Detected race condition where get_dataset() is invoked in "
                 "parallel by multiple asynchronous clients. "
                 "Please upgrade to Python 3.7+."
@@ -757,9 +757,8 @@ class Client(Node):
     @classmethod
     def current(cls, allow_global=True):
         """When running within the context of `as_client`, return the context-local
-        current client. Otherwise, return an arbitrary already existing Client.
+        current client. Otherwise, return the latest initialised Client.
         If no Client instances exist, raise ValueError.
-
         If allow_global is set to False, raise ValueError if running outside of the
         `as_client` context manager.
         """
@@ -4734,11 +4733,12 @@ def temp_default_client(c):
     """ Set the default client for the duration of the context
 
     .. note::
-       This function should be used for unit testing exclusively. In all other cases,
-       please use ``Client.as_current`` instead.
+       This function should be used exclusively for unit testing the default client
+       functionality. In all other cases, please use ``Client.as_current`` instead.
 
     .. note::
-       Unlike Client.as_current, this function is not thread-local.
+       Unlike ``Client.as_current``, this context manager is neither thread-local nor
+       task-local.
 
     Parameters
     ----------

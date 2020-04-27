@@ -3876,8 +3876,8 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster(client=False)
 async def test_serialize_future(s, a, b):
-    c1 = Client(s.address, asynchronous=True)
-    c2 = Client(s.address, asynchronous=True)
+    c1 = await Client(s.address, asynchronous=True)
+    c2 = await Client(s.address, asynchronous=True)
 
     future = c1.submit(lambda: 1)
     result = await future
