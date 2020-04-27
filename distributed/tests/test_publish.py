@@ -259,6 +259,7 @@ async def test_deserialize_client(c, s, a, b):
     - when multiple clients are connected to the same scheduler, test that they don't
       interfere with each other.
 
+    See: test_client.test_serialize_future
     See: https://github.com/dask/distributed/issues/3227
     """
     future = await c.scatter("123")
@@ -274,6 +275,6 @@ async def test_deserialize_client(c, s, a, b):
             assert future.client is c2
 
     # Ensure cleanup
-    from distributed.client import _deserialize_client
+    from distributed.client import _current_client
 
-    assert _deserialize_client.get() is None
+    assert _current_client.get() is None

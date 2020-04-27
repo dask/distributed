@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 _global_clients = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
-_deserialize_client = ContextVar("_deserialize_client", default=None)
+_current_client = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = [PubSubClientExtension]
 
@@ -164,7 +164,7 @@ class Future(WrappedKey):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
-        self.client = client or _deserialize_client.get() or _get_global_client()
+        self.client = client or Client.current()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
 
@@ -359,7 +359,10 @@ class Future(WrappedKey):
 
     def __setstate__(self, state):
         key, address = state
-        c = _deserialize_client.get() or get_client(address)
+        try:
+            c = Client.current(allow_global=False)
+        except ValueError:
+            c = get_client(address)
         Future.__init__(self, key, c)
         c._send_to_scheduler(
             {
@@ -729,10 +732,43 @@ class Client(Node):
 
         ReplayExceptionClient(self)
 
+    @contextmanager
+    def as_current(self):
+        """Thread-local, Task-local context manager that causes the Client.current class
+        method to return self. This is used when a method of Client needs to propagate a
+        reference to self deep into the stack through generic methods that shouldn't be
+        aware of this class.
+        """
+        # Python 3.6; contextvars are thread-local but not Task-local.
+        # We can still detect a race condition.
+        if sys.version_info < (3, 7) and _current_client.get() not in (self, None):
+            raise RuntimeError(  # pragma: nocover
+                "Detected race condition where get_dataset() is invoked in "
+                "parallel by multiple asynchronous clients. "
+                "Please upgrade to Python 3.7+."
+            )
+
+        tok = _current_client.set(self)
+        try:
+            yield
+        finally:
+            _current_client.reset(tok)
+
     @classmethod
-    def current(cls):
-        """ Return global client if one exists, otherwise raise ValueError """
-        return default_client()
+    def current(cls, allow_global=True):
+        """When running within the context of `as_client`, return the context-local
+        current client. Otherwise, return an arbitrary already existing Client.
+        If no Client instances exist, raise ValueError.
+
+        If allow_global is set to False, raise ValueError if running outside of the
+        `as_client` context manager.
+        """
+        out = _current_client.get()
+        if out:
+            return out
+        if allow_global:
+            return default_client()
+        raise ValueError("Not running inside the `as_current` context manager")
 
     @property
     def asynchronous(self):
@@ -2286,26 +2322,8 @@ class Client(Node):
         return self.sync(self.scheduler.publish_list, **kwargs)
 
     async def _get_dataset(self, name):
-        if sys.version_info >= (3, 7):
-            # Insulate contextvars change with a task
-            async def _():
-                _deserialize_client.set(self)
-                return await self.scheduler.publish_get(name=name, client=self.id)
-
-            out = await asyncio.create_task(_())
-        else:
-            # Python 3.6; creating a task doesn't copy the context.
-            # We can still detect a race condition though.
-            if _deserialize_client.get() not in (self, None):
-                raise RuntimeError(  # pragma: nocover
-                    "Detected race condition where get_dataset() is invoked in "
-                    "parallel by multiple clients. Please upgrade to Python 3.7+."
-                )
-            tok = _deserialize_client.set(self)
-            try:
-                out = await self.scheduler.publish_get(name=name, client=self.id)
-            finally:
-                _deserialize_client.reset(tok)
+        with self.as_current():
+            out = await self.scheduler.publish_get(name=name, client=self.id)
 
         if out is None:
             raise KeyError(f"Dataset '{name}' not found")
@@ -4714,6 +4732,13 @@ class performance_report:
 @contextmanager
 def temp_default_client(c):
     """ Set the default client for the duration of the context
+
+    .. note::
+       This function should be used for unit testing exclusively. In all other cases,
+       please use ``Client.as_current`` instead.
+
+    .. note::
+       Unlike Client.as_current, this function is not thread-local.
 
     Parameters
     ----------
