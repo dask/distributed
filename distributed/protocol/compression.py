@@ -213,7 +213,7 @@ def decompress(header, frames):
     """ Decompress frames according to information in the header """
     try:
         return [
-            compressions[c]["decompress"](c, frame)
+            compressions[c]["decompress"](frame)
             for c, frame in zip(header["compression"], frames)
         ]
     except KeyError as e:
