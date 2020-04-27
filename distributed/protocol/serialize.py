@@ -570,7 +570,11 @@ def _deserialize_bytes(header, frames):
 
 @dask_deserialize.register(memoryview)
 def _serialize_memoryview(header, frames):
-    return memoryview(b"".join(frames))
+    if len(frames) == 1:
+        out = frames[0]
+    else:
+        out = b"".join(frames)
+    return memoryview(out)
 
 
 #########################
