@@ -11,12 +11,6 @@ import dask
 from tlz import identity
 
 
-class InvalidCompressionMethodError(ValueError):
-    def __init__(self, method):
-        self.method = method
-        super().__init__("Invalid compression method: %s" % method)
-
-
 try:
     import blosc
 
@@ -226,5 +220,5 @@ def _decompress_frame(method, frame):
     """Decompress a single frame"""
     compressor = compressions.get(method, None)
     if compressor is None:
-        raise InvalidCompressionMethodError(method)
+        raise ValueError("Invalid compression method: %s" % method)
     return compressor["decompress"](frame)
