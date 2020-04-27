@@ -211,14 +211,12 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 
 def decompress(header, frames):
     """ Decompress frames according to information in the header """
-    return [
-        _decompress_frame(c, frame) for c, frame in zip(header["compression"], frames)
-    ]
-
-
-def _decompress_frame(method, frame):
-    """Decompress a single frame"""
-    compressor = compressions.get(method, None)
-    if compressor is None:
-        raise ValueError("Invalid compression method: %s" % method)
-    return compressor["decompress"](frame)
+    try:
+        return [
+            compressions[c]["decompress"](c, frame)
+            for c, frame in zip(header["compression"], frames)
+        ]
+    except KeyError as e:
+        # while it's not documented behavior, the presence of the offending key
+        # at `e.args[0]` is pretty consistent across versions of Python
+        raise ValueError("Invalid compression method: %s" % e.args[0])
