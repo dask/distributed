@@ -40,7 +40,7 @@ def test_defaults(loop):
         assert response.status_code == 404
 
         # clean exit
-        proc.send_signal(signal.SIGINT)
+        proc.send_signal(signal.SIGTERM)
 
     assert proc.returncode == 0
 

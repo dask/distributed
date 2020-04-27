@@ -53,7 +53,7 @@ def install_signal_handlers(loop=None, cleanup=None):
     def handle_signal(sig, frame):
         @gen.coroutine
         def cleanup_and_stop():
-            # TODO: Convert to asyncio / async def.
+            # TODO: This breaks when changed to async / await.
             # See https://github.com/dask/distributed/pull/3332
             try:
                 if cleanup is not None:
