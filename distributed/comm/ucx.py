@@ -69,15 +69,15 @@ def init_once():
     try:
         import numpy
 
-        host_array = lambda n: numpy.empty((n,), dtype="u1")
+        host_array = lambda n: numpy.empty((n,), dtype="u1").data
         host_concat = lambda arys: numpy.concatenate(
             [numpy.asarray(memoryview(e)) for e in arys], axis=None
-        )
+        ).data
         host_split = lambda ary, indices: [
-            e.copy() for e in numpy.split(numpy.asarray(memoryview(ary)), indices)
+            e.copy().data for e in numpy.split(numpy.asarray(memoryview(ary)), indices)
         ]
     except ImportError:
-        host_array = lambda n: bytearray(n)
+        host_array = lambda n: memoryview(bytearray(n))
 
         def host_concat(arys):
             arys = [memoryview(a) for a in arys]
@@ -142,9 +142,9 @@ def init_once():
 
         device_concat = lambda arys: cupy.concatenate(
             [cupy.asarray(e) for e in arys], axis=None
-        )
+        ).data.mem._owner
         device_split = lambda ary, indices: [
-            e.copy() for e in cupy.split(cupy.asarray(ary), indices)
+            e.copy().data.mem._owner for e in cupy.split(cupy.asarray(ary), indices)
         ]
     except ImportError:
         try:
