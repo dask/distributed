@@ -385,7 +385,7 @@ class UCX(Comm):
                     host_frames = [host_frames]
                 else:
                     host_frames = host_split(
-                        host_frames, list(itertools.accumulate(host_frame_sizes))
+                        host_frames, list(itertools.accumulate(host_frame_sizes[:-1]))
                     )
 
                 if len(device_frame_sizes) == 0:
@@ -394,7 +394,8 @@ class UCX(Comm):
                     device_frames = [device_frames]
                 else:
                     device_frames = device_split(
-                        device_frames, list(itertools.accumulate(device_frame_sizes))
+                        device_frames,
+                        list(itertools.accumulate(device_frame_sizes[:-1])),
                     )
 
                 frames = []
