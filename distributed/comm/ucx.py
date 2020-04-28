@@ -191,6 +191,11 @@ def init_once():
                     "In order to send/recv CUDA arrays, CuPy or Numba is required"
                 )
 
+            def device_split(a, indices):
+                raise RuntimeError(
+                    "In order to send/recv CUDA arrays, CuPy or Numba is required"
+                )
+
     pool_size_str = dask.config.get("rmm.pool-size")
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
