@@ -186,7 +186,7 @@ def init_once():
 
         except ImportError:
 
-            def device_concat(n):
+            def device_concat(arys):
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, CuPy or Numba is required"
                 )
