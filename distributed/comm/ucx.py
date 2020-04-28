@@ -368,10 +368,6 @@ class UCX(Comm):
                 if nbytes(device_frames):
                     await self.ep.recv(device_frames)
 
-                host_frames = host_split(
-                    host_frames, itertools.accumulate(host_frame_sizes)
-                )
-
                 if len(host_frame_sizes) == 0:
                     host_frames = []
                 elif len(host_frame_sizes) == 1:
