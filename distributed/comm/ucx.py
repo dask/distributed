@@ -151,7 +151,8 @@ def init_once():
         def device_split(ary, indices):
             with cupy.cuda.using_allocator(rmm.rmm_cupy_allocator):
                 ary = cupy.asarray(ary).view("u1")
-                results = [e.copy() for e in cupy.split(ary, indices)]
+                results = cupy.split(ary, indices)
+                results = [e.copy() for e in results]
                 result_buffers = [e.data.mem._owner for e in results]
                 return result_buffers
 
