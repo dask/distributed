@@ -141,13 +141,20 @@ def init_once():
     try:
         import cupy
 
-        device_concat = lambda arys: cupy.concatenate(
-            [cupy.asarray(e).view("u1") for e in arys], axis=None
-        ).data.mem._owner
-        device_split = lambda ary, indices: [
-            e.copy().data.mem._owner
-            for e in cupy.split(cupy.asarray(ary).view("u1"), indices)
-        ]
+        def device_concat(arys):
+            with cupy.cuda.using_allocator(rmm.rmm_cupy_allocator):
+                arys = [cupy.asarray(e).view("u1") for e in arys]
+                result = cupy.concatenate(arys, axis=None)
+                result_buffer = result.data.mem._owner
+                return result_buffer
+
+        def device_split(ary, indices):
+            with cupy.cuda.using_allocator(rmm.rmm_cupy_allocator):
+                ary = cupy.asarray(ary).view("u1")
+                results = [e.copy() for e in cupy.split(ary, indices)]
+                result_buffers = [e.data.mem._owner for e in results]
+                return result_buffers
+
     except ImportError:
         try:
             import numba.cuda
