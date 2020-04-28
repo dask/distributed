@@ -52,7 +52,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, host_concat, device_array, device_concat
+    global ucp, host_array, host_concat, host_split, device_array, device_concat, device_split
     if ucp is not None:
         return
 
