@@ -277,16 +277,16 @@ class UCX(Comm):
                     else:
                         host_frames.append(each_frame)
 
-                if len(device_frames) == 0:
+                if nbytes(device_frames) == 0:
                     device_frames = device_array(0)
-                elif len(device_frames) == 1:
+                elif nbytes(device_frames) == 1:
                     device_frames = device_frames[0]
                 else:
                     device_frames = device_concat(device_frames)
 
-                if len(host_frames) == 0:
+                if nbytes(host_frames) == 0:
                     host_frames = host_array(0)
-                elif len(host_frames) == 1:
+                elif nbytes(host_frames) == 1:
                     host_frames = host_frames[0]
                 else:
                     host_frames = host_concat(host_frames)
