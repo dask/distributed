@@ -348,7 +348,7 @@ class UCX(Comm):
             else:
                 # Recv frames
                 host_frame_sizes = []
-                device_frames_sizes = []
+                device_frame_sizes = []
                 for is_cuda, each_size in zip(cuda_frames, sizes):
                     if is_cuda:
                         device_frame_sizes.append(each_size)
@@ -356,7 +356,7 @@ class UCX(Comm):
                         host_frame_sizes.append(each_size)
 
                 host_frames = host_array(sum(host_frame_sizes))
-                device_frames = device_array(sum(device_frames_sizes))
+                device_frames = device_array(sum(device_frame_sizes))
 
                 # It is necessary to first populate `frames` with CUDA arrays and synchronize
                 # the default stream before starting receiving to ensure buffers have been allocated
