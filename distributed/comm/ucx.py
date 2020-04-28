@@ -94,7 +94,7 @@ def init_once():
             arys = []
             a_view = memoryview(a)
             indices = list(indices)
-            for each_ij in zip([0] + indices, indices + [ary.size]):
+            for each_ij in zip([0] + indices, indices + [a.size]):
                 each_size = each_ij[1] - each_ij[0]
                 each_slice = slice(*each_ij)
                 each_ary = host_array(each_size)
@@ -165,7 +165,7 @@ def init_once():
                 arys = []
                 a_view = numba.cuda.as_cuda_array(a)
                 indices = list(indices)
-                for each_ij in zip([0] + indices, indices + [ary.size]):
+                for each_ij in zip([0] + indices, indices + [a.size]):
                     each_size = each_ij[1] - each_ij[0]
                     each_slice = slice(*each_ij)
                     each_ary = device_array(each_size)
