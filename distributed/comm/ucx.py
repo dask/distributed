@@ -164,7 +164,7 @@ def init_once():
                 arys = [numba.cuda.as_cuda_array(a).view("u1") for a in arys]
                 sizes = [nbytes(a) for a in arys]
                 r = device_array(sum(sizes))
-                r_view = r[:]
+                r_view = numba.cuda.as_cuda_array(r)
                 for each_ary, each_size in zip(arys, sizes):
                     if each_size:
                         r_view[:each_size] = each_ary[:]
