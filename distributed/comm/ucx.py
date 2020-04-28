@@ -303,17 +303,15 @@ class UCX(Comm):
 
                 # Send frames
 
-                # It is necessary to first synchronize the default stream before start sending
-                # We synchronize the default stream because UCX is not stream-ordered and
-                #  syncing the default stream will wait for other non-blocking CUDA streams.
-                # Note this is only sufficient if the memory being sent is not currently in use on
-                # non-blocking CUDA streams.
-                if any(cuda_frames):
-                    synchronize_stream(0)
-
                 if nbytes(host_frames):
                     await self.ep.send(host_frames)
                 if nbytes(device_frames):
+                    # It is necessary to first synchronize the default stream before start sending
+                    # We synchronize the default stream because UCX is not stream-ordered and
+                    #  syncing the default stream will wait for other non-blocking CUDA streams.
+                    # Note this is only sufficient if the memory being sent is not currently in use on
+                    # non-blocking CUDA streams.
+                    synchronize_stream(0)
                     await self.ep.send(device_frames)
                 return sum(sizes)
             except (ucp.exceptions.UCXBaseException):
@@ -360,14 +358,12 @@ class UCX(Comm):
                 host_frames = host_array(sum(host_frame_sizes))
                 device_frames = device_array(sum(device_frame_sizes))
 
-                # It is necessary to first populate `frames` with CUDA arrays and synchronize
-                # the default stream before starting receiving to ensure buffers have been allocated
-                if any(cuda_frames):
-                    synchronize_stream(0)
-
                 if nbytes(host_frames):
                     await self.ep.recv(host_frames)
                 if nbytes(device_frames):
+                    # It is necessary to first populate `frames` with CUDA arrays and synchronize
+                    # the default stream before starting receiving to ensure buffers have been allocated
+                    synchronize_stream(0)
                     await self.ep.recv(device_frames)
 
                 if len(host_frame_sizes) == 0:
