@@ -161,7 +161,7 @@ def init_once():
             import numba.cuda
 
             def device_concat(arys):
-                arys = [numba.cuda.as_cuda_array(a) for a in arys]
+                arys = [numba.cuda.as_cuda_array(a).view("u1") for a in arys]
                 sizes = [nbytes(a) for a in arys]
                 r = device_array(sum(sizes))
                 r_view = r[:]
@@ -173,7 +173,7 @@ def init_once():
 
             def device_split(a, indices):
                 arys = []
-                a_view = numba.cuda.as_cuda_array(a)
+                a_view = numba.cuda.as_cuda_array(a).view("u1")
                 indices = list(indices)
                 for each_ij in zip([0] + indices, indices + [a.size]):
                     each_size = each_ij[1] - each_ij[0]
