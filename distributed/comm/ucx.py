@@ -70,8 +70,12 @@ def init_once():
         import numpy
 
         host_array = lambda n: numpy.empty((n,), dtype="u1")
-        host_concat = lambda arys: numpy.concatenate(arys, axis=None)
-        host_split = lambda ary, indices: [e.copy() for e in numpy.split(ary, indices)]
+        host_concat = lambda arys: numpy.concatenate(
+            [numpy.asarray(memoryview(e)) for e in arys], axis=None
+        )
+        host_split = lambda ary, indices: [
+            e.copy() for e in numpy.split(numpy.asarray(memoryview(ary)), indices)
+        ]
     except ImportError:
         host_array = lambda n: bytearray(n)
 
@@ -136,8 +140,12 @@ def init_once():
     try:
         import cupy
 
-        device_concat = lambda arys: cupy.concatenate(arys, axis=None)
-        device_split = lambda ary, indices: [e.copy() for e in cupy.split(ary, indices)]
+        device_concat = lambda arys: cupy.concatenate(
+            [cupy.asarray(e) for e in arys], axis=None
+        )
+        device_split = lambda ary, indices: [
+            e.copy() for e in cupy.split(cupy.asarray(ary), indices)
+        ]
     except ImportError:
         try:
             import numba.cuda
