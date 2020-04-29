@@ -506,6 +506,7 @@ async def test_config(cleanup):
 
 class KeyboardInterruptWorker(worker.Worker):
     """A Worker that raises KeyboardInterrupt almost immediately"""
+
     async def heartbeat(self):
         def raise_err():
             raise KeyboardInterrupt()
