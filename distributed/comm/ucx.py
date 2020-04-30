@@ -284,8 +284,8 @@ class UCX(Comm):
                 host_frames = []
                 for each_frame in frames:
                     is_cuda = hasattr(each_frame, "__cuda_array_interface__")
-                    cuda_frames.append(is_cuda)
                     each_size = nbytes(each_frame)
+                    cuda_frames.append(is_cuda)
                     sizes.append(each_size)
                     if each_size:
                         if is_cuda:
