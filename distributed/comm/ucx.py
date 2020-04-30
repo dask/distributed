@@ -152,9 +152,15 @@ def init_once():
         def device_split(ary, indices):
             with cupy.cuda.using_allocator(rmm.rmm_cupy_allocator):
                 ary = cupy.asarray(ary).view("u1")
-                results = cupy.split(ary, indices)
-                results = [e.copy() for e in results]
-                result_buffers = [e.data.mem._owner for e in results]
+                ary_split = cupy.split(ary, indices)
+                results = []
+                result_buffers = []
+                for e in ary_split:
+                    e2 = cupy.empty_like(e)
+                    cupy.copyto(e2, e)
+                    results.append(e2)
+                    result_buffers.append(e2.data.mem._owner)
+                cupy.cuda.stream.get_current_stream().synchronize()
                 return result_buffers
 
     except ImportError:
