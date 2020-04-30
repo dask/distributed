@@ -142,8 +142,15 @@ def init_once():
     try:
         import cupy
 
+        def dask_cupy_allocator(nbytes):
+            a = device_array(nbytes)
+            ptr = a.__cuda_array_interface__["data"][0]
+            dev_id = -1 if ptr else cupy.cuda.device.get_device_id()
+            mem = cupy.cuda.UnownedMemory(ptr=ptr, size=nbytes, owner=a, device_id=dev_id)
+            return cupy.cuda.memory.MemoryPointer(mem, 0)
+
         def device_concat(arys):
-            with cupy.cuda.using_allocator(rmm.rmm_cupy_allocator):
+            with cupy.cuda.using_allocator(dask_cupy_allocator):
                 arys = [cupy.asarray(e).view("u1") for e in arys]
                 result = cupy.concatenate(arys, axis=None)
                 result_buffer = result.data.mem._owner
