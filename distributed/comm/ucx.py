@@ -88,7 +88,7 @@ def init_once():
             r_view = memoryview(r)
             for each_ary, each_size in zip(arys, sizes):
                 if each_size:
-                    r_view[:each_size] = each_ary[:]
+                    r_view[:each_size] = each_ary
                     r_view = r_view[each_size:]
             return r
 
