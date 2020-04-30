@@ -371,9 +371,9 @@ class UCX(Comm):
                         await self.ep.recv(host_frames)
                 if device_frame_sizes:
                     device_frames = device_array(sum(device_frame_sizes))
-                    # It is necessary to first populate `frames` with CUDA arrays and synchronize
-                    # the default stream before starting receiving to ensure buffers have been allocated
                     if device_frames.nbytes:
+                        # It is necessary to first populate `frames` with CUDA arrays and synchronize
+                        # the default stream before starting receiving to ensure buffers have been allocated
                         synchronize_stream(0)
                         await self.ep.recv(device_frames)
 
