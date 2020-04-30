@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from typing import List
+from types import ModuleType
 import filecmp
 from importlib import import_module
 
@@ -66,7 +67,7 @@ def is_webaddress(s: str) -> bool:
     return any(s.startswith(prefix) for prefix in ("http://", "https://"))
 
 
-def _import_module(name, file_dir=None):
+def _import_module(name, file_dir=None) -> ModuleType:
     """ Imports module and extract preload interface functions.
 
     Import modules specified by name and extract 'dask_setup'
@@ -111,27 +112,20 @@ def _import_module(name, file_dir=None):
             return _import_module(fn, file_dir=file_dir)
 
     logger.info("Import preload module: %s", name)
-    return {
-        attrname: getattr(module, attrname, None)
-        for attrname in ("dask_setup", "dask_teardown")
-    }
+    return module
 
 
-async def _download_module(url: str):
+async def _download_module(url: str) -> ModuleType:
     assert is_webaddress(url)
 
     client = AsyncHTTPClient()
     response = await client.fetch(url)
     source = response.body.decode()
-    from types import ModuleType
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
     exec(compiled, module.__dict__)
-    return {
-        attrname: getattr(module, attrname, None)
-        for attrname in ("dask_setup", "dask_teardown")
-    }
+    return module
 
 
 class Preload:
@@ -166,7 +160,7 @@ class Preload:
         if is_webaddress(self.name):
             self.module = await _download_module(self.name)
 
-        dask_setup = self.module.get("dask_setup", None)
+        dask_setup = getattr(self.module, "dask_setup", None)
 
         if dask_setup:
             if isinstance(dask_setup, click.Command):
@@ -182,7 +176,7 @@ class Preload:
 
     async def teardown(self):
         """ Run when the server starts its close method """
-        dask_teardown = self.module.get("dask_teardown", None)
+        dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
             future = dask_teardown(self.dask_server)
             if inspect.isawaitable(future):
