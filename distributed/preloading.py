@@ -133,18 +133,21 @@ def _import_module(name, file_dir=None):
 
 class Preload:
     """
+    Manage state for setup/teardown of a preload module
 
     Parameters
     ----------
     dask_server: dask.distributed.Server
         The Worker or Scheduler
+    name: str
+        module name, file name, or web address to load
     argv: [string]
         List of string arguments passed to click-configurable `dask_setup`.
     file_dir: string
         Path of a directory where files should be copied
     """
 
-    def __init__(self, dask_server, name, argv, file_dir):
+    def __init__(self, dask_server, name: str, argv: List[str], file_dir: str):
         self.dask_server = dask_server
         self.name = name
         self.argv = argv
