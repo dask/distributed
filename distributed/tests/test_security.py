@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-import sys
 
 try:
     import ssl
@@ -149,14 +148,14 @@ def test_tls_config_for_role():
         sec.get_tls_config_for_role("supervisor")
 
 
+def assert_many_ciphers(ctx):
+    assert len(ctx.get_ciphers()) > 2  # Most likely
+
+
 def test_connection_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
-
-    def many_ciphers(ctx):
-        if sys.version_info >= (3, 6):
-            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
@@ -171,12 +170,12 @@ def test_connection_args():
     assert not d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     d = sec.get_connection_args("worker")
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     # No cert defined => no TLS
     d = sec.get_connection_args("client")
@@ -193,23 +192,18 @@ def test_connection_args():
     assert d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    if sys.version_info >= (3, 6):
-        supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
-        assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-        if len(tls_13_ciphers):
-            assert len(tls_13_ciphers) == 3
+
+    supported_ciphers = ctx.get_ciphers()
+    tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
+    assert len(tls_12_ciphers) == 1
+    tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
+    assert len(tls_13_ciphers) in (0, 3)
 
 
 def test_listen_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
-
-    def many_ciphers(ctx):
-        if sys.version_info >= (3, 6):
-            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
@@ -224,12 +218,12 @@ def test_listen_args():
     assert not d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     d = sec.get_listen_args("worker")
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     # No cert defined => no TLS
     d = sec.get_listen_args("client")
@@ -246,13 +240,12 @@ def test_listen_args():
     assert d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    if sys.version_info >= (3, 6):
-        supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
-        assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-        if len(tls_13_ciphers):
-            assert len(tls_13_ciphers) == 3
+
+    supported_ciphers = ctx.get_ciphers()
+    tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
+    assert len(tls_12_ciphers) == 1
+    tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
+    assert len(tls_13_ciphers) in (0, 3)
 
 
 @pytest.mark.asyncio
@@ -281,10 +274,10 @@ async def test_tls_listen_connect():
         forced_cipher_sec = Security()
 
     async with listen(
-        "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
+        "tls://", handle_comm, **sec.get_listen_args("scheduler")
     ) as listener:
         comm = await connect(
-            listener.contact_address, connection_args=sec.get_connection_args("worker")
+            listener.contact_address, **sec.get_connection_args("worker")
         )
         msg = await comm.read()
         assert msg == "hello"
@@ -293,14 +286,12 @@ async def test_tls_listen_connect():
         # No SSL context for client
         with pytest.raises(TypeError):
             await connect(
-                listener.contact_address,
-                connection_args=sec.get_connection_args("client"),
+                listener.contact_address, **sec.get_connection_args("client"),
             )
 
         # Check forced cipher
         comm = await connect(
-            listener.contact_address,
-            connection_args=forced_cipher_sec.get_connection_args("worker"),
+            listener.contact_address, **forced_cipher_sec.get_connection_args("worker"),
         )
         cipher, _, _ = comm.extra_info["cipher"]
         assert cipher in [FORCED_CIPHER] + TLS_13_CIPHERS
@@ -331,20 +322,18 @@ async def test_require_encryption():
 
     for listen_addr in ["inproc://", "tls://"]:
         async with listen(
-            listen_addr, handle_comm, connection_args=sec.get_listen_args("scheduler")
+            listen_addr, handle_comm, **sec.get_listen_args("scheduler")
         ) as listener:
             comm = await connect(
-                listener.contact_address,
-                connection_args=sec2.get_connection_args("worker"),
+                listener.contact_address, **sec2.get_connection_args("worker"),
             )
             comm.abort()
 
         async with listen(
-            listen_addr, handle_comm, connection_args=sec2.get_listen_args("scheduler")
+            listen_addr, handle_comm, **sec2.get_listen_args("scheduler")
         ) as listener:
             comm = await connect(
-                listener.contact_address,
-                connection_args=sec2.get_connection_args("worker"),
+                listener.contact_address, **sec2.get_connection_args("worker"),
             )
             comm.abort()
 
@@ -356,25 +345,21 @@ async def test_require_encryption():
 
     for listen_addr in ["tcp://"]:
         async with listen(
-            listen_addr, handle_comm, connection_args=sec.get_listen_args("scheduler")
+            listen_addr, handle_comm, **sec.get_listen_args("scheduler")
         ) as listener:
             comm = await connect(
-                listener.contact_address,
-                connection_args=sec.get_connection_args("worker"),
+                listener.contact_address, **sec.get_connection_args("worker"),
             )
             comm.abort()
 
             with pytest.raises(RuntimeError):
                 await connect(
-                    listener.contact_address,
-                    connection_args=sec2.get_connection_args("worker"),
+                    listener.contact_address, **sec2.get_connection_args("worker"),
                 )
 
         with pytest.raises(RuntimeError):
             listen(
-                listen_addr,
-                handle_comm,
-                connection_args=sec2.get_listen_args("scheduler"),
+                listen_addr, handle_comm, **sec2.get_listen_args("scheduler"),
             )
 
 
@@ -408,10 +393,10 @@ async def test_tls_temporary_credentials_functional():
     sec = Security.temporary()
 
     async with listen(
-        "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
+        "tls://", handle_comm, **sec.get_listen_args("scheduler")
     ) as listener:
         comm = await connect(
-            listener.contact_address, connection_args=sec.get_connection_args("worker")
+            listener.contact_address, **sec.get_connection_args("worker")
         )
         msg = await comm.read()
         assert msg == "hello"

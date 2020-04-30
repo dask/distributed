@@ -1,9 +1,9 @@
 import asyncio
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
-from inspect import isawaitable
+import inspect
 import itertools
 import json
 import logging
@@ -30,11 +30,13 @@ from tlz import (
     second,
     compose,
     groupby,
+    concat,
 )
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 
+from . import profile
 from .batched import BatchedSend
 from .comm import (
     normalize_address,
@@ -45,10 +47,11 @@ from .comm import (
 from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from . import profile
+
+from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from .preloading import preload_modules
+from . import preloading
 from .proctitle import setproctitle
 from .security import Security
 from .utils import (
@@ -61,7 +64,6 @@ from .utils import (
     no_default,
     parse_timedelta,
     parse_bytes,
-    PeriodicCallback,
     shutting_down,
     key_split_group,
     empty_context,
@@ -88,7 +90,9 @@ logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-DEFAULT_DATA_SIZE = dask.config.get("distributed.scheduler.default-data-size")
+DEFAULT_DATA_SIZE = parse_bytes(
+    dask.config.get("distributed.scheduler.default-data-size")
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -1059,6 +1063,8 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
+        dashboard=None,
+        http_prefix="/",
         preload=None,
         preload_argv=(),
         plugins=(),
@@ -1105,21 +1111,36 @@ class Scheduler(ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preload = preload
         self.preload_argv = preload_argv
+        self._preload_modules = preloading.on_creation(self.preload)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
-        self.listen_args = self.security.get_listen_args("scheduler")
 
-        if dashboard_address is not None:
+        self._start_address = addresses_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+            default_port=self.default_port,
+        )
+
+        routes = get_handlers(
+            server=self,
+            modules=dask.config.get("distributed.scheduler.http.routes"),
+            prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address, default_port=8787)
+
+        if dashboard:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard.scheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("dashboard", dashboard_address)] = (
-                    BokehScheduler,
-                    (service_kwargs or {}).get("dashboard", {}),
+                distributed.dashboard.scheduler.connect(
+                    self.http_application, self.http_server, self, prefix=http_prefix,
                 )
 
         # Communication state
@@ -1326,15 +1347,6 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        self._start_address = addresses_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-            default_port=self.default_port,
-        )
-
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1346,11 +1358,11 @@ class Scheduler(ServerNode):
         )
 
         if self.worker_ttl:
-            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl, io_loop=loop)
+            pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl)
             self.periodic_callbacks["worker-ttl"] = pc
 
         if self.idle_timeout:
-            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4, io_loop=loop)
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4)
             self.periodic_callbacks["idle-timeout"] = pc
 
         if extensions is None:
@@ -1429,7 +1441,7 @@ class Scheduler(ServerNode):
 
         if self.status != "running":
             for addr in self._start_address:
-                await self.listen(addr, listen_args=self.listen_args)
+                await self.listen(addr, **self.security.get_listen_args("scheduler"))
                 self.ip = get_address_host(self.listen_address)
                 listen_ip = self.ip
 
@@ -1462,7 +1474,7 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
+        await preloading.on_start(self._preload_modules, self, argv=self.preload_argv)
 
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
@@ -1486,6 +1498,8 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
+        await preloading.on_teardown(self._preload_modules, self)
+
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
@@ -1503,6 +1517,7 @@ class Scheduler(ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
+
         for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
@@ -1958,7 +1973,7 @@ class Scheduler(ServerNode):
                 ts.retries = v
 
         # Compute recommendations
-        recommendations = OrderedDict()
+        recommendations = {}
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts.state == "released" and ts.run_spec:
@@ -2092,7 +2107,7 @@ class Scheduler(ServerNode):
                 return {}
             cts = self.tasks.get(cause)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             if cts is not None and cts.state == "memory":  # couldn't find this
                 for ws in cts.who_has:  # TODO: this behavior is extreme
@@ -2191,7 +2206,7 @@ class Scheduler(ServerNode):
             ws.status = "closed"
             self.total_occupancy -= ws.occupancy
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for ts in list(ws.processing):
                 k = ts.key
@@ -3103,7 +3118,7 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                        "keys": tuple(concat(r["keys"].keys() for r in result)),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -3583,7 +3598,7 @@ class Scheduler(ServerNode):
             if teardown:
                 teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
-            if isawaitable(state):
+            if inspect.isawaitable(state):
                 state = await state
             try:
                 while self.status == "running":
@@ -3861,7 +3876,7 @@ class Scheduler(ServerNode):
 
             ts.state = "waiting"
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.dependencies:
                 if dts.exception_blame:
@@ -3911,7 +3926,7 @@ class Scheduler(ServerNode):
             if ts.has_lost_dependencies:
                 return {key: "forgotten"}
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.dependencies:
                 dep = dts.key
@@ -4043,7 +4058,7 @@ class Scheduler(ServerNode):
 
             self.check_idle_saturated(ws)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             self._add_to_memory(ts, ws, recommendations, **kwargs)
 
@@ -4142,7 +4157,7 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             self._remove_from_processing(ts)
 
@@ -4179,7 +4194,7 @@ class Scheduler(ServerNode):
                     ts.exception = "Worker holding Actor was lost"
                     return {ts.key: "erred"}  # don't try to recreate
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.waiters:
                 if dts.state in ("no-worker", "processing"):
@@ -4273,7 +4288,7 @@ class Scheduler(ServerNode):
                     assert not ts.waiting_on
                     assert not ts.waiters
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             ts.exception = None
             ts.exception_blame = None
@@ -4347,7 +4362,7 @@ class Scheduler(ServerNode):
 
             ts.state = "released"
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             if ts.has_lost_dependencies:
                 recommendations[key] = "forgotten"

@@ -10,7 +10,6 @@ import sys
 import tempfile
 from time import sleep
 
-from tornado import gen
 from click.testing import CliRunner
 
 import distributed
@@ -29,16 +28,16 @@ import distributed.cli.dask_scheduler
 def test_defaults(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as proc:
 
-        @gen.coroutine
-        def f():
+        async def f():
             # Default behaviour is to listen on all addresses
-            yield [assert_can_connect_from_everywhere_4_6(8786, 5.0)]  # main port
+            await assert_can_connect_from_everywhere_4_6(8786, timeout=5.0)
 
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             c.sync(f)
 
-    with pytest.raises(Exception):
-        requests.get("http://127.0.0.1:8787/status/")
+        response = requests.get("http://127.0.0.1:8787/status/")
+        assert response.status_code == 404
+
     with pytest.raises(Exception):
         response = requests.get("http://127.0.0.1:9786/info.json")
 
@@ -46,12 +45,9 @@ def test_defaults(loop):
 def test_hostport(loop):
     with popen(["dask-scheduler", "--no-dashboard", "--host", "127.0.0.1:8978"]):
 
-        @gen.coroutine
-        def f():
-            yield [
-                # The scheduler's main port can't be contacted from the outside
-                assert_can_connect_locally_4(8978, 5.0)
-            ]
+        async def f():
+            # The scheduler's main port can't be contacted from the outside
+            await assert_can_connect_locally_4(8978, timeout=5.0)
 
         with Client("127.0.0.1:8978", loop=loop) as c:
             assert len(c.nthreads()) == 0
@@ -62,11 +58,8 @@ def test_no_dashboard(loop):
     pytest.importorskip("bokeh")
     with popen(["dask-scheduler", "--no-dashboard"]) as proc:
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
-            for i in range(3):
-                line = proc.stderr.readline()
-                assert b"dashboard" not in line.lower()
-            with pytest.raises(Exception):
-                requests.get("http://127.0.0.1:8787/status/")
+            response = requests.get("http://127.0.0.1:8787/status/")
+            assert response.status_code == 404
 
 
 def test_dashboard(loop):
@@ -392,3 +385,28 @@ def test_idle_timeout(loop):
     )
     stop = time()
     assert 1 < stop - start < 10
+
+
+def test_multiple_workers(loop):
+    text = """
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    with popen(["dask-scheduler", "--no-dashboard"]) as s:
+        with popen(
+            [
+                "dask-worker",
+                "localhost:8786",
+                "--no-dashboard",
+                "--preload",
+                text,
+                "--preload-nanny",
+                text,
+            ]
+        ) as a:
+            with Client("127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(1)
+                [foo] = c.run(lambda dask_worker: dask_worker.foo).values()
+                assert foo == "setup"
+                [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
+                assert foo == "setup"

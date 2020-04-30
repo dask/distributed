@@ -12,7 +12,7 @@ import dask
 import tblib
 from tlz import merge
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from .comm import (
     connect,
@@ -31,7 +31,6 @@ from .utils import (
     truncate_exception,
     ignoring,
     shutting_down,
-    PeriodicCallback,
     parse_timedelta,
     has_keyword,
     CancelledError,
@@ -176,18 +175,14 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
+        pc = PeriodicCallback(self.monitor.update, 500)
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(
-            self._measure_tick,
-            parse_timedelta(
-                dask.config.get("distributed.admin.tick.interval"), default="ms"
-            )
-            * 1000,
-            io_loop=self.io_loop,
+        measure_tick_interval = parse_timedelta(
+            dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
+        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
         self.periodic_callbacks["tick"] = pc
 
         self.thread_id = 0
@@ -302,7 +297,7 @@ class Server:
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    async def listen(self, port_or_addr=None, listen_args=None):
+    async def listen(self, port_or_addr=None, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -313,10 +308,7 @@ class Server:
             addr = port_or_addr
             assert isinstance(addr, str)
         listener = await listen(
-            addr,
-            self.handle_comm,
-            deserialize=self.deserialize,
-            connection_args=listen_args,
+            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
         )
         self.listeners.append(listener)
 
@@ -606,7 +598,7 @@ class rpc:
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self._created = weakref.WeakSet()
         rpc.active.add(self)
 
@@ -644,7 +636,7 @@ class rpc:
                 self.address,
                 self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "rpc"
         self.comms[comm] = False  # mark as taken
@@ -832,7 +824,7 @@ class ConnectionPool:
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self.timeout = timeout
         self._n_connecting = 0
         self.server = weakref.ref(server) if server else None
@@ -905,7 +897,7 @@ class ConnectionPool:
                 addr,
                 timeout=timeout or self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)

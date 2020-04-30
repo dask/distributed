@@ -11,7 +11,7 @@ from distributed.utils_test import gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 import numpy as np
 import pandas as pd
-import pandas.util.testing as tm
+import pandas.testing as tm
 
 
 dfs = [
@@ -34,7 +34,7 @@ def assert_equal(a, b):
 
 
 @gen_cluster(timeout=240, client=True)
-def test_dataframes(c, s, a, b):
+async def test_dataframes(c, s, a, b):
     df = pd.DataFrame(
         {"x": np.random.random(1000), "y": np.random.random(1000)},
         index=np.arange(1000),
@@ -46,7 +46,7 @@ def test_dataframes(c, s, a, b):
     assert rdf.divisions == ldf.divisions
 
     remote = c.compute(rdf)
-    result = yield remote
+    result = await remote
 
     tm.assert_frame_equal(result, ldf.compute(scheduler="sync"))
 
@@ -63,19 +63,19 @@ def test_dataframes(c, s, a, b):
     for f in exprs:
         local = f(ldf).compute(scheduler="sync")
         remote = c.compute(f(rdf))
-        remote = yield remote
+        remote = await remote
         assert_equal(local, remote)
 
 
 @gen_cluster(client=True)
-def test__dask_array_collections(c, s, a, b):
+async def test_dask_array_collections(c, s, a, b):
     import dask.array as da
 
     s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
-    x_futures = yield c.scatter(x_dsk)
-    y_futures = yield c.scatter(y_dsk)
+    x_futures = await c.scatter(x_dsk)
+    y_futures = await c.scatter(y_dsk)
 
     dt = np.random.random(0).dtype
     x_local = da.Array(x_dsk, "x", ((3, 3, 3), (3, 3)), dt)
@@ -95,13 +95,13 @@ def test__dask_array_collections(c, s, a, b):
         local = expr(x_local, y_local).compute(scheduler="sync")
 
         remote = c.compute(expr(x_remote, y_remote))
-        remote = yield remote
+        remote = await remote
 
         assert np.all(local == remote)
 
 
 @gen_cluster(client=True)
-def test_bag_groupby_tasks_default(c, s, a, b):
+async def test_bag_groupby_tasks_default(c, s, a, b):
     b = db.range(100, npartitions=10)
     b2 = b.groupby(lambda x: x % 13)
     assert not any("partd" in k[0] for k in b2.dask)
@@ -126,28 +126,37 @@ def test_dataframe_set_index_sync(wait, client):
     assert len(df2)
 
 
+def make_time_dataframe():
+    return pd.DataFrame(
+        np.random.randn(30, 4),
+        columns=list("ABCD"),
+        index=pd.date_range("2000", periods=30, freq="B"),
+    )
+
+
 def test_loc_sync(client):
-    df = pd.util.testing.makeTimeDataFrame()
+    df = make_time_dataframe()
     ddf = dd.from_pandas(df, npartitions=10)
     ddf.loc["2000-01-17":"2000-01-24"].compute()
 
 
 def test_rolling_sync(client):
-    df = pd.util.testing.makeTimeDataFrame()
+    df = make_time_dataframe()
     ddf = dd.from_pandas(df, npartitions=10)
     ddf.A.rolling(2).mean().compute()
 
 
 @gen_cluster(client=True)
-def test_loc(c, s, a, b):
-    df = pd.util.testing.makeTimeDataFrame()
+async def test_loc(c, s, a, b):
+    df = make_time_dataframe()
     ddf = dd.from_pandas(df, npartitions=10)
     future = c.compute(ddf.loc["2000-01-17":"2000-01-24"])
-    yield future
+    await future
 
 
 def test_dataframe_groupby_tasks(client):
-    df = pd.util.testing.makeTimeDataFrame()
+    df = make_time_dataframe()
+
     df["A"] = df.A // 0.1
     df["B"] = df.B // 0.1
     ddf = dd.from_pandas(df, npartitions=10)
@@ -173,7 +182,7 @@ def test_dataframe_groupby_tasks(client):
 
 
 @gen_cluster(client=True)
-def test_sparse_arrays(c, s, a, b):
+async def test_sparse_arrays(c, s, a, b):
     sparse = pytest.importorskip("sparse")
     da = pytest.importorskip("dask.array")
 
@@ -182,13 +191,13 @@ def test_sparse_arrays(c, s, a, b):
     s = x.map_blocks(sparse.COO)
     future = c.compute(s.sum(axis=0)[:10])
 
-    yield future
+    await future
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-def test_delayed_none(c, s, w):
+async def test_delayed_none(c, s, w):
     x = dask.delayed(None)
     y = dask.delayed(123)
     [xx, yy] = c.compute([x, y])
-    assert (yield xx) is None
-    assert (yield yy) == 123
+    assert await xx is None
+    assert await yy == 123
