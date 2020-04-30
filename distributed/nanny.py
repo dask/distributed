@@ -12,7 +12,7 @@ import weakref
 
 import dask
 from dask.system import CPU_COUNT
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
@@ -29,7 +29,6 @@ from .utils import (
     mp_context,
     silence_logging,
     json_load_robust,
-    PeriodicCallback,
     parse_timedelta,
     parse_ports,
     ignoring,
@@ -204,7 +203,7 @@ class Nanny(ServerNode):
         self.scheduler = self.rpc(self.scheduler_addr)
 
         if self.memory_limit:
-            pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
+            pc = PeriodicCallback(self.memory_monitor, 100)
             self.periodic_callbacks["memory"] = pc
 
         if (
@@ -786,4 +785,6 @@ class WorkerProcess:
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:
-            pass
+            # At this point the loop is not running thus we have to run
+            # do_stop() explicitly.
+            loop.run_sync(do_stop)

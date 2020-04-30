@@ -383,7 +383,10 @@ class SpecCluster(Cluster):
             await future
         async with self._lock:
             with ignoring(CommClosedError):
-                await self.scheduler_comm.close(close_workers=True)
+                if self.scheduler_comm:
+                    await self.scheduler_comm.close(close_workers=True)
+                else:
+                    logger.warning("Cluster closed without starting up")
 
         await self.scheduler.close()
         for w in self._created:
@@ -551,7 +554,7 @@ class SpecCluster(Cluster):
         minimum_memory : str
             Minimum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
-        maximum_cores : int
+        maximum_memory : str
             Maximum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
 
@@ -603,6 +606,6 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring((gen.TimeoutError, TimeoutError)):
+        with ignoring(gen.TimeoutError, TimeoutError):
             if cluster.status != "closed":
                 cluster.close(timeout=10)

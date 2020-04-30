@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import gc
 from contextlib import contextmanager
 import copy
 import functools
@@ -17,7 +18,6 @@ import socket
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 from time import sleep
 import uuid
@@ -397,25 +397,9 @@ async def geninc(x, delay=0.02):
     return x + 1
 
 
-def compile_snippet(code, dedent=True):
-    if dedent:
-        code = textwrap.dedent(code)
-    code = compile(code, "<dynamic>", "exec")
-    ns = globals()
-    exec(code, ns, ns)
-
-
-if sys.version_info >= (3, 5):
-    compile_snippet(
-        """
-        async def asyncinc(x, delay=0.02):
-            await asyncio.sleep(delay)
-            return x + 1
-        """
-    )
-    assert asyncinc  # noqa: F821
-else:
-    asyncinc = None
+async def asyncinc(x, delay=0.02):
+    await asyncio.sleep(delay)
+    return x + 1
 
 
 _readone_queues = {}
@@ -761,8 +745,8 @@ def gen_test(timeout=10):
     """ Coroutine test
 
     @gen_test(timeout=5)
-    def test_foo():
-        yield ...  # use tornado coroutines
+    async def test_foo():
+        await ...  # use tornado coroutines
     """
 
     def _(func):
@@ -856,14 +840,15 @@ def gen_cluster(
     active_rpc_timeout=1,
     config={},
     clean_kwargs={},
+    allow_unclosed=False,
 ):
     from distributed import Client
 
     """ Coroutine test with small cluster
 
     @gen_cluster()
-    def test_foo(scheduler, worker1, worker2):
-        yield ...  # use tornado coroutines
+    async def test_foo(scheduler, worker1, worker2):
+        await ...  # use tornado coroutines
 
     See also:
         start
@@ -905,6 +890,7 @@ def gen_cluster(
                                     "Failed to start gen_cluster, retrying",
                                     exc_info=True,
                                 )
+                                await asyncio.sleep(1)
                             else:
                                 workers[:] = ws
                                 args = [s] + workers
@@ -940,16 +926,28 @@ def gen_cluster(
                         else:
                             await c._close(fast=True)
 
-                        for i in range(5):
-                            if all(c.closed() for c in Comm._instances):
-                                break
-                            else:
+                        def get_unclosed():
+                            return [c for c in Comm._instances if not c.closed()] + [
+                                c
+                                for c in _global_clients.values()
+                                if c.status != "closed"
+                            ]
+
+                        try:
+                            start = time()
+                            while time() < start + 5:
+                                gc.collect()
+                                if not get_unclosed():
+                                    break
                                 await asyncio.sleep(0.05)
-                        else:
-                            L = [c for c in Comm._instances if not c.closed()]
+                            else:
+                                if allow_unclosed:
+                                    print(f"Unclosed Comms: {get_unclosed()}")
+                                else:
+                                    raise RuntimeError("Unclosed Comms", get_unclosed())
+                        finally:
                             Comm._instances.clear()
-                            # raise ValueError("Unclosed Comms", L)
-                            print("Unclosed Comms", L)
+                            _global_clients.clear()
 
                         return result
 
@@ -989,12 +987,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            if sys.version_info[0] == 3:
-                proc.wait(10)
-            else:
-                start = time()
-                while proc.poll() is None and time() < start + 10:
-                    sleep(0.02)
+            proc.wait(10)
         finally:
             # Make sure we don't leave the process lingering around
             with ignoring(OSError):

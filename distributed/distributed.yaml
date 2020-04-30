@@ -12,7 +12,7 @@ distributed:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
-    default-data-size: 1000
+    default-data-size: 1kiB
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
@@ -44,6 +44,7 @@ distributed:
         check_unused_sessions_milliseconds: 500
     locks:
       lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
+      lease-timeout: 30s  # The timeout after which a lease will be released if not refreshed
 
     http:
       routes:
@@ -95,10 +96,12 @@ distributed:
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
 
   client:
-    heartbeat: 5s  # time between client heartbeats
+    heartbeat: 5s  # Interval between client heartbeats
+    scheduler-info-interval: 2s  # Interval between scheduler-info updates
 
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
+    cluster-repr-interval: 500ms  # Interval between calls to update cluster-repr for the widget
 
   adaptive:
     interval: 1s         # Interval between scaling evaluations

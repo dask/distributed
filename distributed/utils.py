@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import functools
 from hashlib import md5
 import html
-import inspect
 import json
 import logging
 import multiprocessing
@@ -48,7 +47,6 @@ from dask.utils import (  # noqa
 )
 
 import tlz as toolz
-import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -202,6 +200,7 @@ def ignoring(*exceptions):
         pass
 
 
+# FIXME: this breaks if changed to async def...
 @gen.coroutine
 def ignore_exceptions(coroutines, *exceptions):
     """ Process list of coroutines, ignoring certain exceptions
@@ -1039,10 +1038,7 @@ def import_file(path):
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
             sys.path.insert(0, path)
-        if sys.version_info >= (3, 6):
-            names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
-        else:
-            names = (mod_info[1] for mod_info in pkgutil.iter_modules([path]))
+        names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
     loaded = []
@@ -1117,17 +1113,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def PeriodicCallback(callback, callback_time, io_loop=None):
-    """
-    Wrapper around tornado.IOLoop.PeriodicCallback, for compatibility
-    with removal of the `io_loop` parameter in Tornado 5.0.
-    """
-    if tornado.version_info >= (5,):
-        return tornado.ioloop.PeriodicCallback(callback, callback_time)
-    else:
-        return tornado.ioloop.PeriodicCallback(callback, callback_time, io_loop)
-
-
 @contextmanager
 def time_warn(duration, text):
     start = time()
@@ -1190,49 +1175,47 @@ def reset_logger_locks():
             handler.createLock()
 
 
-if tornado.version_info[0] >= 5:
+is_server_extension = False
 
-    is_server_extension = False
+if "notebook" in sys.modules:
+    import traitlets
+    from notebook.notebookapp import NotebookApp
 
-    if "notebook" in sys.modules:
-        import traitlets
-        from notebook.notebookapp import NotebookApp
+    is_server_extension = traitlets.config.Application.initialized() and isinstance(
+        traitlets.config.Application.instance(), NotebookApp
+    )
 
-        is_server_extension = traitlets.config.Application.initialized() and isinstance(
-            traitlets.config.Application.instance(), NotebookApp
-        )
+if not is_server_extension:
+    is_kernel_and_no_running_loop = False
 
-    if not is_server_extension:
-        is_kernel_and_no_running_loop = False
+    if is_kernel():
+        try:
+            get_running_loop()
+        except RuntimeError:
+            is_kernel_and_no_running_loop = True
 
-        if is_kernel():
-            try:
-                get_running_loop()
-            except RuntimeError:
-                is_kernel_and_no_running_loop = True
+    if not is_kernel_and_no_running_loop:
 
-        if not is_kernel_and_no_running_loop:
+        # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+        # once tornado > 6.0.3 is available.
+        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # fallback to the pre-3.8 default of Selector
+            # https://github.com/tornadoweb/tornado/issues/2608
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+        else:
+            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
-            # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
-            # once tornado > 6.0.3 is available.
-            if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-                # WindowsProactorEventLoopPolicy is not compatible with tornado 6
-                # fallback to the pre-3.8 default of Selector
-                # https://github.com/tornadoweb/tornado/issues/2608
-                BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
-            else:
-                BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+            def get_event_loop(self):
+                try:
+                    return super().get_event_loop()
+                except (RuntimeError, AssertionError):
+                    loop = self.new_event_loop()
+                    self.set_event_loop(loop)
+                    return loop
 
-            class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
-                def get_event_loop(self):
-                    try:
-                        return super().get_event_loop()
-                    except (RuntimeError, AssertionError):
-                        loop = self.new_event_loop()
-                        self.set_event_loop(loop)
-                        return loop
-
-            asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
+        asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
@@ -1298,11 +1281,7 @@ def color_of(x, palette=palette):
 
 
 def iscoroutinefunction(f):
-    if gen.is_coroutine_function(f):
-        return True
-    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
-        return True
-    return False
+    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager

@@ -10,7 +10,6 @@ import weakref
 from distutils.version import LooseVersion
 
 from tornado.ioloop import IOLoop
-from tornado import gen
 import tornado
 from tornado.httpclient import AsyncHTTPClient
 import pytest
@@ -68,7 +67,6 @@ def test_local_cluster_supports_blocked_handlers(loop):
     )
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="fork issues")
 def test_close_twice():
     with LocalCluster() as cluster:
         with Client(cluster.scheduler_address) as client:
@@ -82,7 +80,6 @@ def test_close_twice():
         assert not log
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="multi-loop")
 def test_procs():
     with LocalCluster(
         2,
@@ -174,13 +171,11 @@ def test_transports_tcp_port():
             assert e.submit(inc, 4).result() == 5
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="")
 class LocalTest(ClusterTest, unittest.TestCase):
     Cluster = partial(LocalCluster, silence_logs=False, dashboard_address=None)
     kwargs = {"dashboard_address": None, "processes": False}
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="")
 def test_Client_with_local(loop):
     with LocalCluster(
         1, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
@@ -430,7 +425,6 @@ def test_bokeh(loop, processes):
         requests.get(url, timeout=0.2)
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="Unknown")
 def test_blocks_until_full(loop):
     with Client(loop=loop) as c:
         assert len(c.nthreads()) > 0
@@ -463,7 +457,8 @@ async def test_scale_up_and_down():
 
 @pytest.mark.xfail(
     sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
-    reason="Known issue with Python 3.8 and Tornado < 6.0.3. See https://github.com/tornadoweb/tornado/pull/2683.",
+    reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
+    "See https://github.com/tornadoweb/tornado/pull/2683.",
     strict=True,
 )
 def test_silent_startup():
@@ -550,7 +545,6 @@ def test_death_timeout_raises(loop):
     LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="Unknown")
 @pytest.mark.asyncio
 async def test_bokeh_kwargs(cleanup):
     pytest.importorskip("bokeh")
@@ -761,13 +755,13 @@ def test_local_tls(loop, temporary):
 
 
 @gen_test()
-def test_scale_retires_workers():
+async def test_scale_retires_workers():
     class MyCluster(LocalCluster):
         def scale_down(self, *args, **kwargs):
             pass
 
     loop = IOLoop.current()
-    cluster = yield MyCluster(
+    cluster = await MyCluster(
         0,
         scheduler_port=0,
         processes=False,
@@ -776,26 +770,26 @@ def test_scale_retires_workers():
         loop=loop,
         asynchronous=True,
     )
-    c = yield Client(cluster, asynchronous=True)
+    c = await Client(cluster, asynchronous=True)
 
     assert not cluster.workers
 
-    yield cluster.scale(2)
+    await cluster.scale(2)
 
     start = time()
     while len(cluster.scheduler.workers) != 2:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
-    yield cluster.scale(1)
+    await cluster.scale(1)
 
     start = time()
     while len(cluster.scheduler.workers) != 1:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
-    yield c.close()
-    yield cluster.close()
+    await c.close()
+    await cluster.close()
 
 
 def test_local_tls_restart(loop):
@@ -844,8 +838,7 @@ def test_asynchronous_property(loop):
         loop=loop,
     ) as cluster:
 
-        @gen.coroutine
-        def _():
+        async def _():
             assert cluster.asynchronous
 
         cluster.sync(_)

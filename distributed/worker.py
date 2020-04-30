@@ -25,7 +25,7 @@ from dask.system import CPU_COUNT
 
 from tlz import pluck, merge, first, keymap
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import profile, comm, system
 from .batched import BatchedSend
@@ -56,7 +56,6 @@ from .utils import (
     json_load_robust,
     key_split,
     offload,
-    PeriodicCallback,
     parse_bytes,
     parse_timedelta,
     parse_ports,
@@ -473,9 +472,6 @@ class Worker(ServerNode):
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
 
-        self.memory_monitor_interval = parse_timedelta(
-            memory_monitor_interval, default="ms"
-        )
         self.extensions = dict()
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -645,23 +641,22 @@ class Worker(ServerNode):
             "worker": self,
         }
 
-        pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
+        pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks["heartbeat"] = pc
         pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}),
-            60000,
-            io_loop=self.io_loop,
+            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000,
         )
         self.periodic_callbacks["keep-alive"] = pc
 
         self._address = contact_address
 
+        self.memory_monitor_interval = parse_timedelta(
+            memory_monitor_interval, default="ms"
+        )
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(
-                self.memory_monitor,
-                self.memory_monitor_interval * 1000,
-                io_loop=self.io_loop,
+                self.memory_monitor, self.memory_monitor_interval * 1000,
             )
             self.periodic_callbacks["memory"] = pc
 
@@ -674,19 +669,13 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [not started]")
 
-        pc = PeriodicCallback(
-            self.trigger_profile,
-            parse_timedelta(
-                dask.config.get("distributed.worker.profile.interval"), default="ms"
-            )
-            * 1000,
-            io_loop=self.io_loop,
+        profile_trigger_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
         )
+        pc = PeriodicCallback(self.trigger_profile, profile_trigger_interval * 1000)
         self.periodic_callbacks["profile"] = pc
 
-        pc = PeriodicCallback(
-            self.cycle_profile, profile_cycle_interval * 1000, io_loop=self.io_loop
-        )
+        pc = PeriodicCallback(self.cycle_profile, profile_cycle_interval * 1000)
         self.periodic_callbacks["profile-cycle"] = pc
 
         self.plugins = {}
@@ -2339,6 +2328,7 @@ class Worker(ServerNode):
     # Execute Task #
     ################
 
+    # FIXME: this breaks if changed to async def...
     @gen.coroutine
     def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
         """ Safely run function in thread pool executor
