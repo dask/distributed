@@ -62,6 +62,10 @@ def validate_preload_argv(ctx, param, value):
     return value
 
 
+def is_webaddress(s: str) -> bool:
+    return any(s.startswith(prefix) for prefix in ("http://", "https://"))
+
+
 def _import_module(name, file_dir=None):
     """ Imports module and extract preload interface functions.
 
@@ -80,25 +84,7 @@ def _import_module(name, file_dir=None):
     Nest dict of names to extracted module interface components if present
     in imported module.
     """
-    if any(name.startswith(prefix) for prefix in ("http://", "https://")):
-
-        async def _():
-            client = AsyncHTTPClient()
-            response = await client.fetch(name)
-            source = response.body.decode()
-            from types import ModuleType
-
-            compiled = compile(source, name, "exec")
-            module = ModuleType(name)
-            exec(compiled, module.__dict__)
-            return {
-                attrname: getattr(module, attrname, None)
-                for attrname in ("dask_setup", "dask_teardown")
-            }
-
-        return _()
-
-    elif name.endswith(".py"):
+    if name.endswith(".py"):
         # name is a file path
         if file_dir is not None:
             basename = os.path.basename(name)
@@ -131,6 +117,23 @@ def _import_module(name, file_dir=None):
     }
 
 
+async def _download_module(url: str):
+    assert is_webaddress(url)
+
+    client = AsyncHTTPClient()
+    response = await client.fetch(url)
+    source = response.body.decode()
+    from types import ModuleType
+
+    compiled = compile(source, url, "exec")
+    module = ModuleType(url)
+    exec(compiled, module.__dict__)
+    return {
+        attrname: getattr(module, attrname, None)
+        for attrname in ("dask_setup", "dask_teardown")
+    }
+
+
 class Preload:
     """
     Manage state for setup/teardown of a preload module
@@ -153,12 +156,15 @@ class Preload:
         self.argv = argv
         self.file_dir = file_dir
 
-        self.module = _import_module(name, file_dir)
+        if not is_webaddress(name):
+            self.module = _import_module(name, file_dir)
+        else:
+            self.module = None
 
     async def start(self):
         """ Run when the server finishes its start method """
-        if inspect.isawaitable(self.module):
-            self.module = await self.module
+        if is_webaddress(self.name):
+            self.module = await _download_module(self.name)
 
         dask_setup = self.module.get("dask_setup", None)
 
