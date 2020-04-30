@@ -82,7 +82,7 @@ from .utils import (
     CancelledError,
 )
 from . import versions as version_module
-
+from cudf._lib.nvtx import annotate
 
 logger = logging.getLogger(__name__)
 
@@ -2460,6 +2460,7 @@ class Client(Node):
         )
         return self.run(function, *args, **kwargs)
 
+    @annotate("graph_to_futures", domain="distributed")
     def _graph_to_futures(
         self,
         dsk,
