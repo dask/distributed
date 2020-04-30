@@ -470,22 +470,6 @@ async def test_ports(loop):
         server3.stop()
 
 
-@pytest.mark.asyncio
-async def test_multiple_addresses(loop):
-    addresses = ["tcp://127.0.0.1:8764", "tcp://127.0.0.1:8765"]
-    server_1 = Server({}, io_loop=loop)
-    server_2 = Server({}, io_loop=loop)
-    try:
-        await server_1.listen(addresses)
-        assert server_1.address == addresses[0]
-
-        await server_2.listen(addresses)
-        assert server_2.address == addresses[1]
-    finally:
-        server_1.stop()
-        server_2.stop()
-
-
 def stream_div(stream=None, x=None, y=None):
     return x / y
 

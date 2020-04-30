@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -15,7 +16,7 @@ from tornado.ioloop import IOLoop
 from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
-from .comm.addressing import addresses_from_user_args
+from .comm.addressing import address_from_user_args
 from .core import RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
@@ -257,16 +258,32 @@ class Nanny(ServerNode):
 
         await super().start()
 
-        _start_addresses = addresses_from_user_args(
-            host=self._start_host,
-            port=parse_ports(self._start_port),
-            interface=self._interface,
-            protocol=self._protocol,
-            security=self.security,
-        )
-        self._start_address = await self.listen(
-            _start_addresses, **self.security.get_listen_args("worker")
-        )
+        ports = parse_ports(self._start_port)
+        for port in ports:
+            start_address = address_from_user_args(
+                host=self._start_host,
+                port=port,
+                interface=self._interface,
+                protocol=self._protocol,
+                security=self.security,
+            )
+            try:
+                await self.listen(
+                    start_address, **self.security.get_listen_args("worker")
+                )
+            except OSError as e:
+                if len(ports) > 1 and e.errno == errno.EADDRINUSE:
+                    continue
+                else:
+                    raise e
+            else:
+                self._start_address = start_address
+                break
+        else:
+            raise ValueError(
+                f"Could not start Nanny on host {self._start_host}"
+                f"with port {self._start_port}"
+            )
 
         self.ip = get_address_host(self.address)
 
