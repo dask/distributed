@@ -37,9 +37,9 @@ def validate_preload_argv(ctx, param, value):
     preload_modules = {name: _import_module(name) for name in ctx.params.get("preload")}
 
     preload_commands = [
-        m["dask_setup"]
+        getattr(m, "dask_setup", None)
         for m in preload_modules.values()
-        if isinstance(m["dask_setup"], click.Command)
+        if isinstance(getattr(m, "dask_setup", None), click.Command)
     ]
 
     if len(preload_commands) > 1:
