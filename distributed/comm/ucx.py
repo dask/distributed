@@ -66,6 +66,7 @@ def init_once():
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
     # Find the function, `host_array()`, to use when allocating new host arrays
+    # Also find `host_concat()` and `host_split()` to merge/split frames
     try:
         import numpy
 
@@ -137,7 +138,7 @@ def init_once():
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
 
-    # Find the function, `as_device_array()`
+    # Find the functions `device_concat` and `device_split`
     try:
         import cupy
 
