@@ -284,25 +284,13 @@ class UCX(Comm):
                 for each_frame in frames:
                     is_cuda = hasattr(each_frame, "__cuda_array_interface__")
                     cuda_frames.append(is_cuda)
-                    sizes.append(nbytes(each_frame))
-                    if is_cuda:
-                        device_frames.append(each_frame)
-                    else:
-                        host_frames.append(each_frame)
-
-                if len(device_frames) == 0:
-                    device_frames = device_array(0)
-                elif len(device_frames) == 1:
-                    device_frames = device_frames[0]
-                else:
-                    device_frames = device_concat(device_frames)
-
-                if len(host_frames) == 0:
-                    host_frames = host_array(0)
-                elif len(host_frames) == 1:
-                    host_frames = host_frames[0]
-                else:
-                    host_frames = host_concat(host_frames)
+                    each_size = nbytes(each_frame)
+                    sizes.append(each_size)
+                    if each_size:
+                        if is_cuda:
+                            device_frames.append(each_frame)
+                        else:
+                            host_frames.append(each_frame)
 
                 # Send meta data
 
@@ -316,9 +304,17 @@ class UCX(Comm):
 
                 # Send frames
 
-                if nbytes(host_frames):
+                if host_frames:
+                    if len(host_frames) == 1:
+                        host_frames = host_frames[0]
+                    else:
+                        host_frames = host_concat(host_frames)
                     await self.ep.send(host_frames)
-                if nbytes(device_frames):
+                if device_frames:
+                    if len(device_frames) == 1:
+                        device_frames = device_frames[0]
+                    else:
+                        device_frames = device_concat(device_frames)
                     # It is necessary to first synchronize the default stream before start sending
                     # We synchronize the default stream because UCX is not stream-ordered and
                     #  syncing the default stream will wait for other non-blocking CUDA streams.
@@ -360,24 +356,30 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
+                host_frame_total_size = 0
+                device_frame_total_size = 0
                 host_frame_sizes = []
                 device_frame_sizes = []
                 for is_cuda, each_size in zip(cuda_frames, sizes):
                     if is_cuda:
+                        device_frame_total_size += each_size
                         device_frame_sizes.append(each_size)
                     else:
+                        host_frame_total_size += each_size
                         host_frame_sizes.append(each_size)
 
-                host_frames = host_array(sum(host_frame_sizes))
-                device_frames = device_array(sum(device_frame_sizes))
 
-                if nbytes(host_frames):
-                    await self.ep.recv(host_frames)
-                if nbytes(device_frames):
+                if host_frame_sizes:
+                    host_frames = host_array(host_frame_total_size)
+                    if host_frame_total_size:
+                        await self.ep.recv(host_frames)
+                if device_frame_sizes:
+                    device_frames = device_array(device_frame_total_size)
                     # It is necessary to first populate `frames` with CUDA arrays and synchronize
                     # the default stream before starting receiving to ensure buffers have been allocated
-                    synchronize_stream(0)
-                    await self.ep.recv(device_frames)
+                    if device_frame_total_size:
+                        synchronize_stream(0)
+                        await self.ep.recv(device_frames)
 
                 if len(host_frame_sizes) == 0:
                     host_frames = []
