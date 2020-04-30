@@ -368,7 +368,6 @@ class UCX(Comm):
                         host_frame_total_size += each_size
                         host_frame_sizes.append(each_size)
 
-
                 if host_frame_sizes:
                     host_frames = host_array(host_frame_total_size)
                     if host_frame_total_size:
