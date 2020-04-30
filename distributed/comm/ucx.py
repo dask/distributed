@@ -276,8 +276,8 @@ class UCX(Comm):
                 frames = await to_frames(
                     msg, serializers=serializers, on_error=on_error
                 )
-                nframes = len(frames)
 
+                nframes = len(frames)
                 cuda_frames = []
                 sizes = []
                 device_frames = []
