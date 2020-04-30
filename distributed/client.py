@@ -2498,15 +2498,26 @@ class Client(Node):
             if values:
                 dsk = subs_multiple(dsk, values)
 
-            d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-            extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
-            extra_keys = {tokey(future.key) for future in extra_futures}
-            dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
-            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
+            d = {}
+            extra_futures_values = []
+            dsk2_dict = {}
+            dependencies = {}
+            for k, v in dsk.items():
+                d[k] = unpack_remotedata(v, byte_keys=True)
+                extra_futures_values.append(d[k][1])
+                dsk2_dict[k] = d[k][0]
+                dependencies[k] = get_dependencies(dsk, k)
+
+            extra_futures = set.union(*extra_futures_values) if d else set()
+            extra_keys = set()
             for future in extra_futures:
                 if future.client is not self:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
+                extra_keys.add(tokey(future.key))
+            dsk2 = str_graph(dsk2_dict, extra_keys)
+            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
+            
 
             if restrictions:
                 restrictions = keymap(tokey, restrictions)
@@ -2514,17 +2525,6 @@ class Client(Node):
 
             if loose_restrictions is not None:
                 loose_restrictions = list(map(tokey, loose_restrictions))
-
-            future_dependencies = {
-                tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
-            }
-
-            for s in future_dependencies.values():
-                for v in s:
-                    if v not in self.futures:
-                        raise CancelledError(v)
-
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
 
             if priority is None:
                 priority = dask.order.order(dsk, dependencies=dependencies)
@@ -2534,9 +2534,15 @@ class Client(Node):
                 tokey(k): [tokey(dep) for dep in deps]
                 for k, deps in dependencies.items()
             }
-            for k, deps in future_dependencies.items():
-                if deps:
-                    dependencies[k] = list(set(dependencies.get(k, ())) | deps)
+
+            for key, value in d.items():
+                _key = tokey(key)
+                _value = {tokey(f.key) for f in value[1]}
+                for v in _value:
+                    if v not in self.futures:
+                        raise CancelledError(v)
+                if _value:
+                    dependencies[_key] = list(set(dependencies.get(_key, ())) | _value)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk3}
