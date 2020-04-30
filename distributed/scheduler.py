@@ -1823,6 +1823,9 @@ class Scheduler(ServerNode):
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
 
+        # Avoid computation that is already finished
+        already_in_memory = set()  # tasks that are already done
+
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
             deps = set(v)
@@ -1830,10 +1833,7 @@ class Scheduler(ServerNode):
                 deps.remove(k)
             dependencies[k] = deps
 
-        # Avoid computation that is already finished
-        already_in_memory = set()  # tasks that are already done
-        for k, v in dependencies.items():
-            if v and k in self.tasks and self.tasks[k].state in ("memory", "erred"):
+            if dependencies[k] and k in self.tasks and self.tasks[k].state in ("memory", "erred"):
                 already_in_memory.add(k)
 
         if already_in_memory:
@@ -1865,6 +1865,7 @@ class Scheduler(ServerNode):
         stack = list(keys)
         touched_keys = set()
         touched_tasks = []
+        runnables = []
         while stack:
             k = stack.pop()
             if k in touched_keys:
@@ -1878,6 +1879,9 @@ class Scheduler(ServerNode):
 
             touched_keys.add(k)
             touched_tasks.append(ts)
+            if ts.run_spec:
+                # Ensure all runnables have a priority
+                runnables.append(ts)
             stack.extend(dependencies.get(k, ()))
 
         self.client_desires_keys(keys=keys, client=client)
@@ -1923,10 +1927,11 @@ class Scheduler(ServerNode):
             if ts.priority is None:
                 ts.priority = (-(user_priority.get(key, 0)), generation, priority[key])
 
-        # Ensure all runnables have a priority
-        runnables = [ts for ts in touched_tasks if ts.run_spec]
+        # # Ensure all runnables have a priority
+        # runnables = [ts for ts in touched_tasks if ts.run_spec]
         for ts in runnables:
-            if ts.priority is None and ts.run_spec:
+            #
+            if ts.priority is None:
                 ts.priority = (self.generation, 0)
 
         if restrictions:
