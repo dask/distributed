@@ -1833,7 +1833,11 @@ class Scheduler(ServerNode):
                 deps.remove(k)
             dependencies[k] = deps
 
-            if dependencies[k] and k in self.tasks and self.tasks[k].state in ("memory", "erred"):
+            if (
+                dependencies[k]
+                and k in self.tasks
+                and self.tasks[k].state in ("memory", "erred")
+            ):
                 already_in_memory.add(k)
 
         if already_in_memory:
