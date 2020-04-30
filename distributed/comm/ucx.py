@@ -146,7 +146,9 @@ def init_once():
             a = device_array(nbytes)
             ptr = a.__cuda_array_interface__["data"][0]
             dev_id = -1 if ptr else cupy.cuda.device.get_device_id()
-            mem = cupy.cuda.UnownedMemory(ptr=ptr, size=nbytes, owner=a, device_id=dev_id)
+            mem = cupy.cuda.UnownedMemory(
+                ptr=ptr, size=nbytes, owner=a, device_id=dev_id
+            )
             return cupy.cuda.memory.MemoryPointer(mem, 0)
 
         def device_concat(arys):
