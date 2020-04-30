@@ -356,27 +356,23 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                host_frame_total_size = 0
-                device_frame_total_size = 0
                 host_frame_sizes = []
                 device_frame_sizes = []
                 for is_cuda, each_size in zip(cuda_frames, sizes):
                     if is_cuda:
-                        device_frame_total_size += each_size
                         device_frame_sizes.append(each_size)
                     else:
-                        host_frame_total_size += each_size
                         host_frame_sizes.append(each_size)
 
                 if host_frame_sizes:
-                    host_frames = host_array(host_frame_total_size)
-                    if host_frame_total_size:
+                    host_frames = host_array(sum(host_frame_sizes))
+                    if host_frames.nbytes:
                         await self.ep.recv(host_frames)
                 if device_frame_sizes:
-                    device_frames = device_array(device_frame_total_size)
+                    device_frames = device_array(sum(device_frame_sizes))
                     # It is necessary to first populate `frames` with CUDA arrays and synchronize
                     # the default stream before starting receiving to ensure buffers have been allocated
-                    if device_frame_total_size:
+                    if device_frames.nbytes:
                         synchronize_stream(0)
                         await self.ep.recv(device_frames)
 
