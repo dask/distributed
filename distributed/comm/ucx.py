@@ -160,7 +160,6 @@ def init_once():
                     cupy.copyto(e2, e)
                     results.append(e2)
                     result_buffers.append(e2.data.mem._owner)
-                cupy.cuda.stream.get_current_stream().synchronize()
                 return result_buffers
 
     except ImportError:
