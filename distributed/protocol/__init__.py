@@ -130,21 +130,20 @@ class TypeCompressor(collections.abc.MutableMapping):
         if data is not None and isinstance(data, collections.abc.MutableMapping):
             for key, value in data:
                 header, frames = serialize(value)
-                self.storage[key] = {"header": header, "data": maybe_compress(frames)}
+                self.storage[key] = (header, maybe_compress(frames))
 
     def __setitem__(self, key, value):
         header, frames = serialize(value)
-        self.storage[key] = {"header": header, "data": maybe_compress(frames)}
+        self.storage[key] = (header, maybe_compress(frames))
 
     def __getitem__(self, key):
-        header = self.storage[key]["header"]
-        compression, compressed = self.storage[key]["data"]
+        header, (compression, compressed) = self.storage[key]
 
         frames = decompress({"compression": {compression}}, compressed)
         return deserialize(header, frames)
 
     def __delitem__(self, key):
-        return self.storage.__delitem__(key)
+        del self.storage[key]
 
     def __iter__(self):
         return iter(self.storage)
