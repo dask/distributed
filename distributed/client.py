@@ -83,6 +83,7 @@ from .utils import (
 )
 from . import versions as version_module
 
+from cudf._lib.nvtx import annotate
 
 logger = logging.getLogger(__name__)
 
@@ -2460,6 +2461,7 @@ class Client(Node):
         )
         return self.run(function, *args, **kwargs)
 
+    @annotate("graph_to_futures", domain="distributed")
     def _graph_to_futures(
         self,
         dsk,
@@ -3890,6 +3892,7 @@ class Client(Node):
         return restrictions, loose_restrictions
 
     @staticmethod
+    @annotate("collections_to_dsk", domain="distributed")
     def collections_to_dsk(collections, *args, **kwargs):
         return collections_to_dsk(collections, *args, **kwargs)
 
