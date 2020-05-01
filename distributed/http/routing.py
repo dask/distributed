@@ -21,8 +21,11 @@ class DirectoryHandler(web.RequestHandler):
         out = set()
         routers = set()
         for app in self.application.applications + [self.application]:
-            _descend_routes(app.default_router, routers, out)
-            _descend_routes(app.wildcard_router, routers, out)
+            if 'bokeh' in str(app):
+                out.update(set(app.app_paths))
+            else:
+                _descend_routes(app.default_router, routers, out)
+                _descend_routes(app.wildcard_router, routers, out)
         self.write({'paths': sorted(out)})
 
 
