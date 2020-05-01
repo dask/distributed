@@ -84,6 +84,7 @@ from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+
 from cudf._lib.nvtx import annotate
 
 logger = logging.getLogger(__name__)
@@ -3508,6 +3509,7 @@ class Scheduler(ServerNode):
 
         return "OK"
 
+    @annotate("update_data", domain="distributed")
     def update_data(
         self, comm=None, who_has=None, nbytes=None, client=None, serializers=None
     ):
@@ -4704,6 +4706,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @annotate("scheduler_transitions", domain="distributed")
     def transitions(self, recommendations):
         """ Process transitions until none are left
 
