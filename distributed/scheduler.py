@@ -1834,7 +1834,7 @@ class Scheduler(ServerNode):
             dependencies[k] = deps
 
             if (
-                dependencies[k]
+                deps
                 and k in self.tasks
                 and self.tasks[k].state in ("memory", "erred")
             ):
