@@ -1621,6 +1621,7 @@ class Client(Node):
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
+            # PREM
             batches = list(
                 zip(*[partition_all(batch_size, iterable) for iterable in iterables])
             )

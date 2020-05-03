@@ -130,6 +130,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=N
     assert isinstance(data, dict)
 
     workers = list(concat([w] * nc for w, nc in nthreads.items()))
+    # PREM
     names, data = list(zip(*data.items()))
 
     worker_iter = drop(_round_robin_counter[0] % len(workers), cycle(workers))

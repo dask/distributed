@@ -57,6 +57,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             ):
                 if compression is None:  # default behavior
                     _frames = frame_split_size(frame)
+                    # PREM
                     _compression, _frames = zip(*map(maybe_compress, _frames))
                     out_compression.extend(_compression)
                     _out_frames.extend(_frames)
