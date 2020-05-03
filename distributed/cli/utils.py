@@ -1,5 +1,5 @@
 from tornado.ioloop import IOLoop
-
+from click.types import BoolParamType
 
 py3_err_msg = """
 Warning: Your terminal does not set locales.
@@ -64,3 +64,31 @@ def install_signal_handlers(loop=None, cleanup=None):
 
     for sig in [signal.SIGINT, signal.SIGTERM]:
         old_handlers[sig] = signal.signal(sig, handle_signal)
+
+
+def prepare_additional_options(cmd, options, **kwargs):
+    for opt in options:
+        if opt.name in kwargs.keys():
+            value = kwargs.get(opt.name)
+            if value in (None, (), ""):
+                continue
+            opts = opt.opts[0]
+            if isinstance(opt.type, BoolParamType):
+                if not value:
+                    try:
+                        opts = opt.secondary_opts[0]
+                    except IndexError:
+                        continue
+                value = ""
+            if opt.multiple:
+                for i in value:
+                    if " " in i:
+                        i = f'"{i}"'
+                    cmd += f" {opts} {i}"
+                continue
+            if " " in value:
+                value = f'"{value}"'
+
+            cmd += f" {opts} {value}"
+
+    return cmd
