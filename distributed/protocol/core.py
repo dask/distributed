@@ -86,11 +86,13 @@ def dumps(msg, serializers=None, on_error="message", context=None):
                     frame = frame.tobytes()
                 out_frames[i] = frame
 
-        return [
+        dump_list = [
             small_header,
             small_payload,
             msgpack.dumps(header, use_bin_type=True),
-        ] + out_frames
+        ]
+        dump_list.extend(out_frames)
+        return dump_list
     except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise
