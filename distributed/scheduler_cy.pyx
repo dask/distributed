@@ -108,7 +108,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
-class ClientState:
+cdef class ClientState:
     """
     A simple object holding information about a client.
 
@@ -128,8 +128,11 @@ class ClientState:
        collection) gets garbage-collected.
 
     """
-
-    __slots__ = ("client_key", "wants_what", "last_seen", "versions")
+    cdef public:
+        cdef object client_key
+        cdef object wants_what
+        cdef object last_seen
+        cdef object versions
 
     def __init__(self, client, versions=None):
         self.client_key = client
@@ -144,7 +147,7 @@ class ClientState:
         return self.client_key
 
 
-class WorkerState:
+cdef class WorkerState:
     """
     A simple object holding information about a worker.
 
@@ -225,30 +228,29 @@ class WorkerState:
 
     # XXX need a state field to signal active/removed?
 
-    __slots__ = (
-        "actors",
-        "address",
-        "bandwidth",
-        "extra",
-        "has_what",
-        "last_seen",
-        "local_directory",
-        "memory_limit",
-        "metrics",
-        "name",
-        "nanny",
-        "nbytes",
-        "nthreads",
-        "occupancy",
-        "pid",
-        "processing",
-        "resources",
-        "services",
-        "status",
-        "time_delay",
-        "used_resources",
-        "versions",
-    )
+    cdef public:
+        cdef object actors
+        cdef object address
+        cdef object bandwidth
+        cdef object extra
+        cdef object has_what
+        cdef object last_seen
+        cdef object local_directory
+        cdef object memory_limit
+        cdef object metrics
+        cdef object name
+        cdef object nanny
+        cdef object nbytes
+        cdef object nthreads
+        cdef object occupancy
+        cdef object pid
+        cdef object processing
+        cdef object resources
+        cdef object services
+        cdef object status
+        cdef object time_delay
+        cdef object used_resources
+        cdef object versions
 
     def __init__(
         self,
@@ -346,7 +348,7 @@ class WorkerState:
         return self.nthreads
 
 
-class TaskState:
+cdef class TaskState:
     """
     A simple object holding information about a task.
 
@@ -579,51 +581,51 @@ class TaskState:
 :      The group of tasks to which this one belongs.
     """
 
-    __slots__ = (
+    cdef public:
         # === General description ===
-        "actor",
+        cdef object actor
         # Key name
-        "key",
+        cdef object key
         # Key prefix (see key_split())
-        "prefix",
+        cdef object prefix
         # How to run the task (None if pure data)
-        "run_spec",
+        cdef object run_spec
         # Alive dependents and dependencies
-        "dependencies",
-        "dependents",
+        cdef object dependencies
+        cdef object dependents
         # Compute priority
-        "priority",
+        cdef object priority
         # Restrictions
-        "host_restrictions",
-        "worker_restrictions",  # not WorkerStates but addresses
-        "resource_restrictions",
-        "loose_restrictions",
+        cdef object host_restrictions
+        cdef object worker_restrictions
+        cdef object resource_restrictions
+        cdef object loose_restrictions
         # === Task state ===
-        "_state",
+        cdef object _state
         # Whether some dependencies were forgotten
-        "has_lost_dependencies",
+        cdef object has_lost_dependencies
         # If in 'waiting' state, which tasks need to complete
         # before we can run
-        "waiting_on",
+        cdef object waiting_on
         # If in 'waiting' or 'processing' state, which tasks needs us
         # to complete before they can run
-        "waiters",
+        cdef object waiters
         # In in 'processing' state, which worker we are processing on
-        "processing_on",
+        cdef object processing_on
         # If in 'memory' state, Which workers have us
-        "who_has",
+        cdef object who_has
         # Which clients want us
-        "who_wants",
-        "exception",
-        "traceback",
-        "exception_blame",
-        "suspicious",
-        "retries",
-        "nbytes",
-        "type",
-        "group_key",
-        "group",
-    )
+        cdef object who_wants
+        cdef object exception
+        cdef object traceback
+        cdef object exception_blame
+        cdef object suspicious
+        cdef object retries
+        cdef object nbytes
+        cdef object type
+        cdef object group_key
+        cdef object group
+
 
     def __init__(self, key, run_spec):
         self.key = key
