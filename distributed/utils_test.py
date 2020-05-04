@@ -1131,10 +1131,14 @@ async def assert_can_connect_from_everywhere_4_6(port, protocol="tcp", **kwargs)
         assert_can_connect("%s://%s:%d" % (protocol, get_ip(), port), **kwargs),
     ]
     if has_ipv6():
-        futures.extend([
-            assert_can_connect("%s://[::1]:%d" % (protocol, port), **kwargs),
-            assert_can_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), **kwargs),
-        ])
+        futures.extend(
+            [
+                assert_can_connect("%s://[::1]:%d" % (protocol, port), **kwargs),
+                assert_can_connect(
+                    "%s://[%s]:%d" % (protocol, get_ipv6(), port), **kwargs
+                ),
+            ]
+        )
     await asyncio.gather(*futures)
 
 

@@ -1621,7 +1621,9 @@ class Client(Node):
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
-            batches = zip(*[partition_all(batch_size, iterable) for iterable in iterables])
+            batches = zip(
+                *[partition_all(batch_size, iterable) for iterable in iterables]
+            )
             return sum(
                 [
                     self.map(
@@ -1684,7 +1686,7 @@ class Client(Node):
                     dsk.update(vv.dask)
                 else:
                     kwargs2[k] = v
-            
+
             for key, args in zip(keys, zip(*iterables)):
                 dsk[key] = (apply, func, (tuple, list(args)), kwargs2)
 
