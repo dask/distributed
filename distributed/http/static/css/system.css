@@ -18,9 +18,9 @@
  * half of the width */
 @media (min-width: 992px) {
     #system-fluid {
-        flex-direction: row;
+        flex-direction: column;
     }
     #system-fluid .system-item {
-        flex: 1 50%;
+        flex: 1;
     }
 }
