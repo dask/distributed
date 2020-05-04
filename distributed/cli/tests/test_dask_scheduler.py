@@ -299,6 +299,36 @@ def test_preload_module(loop):
         shutil.rmtree(tmpdir)
 
 
+def test_preload_remote_module(loop):
+    def check_scheduler():
+        import scheduler_info
+
+        return scheduler_info.get_scheduler_address()
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, "scheduler_info.py")
+        with open(path, "w") as f:
+            f.write(PRELOAD_TEXT)
+        with popen(["python", "-m", "http.server", "127.0.0.1:93829"], cwd=tmpdir):
+            with tmpfile() as fn:
+                with popen(
+                    [
+                        "dask-scheduler",
+                        "--scheduler-file",
+                        fn,
+                        "--preload",
+                        "http://localhost:93829/scheduler_info.py",
+                    ],
+                ):
+                    with Client(scheduler_file=fn, loop=loop) as c:
+                        assert (
+                            c.run_on_scheduler(check_scheduler) == c.scheduler.address
+                        )
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 PRELOAD_COMMAND_TEXT = """
 import click
 _config = {}
