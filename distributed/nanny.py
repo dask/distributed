@@ -141,14 +141,10 @@ class Nanny(ServerNode):
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
         self.config = config or {}
-        worker_kwargs.update(
-            {
-                "port": worker_port,
-                "interface": interface,
-                "protocol": protocol,
-                "host": host,
-            }
-        )
+        worker_kwargs["port"] = worker_port
+        worker_kwargs["interface"] = interface
+        worker_kwargs["protocol"] = protocol
+        worker_kwargs["host"] = host
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address

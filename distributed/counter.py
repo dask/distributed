@@ -52,8 +52,10 @@ class Counter:
     def shift(self):
         for i in range(len(self.intervals) - 1):
             frac = 0.2 * self.intervals[0] / self.intervals[i]
-            part = {k: v * frac for k, v in self.components[i].items()}
-            rest = {k: v * (1 - frac) for k, v in self.components[i].items()}
+            part, rest = {}, {}
+            for k, v in self.components[i].items():
+                part[k] = v * frac
+                rest[k] = v * (1 - frac)
 
             for k, v in part.items():
                 self.components[i + 1][k] += v

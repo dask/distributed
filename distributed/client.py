@@ -1621,10 +1621,7 @@ class Client(Node):
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
-            # PREM
-            batches = list(
-                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
-            )
+            batches = zip(*[partition_all(batch_size, iterable) for iterable in iterables])
             return sum(
                 [
                     self.map(
@@ -1687,12 +1684,9 @@ class Client(Node):
                     dsk.update(vv.dask)
                 else:
                     kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*iterables))
-                }
-            )
+            
+            for key, args in zip(keys, zip(*iterables)):
+                dsk[key] = (apply, func, (tuple, list(args)), kwargs2)
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -1799,10 +1793,13 @@ class Client(Node):
             keys = [k for k in keys if k not in bad_keys and k not in data]
 
             if local_worker:  # look inside local worker
-                data.update(
-                    {k: local_worker.data[k] for k in keys if k in local_worker.data}
-                )
-                keys = [k for k in keys if k not in data]
+                not_included_keys = []
+                for k in keys:
+                    if k in local_worker.data:
+                        data[k] = local_worker.data[k]
+                    else:
+                        not_included_keys.append(k)
+                keys = not_included_keys
 
             # We now do an actual remote communication with workers or scheduler
             if self._gather_future:  # attach onto another pending gather request
@@ -3319,7 +3316,7 @@ class Client(Node):
         keys = keys or []
         if futures is not None:
             futures = self.futures_of(futures)
-            keys += list(map(tokey, {f.key for f in futures}))
+            keys.extend(list(map(tokey, {f.key for f in futures})))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -3852,10 +3849,12 @@ class Client(Node):
         for k, v in resources.items():
             if isinstance(v, dict):
                 # It's a per-key requirement
-                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
+                for kk in cls._expand_key(k):
+                    per_key_reqs[kk] = v
             else:
                 # It's a global requirement
-                global_reqs.update((kk, {k: v}) for kk in all_keys)
+                for kk in all_keys:
+                    global_reqs[kk] = {k: v}
 
         if global_reqs and per_key_reqs:
             raise ValueError(
@@ -3880,7 +3879,8 @@ class Client(Node):
                     keys = list(
                         {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
                     )
-                restrictions.update({k: ws for k in keys})
+                for k in keys:
+                    restrictions[k] = ws
         else:
             restrictions = {}
 

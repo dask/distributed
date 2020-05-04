@@ -4916,7 +4916,9 @@ class Scheduler(ServerNode):
             if ":" in w:
                 out.add(w)
             else:
-                out.update({ww for ww in self.workers if w in ww})  # TODO: quadratic
+                for ww in self.workers:
+                    if w in ww:
+                        out.add(ww) # TODO: quadratic
         return list(out)
 
     def start_ipython(self, comm=None):
