@@ -2697,7 +2697,7 @@ class Client(Node):
         self,
         collections,
         sync=False,
-        optimize_graph=True,
+        optimize_graph=False,
         workers=None,
         allow_other_workers=False,
         resources=None,
@@ -2846,7 +2846,7 @@ class Client(Node):
     def persist(
         self,
         collections,
-        optimize_graph=True,
+        optimize_graph=False,
         workers=None,
         allow_other_workers=None,
         resources=None,
