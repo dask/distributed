@@ -49,15 +49,21 @@ worker_options = [
     ),
     click.Option(
         ["--worker-port"],
-        type=int,
-        default=0,
-        help="Serving computation port, defaults to random",
+        default=None,
+        help="Serving computation port, defaults to random. "
+        "When creating multiple workers with --nprocs, a sequential range of "
+        "worker ports may be used by specifying the first and last available "
+        "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
+        "will use ports 3000, 3001, ..., 3025, 3026.",
     ),
     click.Option(
         ["--nanny-port"],
-        type=int,
-        default=0,
-        help="Serving nanny port, defaults to random",
+        default=None,
+        help="Serving nanny port, defaults to random. "
+        "When creating multiple nannies with --nprocs, a sequential range of "
+        "nanny ports may be used by specifying the first and last available "
+        "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
+        "will use ports 3000, 3001, ..., 3025, 3026.",
     ),
     click.Option(
         ["--bokeh-port"],
