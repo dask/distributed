@@ -30,7 +30,12 @@ from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+)
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -311,6 +316,21 @@ async def test_worker_with_port_zero():
     assert w.port > 1024
 
     await w.close()
+
+
+@pytest.mark.asyncio
+async def test_worker_port_range(cleanup):
+    async with Scheduler() as s:
+        port = "9867:9868"
+        async with Worker(s.address, port=port) as w1:
+            assert w1.port == 9867  # Selects first port in range
+            async with Worker(s.address, port=port) as w2:
+                assert w2.port == 9868  # Selects next port in range
+                with pytest.raises(
+                    ValueError, match="Could not start Worker"
+                ):  # No more ports left
+                    async with Worker(s.address, port=port):
+                        pass
 
 
 @pytest.mark.slow
@@ -1557,18 +1577,6 @@ async def test_lifetime_stagger(c, s, a, b):
     assert a.lifetime != b.lifetime
     assert 8 <= a.lifetime <= 12
     assert 8 <= b.lifetime <= 12
-
-
-@gen_cluster()
-async def test_gpu_metrics(s, a, b):
-    pytest.importorskip("pynvml")
-    from distributed.diagnostics.nvml import count
-
-    assert "gpu" in a.metrics
-    assert len(s.workers[a.address].metrics["gpu"]["memory-used"]) == count
-
-    assert "gpu" in a.startup_information
-    assert len(s.workers[a.address].extra["gpu"]["name"]) == count
 
 
 @pytest.mark.asyncio
