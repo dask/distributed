@@ -1504,7 +1504,7 @@ class Scheduler(ServerNode):
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
                 self.worker_send(worker, {"op": "close"})
-            for i in range(20):  # wait a second for send signals to clear
+            for _ in range(20):  # wait a second for send signals to clear
                 if self.workers:
                     await asyncio.sleep(0.05)
                 else:
@@ -1524,7 +1524,7 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing all comms")
 
         futures = []
-        for w, comm in list(self.stream_comms.items()):
+        for comm in self.stream_comms.values():
             if not comm.closed():
                 comm.send({"op": "close", "report": False})
                 comm.send({"op": "close-stream"})
@@ -1556,8 +1556,6 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            nanny_addr = self.workers[worker].nanny
-            address = nanny_addr or worker
 
             self.worker_send(worker, {"op": "close", "report": False})
             self.remove_worker(address=worker, safe=safe)
@@ -1802,7 +1800,7 @@ class Scheduler(ServerNode):
             )
 
         # Remove aliases
-        for k in list(tasks):
+        for k in tasks:
             if tasks[k] is k:
                 del tasks[k]
 
@@ -1811,7 +1809,7 @@ class Scheduler(ServerNode):
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
             n = len(tasks)
-            for k, deps in list(dependencies.items()):
+            for k, deps in dependencies.items():
                 if any(
                     dep not in self.tasks and dep not in tasks for dep in deps
                 ):  # bad key
@@ -2449,17 +2447,15 @@ class Scheduler(ServerNode):
             assert isinstance(cs, ClientState), (type(cs), cs)
             assert cs.client_key == c
 
-        a = {w: ws.nbytes for w, ws in self.workers.items()}
-        b = {
-            w: sum(ts.get_nbytes() for ts in ws.has_what)
-            for w, ws in self.workers.items()
-        }
-        assert a == b, (a, b)
-
+        a = {}
+        b = {}
         actual_total_occupancy = 0
-        for worker, ws in self.workers.items():
+        for w, ws in self.workers.items():
+            a[w] = ws.nbytes
+            b[w] = sum(ts.get_nbytes() for ts in ws.has_what)
             assert abs(sum(ws.processing.values()) - ws.occupancy) < 1e-8
             actual_total_occupancy += ws.occupancy
+        assert a == b, (a, b)
 
         assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, (
             actual_total_occupancy,
@@ -2602,10 +2598,12 @@ class Scheduler(ServerNode):
 
             deps = ts.dependencies
             if deps:
-                msg["who_has"] = {
-                    dep.key: [ws.address for ws in dep.who_has] for dep in deps
-                }
-                msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
+                dep_who_has, dep_nbytes = {}, {}
+                for dep in deps:
+                    dep_who_has[dep.key] = [ws.address for ws in dep.who_has]
+                    dep_nbytes[dep.key] = dep.nbytes
+                msg["who_has"] = dep_who_has
+                msg["nbytes"] = dep_nbytes
 
             if self.validate and deps:
                 assert all(msg["who_has"].values())
@@ -4867,7 +4865,7 @@ class Scheduler(ServerNode):
 
     def remove_resources(self, worker):
         ws = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource in ws.resources:
             del self.resources[resource][worker]
 
     def coerce_address(self, addr, resolve=True):
@@ -5009,15 +5007,15 @@ class Scheduler(ServerNode):
         counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
         counts = [(time, sum(pluck(1, group))) for time, group in counts]
 
-        keys = set()
+        keys = {}
+        groups1 = []
         for v in results:
             for t, d in v["keys"]:
                 for k in d:
-                    keys.add(k)
-        keys = {k: [] for k in keys}
+                    keys[k] = []
+            groups1.append(v["keys"])
 
-        groups1 = [v["keys"] for v in results]
-        groups2 = list(merge_sorted(*groups1, key=first))
+        groups2 = merge_sorted(*groups1, key=first)
 
         last = 0
         for t, d in groups2:
@@ -5171,7 +5169,7 @@ class Scheduler(ServerNode):
 
             if self.proc.cpu_percent() < 50:
                 workers = list(self.workers.values())
-                for i in range(len(workers)):
+                for _ in range(len(workers)):
                     ws = workers[worker_index % len(workers)]
                     worker_index += 1
                     try:

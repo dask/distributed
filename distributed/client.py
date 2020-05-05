@@ -947,7 +947,7 @@ class Client(Node):
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
                 await asyncio.sleep(0.01)
-            for i in range(10):
+            for _ in range(10):
                 try:
                     with open(self.scheduler_file) as f:
                         cfg = json.load(f)
@@ -1773,6 +1773,7 @@ class Client(Node):
 
             exceptions = set()
             bad_keys = set()
+
             for key in keys:
                 if key not in self.futures or self.futures[key].status in failed:
                     exceptions.add(key)
@@ -2655,7 +2656,7 @@ class Client(Node):
         """
         with self._refcount_lock:
             changed = False
-            for key in list(dsk):
+            for key in dsk:
                 if tokey(key) in self.futures:
                     if not changed:
                         changed = True
@@ -2800,11 +2801,13 @@ class Client(Node):
         variables = [a for a in collections if dask.is_dask_collection(a)]
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
-        names = ["finalize-%s" % tokenize(v) for v in variables]
+        names = []
         dsk2 = {}
-        for i, (name, v) in enumerate(zip(names, variables)):
+        for i, v in enumerate(variables):
+            name = "finalize-%s" % tokenize(v)
             func, extra_args = v.__dask_postcompute__()
             keys = v.__dask_keys__()
+            names.append(name)
             if func is single_key and len(keys) == 1 and not extra_args:
                 names[i] = keys[0]
             else:
@@ -2945,12 +2948,12 @@ class Client(Node):
             fifo_timeout=fifo_timeout,
             actors=actors,
         )
-
-        postpersists = [c.__dask_postpersist__() for c in collections]
-        result = [
-            func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
-            for (func, args), c in zip(postpersists, collections)
-        ]
+        result = []
+        for c in collections:
+            (func, args) = c.__dask_postpersist__()
+            result.append(
+                func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
+            )
 
         if singleton:
             return first(result)
@@ -3318,7 +3321,7 @@ class Client(Node):
         keys = keys or []
         if futures is not None:
             futures = self.futures_of(futures)
-            keys.extend(list(map(tokey, {f.key for f in futures})))
+            keys.extend(map(tokey, {f.key for f in futures}))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -4153,11 +4156,15 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         future = asyncio.wait_for(future, timeout)
     await future
 
-    done, not_done = (
-        {fu for fu in fs if fu.status != "pending"},
-        {fu for fu in fs if fu.status == "pending"},
-    )
-    cancelled = [f.key for f in done if f.status == "cancelled"]
+    done, not_done, cancelled = set(), set(), []
+    for fu in fs:
+        if fu.status != "pending":
+            done.add(fu)
+            if fu.status == "cancelled":
+                cancelled.append(fu.key)
+        elif fu.status == "pending":
+            not_done.add(fu)
+
     if cancelled:
         raise CancelledError(cancelled)
 
