@@ -307,12 +307,6 @@ def main(
         }
     )
 
-    if nprocs > 1 and worker_port != 0:
-        logger.error(
-            "Failed to launch worker.  You cannot use the --port argument when nprocs > 1."
-        )
-        sys.exit(1)
-
     if nprocs > 1 and not nanny:
         logger.error(
             "Failed to launch worker.  You cannot use the --no-nanny argument when nprocs > 1."
