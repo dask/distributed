@@ -735,16 +735,15 @@ class Client(Node):
     @contextmanager
     def as_current(self):
         """Thread-local, Task-local context manager that causes the Client.current class
-        method to return self. This is used when a method of Client needs to propagate a
-        reference to self deep into the stack through generic methods that shouldn't be
-        aware of this class.
+        method to return self. Any Future objects deserialized inside this context
+        manager will be automatically attached to this Client.
         """
-        # Python 3.6; contextvars are thread-local but not Task-local.
-        # We can still detect a race condition.
+        # In Python 3.6, contextvars are thread-local but not Task-local.
+        # We can still detect a race condition though.
         if sys.version_info < (3, 7) and _current_client.get() not in (self, None):
             raise RuntimeError(
-                "Detected race condition where get_dataset() is invoked in "
-                "parallel by multiple asynchronous clients. "
+                "Detected race condition where multiple asynchronous clients tried "
+                "entering the as_current() context manager at the same time. "
                 "Please upgrade to Python 3.7+."
             )
 
