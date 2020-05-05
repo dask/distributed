@@ -1,7 +1,7 @@
 from distributed.deploy.old_ssh import SSHCluster
 from distributed.cli.dask_worker import worker_options
 from distributed.cli.dask_scheduler import scheduler_options
-from collections import defaultdict
+from distributed.cli.utils import prepare_dask_ssh_options
 import click
 
 from distributed.cli.utils import check_python_3
@@ -121,34 +121,28 @@ dask_ssh_options = [
 dask_ssh_opt_names = [
     opt.name for opt in dask_ssh_options if opt.param_type_name == "option"
 ]
-ignored_options = ["version", "worker_class", "pid_file", "port"]
-options_dict = defaultdict(list)
-
-for opt in worker_options:
-    if opt.name in ignored_options:
-        continue
-    if opt.param_type_name == "option" and opt.name not in dask_ssh_opt_names:
-        options_dict["worker"].append(opt)
+ignored_options = ["version", "pid_file", "port"]
+options_dict = []
 
 for opt in scheduler_options:
     if opt.name in ignored_options:
         continue
     if opt.param_type_name == "option" and opt.name not in dask_ssh_opt_names:
-        options_dict["scheduler"].append(opt)
+        opt = prepare_dask_ssh_options("scheduler", opt)
+        options_dict.append(opt)
 
-# print('\n'.join([opt.name for opt in options_dict['scheduler']]))
-# print(' ')
-# print('\n'.join([opt.name for opt in options_dict['worker']]))
+for opt in worker_options:
+    if opt.name in ignored_options:
+        continue
+    if opt.param_type_name == "option" and opt.name not in dask_ssh_opt_names:
+        opt = prepare_dask_ssh_options("worker", opt)
+        options_dict.append(opt)
 
 
 class DaskSSHCommand(click.Command):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.params = (
-            dask_ssh_options
-            + options_dict.get("scheduler", [])
-            + options_dict.get("worker", [])
-        )
+        self.params = dask_ssh_options + options_dict
         self.help = (
             "Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the"
             "first host specified in [HOSTNAMES] or in the hostfile (unless --scheduler is specified"

@@ -225,7 +225,7 @@ def start_scheduler(
         python=remote_python or sys.executable, port=port, logdir=logdir
     )
 
-    cmd = prepare_additional_options(cmd, scheduler_options, **kwargs)
+    cmd = prepare_additional_options("scheduler", cmd, scheduler_options, **kwargs)
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
@@ -322,7 +322,7 @@ def start_worker(
             local_directory=local_directory
         )
 
-    cmd = prepare_additional_options(cmd, worker_options, **kwargs)
+    cmd = prepare_additional_options("worker", cmd, worker_options, **kwargs)
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:

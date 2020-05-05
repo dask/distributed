@@ -1,3 +1,4 @@
+import copy
 from tornado.ioloop import IOLoop
 from click.types import BoolParamType
 
@@ -66,12 +67,30 @@ def install_signal_handlers(loop=None, cleanup=None):
         old_handlers[sig] = signal.signal(sig, handle_signal)
 
 
-def prepare_additional_options(cmd, options, **kwargs):
-    for opt in options:
+def prepare_dask_ssh_options(entity, opt):
+    opt.name = f"{opt.name}__{entity}"
+    opt.opts[0] = f'--{entity}-{opt.opts[0].replace("--", "")}'
+    if opt.secondary_opts:
+        opt.secondary_opts[0] = f'--{entity}-{opt.secondary_opts[0].replace("--", "")}'
+
+    return opt
+
+
+def prepare_additional_options(entity, cmd, options, **kwargs):
+    options_copy = copy.deepcopy(options)
+    for opt in options_copy:
         if opt.name in kwargs.keys():
             value = kwargs.get(opt.name)
-            if value in (None, (), ""):
+            if value in [None, (), ""]:
                 continue
+
+            opt.name = opt.name.replace(f"__{entity}", "")
+            opt.opts[0] = "--{}".format(opt.opts[0].replace(f"--{entity}-", ""))
+            if opt.secondary_opts:
+                opt.secondary_opts[0] = "--{}".format(
+                    opt.secondary_opts[0].replace(f"--{entity}-", "")
+                )
+
             opts = opt.opts[0]
             if isinstance(opt.type, BoolParamType):
                 if not value:
