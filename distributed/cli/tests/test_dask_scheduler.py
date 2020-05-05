@@ -309,7 +309,7 @@ def test_preload_remote_module(loop, tmp_path):
             [
                 "dask-scheduler",
                 "--scheduler-file",
-                tmp_path / "scheduler-file.json",
+                str(tmp_path / "scheduler-file.json"),
                 "--preload",
                 "http://localhost:9382/scheduler_info.py",
             ],
