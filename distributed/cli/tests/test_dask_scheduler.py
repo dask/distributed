@@ -304,7 +304,7 @@ def test_preload_remote_module(loop, tmpdir):
     with open(tmpdir / "scheduler_info.py", "w") as f:
         f.write(PRELOAD_TEXT)
 
-    with popen(["python", "-m", "http.server", "9382"], cwd=tmpdir):
+    with popen([sys.executable, "-m", "http.server", "9382"], cwd=tmpdir):
         with popen(
             [
                 "dask-scheduler",
