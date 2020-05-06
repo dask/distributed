@@ -305,6 +305,11 @@ def test_preload_remote_module(loop, tmp_path):
         f.write(PRELOAD_TEXT)
 
     with popen([sys.executable, "-m", "http.server", "9382"], cwd=tmp_path):
+        import requests
+
+        data = requests.get("http://localhost:9382/scheduler_info.py").content
+        assert b"scheduler.foo" in data
+
         with popen(
             [
                 "dask-scheduler",
