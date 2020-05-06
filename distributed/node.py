@@ -89,6 +89,7 @@ class ServerNode(Node, Server):
             deserialize=deserialize,
             io_loop=self.io_loop,
         )
+        self._startup_lock = asyncio.Lock()
 
     def versions(self, comm=None, packages=None):
         return get_versions(packages=packages)
@@ -169,16 +170,15 @@ class ServerNode(Node, Server):
         await self.close()
 
     def __await__(self):
-        if self.status == "running":
-            return gen.sleep(0).__await__()
-        else:
-            future = self.start()
+        async def _():
             timeout = getattr(self, "death_timeout", 0)
-            if timeout:
-
-                async def wait_for(future, timeout=None):
+            async with self._startup_lock:
+                if self.status == "running":
+                    return self
+                if timeout:
                     try:
-                        await asyncio.wait_for(future, timeout=timeout)
+                        await asyncio.wait_for(self.start(), timeout=timeout)
+                        self.status = "running"
                     except Exception:
                         await self.close(timeout=1)
                         raise TimeoutError(
@@ -186,9 +186,12 @@ class ServerNode(Node, Server):
                                 type(self).__name__, timeout
                             )
                         )
+                else:
+                    await self.start()
+                    self.status = "running"
+            return self
 
-                future = wait_for(future, timeout=timeout)
-            return future.__await__()
+        return _().__await__()
 
     async def start(self):
         # subclasses should implement their own start method whichs calls super().start()

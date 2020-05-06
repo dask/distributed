@@ -317,16 +317,9 @@ def test_preload_remote_module(loop, tmp_path):
             with Client(
                 scheduler_file=tmp_path / "scheduler-file.json", loop=loop
             ) as c:
-                for i in range(10):
-                    val = c.run_on_scheduler(
-                        lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
-                    )
-                    if val == "bar":
-                        break
-                    else:
-                        sleep(0.1)
-                else:
-                    raise ValueError(val)
+                assert c.run_on_scheduler(
+                    lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
+                ) == "bar"
 
 
 PRELOAD_COMMAND_TEXT = """
