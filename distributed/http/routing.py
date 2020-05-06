@@ -21,21 +21,19 @@ class DirectoryHandler(web.RequestHandler):
         out = set()
         routers = set()
         for app in self.application.applications + [self.application]:
-            if 'bokeh' in str(app):
+            if "bokeh" in str(app):
                 out.update(set(app.app_paths))
             else:
                 _descend_routes(app.default_router, routers, out)
                 _descend_routes(app.wildcard_router, routers, out)
-        self.write({'paths': sorted(out)})
+        self.write({"paths": sorted(out)})
 
 
 class RoutingApplication(web.Application):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.applications = []
-        self.add_handlers(".*$", [
-            (r"/sitemap.json", DirectoryHandler),
-        ])
+        self.add_handlers(".*$", [(r"/sitemap.json", DirectoryHandler),])
 
     def find_handler(self, request: tornado.httputil.HTTPServerRequest, **kwargs):
         handler = super().find_handler(request, **kwargs)
