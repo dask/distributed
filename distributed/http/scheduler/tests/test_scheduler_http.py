@@ -31,7 +31,7 @@ async def test_connect(c, s, a, b):
         "json/identity.json",
         "json/index.html",
         "individual-plots.json",
-        "ditemap.json",
+        "sitemap.json",
     ]:
         response = await http_client.fetch(
             "http://localhost:%d/%s" % (s.http_server.port, suffix)
