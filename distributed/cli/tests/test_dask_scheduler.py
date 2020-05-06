@@ -300,9 +300,6 @@ def test_preload_module(loop):
         shutil.rmtree(tmpdir)
 
 
-@pytest.mark.xfail(
-    reason="Known failure (see https://github.com/dask/distributed/issues/3774). This has been xfailed to unblock CI."
-)
 def test_preload_remote_module(loop, tmpdir):
     with open(tmpdir / "scheduler_info.py", "w") as f:
         f.write(PRELOAD_TEXT)
@@ -318,10 +315,16 @@ def test_preload_remote_module(loop, tmpdir):
             ],
         ) as proc:
             with Client(scheduler_file=tmpdir / "scheduler-file.json", loop=loop) as c:
-                assert (
-                    c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
-                    == "bar"
-                )
+                for i in range(10):
+                    val = c.run_on_scheduler(
+                        lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
+                    )
+                    if val == "bar":
+                        break
+                    else:
+                        sleep(0.1)
+                else:
+                    raise ValueError(val)
 
 
 PRELOAD_COMMAND_TEXT = """
