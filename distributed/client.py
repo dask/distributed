@@ -1621,9 +1621,6 @@ class Client(Node):
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
-            batches = zip(
-                *[partition_all(batch_size, iterable) for iterable in iterables]
-            )
             return sum(
                 [
                     self.map(
@@ -1641,7 +1638,9 @@ class Client(Node):
                         pure=pure,
                         **kwargs,
                     )
-                    for batch in batches
+                    for batch in zip(
+                        *(partition_all(batch_size, iterable) for iterable in iterables)
+                    )
                 ],
                 [],
             )
