@@ -1,7 +1,7 @@
 import asyncio
 import weakref
 
-from bokeh.layouts import row, column
+from bokeh.layouts import row, column, gridplot
 from bokeh.models import (
     ColumnDataSource,
     DataRange1d,
@@ -528,7 +528,7 @@ class SystemMonitor(DashboardComponent):
         self.cpu.y_range.start = 0
         self.bandwidth.y_range.start = 0
 
-        self.root = column(*plots, **kw)
+        self.root = gridplot(plots, ncols=2, **kw)
         self.worker.monitor.update()
 
     def get_data(self):
