@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -29,6 +30,7 @@ from .utils import (
     silence_logging,
     json_load_robust,
     parse_timedelta,
+    parse_ports,
     ignoring,
     TimeoutError,
 )
@@ -90,7 +92,7 @@ class Nanny(ServerNode):
         port=None,
         protocol=None,
         config=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
@@ -131,12 +133,10 @@ class Nanny(ServerNode):
         if self.preload_argv is None:
             self.preload_argv = dask.config.get("distributed.worker.preload-argv")
 
-        self.preload_nanny = preload_nanny
-        if self.preload_nanny is None:
-            self.preload_nanny = dask.config.get("distributed.nanny.preload")
-        self.preload_nanny_argv = preload_nanny_argv
-        if self.preload_nanny_argv is None:
-            self.preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+        if preload_nanny is None:
+            preload_nanny = dask.config.get("distributed.nanny.preload")
+        if preload_nanny_argv is None:
+            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
 
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
@@ -168,8 +168,8 @@ class Nanny(ServerNode):
 
         self.local_directory = local_directory
 
-        self._preload_modules = preloading.on_creation(
-            self.preload_nanny, file_dir=self.local_directory
+        self.preloads = preloading.process_preloads(
+            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
         )
 
         self.services = services
@@ -211,13 +211,10 @@ class Nanny(ServerNode):
         ):
             host = get_ip(get_address_host(self.scheduler.address))
 
-        self._start_address = address_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-        )
+        self._start_port = port
+        self._start_host = host
+        self._interface = interface
+        self._protocol = protocol
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
@@ -258,14 +255,37 @@ class Nanny(ServerNode):
 
         await super().start()
 
-        await self.listen(
-            self._start_address, **self.security.get_listen_args("worker")
-        )
+        ports = parse_ports(self._start_port)
+        for port in ports:
+            start_address = address_from_user_args(
+                host=self._start_host,
+                port=port,
+                interface=self._interface,
+                protocol=self._protocol,
+                security=self.security,
+            )
+            try:
+                await self.listen(
+                    start_address, **self.security.get_listen_args("worker")
+                )
+            except OSError as e:
+                if len(ports) > 1 and e.errno == errno.EADDRINUSE:
+                    continue
+                else:
+                    raise e
+            else:
+                self._start_address = start_address
+                break
+        else:
+            raise ValueError(
+                f"Could not start Nanny on host {self._start_host}"
+                f"with port {self._start_port}"
+            )
+
         self.ip = get_address_host(self.address)
 
-        await preloading.on_start(
-            self._preload_modules, self, argv=self.preload_nanny_argv,
-        )
+        for preload in self.preloads:
+            await preload.start()
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
@@ -465,7 +485,8 @@ class Nanny(ServerNode):
         self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)
 
-        await preloading.on_teardown(self._preload_modules, self)
+        for preload in self.preloads:
+            await preload.teardown()
 
         self.stop()
         try:
@@ -762,4 +783,6 @@ class WorkerProcess:
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:
-            pass
+            # At this point the loop is not running thus we have to run
+            # do_stop() explicitly.
+            loop.run_sync(do_stop)

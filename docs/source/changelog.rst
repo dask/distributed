@@ -1,6 +1,25 @@
 Changelog
 =========
 
+2.15.2 - 2020-05-01
+-------------------
+
+- Connect to dashboard when address provided (:pr:`3758`) `Tom Augspurger`_
+- Move ``test_gpu_metrics test`` (:pr:`3721`) `Tom Augspurger`_
+- Nanny closing worker on ``KeyboardInterrupt`` (:pr:`3747`) `Mads R. B. Kristensen`_
+- Replace ``OrderedDict`` with ``dict`` in scheduler (:pr:`3740`) `Matthew Rocklin`_
+- Fix exception handling typo (:pr:`3751`) `Jonas Haag`_
+
+
+2.15.1 - 2020-04-28
+-------------------
+
+- Ensure ``BokehTornado`` uses prefix (:pr:`3746`) `James Bourbeau`_
+- Warn if cluster closes before starting (:pr:`3735`) `Matthew Rocklin`_
+- Memoryview serialisation (:pr:`3743`) `Martin Durant`_
+- Allows logging config under distributed key (:pr:`2952`) `Dillon Niederhut`_
+
+
 2.15.0 - 2020-04-24
 -------------------
 
@@ -1714,3 +1733,5 @@ significantly without many new features.
 .. _`Rami Chowdhury`: https://github.com/necaris
 .. _`crusaderky`: https://github.com/crusaderky
 .. _`Nicholas Smith`: https://github.com/nsmith-
+.. _`Dillon Niederhut`: https://github.com/deniederhut
+.. _`Jonas Haag`: https://github.com/jonashaag

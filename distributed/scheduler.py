@@ -1,5 +1,5 @@
 import asyncio
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
@@ -45,7 +45,7 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import rpc, connect, send_recv, clean_exception, CommClosedError
+from .core import rpc, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 
 from .http import get_handlers
@@ -1109,9 +1109,7 @@ class Scheduler(ServerNode):
             preload = dask.config.get("distributed.scheduler.preload")
         if not preload_argv:
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
-        self.preload = preload
-        self.preload_argv = preload_argv
-        self._preload_modules = preloading.on_creation(self.preload)
+        self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -1133,14 +1131,14 @@ class Scheduler(ServerNode):
         )
         self.start_http_server(routes, dashboard_address, default_port=8787)
 
-        if dashboard:
+        if dashboard or (dashboard is None and dashboard_address):
             try:
                 import distributed.dashboard.scheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 distributed.dashboard.scheduler.connect(
-                    self.http_application, self.http_server, self, prefix=http_prefix,
+                    self.http_application, self.http_server, self, prefix=http_prefix
                 )
 
         # Communication state
@@ -1474,7 +1472,8 @@ class Scheduler(ServerNode):
 
             weakref.finalize(self, del_scheduler_file)
 
-        await preloading.on_start(self._preload_modules, self, argv=self.preload_argv)
+        for preload in self.preloads:
+            await preload.start()
 
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
@@ -1498,7 +1497,8 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
-        await preloading.on_teardown(self._preload_modules, self)
+        for preload in self.preloads:
+            await preload.teardown()
 
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
@@ -1973,7 +1973,7 @@ class Scheduler(ServerNode):
                 ts.retries = v
 
         # Compute recommendations
-        recommendations = OrderedDict()
+        recommendations = {}
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts.state == "released" and ts.run_spec:
@@ -2107,7 +2107,7 @@ class Scheduler(ServerNode):
                 return {}
             cts = self.tasks.get(cause)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             if cts is not None and cts.state == "memory":  # couldn't find this
                 for ws in cts.who_has:  # TODO: this behavior is extreme
@@ -2206,7 +2206,7 @@ class Scheduler(ServerNode):
             ws.status = "closed"
             self.total_occupancy -= ws.occupancy
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for ts in list(ws.processing):
                 k = ts.key
@@ -2973,11 +2973,12 @@ class Scheduler(ServerNode):
             addresses = workers
 
         async def send_message(addr):
-            comm = await connect(
-                addr, deserialize=self.deserialize, connection_args=self.connection_args
-            )
+            comm = await self.rpc.connect(addr)
             comm.name = "Scheduler Broadcast"
-            resp = await send_recv(comm, close=True, serializers=serializers, **msg)
+            try:
+                resp = await send_recv(comm, close=True, serializers=serializers, **msg)
+            finally:
+                self.rpc.reuse(addr, comm)
             return resp
 
         results = await All(
@@ -3876,7 +3877,7 @@ class Scheduler(ServerNode):
 
             ts.state = "waiting"
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.dependencies:
                 if dts.exception_blame:
@@ -3926,7 +3927,7 @@ class Scheduler(ServerNode):
             if ts.has_lost_dependencies:
                 return {key: "forgotten"}
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.dependencies:
                 dep = dts.key
@@ -4058,7 +4059,7 @@ class Scheduler(ServerNode):
 
             self.check_idle_saturated(ws)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             self._add_to_memory(ts, ws, recommendations, **kwargs)
 
@@ -4157,7 +4158,7 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             self._remove_from_processing(ts)
 
@@ -4194,7 +4195,7 @@ class Scheduler(ServerNode):
                     ts.exception = "Worker holding Actor was lost"
                     return {ts.key: "erred"}  # don't try to recreate
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             for dts in ts.waiters:
                 if dts.state in ("no-worker", "processing"):
@@ -4288,7 +4289,7 @@ class Scheduler(ServerNode):
                     assert not ts.waiting_on
                     assert not ts.waiters
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             ts.exception = None
             ts.exception_blame = None
@@ -4362,7 +4363,7 @@ class Scheduler(ServerNode):
 
             ts.state = "released"
 
-            recommendations = OrderedDict()
+            recommendations = {}
 
             if ts.has_lost_dependencies:
                 recommendations[key] = "forgotten"
