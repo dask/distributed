@@ -24,7 +24,7 @@ def _always_use_pickle_for(x):
         return False
 
 
-def dumps(x):
+def dumps(x, *, buffer_callback=None):
     """ Manage between cloudpickle and pickle
 
     1.  Try pickle
@@ -36,25 +36,25 @@ def dumps(x):
         result = pickle.dumps(x, **dump_kwargs)
         if len(result) < 1000:
             if b"__main__" in result:
-                return cloudpickle.dumps(x, **dump_kwargs)
-            else:
-                return result
+                result = cloudpickle.dumps(x, **dump_kwargs)
         else:
-            if _always_use_pickle_for(x) or b"__main__" not in result:
-                return result
-            else:
-                return cloudpickle.dumps(x, **dump_kwargs)
+            if not (_always_use_pickle_for(x) or b"__main__" not in result):
+                result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
-            return cloudpickle.dumps(x, **dump_kwargs)
+            result = cloudpickle.dumps(x, **dump_kwargs)
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
+    return result
 
 
-def loads(x):
+def loads(x, *, buffers=()):
     try:
-        return pickle.loads(x)
+        if buffers:
+            return pickle.loads(x, buffers=buffers)
+        else:
+            return pickle.loads(x)
     except Exception:
         logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
         raise
