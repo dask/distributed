@@ -52,7 +52,9 @@ def dask_loads(header, frames):
 
 
 def pickle_dumps(x):
-    return {"serializer": "pickle"}, [pickle.dumps(x)]
+    header = {"serializer": "pickle"}
+    frames = [pickle.dumps(x)]
+    return header, frames
 
 
 def pickle_loads(header, frames):
