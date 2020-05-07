@@ -1504,6 +1504,7 @@ class Scheduler(ServerNode):
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in self.workers:
                 self.worker_send(worker, {"op": "close"})
+
             for _ in range(20):  # wait a second for send signals to clear
                 if self.workers:
                     await asyncio.sleep(0.05)
@@ -1524,6 +1525,7 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing all comms")
 
         futures = []
+
         for comm in self.stream_comms.values():
             if not comm.closed():
                 comm.send({"op": "close", "report": False})
@@ -1556,7 +1558,6 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-
             self.worker_send(worker, {"op": "close", "report": False})
             self.remove_worker(address=worker, safe=safe)
 
@@ -1800,6 +1801,7 @@ class Scheduler(ServerNode):
             )
 
         # Remove aliases
+
         for k in tasks:
             if tasks[k] is k:
                 del tasks[k]
@@ -1809,7 +1811,7 @@ class Scheduler(ServerNode):
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
             n = len(tasks)
-            for k, deps in dependencies.items():
+            for k, deps in dependencies.copy().items():
                 if any(
                     dep not in self.tasks and dep not in tasks for dep in deps
                 ):  # bad key
@@ -2449,6 +2451,7 @@ class Scheduler(ServerNode):
 
         a = {}
         b = {}
+
         actual_total_occupancy = 0
         for w, ws in self.workers.items():
             a[w] = ws.nbytes
