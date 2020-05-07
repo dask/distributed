@@ -32,6 +32,14 @@ scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
 )
 
 
+# notes to be displayed for mismatch packages
+notes_mismatch_package = {
+    "msgpack": "Variation is ok, as long as everything is above 0.6",
+    "lz4": "Variation is ok, but missing libraries are not",
+    "python": "Variation is sometimes ok, sometimes not.  It depends on your workloads",
+}
+
+
 def get_versions(packages=None):
     """
     Return basic information on our software installation, and our installed versions of packages.
@@ -123,6 +131,7 @@ def error_message(scheduler, workers, client, client_name="client"):
                 packages.add(pkg)
 
     errs = []
+    notes = []
     for pkg in sorted(packages):
         versions = set(
             node_packages[node][pkg]
@@ -131,12 +140,28 @@ def error_message(scheduler, workers, client, client_name="client"):
         )
         if len(versions) <= 1:
             continue
-        rows = [
-            (node_name, node_packages[node_name][pkg]) for node_name in nodes.keys()
-        ]
-        errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
+
+        client_version = None
+        scheduler_version = None
+        workers_version = set()
+        for node_name in nodes.keys():
+            if node_name == "client":
+                client_version = node_packages[node_name][pkg]
+            elif node_name == "scheduler":
+                scheduler_version = node_packages[node_name][pkg]
+            else:
+                workers_version.add(node_packages[node_name][pkg])
+
+        errs.append((pkg, client_version, scheduler_version, workers_version))
+        if pkg in notes_mismatch_package.keys():
+            notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
+
     if errs:
-        return "Mismatched versions found\n" "\n" "%s" % ("\n\n".join(errs))
+        err_table = asciitable(["Package", "client", "scheduler", "workers"], errs)
+        err_msg = "Mismatched versions found\n" "\n" f"{err_table}"
+        if notes:
+            err_msg += "\nNotes: \n{}".format("\n".join(notes))
+        return err_msg
     else:
         return ""
 
