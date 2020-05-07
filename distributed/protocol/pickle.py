@@ -32,6 +32,8 @@ def dumps(x, *, buffer_callback=None):
     3.  If it is long, then first check type, then check __main__
     """
     dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
+    if HIGHEST_PROTOCOL >= 5:
+        dump_kwargs["buffer_callback"] = buffer_callback
     try:
         result = pickle.dumps(x, **dump_kwargs)
         if len(result) < 1000:
