@@ -6,13 +6,44 @@ import sys
 
 import pytest
 
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 
 
 def test_pickle_data():
     data = [1, b"123", "123", [123], {}, set()]
     for d in data:
         assert loads(dumps(d)) == d
+
+
+def test_pickle_out_of_band():
+    try:
+        from pickle import PickleBuffer
+    except ImportError:
+        pass
+
+    class MemoryviewHolder:
+        def __init__(self, mv):
+            self.mv = memoryview(mv)
+
+        def __reduce_ex__(self, protocol):
+            if protocol >= 5:
+                return MemoryviewHolder, (PickleBuffer(self.mv),)
+            else:
+                return MemoryviewHolder, (self.mv.tobytes(),)
+
+    mv = memoryview(b"123")
+    mvh = MemoryviewHolder(mv)
+
+    if HIGHEST_PROTOCOL >= 5:
+        l = []
+        d = dumps(mvh, buffer_callback=l.append)
+        mvh2 = loads(d, buffers=l)
+    else:
+        mvh2 = loads(dumps(mvh))
+
+    assert isinstance(mvh2, MemoryviewHolder)
+    assert isinstance(mvh2.mv, memoryview)
+    assert mvh2.mv == mv
 
 
 def test_pickle_numpy():
@@ -22,6 +53,12 @@ def test_pickle_numpy():
 
     x = np.ones(5000)
     assert (loads(dumps(x)) == x).all()
+
+    if HIGHEST_PROTOCOL >= 5:
+        x = np.ones(5000)
+        l = []
+        d = dumps(x, buffer_callback=l.append)
+        assert (loads(d, buffers=l) == x).all()
 
 
 @pytest.mark.xfail(
