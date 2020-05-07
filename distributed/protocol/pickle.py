@@ -31,21 +31,22 @@ def dumps(x):
     2.  If it is short then check if it contains __main__
     3.  If it is long, then first check type, then check __main__
     """
+    dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
     try:
-        result = pickle.dumps(x, protocol=HIGHEST_PROTOCOL)
+        result = pickle.dumps(x, **dump_kwargs)
         if len(result) < 1000:
             if b"__main__" in result:
-                return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
+                return cloudpickle.dumps(x, **dump_kwargs)
             else:
                 return result
         else:
             if _always_use_pickle_for(x) or b"__main__" not in result:
                 return result
             else:
-                return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
+                return cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
-            return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
+            return cloudpickle.dumps(x, **dump_kwargs)
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
