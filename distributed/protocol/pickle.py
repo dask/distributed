@@ -1,5 +1,6 @@
 import logging
 import pickle
+from pickle import HIGHEST_PROTOCOL
 
 import cloudpickle
 
@@ -31,20 +32,20 @@ def dumps(x):
     3.  If it is long, then first check type, then check __main__
     """
     try:
-        result = pickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
+        result = pickle.dumps(x, protocol=HIGHEST_PROTOCOL)
         if len(result) < 1000:
             if b"__main__" in result:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
+                return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
             else:
                 return result
         else:
             if _always_use_pickle_for(x) or b"__main__" not in result:
                 return result
             else:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
+                return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
     except Exception:
         try:
-            return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
+            return cloudpickle.dumps(x, protocol=HIGHEST_PROTOCOL)
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
