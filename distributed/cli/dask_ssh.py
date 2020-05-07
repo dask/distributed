@@ -127,11 +127,13 @@ dask_ssh_options = [
 dask_ssh_opt_names = [
     opt.name for opt in dask_ssh_options if opt.param_type_name == "option"
 ]
-ignored_options = ["version", "pid_file", "port"]
+ignored_options = ["version", "port", "pid_file", "host", "name"]
 options_dict = []
 
 for opt in scheduler_options:
     if opt.name in ignored_options:
+        continue
+    if hasattr(opt, "help") and "deprecated" in opt.help.lower():
         continue
     if opt.param_type_name == "option" and opt.name not in dask_ssh_opt_names:
         opt = prepare_dask_ssh_options("scheduler", opt)
@@ -139,6 +141,8 @@ for opt in scheduler_options:
 
 for opt in worker_options:
     if opt.name in ignored_options:
+        continue
+    if hasattr(opt, "help") and "deprecated" in opt.help.lower():
         continue
     if opt.param_type_name == "option" and opt.name not in dask_ssh_opt_names:
         opt = prepare_dask_ssh_options("worker", opt)
