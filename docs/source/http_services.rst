@@ -2,7 +2,8 @@ HTTP endpoints
 ==============
 
 A subset of the following pages will be available from the scheduler or
-workers of a running cluster.
+workers of a running cluster. The list of currently available endpoins can
+be found by examining ``/sitemap.json``.
 
 
 Main dashboard links
@@ -43,6 +44,7 @@ Pages and JSON endpoints served by the scheduler
 - ``/json/counts.json``: cluster count stats
 - ``/json/identity.json``: scheduler information
 - ``/json/index.html``: link to the above two endpoints
+- ``/sitemap.json``: list of available endpoints
 - ``/statics/()``: static file content (CSS, etc)
 - ``/stealing``: worker occupancy metrics, to evaluate task stealing
 
@@ -69,8 +71,9 @@ Worker HTTP
 
 - ``/status``: 
 - ``/counters``: 
-- ``/crossfilter``: 
+- ``/crossfilter``:
+- ``/sitemap.json``: list of available endpoints
 - ``/system``: 
-- ``/profile``: 
-- ``/profile-server``: 
+- ``/health``: check server is alive
 - ``/metrics``: prometheus endpoint
+- ``/statics/()``: static file content (CSS, etc)
