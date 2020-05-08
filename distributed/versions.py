@@ -152,6 +152,11 @@ def error_message(scheduler, workers, client, client_name="client"):
             else:
                 workers_version.add(node_packages[node_name][pkg])
 
+        if len(workers_version) == 1:
+            workers_version = list(workers_version)[0]
+        elif len(workers_version) == 0:
+            workers_version = None
+
         errs.append((pkg, client_version, scheduler_version, workers_version))
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
