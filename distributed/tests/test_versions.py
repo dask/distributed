@@ -33,6 +33,11 @@ def kwargs_matching():
     )
 
 
+@pytest.fixture
+def column_matching():
+    return dict(scheduler=2, workers=3, client=1,)
+
+
 def test_versions_match(kwargs_matching):
     assert error_message(**kwargs_matching) == ""
 
@@ -67,21 +72,27 @@ def kwargs_not_matching(kwargs_matching, node, effect):
 
 @pytest.fixture
 def pattern(effect):
-    """Pattern to match in the right-hand column."""
+    """String to match in the right column."""
     return {
-        "MISMATCHED": r"0\.0\.0\.dev0",
+        "MISMATCHED": "0.0.0.dev0",
         "MISSING": "MISSING",
         "KEY_ERROR": "UNKNOWN",
         "NONE": "UNKNOWN",
     }[effect]
 
 
-def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
+def test_version_mismatch(node, effect, kwargs_not_matching, column_matching, pattern):
     msg = error_message(**kwargs_not_matching)
-
+    i = column_matching.get(node, 3)
     assert "Mismatched versions found" in msg
     assert "distributed" in msg
-    assert re.search(node + r"\s+\|\s+" + pattern, msg)
+    assert (
+        pattern
+        in re.search(r"distributed\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg)
+        .group(0)
+        .split("|")[i]
+        .strip()
+    )
 
 
 def test_scheduler_mismatched_irrelevant_package(kwargs_matching):
@@ -110,14 +121,11 @@ async def test_version_warning_in_cluster(s, a, b):
     assert record
     assert any("dask" in str(r.message) for r in record)
     assert any("0.0.0" in str(r.message) for r in record)
-    assert any(a.address in str(r.message) for r in record)
 
     async with Worker(s.address) as w:
-        assert any("This Worker" in line.message for line in w.logs)
+        assert any("workers" in line.message for line in w.logs)
         assert any("dask" in line.message for line in w.logs)
-        assert any(
-            "0.0.0" in line.message and a.address in line.message for line in w.logs
-        )
+        assert any("0.0.0" in line.message in line.message for line in w.logs)
 
 
 def test_python_version():
