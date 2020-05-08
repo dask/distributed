@@ -1,6 +1,6 @@
 import pytest
 
-from distributed import Worker, WorkerPlugin
+from distributed import Worker, WorkerPlugin, get_worker
 from distributed.utils_test import gen_cluster
 
 
@@ -94,11 +94,19 @@ async def test_empty_plugin(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_plugin_with_name_in_register(c, s, w):
+async def test_plugin_with_name_and_name_kwarg(c, s, w):
     plugin = MyPlugin(123)
-    await c.register_worker_plugin(plugin, "plugin_name")
-    assert plugin.name == "MyPlugin"
+    await c.register_worker_plugin(plugin)
 
+    # if name is provided as kwarg, warn and use name on class
+    plugin.name = "Other"
+    with pytest.warns(Warning):
+        await c.register_worker_plugin(plugin, "plugin_name")
+
+    # if name is provided as kwarg, warn but use it
     plugin = WorkerPlugin()
-    await c.register_worker_plugin(plugin, "plugin_name")
-    assert plugin.name == "plugin_name"
+    with pytest.warns(Warning):
+        await c.register_worker_plugin(plugin, "plugin_name")
+
+    plugins = await c.run(lambda: list(get_worker().plugins))
+    assert plugins[w.address] == ["MyPlugin", "Other", "plugin_name"]

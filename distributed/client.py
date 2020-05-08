@@ -4021,8 +4021,15 @@ class Client(Node):
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
     async def _register_worker_plugin(self, plugin=None, name=None):
-        if getattr(plugin, "name", None) is None and name is not None:
-            plugin.name = name
+        if name is not None:
+            warnings.warn(
+                "This name= parameter is deprecated. "
+                "Instead set name as an attribute on your plugin class",
+                stacklevel=2,
+            )
+        if hasattr(plugin, "name"):
+            name = plugin.name
+
         responses = await self.scheduler.register_worker_plugin(
             plugin=dumps(plugin), name=name
         )
@@ -4060,7 +4067,7 @@ class Client(Node):
         plugin: WorkerPlugin
             The plugin object to pass to the workers
         name: str, optional
-            A name for the plugin.
+            Deprecated.  Set name as attribute on plugin object instead.
             Registering a plugin with the same name will have no effect.
 
         Examples
@@ -4080,10 +4087,10 @@ class Client(Node):
 
         You can get access to the plugin with the ``get_worker`` function
 
-        >>> client.register_worker_plugin(other_plugin, name='my-plugin')
+        >>> client.register_worker_plugin(other_plugin)
         >>> def f():
         ...    worker = get_worker()
-        ...    plugin = worker.plugins['my-plugin']
+        ...    plugin = worker.plugins[other_plugin.name]
         ...    return plugin.my_state
 
         >>> future = client.run(f)
