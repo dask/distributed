@@ -1079,7 +1079,6 @@ class Scheduler(ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
-        self.status = None
         self.proc = psutil.Process()
         self.delete_interval = parse_timedelta(delete_interval, default="ms")
         self.synchronize_worker_interval = parse_timedelta(
@@ -2935,8 +2934,13 @@ class Scheduler(ServerNode):
             finally:
                 await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
-            self.status = None
-            await self
+            # self.status = None
+            # await self
+            self.clear_task_state()
+
+            with ignoring(AttributeError):
+                for c in self._worker_coroutines:
+                    c.cancel()
 
             self.log_event([client, "all"], {"action": "restart", "client": client})
             start = time()
