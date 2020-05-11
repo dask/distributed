@@ -200,7 +200,8 @@ class TCP(Comm):
         else:
             try:
                 msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers
+                    frames, deserialize=self.deserialize, deserializers=deserializers,
+                    allow_offload=self.allow_offload
                 )
             except EOFError:
                 # Frames possibly garbled or truncated by communication error

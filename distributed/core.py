@@ -811,6 +811,7 @@ class ConnectionPool:
         limit=512,
         deserialize=True,
         serializers=None,
+        allow_offload=True,
         deserializers=None,
         connection_args=None,
         timeout=None,
@@ -821,6 +822,7 @@ class ConnectionPool:
         self.available = defaultdict(set)
         # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
+        self.allow_offload = allow_offload
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
@@ -901,6 +903,7 @@ class ConnectionPool:
             )
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
+            comm.allow_offload = self.allow_offload
             self._created.add(comm)
         except Exception:
             self.semaphore.release()

@@ -261,7 +261,8 @@ class UCX(Comm):
                 for each_frame in recv_frames:
                     await self.ep.recv(each_frame)
                 msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers
+                    frames, deserialize=self.deserialize, deserializers=deserializers,
+                    allow_offload=self.allow_offload
                 )
                 return msg
 

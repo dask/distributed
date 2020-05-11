@@ -1372,6 +1372,7 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
+        self.rpc.allow_offload = False
 
     ##################
     # Administration #

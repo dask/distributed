@@ -49,11 +49,11 @@ async def to_frames(msg, serializers=None, on_error="message", context=None):
         return _to_frames()
 
 
-async def from_frames(frames, deserialize=True, deserializers=None):
+async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
     """
     Unserialize a list of Distributed protocol frames.
     """
-    size = sum(map(nbytes, frames))
+    size = False
 
     def _from_frames():
         try:
@@ -69,7 +69,9 @@ async def from_frames(frames, deserialize=True, deserializers=None):
             logger.error("truncated data stream (%d bytes): %s", size, datastr)
             raise
 
-    if deserialize and FRAME_OFFLOAD_THRESHOLD and size > FRAME_OFFLOAD_THRESHOLD:
+    if allow_offload and deserialize and FRAME_OFFLOAD_THRESHOLD:
+        size = sum(map(nbytes, frames))
+    if allow_offload and deserialize and FRAME_OFFLOAD_THRESHOLD and size > FRAME_OFFLOAD_THRESHOLD:
         res = await offload(_from_frames)
     else:
         res = _from_frames()
