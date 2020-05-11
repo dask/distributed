@@ -132,7 +132,7 @@ def test_no_nanny(loop):
         with popen(
             ["dask-worker", "127.0.0.1:8786", "--no-nanny", "--no-dashboard"]
         ) as worker:
-            assert any(b"Registered" in worker.stderr.readline() for i in range(15))
+            assert any(b"Registered" in worker.stderr.readline() for i in range(20))
 
 
 @pytest.mark.slow
