@@ -8,6 +8,11 @@ import pytest
 
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 
+try:
+    from pickle import PickleBuffer
+except ImportError:
+    pass
+
 
 def test_pickle_data():
     data = [1, b"123", "123", [123], {}, set()]
@@ -16,11 +21,6 @@ def test_pickle_data():
 
 
 def test_pickle_out_of_band():
-    try:
-        from pickle import PickleBuffer
-    except ImportError:
-        pass
-
     class MemoryviewHolder:
         def __init__(self, mv):
             self.mv = memoryview(mv)
