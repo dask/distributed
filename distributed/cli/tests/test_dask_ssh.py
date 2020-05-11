@@ -1,8 +1,7 @@
-from click.testing import CliRunner
-from distributed.cli.dask_ssh import main
+from subprocess import Popen
 
 
 def test_version_option():
-    runner = CliRunner()
-    result = runner.invoke(main, ["--version"])
-    assert result.exit_code == 0
+    with Popen(["dask-ssh", "--version"]) as cmd:
+        cmd.communicate()
+        assert cmd.returncode == 0
