@@ -47,11 +47,21 @@ def test_pickle_out_of_band():
     assert isinstance(mvh2.mv, memoryview)
     assert mvh2.mv == mv
 
-    mvh3 = deserialize(*serialize(mvh, serializers=("pickle",)))
+    h, f = serialize(mvh, serializers=("pickle",))
+    mvh3 = deserialize(h, f)
 
     assert isinstance(mvh3, MemoryviewHolder)
     assert isinstance(mvh3.mv, memoryview)
     assert mvh3.mv == mv
+
+    if HIGHEST_PROTOCOL >= 5:
+        assert len(f) == 2
+        assert isinstance(f[0], bytes)
+        assert isinstance(f[1], memoryview)
+        assert f[1] == mv
+    else:
+        assert len(f) == 1
+        assert isinstance(f[0], bytes)
 
 
 def test_pickle_numpy():
@@ -66,10 +76,18 @@ def test_pickle_numpy():
 
     if HIGHEST_PROTOCOL >= 5:
         x = np.ones(5000)
+
         l = []
         d = dumps(x, buffer_callback=l.append)
+        assert len(l) == 1
+        assert isinstance(l[0], PickleBuffer)
         assert (loads(d, buffers=l) == x).all()
-        assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
+
+        h, f = serialize(x, serializers=("pickle",))
+        assert len(f) == 2
+        assert isinstance(f[0], bytes)
+        assert isinstance(f[1], memoryview)
+        assert (deserialize(h, f) == x).all()
 
 
 @pytest.mark.xfail(
