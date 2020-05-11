@@ -43,7 +43,7 @@ def test_pickle_out_of_band():
 
         assert len(l) == 1
         assert isinstance(l[0], PickleBuffer)
-        assert l[0].raw() == mv
+        assert memoryview(l[0]) == mv
     else:
         mvh2 = loads(dumps(mvh))
 
@@ -85,7 +85,7 @@ def test_pickle_numpy():
         d = dumps(x, buffer_callback=l.append)
         assert len(l) == 1
         assert isinstance(l[0], PickleBuffer)
-        assert l[0].raw() == memoryview(x).cast("B")
+        assert memoryview(l[0]) == memoryview(x)
         assert (loads(d, buffers=l) == x).all()
 
         h, f = serialize(x, serializers=("pickle",))
