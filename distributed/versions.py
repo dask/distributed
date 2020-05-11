@@ -163,7 +163,7 @@ def error_message(scheduler, workers, client, client_name="client"):
 
     if errs:
         err_table = asciitable(["Package", "client", "scheduler", "workers"], errs)
-        err_msg = "Mismatched versions found\n" "\n" f"{err_table}"
+        err_msg = f"Mismatched versions found\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
         return err_msg
