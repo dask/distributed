@@ -356,7 +356,7 @@ def test_dashboard_non_standard_ports(loop):
 
 
 def test_version_option():
-    with Popen(["dask-scheduler", "--version"]) as cmd:
+    with Popen(["dask-worker", "--version"]) as cmd:
         cmd.communicate()
         assert cmd.returncode == 0
 
