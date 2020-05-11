@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from click.testing import CliRunner
+from subprocess import Popen, PIPE
 
 pytest.importorskip("requests")
 
@@ -9,7 +9,6 @@ import sys
 import os
 from time import sleep
 
-import distributed.cli.dask_worker
 from distributed import Client, Scheduler
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile, parse_ports
@@ -357,39 +356,32 @@ def test_dashboard_non_standard_ports(loop):
 
 
 def test_version_option():
-    runner = CliRunner()
-    result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
-    assert result.exit_code == 0
+    with Popen(["dask-worker", "--version"]) as cmd:
+        cmd.communicate()
+        assert cmd.returncode == 0
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("no_nanny", [True, False])
 def test_worker_timeout(no_nanny):
-    runner = CliRunner()
-    args = ["192.168.1.100:7777", "--death-timeout=1"]
+    cmd = ["dask-worker", "192.168.1.100:7777", "--death-timeout=1"]
     if no_nanny:
-        args.append("--no-nanny")
-    result = runner.invoke(distributed.cli.dask_worker.main, args)
-    assert result.exit_code != 0
+        cmd.append("--no-nanny")
+    with Popen(cmd) as worker:
+        worker.communicate()
+        assert worker.returncode != 0
 
 
 def test_bokeh_deprecation():
-    pytest.importorskip("bokeh")
+    with Popen(["dask-worker", "--bokeh"], stdout=PIPE, stderr=PIPE) as worker:
+        stderr_out = worker.communicate()[1]
+        assert b"UserWarning" in stderr_out
+        assert b"dashboard" in stderr_out
 
-    runner = CliRunner()
-    with pytest.warns(UserWarning, match="dashboard"):
-        try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--bokeh"])
-        except ValueError:
-            # didn't pass scheduler
-            pass
-
-    with pytest.warns(UserWarning, match="dashboard"):
-        try:
-            runner.invoke(distributed.cli.dask_worker.main, ["--no-bokeh"])
-        except ValueError:
-            # didn't pass scheduler
-            pass
+    with Popen(["dask-worker", "--no-bokeh"], stdout=PIPE, stderr=PIPE) as worker:
+        stderr_out = worker.communicate()[1]
+        assert b"UserWarning" in stderr_out
+        assert b"dashboard" in stderr_out
 
 
 @pytest.mark.asyncio
