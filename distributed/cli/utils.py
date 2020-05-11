@@ -68,6 +68,7 @@ def install_signal_handlers(loop=None, cleanup=None):
 
 
 def prepare_dask_ssh_options(entity, opt):
+    opt = copy.deepcopy(opt)
     opt.name = f"{opt.name}__{entity}"
     opt.opts[0] = f'--{entity}-{opt.opts[0].replace("--", "")}'
     if opt.secondary_opts:
