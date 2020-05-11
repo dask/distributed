@@ -10,8 +10,9 @@ import sys
 import tempfile
 from time import sleep
 
-from subprocess import Popen
+from click.testing import CliRunner
 
+import distributed
 from distributed import Scheduler, Client
 from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
@@ -21,6 +22,7 @@ from distributed.utils_test import (
 )
 from distributed.utils_test import loop  # noqa: F401
 from distributed.metrics import time
+import distributed.cli.dask_scheduler
 
 
 def test_defaults(loop):
@@ -399,16 +401,18 @@ def test_preload_command_default(loop):
 
 
 def test_version_option():
-    with Popen(["dask-scheduler", "--version"]) as cmd:
-        cmd.communicate()
-        assert cmd.returncode == 0
+    runner = CliRunner()
+    result = runner.invoke(distributed.cli.dask_scheduler.main, ["--version"])
+    assert result.exit_code == 0
 
 
 @pytest.mark.slow
 def test_idle_timeout(loop):
     start = time()
-    with Popen(["dask-scheduler", "--idle-timeout", "1s"]) as cmd:
-        cmd.communicate()
+    runner = CliRunner()
+    result = runner.invoke(
+        distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
+    )
     stop = time()
     assert 1 < stop - start < 10
 
