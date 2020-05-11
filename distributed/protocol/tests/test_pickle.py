@@ -6,6 +6,7 @@ import sys
 
 import pytest
 
+from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 
 try:
@@ -18,6 +19,7 @@ def test_pickle_data():
     data = [1, b"123", "123", [123], {}, set()]
     for d in data:
         assert loads(dumps(d)) == d
+        assert deserialize(*serialize(d, serializers=("pickle",))) == d
 
 
 def test_pickle_out_of_band():
@@ -45,20 +47,29 @@ def test_pickle_out_of_band():
     assert isinstance(mvh2.mv, memoryview)
     assert mvh2.mv == mv
 
+    mvh3 = deserialize(*serialize(mvh, serializers=("pickle",)))
+
+    assert isinstance(mvh3, MemoryviewHolder)
+    assert isinstance(mvh3.mv, memoryview)
+    assert mvh3.mv == mv
+
 
 def test_pickle_numpy():
     np = pytest.importorskip("numpy")
     x = np.ones(5)
     assert (loads(dumps(x)) == x).all()
+    assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
 
     x = np.ones(5000)
     assert (loads(dumps(x)) == x).all()
+    assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
 
     if HIGHEST_PROTOCOL >= 5:
         x = np.ones(5000)
         l = []
         d = dumps(x, buffer_callback=l.append)
         assert (loads(d, buffers=l) == x).all()
+        assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
 
 
 @pytest.mark.xfail(
@@ -82,10 +93,17 @@ def test_pickle_functions():
 
     for func in funcs():
         wr = weakref.ref(func)
+
         func2 = loads(dumps(func))
         wr2 = weakref.ref(func2)
         assert func2(1) == func(1)
-        del func, func2
+
+        func3 = deserialize(*serialize(func, serializers=("pickle",)))
+        wr3 = weakref.ref(func3)
+        assert func3(1) == func(1)
+
+        del func, func2, func3
         gc.collect()
         assert wr() is None
         assert wr2() is None
+        assert wr3() is None
