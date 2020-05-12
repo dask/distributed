@@ -65,6 +65,8 @@ from distributed.utils import log_errors, format_time, parse_timedelta
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.task_stream import TaskStreamPlugin
+from distributed.diagnostics.task_stream import color_of as ts_color_of
+from distributed.diagnostics.task_stream import colors as ts_color_lookup
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -453,14 +455,11 @@ class RatioByKey(DashboardComponent):
             else:
                 self.plugin = es[0]
 
-            self.actions = [
-                "transfer",
-                "compute",
-            ]  # "disk_write", "disk_read", "deserialize"
-
             data = {
-                "x": [("nokey", "transfer"), ("rk", "compute")],
+                "name_actions": [("nokey", "transfer"), ("rk", "compute")],
                 "counts": [0.2, 0.1],
+                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
+                "actions": ["transfer", "compute"],
             }
 
             self.source = ColumnDataSource(data=data)
@@ -475,7 +474,12 @@ class RatioByKey(DashboardComponent):
             )
 
             rect = fig.vbar(
-                source=self.source, x="x", top="counts", width=0.9, line_color="black"
+                source=self.source,
+                x="name_actions",
+                top="counts",
+                width=0.9,
+                color="color",
+                legend_field="actions",
             )
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
 
@@ -489,22 +493,23 @@ class RatioByKey(DashboardComponent):
             fig.toolbar.logo = None
             fig.toolbar_location = None
 
-            # hover = HoverTool()
-            # hover.tooltips = "@name: @transfer objects"
-            # hover.tooltips = """
-            # <div>
-            #     <p><b>Name:</b> @name</p>
-            #     <p><b>Transfer:</b> @transfer objects</p>
-            #     <p><b>Compute:</b> @compute objects </p>
-            #     <p><b>Deserialize:</b> @deserialize objects </p>
-            # </div>
-            # """
-            # hover.point_policy = "follow_mouse"
-            # fig.add_tools(hover)
+            hover = HoverTool()
+            hover.tooltips = """
+            <div>
+                <p><b>Name:</b> @names</p>
+                <p><b>Action:</b> @actions</p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
 
             fig.y_range.start = 0
             fig.x_range.range_padding = 0.1
             fig.xaxis.major_label_orientation = 1
+            fig.xaxis.axis_label_text_font_size = "0pt"
+            fig.xaxis.major_label_text_font_size = "0pt"
+            fig.xaxis.minor_tick_line_color = None
+            fig.xaxis.major_tick_line_color = None
             fig.xgrid.grid_line_color = None
 
             self.fig = fig
@@ -513,13 +518,12 @@ class RatioByKey(DashboardComponent):
     def update(self):
         with log_errors():
             # transfer = defaultdict(float)
-            key_vals = defaultdict(float)
-            totals = defaultdict(float)
+            total_time = defaultdict(float)
+            total_data = defaultdict(int)
 
             for task in self.scheduler.get_task_stream():
                 name = key_split(task["key"])
                 startstops = task["startstops"]
-
                 for data in startstops:
 
                     act = data["action"]
@@ -527,24 +531,36 @@ class RatioByKey(DashboardComponent):
                     start = data["start"]
                     stop = data["stop"]
                     time = stop - start
+                    total_time[(name, act)] += time
 
-                    key_vals[(name, act)] += time
-                    totals[act] += time
+            name_actions = list(total_time.keys())
+            counts = list(total_time.values())
 
-            names = list(key_vals.keys())
-            counts = list(key_vals.values())
+            colors = list()
+            actions = list()
+            names = list()
 
-            self.fig.x_range.factors = names
-            result = dict(x=names, counts=counts)
+            for name_act in name_actions:
+                names.append(name_act[0])
+                if name_act[1] == "compute":
+                    # n = '-'.join(name_act)
+                    actions.append("compute")
+                    colors.append(ts_color_of(name_act[0]))
+                else:
+                    actions.append(name_act[1])
+                    colors.append(ts_color_lookup[name_act[1]])
 
-            transfer = totals.get("transfer", 0)
-            compute = totals.get("compute", 0)
+            self.fig.x_range.factors = name_actions
 
-            ratio = "NaN"
-            if compute:
-                ratio = "{:.2f}".format(transfer / compute)
+            result = dict(
+                name_actions=name_actions,
+                counts=counts,
+                color=colors,
+                actions=actions,
+                names=names,
+            )
 
-            self.fig.title.text = "Total Transfer / Compute Ratio : " + ratio
+            self.fig.title.text = "Actions by Key"
 
             update(self.source, result)
 
