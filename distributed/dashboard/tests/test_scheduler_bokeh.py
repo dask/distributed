@@ -35,6 +35,7 @@ from distributed.dashboard.components.scheduler import (
     TaskGraph,
     ProfileServer,
     MemoryByKey,
+    RatioByKey,
 )
 from distributed.dashboard import scheduler
 
@@ -713,6 +714,29 @@ async def test_memory_by_key(c, s, a, b):
     mbk.update()
     assert mbk.source.data["name"] == ["add", "inc"]
     assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_ratio_by_key(c, s, a, b):
+    mbk = RatioByKey(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.random.random((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+
+    await x
+    y = await dask.delayed(inc)(1).persist()
+    z = (x + x.T) - x.mean(axis=0)
+    await c.compute(z.sum())
+
+    mbk.update()
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        "http://localhost:%d/individual-ratio-by-key" % s.http_server.port
+    )
+    assert response.code == 200
+    assert ("sum-aggregate", "transfer") in mbk.source.data["x"]
+    assert ("inc", "compute") in mbk.source.data["x"]
+    assert ("add", "compute") in mbk.source.data["x"]
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})

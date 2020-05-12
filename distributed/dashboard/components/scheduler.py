@@ -26,6 +26,7 @@ from bokeh.models import (
     BoxSelectTool,
     GroupFilter,
     CDSView,
+    FactorRange,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
@@ -434,6 +435,116 @@ class BandwidthWorkers(DashboardComponent):
                 "bandwidth_text": list(map(format_bytes, value)),
             }
             self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+
+            update(self.source, result)
+
+
+class RatioByKey(DashboardComponent):
+    """ Bar chart showing memory use by key prefix"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.last = 0
+            self.scheduler = scheduler
+
+            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+            if not es:
+                self.plugin = TaskStreamPlugin(self.scheduler)
+            else:
+                self.plugin = es[0]
+
+            self.actions = [
+                "transfer",
+                "compute",
+            ]  # "disk_write", "disk_read", "deserialize"
+
+            data = {
+                "x": [("nokey", "transfer"), ("rk", "compute")],
+                "counts": [0.2, 0.1],
+            }
+
+            self.source = ColumnDataSource(data=data)
+
+            fig = figure(
+                title="Computer / Transfer Ratio",
+                tools="",
+                id="bk-ratio-by-key-plot",
+                name="ratio_by_key",
+                x_range=FactorRange(),
+                **kwargs,
+            )
+
+            rect = fig.vbar(
+                source=self.source, x="x", top="counts", width=0.9, line_color="black"
+            )
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+
+            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            fig.xaxis.major_label_orientation = -math.pi / 12
+            rect.nonselection_glyph = None
+
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.ygrid.visible = False
+
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
+
+            # hover = HoverTool()
+            # hover.tooltips = "@name: @transfer objects"
+            # hover.tooltips = """
+            # <div>
+            #     <p><b>Name:</b> @name</p>
+            #     <p><b>Transfer:</b> @transfer objects</p>
+            #     <p><b>Compute:</b> @compute objects </p>
+            #     <p><b>Deserialize:</b> @deserialize objects </p>
+            # </div>
+            # """
+            # hover.point_policy = "follow_mouse"
+            # fig.add_tools(hover)
+
+            fig.y_range.start = 0
+            fig.x_range.range_padding = 0.1
+            fig.xaxis.major_label_orientation = 1
+            fig.xgrid.grid_line_color = None
+
+            self.fig = fig
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            # transfer = defaultdict(float)
+            key_vals = defaultdict(float)
+            totals = defaultdict(float)
+
+            for task in self.scheduler.get_task_stream():
+                name = key_split(task["key"])
+                startstops = task["startstops"]
+
+                for data in startstops:
+
+                    act = data["action"]
+
+                    start = data["start"]
+                    stop = data["stop"]
+                    time = stop - start
+
+                    key_vals[(name, act)] += time
+                    totals[act] += time
+
+            names = list(key_vals.keys())
+            counts = list(key_vals.values())
+
+            self.fig.x_range.factors = names
+            result = dict(x=names, counts=counts)
+
+            transfer = totals.get("transfer", 0)
+            compute = totals.get("compute", 0)
+
+            ratio = "NaN"
+            if compute:
+                ratio = "{:.2f}".format(transfer / compute)
+
+            self.fig.title.text = "Total Transfer / Compute Ratio : " + ratio
 
             update(self.source, result)
 
@@ -1898,6 +2009,15 @@ def individual_bandwidth_workers_doc(scheduler, extra, doc):
 def individual_memory_by_key_doc(scheduler, extra, doc):
     with log_errors():
         component = MemoryByKey(scheduler, sizing_mode="stretch_both")
+        component.update()
+        add_periodic_callback(doc, component, 500)
+        doc.add_root(component.fig)
+        doc.theme = BOKEH_THEME
+
+
+def individual_ratio_by_key_doc(scheduler, extra, doc):
+    with log_errors():
+        component = RatioByKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
         doc.add_root(component.fig)
