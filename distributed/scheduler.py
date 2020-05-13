@@ -753,6 +753,7 @@ class TaskGroup:
         self.nbytes_total = 0
         self.nbytes_in_memory = 0
         self.duration = 0
+        self.all_durations = defaultdict(float)
         self.types = set()
 
     def add(self, ts):
@@ -4116,12 +4117,19 @@ class Scheduler(ServerNode):
                 return {}
 
             if startstops:
-                L = [
-                    (startstop["start"], startstop["stop"])
-                    for startstop in startstops
-                    if startstop["action"] == "compute"
-                ]
-                if L:
+                L = list()
+                for startstop in startstops:
+                    stop = startstop["stop"]
+                    start = startstop["start"]
+                    action = startstop["action"]
+                    if action == "compute":
+                        L.append((start, stop))
+
+                    # record timings of all actions -- a cheaper way of
+                    # getting timing info compared with get_task_stream()
+                    ts.group.all_durations[action] += stop - start
+
+                if len(L) is 0:
                     compute_start, compute_stop = L[0]
                 else:  # This is very rare
                     compute_start = compute_stop = None

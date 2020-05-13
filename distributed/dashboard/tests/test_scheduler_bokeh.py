@@ -35,7 +35,7 @@ from distributed.dashboard.components.scheduler import (
     TaskGraph,
     ProfileServer,
     MemoryByKey,
-    RatioByKey,
+    ActionByKey,
 )
 from distributed.dashboard import scheduler
 
@@ -717,11 +717,14 @@ async def test_memory_by_key(c, s, a, b):
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
-async def test_ratio_by_key(c, s, a, b):
-    mbk = RatioByKey(s)
+async def test_action_by_key(c, s, a, b):
+    from collections import defaultdict
+    from dask.utils import key_split
+
+    mbk = ActionByKey(s)
 
     da = pytest.importorskip("dask.array")
-    x = (da.random.random((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
 
     await x
     y = await dask.delayed(inc)(1).persist()
@@ -731,12 +734,13 @@ async def test_ratio_by_key(c, s, a, b):
     mbk.update()
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
-        "http://localhost:%d/individual-ratio-by-key" % s.http_server.port
+        "http://localhost:%d/individual-action-by-key" % s.http_server.port
     )
     assert response.code == 200
-    assert ("sum-aggregate", "transfer") in mbk.source.data["x"]
-    assert ("inc", "compute") in mbk.source.data["x"]
-    assert ("add", "compute") in mbk.source.data["x"]
+
+    assert ("sum-aggregate", "transfer") in mbk.source.data["name_actions"]
+    assert ("inc", "compute") in mbk.source.data["name_actions"]
+    assert ("add", "compute") in mbk.source.data["name_actions"]
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})

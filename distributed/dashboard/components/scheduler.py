@@ -441,8 +441,8 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
-class RatioByKey(DashboardComponent):
-    """ Bar chart showing memory use by key prefix"""
+class ActionByKey(DashboardComponent):
+    """ Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -465,10 +465,10 @@ class RatioByKey(DashboardComponent):
             self.source = ColumnDataSource(data=data)
 
             fig = figure(
-                title="Computer / Transfer Ratio",
+                title="Action by Key",
                 tools="",
-                id="bk-ratio-by-key-plot",
-                name="ratio_by_key",
+                id="bk-Action-by-key-plot",
+                name="action_by_key",
                 x_range=FactorRange(),
                 **kwargs,
             )
@@ -517,21 +517,13 @@ class RatioByKey(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            # transfer = defaultdict(float)
             total_time = defaultdict(float)
             total_data = defaultdict(int)
 
-            for task in self.scheduler.get_task_stream():
-                name = key_split(task["key"])
-                startstops = task["startstops"]
-                for data in startstops:
-
-                    act = data["action"]
-
-                    start = data["start"]
-                    stop = data["stop"]
-                    time = stop - start
-                    total_time[(name, act)] += time
+            for key, ts in self.scheduler.tasks.items():
+                name = key_split(key)
+                for action, time in ts.group.all_durations.items():
+                    total_time[(name, action)] += time
 
             name_actions = list(total_time.keys())
             counts = list(total_time.values())
@@ -542,8 +534,9 @@ class RatioByKey(DashboardComponent):
 
             for name_act in name_actions:
                 names.append(name_act[0])
+                # special case compute as these tasks
+                # will be multi-colored (read-csv, add, inc, etc.)
                 if name_act[1] == "compute":
-                    # n = '-'.join(name_act)
                     actions.append("compute")
                     colors.append(ts_color_of(name_act[0]))
                 else:
@@ -551,6 +544,7 @@ class RatioByKey(DashboardComponent):
                     colors.append(ts_color_lookup[name_act[1]])
 
             self.fig.x_range.factors = name_actions
+            self.fig.title.text = "Action by Key"
 
             result = dict(
                 name_actions=name_actions,
@@ -559,8 +553,6 @@ class RatioByKey(DashboardComponent):
                 actions=actions,
                 names=names,
             )
-
-            self.fig.title.text = "Actions by Key"
 
             update(self.source, result)
 
@@ -2031,9 +2023,9 @@ def individual_memory_by_key_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-def individual_ratio_by_key_doc(scheduler, extra, doc):
+def individual_action_by_key_doc(scheduler, extra, doc):
     with log_errors():
-        component = RatioByKey(scheduler, sizing_mode="stretch_both")
+        component = ActionByKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
         doc.add_root(component.fig)
