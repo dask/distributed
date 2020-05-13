@@ -4129,7 +4129,7 @@ class Scheduler(ServerNode):
                     # getting timing info compared with get_task_stream()
                     ts.group.all_durations[action] += stop - start
 
-                if len(L) is 0:
+                if len(L) > 0:
                     compute_start, compute_stop = L[0]
                 else:  # This is very rare
                     compute_start = compute_stop = None
