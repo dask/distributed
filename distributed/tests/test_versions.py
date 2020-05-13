@@ -33,11 +33,6 @@ def kwargs_matching():
     )
 
 
-@pytest.fixture
-def column_matching():
-    return dict(scheduler=2, workers=3, client=1,)
-
-
 def test_versions_match(kwargs_matching):
     assert error_message(**kwargs_matching) == ""
 
@@ -81,7 +76,8 @@ def pattern(effect):
     }[effect]
 
 
-def test_version_mismatch(node, effect, kwargs_not_matching, column_matching, pattern):
+def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
+    column_matching = {"client": 1, "scheduler": 2, "workers": 3}
     msg = error_message(**kwargs_not_matching)
     i = column_matching.get(node, 3)
     assert "Mismatched versions found" in msg
