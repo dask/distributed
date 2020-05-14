@@ -6123,8 +6123,6 @@ def test_task_annotations(c, s, a, b):
 def test_nested_task_annotations(c, s, a, b):
     from distributed.annotations import annotate
 
-    from distributed.worker import dumps_task
-
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
 
     result = yield c.get(dsk, "v", sync=False)
