@@ -6089,7 +6089,9 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
 
+
 from distributed.diagnostics import SchedulerPlugin
+
 
 class AnnotationCheckPlugin(SchedulerPlugin):
     """ Test that expected annotations are propagated to the scheduler """
@@ -6106,6 +6108,7 @@ class AnnotationCheckPlugin(SchedulerPlugin):
 
         for k, v in self.expected.items():
             assert annotations[k] == v
+
 
 class annotation_checker:
     """ Context Manager around AnnotationCheckPlugin """
