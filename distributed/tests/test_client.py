@@ -6089,7 +6089,7 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_task_annotations(c, s, a, b):
+def test_task_annotations(c, s, a, b):
     from distributed.annotations import annotate
 
     #  Test priority
@@ -6120,7 +6120,7 @@ async def test_task_annotations(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_nested_task_annotations(c, s, a, b):
+def test_nested_task_annotations(c, s, a, b):
     from distributed.annotations import annotate
 
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
