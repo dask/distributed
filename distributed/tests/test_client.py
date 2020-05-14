@@ -6127,9 +6127,6 @@ def test_nested_task_annotations(c, s, a, b):
 
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
 
-    import pdb; pdb.set_trace()
-    print(dumps_task(dsk["v"]))
-
     result = yield c.get(dsk, "v", sync=False)
     assert s.who_has["v"] == set([a.address])
     assert result == 3
