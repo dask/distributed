@@ -1809,6 +1809,7 @@ class Scheduler(ServerNode):
         resources = resources or {}
         retries = retries or {}
         loose_restrictions = loose_restrictions or []
+        annotations = {}
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -1828,8 +1829,6 @@ class Scheduler(ServerNode):
         # Extract any annotations relating to existing update_graph interfaces
         # https://stackoverflow.com/a/20308657/1611416
         for k, task in tasks.items():
-            print(k, task)
-
             # This is probably a nested task
             if not isinstance(task, dict):
                 continue
@@ -1838,6 +1837,7 @@ class Scheduler(ServerNode):
                 continue
 
             annotation = pickle.loads(task['annotation'])
+            annotations[k] = annotation
 
             if "priority" in annotation:
                 priority[k] = annotation["priority"]
@@ -2033,6 +2033,7 @@ class Scheduler(ServerNode):
                     priority=priority,
                     loose_restrictions=loose_restrictions,
                     resources=resources,
+                    annotations=annotation,
                 )
             except Exception as e:
                 logger.exception(e)
