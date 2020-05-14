@@ -39,6 +39,7 @@ from distributed import (
     TimeoutError,
     CancelledError,
 )
+from distributed.annotations import annotate
 from distributed.comm import CommClosedError
 from distributed.client import (
     Client,
@@ -6089,42 +6090,38 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
 
 
 @gen_cluster(client=True)
-def test_task_annotations(c, s, a, b):
-    from distributed.annotations import annotate
-
-    #  Test priority
+async def test_task_annotations(c, s, a, b):
     dsk = {"x": (annotate(inc, {'priority': 1}), 1)}
-    result = yield c.get(dsk, "x", sync=False)
+    result = await c.get(dsk, "x", sync=False)
     assert result == 2
 
     # Test specifying a worker
     dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
-    result = yield c.get(dsk, "y", sync=False)
+    result = await c.get(dsk, "y", sync=False)
 
     assert s.who_has["y"] == set([a.address])
     assert result == 2
 
     # Test specifying multiple workers
     dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
-    result = yield c.get(dsk, "w", sync=False)
+    result = await c.get(dsk, "w", sync=False)
 
     assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    dsk = {"z": (annotate(inc, {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}), 1)}
-    result = yield c.get(dsk, "z", sync=False)
+    a = {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}
+    dsk = {"z": (annotate(inc, a), 1)}
+    result = await c.get(dsk, "z", sync=False)
 
     assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
 
 @gen_cluster(client=True)
-def test_nested_task_annotations(c, s, a, b):
-    from distributed.annotations import annotate
-
+async def test_nested_task_annotations(c, s, a, b):
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
 
-    result = yield c.get(dsk, "v", sync=False)
+    result = await c.get(dsk, "v", sync=False)
     assert s.who_has["v"] == set([a.address])
     assert result == 3
