@@ -2,7 +2,6 @@
 
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict
 import platform
 import struct
 import os
@@ -36,7 +35,7 @@ scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
 notes_mismatch_package = {
     "msgpack": "Variation is ok, as long as everything is above 0.6",
     "lz4": "Variation is ok, but missing libraries are not",
-    "python": "Variation is sometimes ok, sometimes not.  It depends on your workloads",
+    "python": "Variation is sometimes ok, sometimes not. It depends on your workloads",
 }
 
 
@@ -114,55 +113,52 @@ def get_package_info(pkgs):
 def error_message(scheduler, workers, client, client_name="client"):
     from .utils import asciitable
 
-    nodes = {**{client_name: client}, **{"scheduler": scheduler}, **workers}
+    client = client.get("packages") if client else "UNKNOWN"
+    scheduler = scheduler.get("packages") if scheduler else "UNKNOWN"
+    workers = {k: v.get("packages") if v else "UNKNOWN" for k, v in workers.items()}
 
-    # Hold all versions, e.g. versions["scheduler"]["distributed"] = 2.9.3
-    node_packages = defaultdict(dict)
-
-    # Collect all package versions
     packages = set()
-    for node, info in nodes.items():
-        if info is None or not (isinstance(info, dict)) or "packages" not in info:
-            node_packages[node] = defaultdict(lambda: "UNKNOWN")
-        else:
-            node_packages[node] = defaultdict(lambda: "MISSING")
-            for pkg, version in info["packages"].items():
-                node_packages[node][pkg] = version
-                packages.add(pkg)
+    packages.update(client)
+    packages.update(scheduler)
+    for worker in workers:
+        packages.update(workers.get(worker))
 
     errs = []
     notes = []
     for pkg in sorted(packages):
-        versions = set(
-            node_packages[node][pkg]
-            for node in nodes
-            if node != "scheduler" or pkg in scheduler_relevant_packages
+        versions = set()
+        scheduler_version = (
+            scheduler.get(pkg, "MISSING") if isinstance(scheduler, dict) else scheduler
         )
+        if pkg in scheduler_relevant_packages:
+            versions.add(scheduler_version)
+
+        client_version = (
+            client.get(pkg, "MISSING") if isinstance(client, dict) else client
+        )
+        versions.add(client_version)
+
+        worker_versions = set(
+            workers[w].get(pkg, "MISSING")
+            if isinstance(workers[w], dict)
+            else workers[w]
+            for w in workers
+        )
+        versions |= worker_versions
+
         if len(versions) <= 1:
             continue
+        if len(worker_versions) == 1:
+            worker_versions = list(worker_versions)[0]
+        elif len(worker_versions) == 0:
+            worker_versions = None
 
-        client_version = None
-        scheduler_version = None
-        workers_version = set()
-        for node_name in nodes.keys():
-            if node_name == "client":
-                client_version = node_packages[node_name][pkg]
-            elif node_name == "scheduler":
-                scheduler_version = node_packages[node_name][pkg]
-            else:
-                workers_version.add(node_packages[node_name][pkg])
-
-        if len(workers_version) == 1:
-            workers_version = list(workers_version)[0]
-        elif len(workers_version) == 0:
-            workers_version = None
-
-        errs.append((pkg, client_version, scheduler_version, workers_version))
+        errs.append((pkg, client_version, scheduler_version, worker_versions))
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
     if errs:
-        err_table = asciitable(["Package", "client", "scheduler", "workers"], errs)
+        err_table = asciitable(["Package", client_name, "scheduler", "workers"], errs)
         err_msg = f"Mismatched versions found\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
