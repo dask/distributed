@@ -2889,7 +2889,7 @@ async def test_rebalance_unprepared(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_rebalance_raises_missing_data(c, s, a, b):
-    with pytest.raises(ValueError, match=f"keys were found to be missing"):
+    with pytest.raises(ValueError, match="keys were found to be missing"):
         futures = await c.scatter(range(100))
         keys = [f.key for f in futures]
         del futures
@@ -3620,8 +3620,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                     return
                 w = worker(s["address"], loop=loop)
                 running[w] = None
-                workers.add(w)
                 await w
+                workers.add(w)
                 addr = w.worker_address
                 running[w] = addr
                 await asyncio.sleep(duration)
@@ -3648,6 +3648,9 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             while c.nthreads():
                 sleep(0.2)
                 assert time() < start + 10
+
+            while len(workers) < count * repeat:
+                sleep(0.2)
 
             status = False
 
