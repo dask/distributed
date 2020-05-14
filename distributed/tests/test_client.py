@@ -6093,17 +6093,18 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
 
 class AnnotationCheckPlugin(SchedulerPlugin):
     """ Test that expected annotations are propagated to the scheduler """
+
     def __init__(self, expected):
         self.expected = expected
         self.not_equal = None
 
-    def update_graph(self, scheduler, dsk=None, keys=None,
-                        restrictions=None, **kwargs):
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
 
         annotations = kwargs.pop("annotations", {})
 
-        super().update_graph(scheduler, dsk=dsk, keys=keys,
-                                restriction=restrictions, **kwargs)
+        super().update_graph(
+            scheduler, dsk=dsk, keys=keys, restriction=restrictions, **kwargs
+        )
 
         # Check for exceptions
         for k, v in self.expected.items():
@@ -6132,7 +6133,7 @@ def check_annotation(scheduler, annotations):
 async def test_task_annotations(c, s, a, b):
 
     # Test that simple priorities get through
-    dsk = {"x": (annotate(inc, {'priority': 1000}), 1)}
+    dsk = {"x": (annotate(inc, {"priority": 1000}), 1)}
 
     with check_annotation(s, {"x": get_annotation(dsk["x"][0])}):
         result = await c.get(dsk, "x", sync=False)
@@ -6170,7 +6171,7 @@ async def test_task_annotations(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_nested_task_annotations(c, s, a, b):
-    dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
+    dsk = {"v": (annotate(inc, {"worker": a.address}), (inc, 1))}
 
     with check_annotation(s, {"v": dsk["v"][0]}):
         result = await c.get(dsk, "v", sync=False)
