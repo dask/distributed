@@ -2033,7 +2033,7 @@ class Scheduler(ServerNode):
                     priority=priority,
                     loose_restrictions=loose_restrictions,
                     resources=resources,
-                    annotations=annotation,
+                    annotations=annotations,
                 )
             except Exception as e:
                 logger.exception(e)
