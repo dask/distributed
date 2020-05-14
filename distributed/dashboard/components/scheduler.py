@@ -520,9 +520,9 @@ class ActionByKey(DashboardComponent):
             total_time = defaultdict(float)
             total_data = defaultdict(int)
 
-            for key, ts in self.scheduler.tasks.items():
+            for key, ts in self.scheduler.task_prefixes.items():
                 name = key_split(key)
-                for action, time in ts.group.all_durations.items():
+                for action, time in ts.all_durations.items():
                     total_time[(name, action)] += time
 
             name_actions = list(total_time.keys())

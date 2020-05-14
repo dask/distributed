@@ -753,7 +753,6 @@ class TaskGroup:
         self.nbytes_total = 0
         self.nbytes_in_memory = 0
         self.duration = 0
-        self.all_durations = defaultdict(float)
         self.types = set()
 
     def add(self, ts):
@@ -809,6 +808,10 @@ class TaskPrefix:
     def __init__(self, name):
         self.name = name
         self.groups = []
+
+        # store timings for each prefix-action
+        self.all_durations = defaultdict(float)
+
         if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
             self.duration_average = parse_timedelta(
                 dask.config.get("distributed.scheduler.default-task-durations")[
@@ -4127,7 +4130,7 @@ class Scheduler(ServerNode):
 
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
-                    ts.group.all_durations[action] += stop - start
+                    ts.prefix.all_durations[action] += stop - start
 
                 if len(L) > 0:
                     compute_start, compute_stop = L[0]
