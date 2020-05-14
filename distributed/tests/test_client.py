@@ -53,6 +53,7 @@ from distributed.client import (
     temp_default_client,
 )
 from distributed.compatibility import WINDOWS
+from distributed.diagnostics import SchedulerPlugin
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
@@ -6088,31 +6089,72 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
 
+from distributed.diagnostics import SchedulerPlugin
+
+class AnnotationCheckPlugin(SchedulerPlugin):
+    """ Test that expected annotations are propagated to the scheduler """
+    def __init__(self, expected):
+        self.expected = expected
+
+    def update_graph(self, scheduler, dsk=None, keys=None,
+                        restrictions=None, **kwargs):
+
+        annotations = kwargs.pop("annotations", None)
+
+        super().update_graph(scheduler, dsk=dsk, keys=keys,
+                                restriction=restrictions, **kwargs)
+
+        for k, v in self.expected.items():
+            assert annotations[k] == v
+
+class annotation_checker:
+    """ Context Manager around AnnotationCheckPlugin """
+    def __init__(self, scheduler, annotations):
+        self.scheduler = scheduler
+        self.plugin = AnnotationCheckPlugin(annotations)
+
+    def __enter__(self):
+        self.scheduler.add_plugin(self.plugin)
+
+    def __exit__(self, etype, evalue, etraceback):
+        self.scheduler.remove_plugin(self.plugin)
+
 
 @gen_cluster(client=True)
 async def test_task_annotations(c, s, a, b):
-    dsk = {"x": (annotate(inc, {'priority': 1}), 1)}
-    result = await c.get(dsk, "x", sync=False)
+
+    # Test that simple priorities get through
+    dsk = {"x": (annotate(inc, {'priority': 1000}), 1)}
+
+    with annotation_checker(s, {"x": dsk["x"][0]}):
+        result = await c.get(dsk, "x", sync=False)
+
     assert result == 2
 
     # Test specifying a worker
     dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
-    result = await c.get(dsk, "y", sync=False)
+
+    with annotation_checker(s, {"y": dsk["y"][0]}):
+        result = await c.get(dsk, "y", sync=False)
 
     assert s.who_has["y"] == set([a.address])
     assert result == 2
 
     # Test specifying multiple workers
     dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
-    result = await c.get(dsk, "w", sync=False)
+
+    with annotation_checker(s, {"w": dsk["w"][0]}):
+        result = await c.get(dsk, "w", sync=False)
 
     assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    a = {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}
-    dsk = {"z": (annotate(inc, a), 1)}
-    result = await c.get(dsk, "z", sync=False)
+    annot = {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}
+    dsk = {"z": (annotate(inc, annot), 1)}
+
+    with annotation_checker(s, {"z": dsk["z"][0]}):
+        result = await c.get(dsk, "z", sync=False)
 
     assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
