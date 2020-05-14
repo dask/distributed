@@ -6086,3 +6086,50 @@ async def test_as_completed_condition_loop(c, s, a, b):
 def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+
+
+@gen_cluster(client=True, timeout=None)
+def test_task_annotations(c, s, a, b):
+    from distributed.annotations import annotate
+
+    #  Test priority
+    dsk = {"x": (annotate(inc, {'priority': 1}), 1)}
+    result = yield c.get(dsk, "x", sync=False)
+    assert result == 2
+
+    # Test specifying a worker
+    dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
+    result = yield c.get(dsk, "y", sync=False)
+
+    assert s.who_has["y"] == set([a.address])
+    assert result == 2
+
+    # Test specifying multiple workers
+    dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
+    result = yield c.get(dsk, "w", sync=False)
+
+    assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
+    # Test specifying a non-existent worker with loose restrictions
+    dsk = {"z": (annotate(inc, {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}), 1)}
+    result = yield c.get(dsk, "z", sync=False)
+
+    assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
+
+@gen_cluster(client=True, timeout=None)
+def test_nested_task_annotations(c, s, a, b):
+    from distributed.annotations import annotate
+
+    from distributed.worker import dumps_task
+
+    dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
+
+    import pdb; pdb.set_trace()
+    print(dumps_task(dsk["v"]))
+
+    result = yield c.get(dsk, "v", sync=False)
+    assert s.who_has["v"] == set([a.address])
+    assert result == 3
