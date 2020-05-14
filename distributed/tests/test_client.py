@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+from contextlib import contextmanager
 from functools import partial
 import gc
 import logging
@@ -39,7 +40,7 @@ from distributed import (
     TimeoutError,
     CancelledError,
 )
-from distributed.annotations import annotate
+from distributed.annotations import annotate, get_annotation
 from distributed.comm import CommClosedError
 from distributed.client import (
     Client,
@@ -6094,6 +6095,7 @@ class AnnotationCheckPlugin(SchedulerPlugin):
     """ Test that expected annotations are propagated to the scheduler """
     def __init__(self, expected):
         self.expected = expected
+        self.not_equal = None
 
     def update_graph(self, scheduler, dsk=None, keys=None,
                         restrictions=None, **kwargs):
@@ -6103,21 +6105,26 @@ class AnnotationCheckPlugin(SchedulerPlugin):
         super().update_graph(scheduler, dsk=dsk, keys=keys,
                                 restriction=restrictions, **kwargs)
 
+        # Check for exceptions
         for k, v in self.expected.items():
-            assert annotations[k] == v
+            if not annotations[k] == v:
+                self.not_equal = (annotations[k], v)
+                break
 
 
-class annotation_checker:
+@contextmanager
+def check_annotation(scheduler, annotations):
     """ Context Manager around AnnotationCheckPlugin """
-    def __init__(self, scheduler, annotations):
-        self.scheduler = scheduler
-        self.plugin = AnnotationCheckPlugin(annotations)
+    plugin = AnnotationCheckPlugin(annotations)
 
-    def __enter__(self):
-        self.scheduler.add_plugin(self.plugin)
+    try:
+        scheduler.add_plugin(plugin)
+        yield
+    finally:
+        scheduler.remove_plugin(plugin)
 
-    def __exit__(self, etype, evalue, etraceback):
-        self.scheduler.remove_plugin(self.plugin)
+        if plugin.not_equal:
+            assert plugin.not_equal[0] == plugin.not_equal[1]
 
 
 @gen_cluster(client=True)
@@ -6126,7 +6133,7 @@ async def test_task_annotations(c, s, a, b):
     # Test that simple priorities get through
     dsk = {"x": (annotate(inc, {'priority': 1000}), 1)}
 
-    with annotation_checker(s, {"x": dsk["x"][0]}):
+    with check_annotation(s, {"x": get_annotation(dsk["x"][0])}):
         result = await c.get(dsk, "x", sync=False)
 
     assert result == 2
@@ -6134,7 +6141,7 @@ async def test_task_annotations(c, s, a, b):
     # Test specifying a worker
     dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
 
-    with annotation_checker(s, {"y": dsk["y"][0]}):
+    with check_annotation(s, {"y": get_annotation(dsk["y"][0])}):
         result = await c.get(dsk, "y", sync=False)
 
     assert s.who_has["y"] == set([a.address])
@@ -6143,7 +6150,7 @@ async def test_task_annotations(c, s, a, b):
     # Test specifying multiple workers
     dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
 
-    with annotation_checker(s, {"w": dsk["w"][0]}):
+    with check_annotation(s, {"w": get_annotation(dsk["w"][0])}):
         result = await c.get(dsk, "w", sync=False)
 
     assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
@@ -6153,7 +6160,7 @@ async def test_task_annotations(c, s, a, b):
     annot = {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}
     dsk = {"z": (annotate(inc, annot), 1)}
 
-    with annotation_checker(s, {"z": dsk["z"][0]}):
+    with check_annotation(s, {"z": get_annotation(dsk["z"][0])}):
         result = await c.get(dsk, "z", sync=False)
 
     assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
@@ -6164,6 +6171,8 @@ async def test_task_annotations(c, s, a, b):
 async def test_nested_task_annotations(c, s, a, b):
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
 
-    result = await c.get(dsk, "v", sync=False)
+    with check_annotation(s, {"v": dsk["v"][0]}):
+        result = await c.get(dsk, "v", sync=False)
+
     assert s.who_has["v"] == set([a.address])
     assert result == 3
