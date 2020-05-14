@@ -222,7 +222,7 @@ def start_scheduler(
     **kwargs,
 ):
     cmd = "{python} -m distributed.cli.dask_scheduler --port {port}".format(
-        python=remote_python or sys.executable, port=port, logdir=logdir
+        python=remote_python or sys.executable, port=port
     )
 
     cmd = prepare_additional_options("scheduler", cmd, scheduler_options, **kwargs)
