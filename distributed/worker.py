@@ -3346,10 +3346,8 @@ def dumps_task(task):
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
     if istask(task):
-        is_apply = task[0] == apply
-
         # (apply, func, args [, kwargs]])
-        if is_apply:
+        if task[0] is apply:
             if any(map(_maybe_complex, task[2:])):
                 # Complex task
                 d = {"task": to_serialize(task)}
