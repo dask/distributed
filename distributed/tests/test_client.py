@@ -6101,7 +6101,7 @@ class AnnotationCheckPlugin(SchedulerPlugin):
     def update_graph(self, scheduler, dsk=None, keys=None,
                         restrictions=None, **kwargs):
 
-        annotations = kwargs.pop("annotations", None)
+        annotations = kwargs.pop("annotations", {})
 
         super().update_graph(scheduler, dsk=dsk, keys=keys,
                                 restriction=restrictions, **kwargs)
