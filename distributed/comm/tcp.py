@@ -200,8 +200,10 @@ class TCP(Comm):
         else:
             try:
                 msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers,
-                    allow_offload=self.allow_offload
+                    frames,
+                    deserialize=self.deserialize,
+                    deserializers=deserializers,
+                    allow_offload=self.allow_offload,
                 )
             except EOFError:
                 # Frames possibly garbled or truncated by communication error
@@ -217,6 +219,7 @@ class TCP(Comm):
 
         frames = await to_frames(
             msg,
+            allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
             context={"sender": self._local_addr, "recipient": self._peer_addr},

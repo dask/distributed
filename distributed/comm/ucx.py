@@ -176,7 +176,10 @@ class UCX(Comm):
                     serializers = ("cuda", "dask", "pickle", "error")
                 # msg can also be a list of dicts when sending batched messages
                 frames = await to_frames(
-                    msg, serializers=serializers, on_error=on_error
+                    msg,
+                    serializers=serializers,
+                    on_error=on_error,
+                    allow_offload=self.allow_offload,
                 )
                 nframes = len(frames)
                 cuda_frames = tuple(
@@ -261,8 +264,10 @@ class UCX(Comm):
                 for each_frame in recv_frames:
                     await self.ep.recv(each_frame)
                 msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers,
-                    allow_offload=self.allow_offload
+                    frames,
+                    deserialize=self.deserialize,
+                    deserializers=deserializers,
+                    allow_offload=self.allow_offload,
                 )
                 return msg
 
