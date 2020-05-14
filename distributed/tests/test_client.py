@@ -6107,8 +6107,9 @@ class AnnotationCheckPlugin(SchedulerPlugin):
 
         # Check for exceptions
         for k, v in self.expected.items():
-            if not annotations[k] == v:
-                self.not_equal = (annotations[k], v)
+            annotation = annotations.get(k, "annotation not present")
+            if not annotation == v:
+                self.not_equal = (annotation, v)
                 break
 
 
