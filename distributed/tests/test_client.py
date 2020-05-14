@@ -6088,8 +6088,8 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
 
 
-@gen_cluster(client=True, timeout=None)
-def test_task_annotations(c, s, a, b):
+@gen_cluster(client=True)
+async def test_task_annotations(c, s, a, b):
     from distributed.annotations import annotate
 
     #  Test priority
@@ -6119,8 +6119,8 @@ def test_task_annotations(c, s, a, b):
     assert result == 2
 
 
-@gen_cluster(client=True, timeout=None)
-def test_nested_task_annotations(c, s, a, b):
+@gen_cluster(client=True)
+async def test_nested_task_annotations(c, s, a, b):
     from distributed.annotations import annotate
 
     dsk = {"v": (annotate(inc, {"worker": a.address}),(inc, 1))}
