@@ -3,16 +3,15 @@ import logging
 from math import log
 from time import time
 
+from tornado.ioloop import PeriodicCallback
+
 import dask
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, parse_timedelta, PeriodicCallback
+from .utils import log_errors, parse_timedelta
 
-try:
-    from cytoolz import topk
-except ImportError:
-    from toolz import topk
+from tlz import topk
 
 LATENCY = 10e-3
 log_2 = log(2)
@@ -32,8 +31,6 @@ class WorkStealing(SchedulerPlugin):
         self.stealable = dict()
         # { task state: (worker, level) }
         self.key_stealable = dict()
-        # { prefix: { task states } }
-        self.stealable_unknown_durations = defaultdict(set)
 
         self.cost_multipliers = [1 + 2 ** (i - 6) for i in range(15)]
         self.cost_multipliers[0] = 1
@@ -41,16 +38,12 @@ class WorkStealing(SchedulerPlugin):
         for worker in scheduler.workers:
             self.add_worker(worker=worker)
 
-        # `callback_time` is in milliseconds
-        callback_time = 1000 * parse_timedelta(
+        callback_time = parse_timedelta(
             dask.config.get("distributed.scheduler.work-stealing-interval"),
             default="ms",
         )
-        pc = PeriodicCallback(
-            callback=self.balance,
-            callback_time=callback_time,
-            io_loop=self.scheduler.loop,
-        )
+        # `callback_time` is in milliseconds
+        pc = PeriodicCallback(callback=self.balance, callback_time=callback_time * 1000)
         self._pc = pc
         self.scheduler.periodic_callbacks["stealing"] = pc
         self.scheduler.plugins.append(self)
@@ -86,11 +79,7 @@ class WorkStealing(SchedulerPlugin):
 
         if start == "processing":
             self.remove_key_from_stealable(ts)
-            if finish == "memory":
-                for tts in self.stealable_unknown_durations.pop(ts.prefix, ()):
-                    if tts not in self.in_flight and tts.state == "processing":
-                        self.put_key_in_stealable(tts)
-            else:
+            if finish != "memory":
                 self.in_flight.pop(ts, None)
 
     def put_key_in_stealable(self, ts):
@@ -135,24 +124,20 @@ class WorkStealing(SchedulerPlugin):
         nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
-        split = ts.prefix
+        split = ts.prefix.name
         if split in fast_tasks:
             return None, None
         ws = ts.processing_on
-        if ws is None:
-            self.stealable_unknown_durations[split].add(ts)
+        compute_time = ws.processing[ts]
+        if compute_time < 0.005:  # 5ms, just give up
             return None, None
-        else:
-            compute_time = ws.processing[ts]
-            if compute_time < 0.005:  # 5ms, just give up
-                return None, None
-            cost_multiplier = transfer_time / compute_time
-            if cost_multiplier > 100:
-                return None, None
+        cost_multiplier = transfer_time / compute_time
+        if cost_multiplier > 100:
+            return None, None
 
-            level = int(round(log(cost_multiplier) / log_2 + 6, 0))
-            level = max(1, level)
-            return cost_multiplier, level
+        level = int(round(log(cost_multiplier) / log_2 + 6, 0))
+        level = max(1, level)
+        return cost_multiplier, level
 
     def move_task_request(self, ts, victim, thief):
         try:
@@ -421,7 +406,6 @@ class WorkStealing(SchedulerPlugin):
         for s in self.stealable_all:
             s.clear()
         self.key_stealable.clear()
-        self.stealable_unknown_durations.clear()
 
     def story(self, *keys):
         keys = set(keys)

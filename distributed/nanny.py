@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -11,7 +12,7 @@ import weakref
 
 import dask
 from dask.system import CPU_COUNT
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
@@ -19,6 +20,7 @@ from .comm.addressing import address_from_user_args
 from .core import RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
+from . import preloading
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
@@ -27,8 +29,8 @@ from .utils import (
     mp_context,
     silence_logging,
     json_load_robust,
-    PeriodicCallback,
     parse_timedelta,
+    parse_ports,
     ignoring,
     TimeoutError,
 )
@@ -78,6 +80,8 @@ class Nanny(ServerNode):
         death_timeout=None,
         preload=None,
         preload_argv=None,
+        preload_nanny=None,
+        preload_nanny_argv=None,
         security=None,
         contact_address=None,
         listen_address=None,
@@ -88,14 +92,13 @@ class Nanny(ServerNode):
         port=None,
         protocol=None,
         config=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -122,12 +125,19 @@ class Nanny(ServerNode):
         self.validate = validate
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
+
         self.preload = preload
         if self.preload is None:
             self.preload = dask.config.get("distributed.worker.preload")
         self.preload_argv = preload_argv
         if self.preload_argv is None:
             self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+
+        if preload_nanny is None:
+            preload_nanny = dask.config.get("distributed.nanny.preload")
+        if preload_nanny_argv is None:
+            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
         self.config = config or {}
@@ -158,6 +168,10 @@ class Nanny(ServerNode):
 
         self.local_directory = local_directory
 
+        self.preloads = preloading.process_preloads(
+            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
+        )
+
         self.services = services
         self.name = name
         self.quiet = quiet
@@ -187,7 +201,7 @@ class Nanny(ServerNode):
         self.scheduler = self.rpc(self.scheduler_addr)
 
         if self.memory_limit:
-            pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
+            pc = PeriodicCallback(self.memory_monitor, 100)
             self.periodic_callbacks["memory"] = pc
 
         if (
@@ -197,13 +211,10 @@ class Nanny(ServerNode):
         ):
             host = get_ip(get_address_host(self.scheduler.address))
 
-        self._start_address = address_from_user_args(
-            host=host,
-            port=port,
-            interface=interface,
-            protocol=protocol,
-            security=security,
-        )
+        self._start_port = port
+        self._start_host = host
+        self._interface = interface
+        self._protocol = protocol
 
         self._listen_address = listen_address
         Nanny._instances.add(self)
@@ -241,8 +252,40 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
-        await self.listen(self._start_address, listen_args=self.listen_args)
+
+        await super().start()
+
+        ports = parse_ports(self._start_port)
+        for port in ports:
+            start_address = address_from_user_args(
+                host=self._start_host,
+                port=port,
+                interface=self._interface,
+                protocol=self._protocol,
+                security=self.security,
+            )
+            try:
+                await self.listen(
+                    start_address, **self.security.get_listen_args("worker")
+                )
+            except OSError as e:
+                if len(ports) > 1 and e.errno == errno.EADDRINUSE:
+                    continue
+                else:
+                    raise e
+            else:
+                self._start_address = start_address
+                break
+        else:
+            raise ValueError(
+                f"Could not start Nanny on host {self._start_host}"
+                f"with port {self._start_port}"
+            )
+
         self.ip = get_address_host(self.address)
+
+        for preload in self.preloads:
+            await preload.start()
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
@@ -441,6 +484,10 @@ class Nanny(ServerNode):
 
         self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)
+
+        for preload in self.preloads:
+            await preload.teardown()
+
         self.stop()
         try:
             if self.process is not None:
@@ -515,6 +562,7 @@ class WorkerProcess:
         self.running = asyncio.Event()
         self.stopped = asyncio.Event()
         self.status = "starting"
+
         try:
             await self.process.start()
         except OSError:
@@ -735,4 +783,6 @@ class WorkerProcess:
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:
-            pass
+            # At this point the loop is not running thus we have to run
+            # do_stop() explicitly.
+            loop.run_sync(do_stop)

@@ -2,13 +2,14 @@ import asyncio
 import logging
 import threading
 import warnings
+from tornado.ioloop import PeriodicCallback
 
+import dask.config
 from dask.utils import format_bytes
 
 from .adaptive import Adaptive
 
 from ..utils import (
-    PeriodicCallback,
     log_errors,
     ignoring,
     sync,
@@ -16,6 +17,7 @@ from ..utils import (
     Logs,
     thread_state,
     format_dashboard_link,
+    parse_timedelta,
 )
 
 
@@ -34,7 +36,7 @@ class Cluster:
     2.  Implement ``scale``, which takes an integer and scales the cluster to
         that many workers, or else set ``_supports_scaling`` to False
 
-    For that, should should get the following:
+    For that, you should get the following:
 
     1.  A standard ``__repr__``
     2.  A live IPython widget
@@ -48,7 +50,7 @@ class Cluster:
     _supports_scaling = True
 
     def __init__(self, asynchronous):
-        self.scheduler_info = {}
+        self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
 
@@ -135,8 +137,8 @@ class Cluster:
         n: int
             Target number of workers
 
-        Example
-        -------
+        Examples
+        --------
         >>> cluster.scale(10)  # scale cluster to ten workers
         """
         raise NotImplementedError()
@@ -319,7 +321,10 @@ class Cluster:
         def update():
             status.value = self._widget_status()
 
-        pc = PeriodicCallback(update, 500, io_loop=self.loop)
+        cluster_repr_interval = parse_timedelta(
+            dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
+        )
+        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
@@ -351,6 +356,12 @@ class Cluster:
 
             data = {"text/plain": repr(self), "text/html": self._repr_html_()}
             display(data, raw=True)
+
+    def __enter__(self):
+        return self.sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return self.sync(self.__aexit__, typ, value, traceback)
 
     async def __aenter__(self):
         await self

@@ -20,7 +20,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import RdBu
 from bokeh.themes import Theme
 from dask.utils import format_bytes
-from toolz import merge, partition_all
+from tlz import merge, partition_all
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -37,13 +37,12 @@ from distributed.utils import log_errors, key_split, format_time
 
 logger = logging.getLogger(__name__)
 
-with open(os.path.join(os.path.dirname(__file__), "..", "templates", "base.html")) as f:
-    template_source = f.read()
-
 from jinja2 import Environment, FileSystemLoader
 
 env = Environment(
-    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    loader=FileSystemLoader(
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+    )
 )
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))

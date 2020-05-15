@@ -11,8 +11,7 @@ import click
 import dask
 from dask.utils import ignoring
 from dask.system import CPU_COUNT
-from distributed import Nanny
-from distributed.security import Security
+from distributed import Nanny, Security
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.preloading import validate_preload_argv
@@ -22,7 +21,7 @@ from distributed.proctitle import (
 )
 from distributed.utils import deserialize_for_cli, import_term
 
-from toolz import valmap
+from tlz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
 
 logger = logging.getLogger("distributed.dask_worker")
@@ -53,12 +52,21 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 )
 @click.option(
     "--worker-port",
-    type=int,
-    default=0,
-    help="Serving computation port, defaults to random",
+    default=None,
+    help="Serving computation port, defaults to random. "
+    "When creating multiple workers with --nprocs, a sequential range of "
+    "worker ports may be used by specifying the first and last available "
+    "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
+    "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
-    "--nanny-port", type=int, default=0, help="Serving nanny port, defaults to random"
+    "--nanny-port",
+    default=None,
+    help="Serving nanny port, defaults to random. "
+    "When creating multiple nannies with --nprocs, a sequential range of "
+    "nanny ports may be used by specifying the first and last available "
+    "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
+    "will use ports 3000, 3001, ..., 3025, 3026.",
 )
 @click.option(
     "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
@@ -217,6 +225,14 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.argument(
     "preload_argv", nargs=-1, type=click.UNPROCESSED, callback=validate_preload_argv
 )
+@click.option(
+    "--preload-nanny",
+    type=str,
+    multiple=True,
+    is_eager=True,
+    help="Module that should be loaded by each nanny "
+    'like "foo.bar" or "/path/to/foo.py"',
+)
 @click.version_option()
 def main(
     scheduler,
@@ -241,6 +257,7 @@ def main(
     tls_key,
     dashboard_address,
     worker_class,
+    preload_nanny,
     **kwargs
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -272,12 +289,6 @@ def main(
             if v is not None
         }
     )
-
-    if nprocs > 1 and worker_port != 0:
-        logger.error(
-            "Failed to launch worker.  You cannot use the --port argument when nprocs > 1."
-        )
-        sys.exit(1)
 
     if nprocs > 1 and not nanny:
         logger.error(
@@ -350,6 +361,7 @@ def main(
     worker_class = import_term(worker_class)
     if nanny:
         kwargs["worker_class"] = worker_class
+        kwargs["preload_nanny"] = preload_nanny
 
     if nanny:
         kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
@@ -388,8 +400,8 @@ def main(
             contact_address=contact_address,
             host=host,
             port=port,
-            dashboard_address=dashboard_address if dashboard else None,
-            service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
+            dashboard=dashboard,
+            dashboard_address=dashboard_address,
             name=name
             if nprocs == 1 or name is None or name == ""
             else str(name) + "-" + str(i),

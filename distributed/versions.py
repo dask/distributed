@@ -51,17 +51,17 @@ def get_versions(packages=None):
 
 def get_system_info():
     (sysname, nodename, release, version, machine, processor) = platform.uname()
-    host = [
-        ("python", "%d.%d.%d.%s.%s" % sys.version_info[:]),
-        ("python-bits", struct.calcsize("P") * 8),
-        ("OS", "%s" % sysname),
-        ("OS-release", "%s" % release),
-        ("machine", "%s" % machine),
-        ("processor", "%s" % processor),
-        ("byteorder", "%s" % sys.byteorder),
-        ("LC_ALL", "%s" % os.environ.get("LC_ALL", "None")),
-        ("LANG", "%s" % os.environ.get("LANG", "None")),
-    ]
+    host = {
+        "python": "%d.%d.%d.%s.%s" % sys.version_info[:],
+        "python-bits": struct.calcsize("P") * 8,
+        "OS": "%s" % sysname,
+        "OS-release": "%s" % release,
+        "machine": "%s" % machine,
+        "processor": "%s" % processor,
+        "byteorder": "%s" % sys.byteorder,
+        "LC_ALL": "%s" % os.environ.get("LC_ALL", "None"),
+        "LANG": "%s" % os.environ.get("LANG", "None"),
+    }
 
     return host
 
@@ -82,7 +82,7 @@ def version_of_package(pkg):
 def get_package_info(pkgs):
     """ get package versions for the passed required & optional packages """
 
-    pversions = []
+    pversions = [("python", ".".join(map(str, sys.version_info)))]
     for pkg in pkgs:
         if isinstance(pkg, (tuple, list)):
             modname, ver_f = pkg
@@ -113,7 +113,6 @@ def error_message(scheduler, workers, client, client_name="client"):
 
     # Collect all package versions
     packages = set()
-
     for node, info in nodes.items():
         if info is None or not (isinstance(info, dict)) or "packages" not in info:
             node_packages[node] = defaultdict(lambda: "UNKNOWN")

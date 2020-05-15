@@ -1,20 +1,17 @@
-from operator import add, sub
+import asyncio
 import re
+from operator import add, sub
 from time import sleep
 
 import pytest
 
 pytest.importorskip("bokeh")
-import sys
-from toolz import first
-from tornado import gen
+from tlz import first
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.dashboard.scheduler import BokehScheduler
-from distributed.dashboard.worker import BokehWorker
 from distributed.dashboard.components.worker import (
     StateTable,
     CrossFilter,
@@ -28,60 +25,54 @@ from distributed.dashboard.components.worker import (
 
 @gen_cluster(
     client=True,
-    worker_kwargs={"services": {("dashboard", 0): BokehWorker}},
-    scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}},
+    worker_kwargs={"dashboard": True},
+    scheduler_kwargs={"dashboard": True},
 )
-def test_routes(c, s, a, b):
-    assert isinstance(a.services["dashboard"], BokehWorker)
-    assert isinstance(b.services["dashboard"], BokehWorker)
-    port = a.services["dashboard"].port
+async def test_routes(c, s, a, b):
+    port = a.http_server.port
 
     future = c.submit(sleep, 1)
-    yield gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
     for suffix in ["status", "counters", "system", "profile", "profile-server"]:
-        response = yield http_client.fetch("http://localhost:%d/%s" % (port, suffix))
+        response = await http_client.fetch("http://localhost:%d/%s" % (port, suffix))
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
 
-    response = yield http_client.fetch(
-        "http://localhost:%d/info/main/workers.html" % s.services["dashboard"].port
+    response = await http_client.fetch(
+        "http://localhost:%d/info/main/workers.html" % s.http_server.port
     )
 
     assert str(port) in response.body.decode()
 
 
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="https://github.com/bokeh/bokeh/issues/5494"
-)
-@gen_cluster(client=True, worker_kwargs={"services": {("dashboard", 0): BokehWorker}})
-def test_simple(c, s, a, b):
-    assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
-    assert s.workers[b.address].services == {"dashboard": b.services["dashboard"].port}
+@gen_cluster(client=True, worker_kwargs={"dashboard": True})
+async def test_simple(c, s, a, b):
+    assert s.workers[a.address].services == {"dashboard": a.http_server.port}
+    assert s.workers[b.address].services == {"dashboard": b.http_server.port}
 
     future = c.submit(sleep, 1)
-    yield gen.sleep(0.1)
+    await asyncio.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    for suffix in ["main", "crossfilter", "system"]:
-        response = yield http_client.fetch(
-            "http://localhost:%d/%s" % (a.services["dashboard"].port, suffix)
+    for suffix in ["crossfilter", "system"]:
+        response = await http_client.fetch(
+            "http://localhost:%d/%s" % (a.http_server.port, suffix)
         )
         assert "bokeh" in response.body.decode().lower()
 
 
 @gen_cluster(
-    client=True, worker_kwargs={"services": {("dashboard", 0): (BokehWorker, {})}}
+    client=True, worker_kwargs={"dashboard": True},
 )
-def test_services_kwargs(c, s, a, b):
-    assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
-    assert isinstance(a.services["dashboard"], BokehWorker)
+async def test_services_kwargs(c, s, a, b):
+    assert s.workers[a.address].services == {"dashboard": a.http_server.port}
 
 
 @gen_cluster(client=True)
-def test_basic(c, s, a, b):
+async def test_basic(c, s, a, b):
     for component in [
         StateTable,
         ExecutingTimeSeries,
@@ -101,7 +92,7 @@ def test_basic(c, s, a, b):
 
         x = c.submit(slowall, xs, ys, 1, workers=a.address)
         y = c.submit(slowall, xs, ys, 2, workers=b.address)
-        yield gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
         aa.update()
         bb.update()
@@ -112,19 +103,19 @@ def test_basic(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_counters(c, s, a, b):
+async def test_counters(c, s, a, b):
     pytest.importorskip("crick")
     while "tick-duration" not in a.digests:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
     aa = Counters(a)
 
     aa.update()
-    yield gen.sleep(0.1)
+    await asyncio.sleep(0.1)
     aa.update()
 
     start = time()
     while not len(aa.digest_sources["tick-duration"][0].data["x"]):
-        yield gen.sleep(1)
+        await asyncio.sleep(1)
         assert time() < start + 5
 
     a.digests["foo"].add(1)
@@ -143,7 +134,7 @@ def test_counters(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_CommunicatingStream(c, s, a, b):
+async def test_CommunicatingStream(c, s, a, b):
     aa = CommunicatingStream(a)
     bb = CommunicatingStream(b)
 
@@ -152,7 +143,7 @@ def test_CommunicatingStream(c, s, a, b):
     adds = c.map(add, xs, ys, workers=a.address)
     subs = c.map(sub, xs, ys, workers=b.address)
 
-    yield wait([adds, subs])
+    await wait([adds, subs])
 
     aa.update()
     bb.update()
@@ -166,17 +157,14 @@ def test_CommunicatingStream(c, s, a, b):
 
 
 @gen_cluster(
-    client=True,
-    clean_kwargs={"threads": False},
-    worker_kwargs={"services": {("dashboard", 0): BokehWorker}},
+    client=True, clean_kwargs={"threads": False}, worker_kwargs={"dashboard": True},
 )
-def test_prometheus(c, s, a, b):
+async def test_prometheus(c, s, a, b):
     pytest.importorskip("prometheus_client")
-    assert s.workers[a.address].services == {"dashboard": a.services["dashboard"].port}
 
     http_client = AsyncHTTPClient()
     for suffix in ["metrics"]:
-        response = yield http_client.fetch(
-            "http://localhost:%d/%s" % (a.services["dashboard"].port, suffix)
+        response = await http_client.fetch(
+            "http://localhost:%d/%s" % (a.http_server.port, suffix)
         )
         assert response.code == 200

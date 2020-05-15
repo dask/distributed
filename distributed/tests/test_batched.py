@@ -2,7 +2,7 @@ import asyncio
 import random
 
 import pytest
-from toolz import assoc
+from tlz import assoc
 
 from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
@@ -25,8 +25,7 @@ class EchoServer:
                 return
 
     async def listen(self):
-        listener = listen("", self.handle_comm)
-        await listener.start()
+        listener = await listen("", self.handle_comm)
         self.address = listener.contact_address
         self.stop = listener.stop
 

@@ -34,8 +34,10 @@ from bokeh.themes import Theme
 from bokeh.transform import factor_cmap, linear_cmap
 from bokeh.io import curdoc
 import dask
+from dask import config
 from dask.utils import format_bytes, key_split
-from toolz import pipe
+from tlz import pipe
+from tlz.curried import map, concat, groupby
 from tornado import escape
 
 try:
@@ -63,11 +65,6 @@ from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 
-try:
-    from cytoolz.curried import map, concat, groupby
-except ImportError:
-    from toolz.curried import map, concat, groupby
-
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
@@ -78,10 +75,13 @@ logger = logging.getLogger(__name__)
 from jinja2 import Environment, FileSystemLoader
 
 env = Environment(
-    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    loader=FileSystemLoader(
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+    )
 )
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
+TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]}
 
 nan = float("nan")
 inf = float("inf")
@@ -237,7 +237,7 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            self.root.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
+            self.root.xaxis.ticker = AdaptiveTicker(**TICKS_1024)
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
             self.root.xaxis.minor_tick_line_alpha = 0
@@ -300,7 +300,7 @@ class BandwidthTypes(DashboardComponent):
             )
             fig.x_range.start = 0
             fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            fig.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
+            fig.xaxis.ticker = AdaptiveTicker(**TICKS_1024)
             rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
@@ -383,9 +383,7 @@ class BandwidthWorkers(DashboardComponent):
                 location=(0, 0),
             )
             color_bar.formatter = NumeralTickFormatter(format="0.0 b")
-            color_bar.ticker = AdaptiveTicker(
-                mantissas=[1, 64, 128, 256, 512], base=1024
-            )
+            color_bar.ticker = AdaptiveTicker(**TICKS_1024)
             fig.add_layout(color_bar, "right")
 
             fig.toolbar.logo = None
@@ -468,7 +466,7 @@ class MemoryByKey(DashboardComponent):
                 source=self.source, x="name", top="nbytes", width=0.9, color="color"
             )
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            fig.yaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
+            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
             rect.nonselection_glyph = None
 
@@ -597,7 +595,7 @@ class CurrentLoad(DashboardComponent):
             )
             rect.nonselection_glyph = None
 
-            nbytes.axis[0].ticker = BasicTicker(mantissas=[1, 256, 512], base=1024)
+            nbytes.axis[0].ticker = BasicTicker(**TICKS_1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
@@ -1095,7 +1093,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
             """,
     )
 
-    tap = TapTool(callback=OpenURL(url="/profile?key=@name"))
+    tap = TapTool(callback=OpenURL(url="./profile?key=@name"))
 
     root.add_tools(
         hover,
@@ -1176,6 +1174,7 @@ class TaskGraph(DashboardComponent):
         tap = TapTool(callback=OpenURL(url="info/task/@key.html"), renderers=[rect])
         rect.nonselection_glyph = None
         self.root.add_tools(hover, tap)
+        self.max_items = config.get("distributed.dashboard.graph-max-items", 5000)
 
     @without_property_validation
     def update(self):
@@ -1211,6 +1210,10 @@ class TaskGraph(DashboardComponent):
             y = self.layout.y
 
             tasks = self.scheduler.tasks
+            if len(tasks) > self.max_items:
+                # graph to big - no update, reset for next time
+                self.invisible_count = len(tasks)
+                return
             for key in new:
                 try:
                     task = tasks[key]
@@ -1664,9 +1667,8 @@ def systemmonitor_doc(scheduler, extra, doc):
         doc.title = "Dask: Scheduler System Monitor"
         add_periodic_callback(doc, sysmon, 500)
 
-        for subdoc in sysmon.root.children:
-            doc.add_root(subdoc)
-        doc.template = env.get_template("system.html")
+        doc.add_root(sysmon.root)
+        doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
 

@@ -81,9 +81,7 @@ from distributed.cli.utils import check_python_3
     "--local-directory",
     default=None,
     type=click.Path(exists=True),
-    help=(
-        "Directory to use on all cluster nodes to place workers " "and scheduler files."
-    ),
+    help=("Directory to use on all cluster nodes to place workers files."),
 )
 @click.option(
     "--remote-python", default=None, type=str, help="Path to Python on remote nodes."
@@ -177,7 +175,7 @@ def main(
             version=distributed.__version__
         )
     )
-    print("Worker nodes:".format(n=len(hostnames)))
+    print("Worker nodes: {n}".format(n=len(hostnames)))
     for i, host in enumerate(hostnames):
         print("  {num}: {host}".format(num=i, host=host))
     print("\nscheduler node: {addr}:{port}".format(addr=scheduler, port=scheduler_port))

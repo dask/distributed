@@ -8,7 +8,6 @@ from contextlib import contextmanager
 import functools
 from hashlib import md5
 import html
-import inspect
 import json
 import logging
 import multiprocessing
@@ -47,8 +46,7 @@ from dask.utils import (  # noqa
     parse_timedelta,
 )
 
-import toolz
-import tornado
+import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -202,6 +200,7 @@ def ignoring(*exceptions):
         pass
 
 
+# FIXME: this breaks if changed to async def...
 @gen.coroutine
 def ignore_exceptions(coroutines, *exceptions):
     """ Process list of coroutines, ignoring certain exceptions
@@ -1039,10 +1038,7 @@ def import_file(path):
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
             sys.path.insert(0, path)
-        if sys.version_info >= (3, 6):
-            names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
-        else:
-            names = (mod_info[1] for mod_info in pkgutil.iter_modules([path]))
+        names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
     loaded = []
@@ -1117,17 +1113,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def PeriodicCallback(callback, callback_time, io_loop=None):
-    """
-    Wrapper around tornado.IOLoop.PeriodicCallback, for compatibility
-    with removal of the `io_loop` parameter in Tornado 5.0.
-    """
-    if tornado.version_info >= (5,):
-        return tornado.ioloop.PeriodicCallback(callback, callback_time)
-    else:
-        return tornado.ioloop.PeriodicCallback(callback, callback_time, io_loop)
-
-
 @contextmanager
 def time_warn(duration, text):
     start = time()
@@ -1190,49 +1175,47 @@ def reset_logger_locks():
             handler.createLock()
 
 
-if tornado.version_info[0] >= 5:
+is_server_extension = False
 
-    is_server_extension = False
+if "notebook" in sys.modules:
+    import traitlets
+    from notebook.notebookapp import NotebookApp
 
-    if "notebook" in sys.modules:
-        import traitlets
-        from notebook.notebookapp import NotebookApp
+    is_server_extension = traitlets.config.Application.initialized() and isinstance(
+        traitlets.config.Application.instance(), NotebookApp
+    )
 
-        is_server_extension = traitlets.config.Application.initialized() and isinstance(
-            traitlets.config.Application.instance(), NotebookApp
-        )
+if not is_server_extension:
+    is_kernel_and_no_running_loop = False
 
-    if not is_server_extension:
-        is_kernel_and_no_running_loop = False
+    if is_kernel():
+        try:
+            get_running_loop()
+        except RuntimeError:
+            is_kernel_and_no_running_loop = True
 
-        if is_kernel():
-            try:
-                get_running_loop()
-            except RuntimeError:
-                is_kernel_and_no_running_loop = True
+    if not is_kernel_and_no_running_loop:
 
-        if not is_kernel_and_no_running_loop:
+        # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+        # once tornado > 6.0.3 is available.
+        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # fallback to the pre-3.8 default of Selector
+            # https://github.com/tornadoweb/tornado/issues/2608
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+        else:
+            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
-            # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
-            # once tornado > 6.0.3 is available.
-            if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-                # WindowsProactorEventLoopPolicy is not compatible with tornado 6
-                # fallback to the pre-3.8 default of Selector
-                # https://github.com/tornadoweb/tornado/issues/2608
-                BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
-            else:
-                BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+            def get_event_loop(self):
+                try:
+                    return super().get_event_loop()
+                except (RuntimeError, AssertionError):
+                    loop = self.new_event_loop()
+                    self.set_event_loop(loop)
+                    return loop
 
-            class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
-                def get_event_loop(self):
-                    try:
-                        return super().get_event_loop()
-                    except (RuntimeError, AssertionError):
-                        loop = self.new_event_loop()
-                        self.set_event_loop(loop)
-                        return loop
-
-            asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
+        asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
@@ -1298,11 +1281,7 @@ def color_of(x, palette=palette):
 
 
 def iscoroutinefunction(f):
-    if gen.is_coroutine_function(f):
-        return True
-    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
-        return True
-    return False
+    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager
@@ -1338,6 +1317,64 @@ def format_dashboard_link(host, port):
     return template.format(
         **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
     )
+
+
+def parse_ports(port):
+    """ Parse input port information into list of ports
+
+    Parameters
+    ----------
+    port : int, str, None
+        Input port or ports. Can be an integer like 8787, a string for a
+        single port like "8787", a string for a sequential range of ports like
+        "8000:8200", or None.
+
+    Returns
+    -------
+    ports : list
+        List of ports
+
+    Examples
+    --------
+    A single port can be specified using an integer:
+
+    >>> parse_ports(8787)
+    >>> [8787]
+
+    or a string:
+
+    >>> parse_ports("8787")
+    >>> [8787]
+
+    A sequential range of ports can be specified by a string which indicates
+    the first and last ports which should be included in the sequence of ports:
+
+    >>> parse_ports("8787:8790")
+    >>> [8787, 8788, 8789, 8790]
+
+    An input of ``None`` is also valid and can be used to indicate that no port
+    has been specified:
+
+    >>> parse_ports(None)
+    >>> [None]
+
+    """
+    if isinstance(port, str) and ":" not in port:
+        port = int(port)
+
+    if isinstance(port, (int, type(None))):
+        ports = [port]
+    else:
+        port_start, port_stop = map(int, port.split(":"))
+        if port_stop <= port_start:
+            raise ValueError(
+                "When specifying a range of ports like port_start:port_stop, "
+                "port_stop must be greater than port_start, but got "
+                f"port_start={port_start} and port_stop={port_stop}"
+            )
+        ports = list(range(port_start, port_stop + 1))
+
+    return ports
 
 
 def is_coroutine_function(f):
@@ -1523,3 +1560,45 @@ class LRU(UserDict):
         if len(self) >= self.maxsize:
             self.data.popitem(last=False)
         super().__setitem__(key, value)
+
+
+def clean_dashboard_address(addr, default_listen_ip=""):
+    """
+
+    Examples
+    --------
+    >>> clean_dashboard_address(8787)
+    {'address': '', 'port': 8787}
+    >>> clean_dashboard_address(":8787")
+    {'address': '', 'port': 8787}
+    >>> clean_dashboard_address("8787")
+    {'address': '', 'port': 8787}
+    >>> clean_dashboard_address("8787")
+    {'address': '', 'port': 8787}
+    >>> clean_dashboard_address("foo:8787")
+    {'address': 'foo', 'port': 8787}
+    """
+
+    if default_listen_ip == "0.0.0.0":
+        default_listen_ip = ""  # for IPV6
+
+    try:
+        addr = int(addr)
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(addr, str):
+        addr = addr.split(":")
+
+    if isinstance(addr, (tuple, list)):
+        if len(addr) == 2:
+            host, port = (addr[0], int(addr[1]))
+        elif len(addr) == 1:
+            [host], port = addr, 0
+        else:
+            raise ValueError(addr)
+    elif isinstance(addr, int):
+        host = default_listen_ip
+        port = addr
+
+    return {"address": host, "port": port}

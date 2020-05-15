@@ -3,12 +3,9 @@ from collections import defaultdict
 import logging
 import uuid
 
-try:
-    from cytoolz import merge
-except ImportError:
-    from toolz import merge
+from tlz import merge
 
-from .client import Future, _get_global_client, Client
+from .client import Future, Client
 from .utils import tokey, log_errors, TimeoutError, ignoring
 from .worker import get_client
 
@@ -116,8 +113,10 @@ class VariableExtension:
             else:
                 if old["type"] == "Future":
                     await self.release(old["value"], name)
-            del self.waiting_conditions[name]
-            del self.variables[name]
+            with ignoring(KeyError):
+                del self.waiting_conditions[name]
+            with ignoring(KeyError):
+                del self.variables[name]
 
 
 class Variable:
@@ -143,7 +142,7 @@ class Variable:
         If not given, a random name will be generated.
     client: Client (optional)
         Client used for communication with the scheduler. Defaults to the
-        value of ``_get_global_client()``.
+        value of ``Client.current()``.
 
     Examples
     --------
@@ -162,7 +161,7 @@ class Variable:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or _get_global_client()
+        self.client = client or Client.current()
         self.name = name or "variable-" + uuid.uuid4().hex
 
     async def _set(self, value):

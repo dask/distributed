@@ -1,6 +1,141 @@
 Changelog
 =========
 
+2.16.0 - 2020-05-08
+-------------------
+
+- ``Client.get_dataset`` to always create ``Futures`` attached to itself (:pr:`3729`) `crusaderky`_
+- Remove dev-requirements since it is unused (:pr:`3782`) `Julia Signell`_
+- Use bokeh column for ``/system`` instead of custom css (:pr:`3781`) `Julia Signell`_
+- Attempt to fix ``test_preload_remote_module`` on windows (:pr:`3775`) `James Bourbeau`_
+- Fix broadcast for TLS comms (:pr:`3766`) `Florian Jetter`_
+- Don't validate http preloads locally (:pr:`3768`) `Rami Chowdhury`_
+- Allow range of ports to be specified for ``Workers`` (:pr:`3704`) `James Bourbeau`_
+- Add UCX support for RDMACM (:pr:`3759`) `Peter Andreas Entschev`_
+- Support web addresses in preload (:pr:`3755`) `Matthew Rocklin`_
+
+
+2.15.2 - 2020-05-01
+-------------------
+
+- Connect to dashboard when address provided (:pr:`3758`) `Tom Augspurger`_
+- Move ``test_gpu_metrics test`` (:pr:`3721`) `Tom Augspurger`_
+- Nanny closing worker on ``KeyboardInterrupt`` (:pr:`3747`) `Mads R. B. Kristensen`_
+- Replace ``OrderedDict`` with ``dict`` in scheduler (:pr:`3740`) `Matthew Rocklin`_
+- Fix exception handling typo (:pr:`3751`) `Jonas Haag`_
+
+
+2.15.1 - 2020-04-28
+-------------------
+
+- Ensure ``BokehTornado`` uses prefix (:pr:`3746`) `James Bourbeau`_
+- Warn if cluster closes before starting (:pr:`3735`) `Matthew Rocklin`_
+- Memoryview serialisation (:pr:`3743`) `Martin Durant`_
+- Allows logging config under distributed key (:pr:`2952`) `Dillon Niederhut`_
+
+
+2.15.0 - 2020-04-24
+-------------------
+
+- Reinstate support for legacy ``@gen_cluster`` functions (:pr:`3738`) `crusaderky`_
+- Relax NumPy requirement in UCX (:pr:`3731`) `jakirkham`_
+- Add Configuration Schema (:pr:`3696`) `Matthew Rocklin`_
+- Reuse CI scripts for local installation process (:pr:`3698`) `crusaderky`_
+- Use ``PeriodicCallback`` class from tornado (:pr:`3725`) `James Bourbeau`_
+- Add ``remote_python`` option in ssh cmd (:pr:`3709`) `Abdulelah Bin Mahfoodh`_
+- Configurable polling interval for cluster widget (:pr:`3723`) `Julia Signell`_
+- Fix copy-paste in docs (:pr:`3728`) `Julia Signell`_
+- Replace ``gen.coroutine`` with async-await in tests (:pr:`3706`) `crusaderky`_
+- Fix flaky ``test_oversubscribing_leases`` (:pr:`3726`) `Florian Jetter`_
+- Add ``batch_size`` to ``Client.map`` (:pr:`3650`) `Tom Augspurger`_
+- Adjust semaphore test timeouts (:pr:`3720`) `Florian Jetter`_
+- Dask-serialize dicts longer than five elements (:pr:`3689`) `Richard J Zamora`_
+- Force ``threads_per_worker`` (:pr:`3715`) `crusaderky`_
+- Idempotent semaphore acquire with retries (:pr:`3690`) `Florian Jetter`_
+- Always use ``readinto`` in TCP (:pr:`3711`) `jakirkham`_
+- Avoid ``DeprecationWarning`` from pandas (:pr:`3712`) `Tom Augspurger`_
+- Allow modification of ``distributed.comm.retry`` at runtime (:pr:`3705`) `Florian Jetter`_
+- Do not log an error on unset variable delete (:pr:`3652`) `Jonathan J. Helmus`_
+- Add ``remote_python`` keyword to the new ``SSHCluster`` (:pr:`3701`) `Abdulelah Bin Mahfoodh`_
+- Replace Example with Examples in docstrings (:pr:`3697`) `Matthew Rocklin`_
+- Add ``Cluster`` ``__enter__`` and ``__exit__`` methods (:pr:`3699`) `Matthew Rocklin`_
+- Fix propagating inherit config in ``SSHCluster`` for non-bash shells (:pr:`3688`) `Abdulelah Bin Mahfoodh`_
+- Add ``Client.wait_to_workers`` to ``Client`` autosummary table (:pr:`3692`) `James Bourbeau`_
+- Replace Bokeh Server with Tornado HTTPServer (:pr:`3658`) `Matthew Rocklin`_
+- Fix ``dask-ssh`` after removing ``local-directory`` from ``dask_scheduler`` cli (:pr:`3684`) `Abdulelah Bin Mahfoodh`_
+- Support preload modules in ``Nanny`` (:pr:`3678`) `Matthew Rocklin`_
+- Refactor semaphore internals: make ``_get_lease`` synchronous (:pr:`3679`) `Lucas Rademaker`_
+- Don't make task graphs too big (:pr:`3671`) `Martin Durant`_
+- Pass through ``connection``/``listen_args`` as splatted keywords (:pr:`3674`) `Matthew Rocklin`_
+- Run preload at import, start, and teardown (:pr:`3673`) `Matthew Rocklin`_
+- Use relative URL in scheduler dashboard (:pr:`3676`) `Nicholas Smith`_
+- Expose ``Security`` object as public API (:pr:`3675`) `Matthew Rocklin`_
+- Add zoom tools to profile plots (:pr:`3672`) `James Bourbeau`_
+- Update ``Scheduler.rebalance`` return value when data is missing (:pr:`3670`) `James Bourbeau`_
+
+
+2.14.0 - 2020-04-03
+-------------------
+
+- Enable more UCX tests (:pr:`3667`) `jakirkham`_
+- Remove openssl 1.1.1d pin for Travis (:pr:`3668`) `Jonathan J. Helmus`_
+- More documentation for ``Semaphore`` (:pr:`3664`) `Florian Jetter`_
+- Get CUDA context to finalize Numba ``DeviceNDArray`` (:pr:`3666`) `jakirkham`_
+- Add Resouces option to ``get_task_stream`` and call ``output_file`` (:pr:`3653`) `Prasun Anand`_
+- Add ``Semaphore`` extension (:pr:`3573`) `Lucas Rademaker`_
+- Replace ``ncores`` with ``nthreads`` in work stealing tests (:pr:`3615`) `James Bourbeau`_
+- Clean up some test warnings (:pr:`3662`) `Matthew Rocklin`_
+- Write "why killed" docs (:pr:`3596`) `Martin Durant`_
+- Update Python version checking (:pr:`3660`) `James Bourbeau`_
+- Add newlines to ensure code formatting for ``retire_workers`` (:pr:`3661`) `Rami Chowdhury`_
+- Clean up performance report test (:pr:`3655`) `Matthew Rocklin`_
+- Avoid diagnostics time in performance report (:pr:`3654`) `Matthew Rocklin`_
+- Introduce config for default task duration (:pr:`3642`) `Gabriel Sailer`_
+- UCX simplify receiving frames in ``comm`` (:pr:`3651`) `jakirkham`_
+- Bump checkout GitHub action to v2 (:pr:`3649`) `James Bourbeau`_
+- Handle exception in ``faulthandler`` (:pr:`3646`) `Jacob Tomlinson`_
+- Add prometheus metric for suspicious tasks (:pr:`3550`) `Gabriel Sailer`_
+- Remove ``local-directory`` keyword (:pr:`3620`) `Prasun Anand`_
+- Don't create output Futures in Client when there are mixed Client Futures (:pr:`3643`) `James Bourbeau`_
+- Add link to ``contributing.md`` (:pr:`3621`) `Prasun Anand`_
+- Update bokeh dependency in CI builds (:pr:`3637`) `James Bourbeau`_
+
+
+2.13.0 - 2020-03-25
+-------------------
+
+- UCX synchronize default stream only on CUDA frames (:pr:`3638`) `Peter Andreas Entschev`_
+- Add ``as_completed.clear`` method (:pr:`3617`) `Matthew Rocklin`_
+- Drop unused line from ``pack_frames_prelude`` (:pr:`3634`) `John Kirkham`_
+- Add logging message when closing idle dask scheduler (:pr:`3632`) `Matthew Rocklin`_
+- Include frame lengths of CUDA objects in ``header["lengths"]`` (:pr:`3631`) `John Kirkham`_
+- Ensure ``Client`` connection pool semaphore attaches to the ``Client`` event loop (:pr:`3546`) `James Bourbeau`_
+- Remove dead stealing code (:pr:`3619`) `Florian Jetter`_
+- Check ``nbytes`` and ``types`` before reading ``data`` (:pr:`3628`) `John Kirkham`_
+- Ensure that we don't steal blacklisted fast tasks (:pr:`3591`) `Florian Jetter`_
+- Support async ``Listener.stop`` functions (:pr:`3613`) `Matthew Rocklin`_
+- Add str/repr methods to ``as_completed`` (:pr:`3618`) `Matthew Rocklin`_
+- Add backoff to comm connect attempts. (:pr:`3496`) `Matthias Urlichs`_
+- Make ``Listeners`` awaitable (:pr:`3611`) `Matthew Rocklin`_
+- Increase number of visible mantissas in dashboard plots (:pr:`3585`) `Scott Sievert`_
+- Pin openssl to 1.1.1d for Travis (:pr:`3602`) `Jacob Tomlinson`_
+- Replace ``tornado.queues`` with ``asyncio.queues`` (:pr:`3607`) `James Bourbeau`_
+- Remove ``dill`` from CI environments (:pr:`3608`) `Loïc Estève`_
+- Fix linting errors (:pr:`3604`) `James Bourbeau`_
+- Synchronize default CUDA stream before UCX send/recv (:pr:`3598`) `Peter Andreas Entschev`_
+- Add configuration for ``Adaptive`` arguments (:pr:`3509`) `Gabriel Sailer`_
+- Change ``Adaptive`` docs to reference ``adaptive_target`` (:pr:`3597`) `Julia Signell`_
+- Optionally compress on a frame-by-frame basis (:pr:`3586`) `Matthew Rocklin`_
+- Add Python version to version check (:pr:`3567`) `James Bourbeau`_
+- Import ``tlz`` (:pr:`3579`) `John Kirkham`_
+- Pin ``numpydoc`` to avoid double escaped ``*`` (:pr:`3530`) `Gil Forsyth`_
+- Avoid ``performance_report`` crashing when a worker dies mid-compute (:pr:`3575`) `Krishan Bhasin`_
+- Pin ``bokeh`` in CI builds (:pr:`3570`) `James Bourbeau`_
+- Disable fast fail on GitHub Actions Windows CI (:pr:`3569`) `James Bourbeau`_
+- Fix typo in ``Client.shutdown`` docstring (:pr:`3562`) `John Kirkham`_
+- Add ``local_directory`` option to ``dask-ssh`` (:pr:`3554`) `Abdulelah Bin Mahfoodh`_
+
+
 2.12.0 - 2020-03-06
 -------------------
 
@@ -1583,6 +1718,7 @@ significantly without many new features.
 .. _`He Jia`: https://github.com/HerculesJack
 .. _`Jim Crist-Harif`: https://github.com/jcrist
 .. _`fjetter`: https://github.com/fjetter
+.. _`Florian Jetter`: https://github.com/fjetter
 .. _`Patrick Sodré`: https://github.com/sodre
 .. _`Stephan Erb`: https://github.com/StephanErb
 .. _`Benedikt Reinartz`: https://github.com/filmor
@@ -1602,3 +1738,14 @@ significantly without many new features.
 .. _`Davis Bennett`: https://github.com/d-v-b
 .. _`Lucas Rademaker`: https://github.com/lr4d
 .. _`Darren Weber`: https://github.com/dazza-codes
+.. _`Matthias Urlichs`: https://github.com/smurfix
+.. _`Krishan Bhasin`: https://github.com/KrishanBhasin
+.. _`Abdulelah Bin Mahfoodh`: https://github.com/abduhbm
+.. _`jakirkham`: https://github.com/jakirkham
+.. _`Prasun Anand`: https://github.com/prasunanand
+.. _`Jonathan J. Helmus`: https://github.com/jjhelmus
+.. _`Rami Chowdhury`: https://github.com/necaris
+.. _`crusaderky`: https://github.com/crusaderky
+.. _`Nicholas Smith`: https://github.com/nsmith-
+.. _`Dillon Niederhut`: https://github.com/deniederhut
+.. _`Jonas Haag`: https://github.com/jonashaag

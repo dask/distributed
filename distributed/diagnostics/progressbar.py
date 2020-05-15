@@ -4,7 +4,7 @@ from timeit import default_timer
 import sys
 import weakref
 
-from toolz import valmap
+from tlz import valmap
 from tornado.ioloop import IOLoop
 
 from .progress import format_time, Progress, MultiProgress
@@ -63,8 +63,7 @@ class ProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
+            self.scheduler, **(self.client().connection_args if self.client else {}),
         )
         logger.debug("Progressbar Connected to scheduler")
 

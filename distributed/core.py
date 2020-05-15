@@ -1,7 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
 from functools import partial
-from inspect import isawaitable
+import inspect
 import logging
 import threading
 import traceback
@@ -10,9 +10,9 @@ import weakref
 
 import dask
 import tblib
-from toolz import merge
+from tlz import merge
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from .comm import (
     connect,
@@ -31,10 +31,10 @@ from .utils import (
     truncate_exception,
     ignoring,
     shutting_down,
-    PeriodicCallback,
     parse_timedelta,
     has_keyword,
     CancelledError,
+    TimeoutError,
 )
 from . import protocol
 
@@ -107,6 +107,10 @@ class Server:
         stream_handlers=None,
         connection_limit=512,
         deserialize=True,
+        serializers=None,
+        deserializers=None,
+        connection_args=None,
+        timeout=None,
         io_loop=None,
     ):
         self.handlers = {
@@ -176,18 +180,14 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
+        pc = PeriodicCallback(self.monitor.update, 500)
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(
-            self._measure_tick,
-            parse_timedelta(
-                dask.config.get("distributed.admin.tick.interval"), default="ms"
-            )
-            * 1000,
-            io_loop=self.io_loop,
+        measure_tick_interval = parse_timedelta(
+            dask.config.get("distributed.admin.tick.interval"), default="ms"
         )
+        pc = PeriodicCallback(self._measure_tick, measure_tick_interval * 1000)
         self.periodic_callbacks["tick"] = pc
 
         self.thread_id = 0
@@ -196,12 +196,58 @@ class Server:
             self.thread_id = threading.get_ident()
 
         self.io_loop.add_callback(set_thread_ident)
+        self._startup_lock = asyncio.Lock()
+        self.status = None
+
+        self.rpc = ConnectionPool(
+            limit=connection_limit,
+            deserialize=deserialize,
+            serializers=serializers,
+            deserializers=deserializers,
+            connection_args=connection_args,
+            timeout=timeout,
+            server=self,
+        )
 
         self.__stopped = False
 
     async def finished(self):
         """ Wait until the server has finished """
         await self._event_finished.wait()
+
+    def __await__(self):
+        async def _():
+            timeout = getattr(self, "death_timeout", 0)
+            async with self._startup_lock:
+                if self.status == "running":
+                    return self
+                if timeout:
+                    try:
+                        await asyncio.wait_for(self.start(), timeout=timeout)
+                        self.status = "running"
+                    except Exception:
+                        await self.close(timeout=1)
+                        raise TimeoutError(
+                            "{} failed to start in {} seconds".format(
+                                type(self).__name__, timeout
+                            )
+                        )
+                else:
+                    await self.start()
+                    self.status = "running"
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        await self.rpc.start()
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        await self.close()
 
     def start_periodic_callbacks(self):
         """ Start Periodic Callbacks consistently
@@ -302,7 +348,7 @@ class Server:
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    async def listen(self, port_or_addr=None, listen_args=None):
+    async def listen(self, port_or_addr=None, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -312,13 +358,9 @@ class Server:
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
-        listener = listen(
-            addr,
-            self.handle_comm,
-            deserialize=self.deserialize,
-            connection_args=listen_args,
+        listener = await listen(
+            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
         )
-        await listener.start()
         self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
@@ -340,6 +382,7 @@ class Server:
 
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
+        await self
         try:
             while True:
                 try:
@@ -406,7 +449,7 @@ class Server:
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if isawaitable(result):
+                        if inspect.isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
@@ -496,7 +539,9 @@ class Server:
         for pc in self.periodic_callbacks.values():
             pc.stop()
         for listener in self.listeners:
-            self.listener.stop()
+            future = self.listener.stop()
+            if inspect.isawaitable(future):
+                yield future
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
@@ -605,7 +650,7 @@ class rpc:
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self._created = weakref.WeakSet()
         rpc.active.add(self)
 
@@ -643,7 +688,7 @@ class rpc:
                 self.address,
                 self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "rpc"
         self.comms[comm] = False  # mark as taken
@@ -831,11 +876,9 @@ class ConnectionPool:
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
-        self.connection_args = connection_args
+        self.connection_args = connection_args or {}
         self.timeout = timeout
         self._n_connecting = 0
-        # Invariant: semaphore._value == limit - open - _n_connecting
-        self.semaphore = asyncio.Semaphore(self.limit)
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
@@ -870,6 +913,17 @@ class ConnectionPool:
             addr, self, serializers=self.serializers, deserializers=self.deserializers
         )
 
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        # Invariant: semaphore._value == limit - open - _n_connecting
+        self.semaphore = asyncio.Semaphore(self.limit)
+
     async def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
@@ -895,7 +949,7 @@ class ConnectionPool:
                 addr,
                 timeout=timeout or self.timeout,
                 deserialize=self.deserialize,
-                connection_args=self.connection_args,
+                **self.connection_args,
             )
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
