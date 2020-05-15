@@ -664,7 +664,7 @@ class CurrentLoad(DashboardComponent):
                     getattr(self.scheduler.workers[ws.address], "memory_limit", inf)
                     or inf
                 )
-                target = (
+                pause = (
                     getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
                     or inf
                 )
@@ -672,10 +672,11 @@ class CurrentLoad(DashboardComponent):
                     getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
                     or inf
                 )
-                pause = (
+                target = (
                     getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
                     or inf
                 )
+
 
                 if limit > max_limit and limit != inf:
                     max_limit = limit
