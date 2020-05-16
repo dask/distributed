@@ -1803,6 +1803,12 @@ class Scheduler(ServerNode):
                 del tasks[k]
 
         dependencies = dependencies or {}
+        priority = priority or {}
+        restrictions = restrictions or {}
+        resources = resources or {}
+        retries = retries or {}
+        loose_restrictions = loose_restrictions or []
+        annotations = {}
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -1818,6 +1824,38 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
+
+        # Extract any annotations relating to existing update_graph interfaces
+        # https://stackoverflow.com/a/20308657/1611416
+        for k, task in tasks.items():
+            # This is probably a nested task
+            if not isinstance(task, dict):
+                continue
+
+            if "annotation" not in task:
+                continue
+
+            annotation = pickle.loads(task["annotation"])
+            annotations[k] = annotation
+
+            if "priority" in annotation:
+                priority[k] = annotation["priority"]
+
+            if "worker" in annotation:
+                worker = annotation["worker"]
+                if not isinstance(worker, (list, tuple)):
+                    worker = [worker]
+
+                restrictions[k] = worker
+
+            if annotation.get("allow_other_workers", False):
+                loose_restrictions.append(k)
+
+            if "retries" in annotation:
+                retries[k] = annotation["retries"]
+
+            if "resources" in annotation:
+                resources[k] = annotation["resources"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -1994,6 +2032,7 @@ class Scheduler(ServerNode):
                     priority=priority,
                     loose_restrictions=loose_restrictions,
                     resources=resources,
+                    annotations=annotations,
                 )
             except Exception as e:
                 logger.exception(e)

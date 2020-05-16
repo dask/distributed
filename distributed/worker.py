@@ -28,6 +28,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import profile, comm, system
+from .annotations import get_annotation
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
@@ -3345,13 +3346,35 @@ def dumps_task(task):
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
     if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
+        # (apply, func, args [, kwargs]])
+        if task[0] is apply:
+            if any(map(_maybe_complex, task[2:])):
+                # Complex task
+                d = {"task": to_serialize(task)}
+            else:
+                # Simple task case
+                d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
+                if len(task) == 4:
+                    d["kwargs"] = warn_dumps(task[3])
+
+            annotation = get_annotation(task[1])
+        # (func, args)
+        else:
+            if any(map(_maybe_complex, task[1:])):
+                # Complex case
+                d = {"task": to_serialize(task)}
+            else:
+                # Simple task case
+                d = {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
+
+            annotation = get_annotation(task[0])
+
+        # Add annotation, if any
+        if len(annotation) > 0:
+            d["annotation"] = warn_dumps(annotation)
+
+        return d
+
     return to_serialize(task)
 
 

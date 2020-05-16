@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+from contextlib import contextmanager
 from functools import partial
 import gc
 import logging
@@ -39,6 +40,7 @@ from distributed import (
     TimeoutError,
     CancelledError,
 )
+from distributed.annotations import annotate, get_annotation
 from distributed.comm import CommClosedError
 from distributed.client import (
     Client,
@@ -52,6 +54,7 @@ from distributed.client import (
     temp_default_client,
 )
 from distributed.compatibility import WINDOWS
+from distributed.diagnostics import SchedulerPlugin
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
@@ -6086,3 +6089,92 @@ async def test_as_completed_condition_loop(c, s, a, b):
 def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+
+
+class AnnotationCheckPlugin(SchedulerPlugin):
+    """ Test that expected annotations are propagated to the scheduler """
+
+    def __init__(self, expected):
+        self.expected = expected
+        self.not_equal = None
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+
+        annotations = kwargs.pop("annotations", {})
+
+        super().update_graph(
+            scheduler, dsk=dsk, keys=keys, restriction=restrictions, **kwargs
+        )
+
+        # Check for exceptions
+        for k, v in self.expected.items():
+            annotation = annotations.get(k, "annotation not present")
+            if not annotation == v:
+                self.not_equal = (annotation, v)
+                break
+
+
+@contextmanager
+def check_annotation(scheduler, annotations):
+    """ Context Manager around AnnotationCheckPlugin """
+    plugin = AnnotationCheckPlugin(annotations)
+
+    try:
+        scheduler.add_plugin(plugin)
+        yield
+    finally:
+        scheduler.remove_plugin(plugin)
+
+        if plugin.not_equal:
+            assert plugin.not_equal[0] == plugin.not_equal[1]
+
+
+@gen_cluster(client=True)
+async def test_task_annotations(c, s, a, b):
+
+    # Test that simple priorities get through
+    dsk = {"x": (annotate(inc, {"priority": 1000}), 1)}
+
+    with check_annotation(s, {"x": get_annotation(dsk["x"][0])}):
+        result = await c.get(dsk, "x", sync=False)
+
+    assert result == 2
+
+    # Test specifying a worker
+    dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
+
+    with check_annotation(s, {"y": get_annotation(dsk["y"][0])}):
+        result = await c.get(dsk, "y", sync=False)
+
+    assert s.who_has["y"] == set([a.address])
+    assert result == 2
+
+    # Test specifying multiple workers
+    dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
+
+    with check_annotation(s, {"w": get_annotation(dsk["w"][0])}):
+        result = await c.get(dsk, "w", sync=False)
+
+    assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
+    # Test specifying a non-existent worker with loose restrictions
+    annot = {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}
+    dsk = {"z": (annotate(inc, annot), 1)}
+
+    with check_annotation(s, {"z": get_annotation(dsk["z"][0])}):
+        result = await c.get(dsk, "z", sync=False)
+
+    assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
+
+@gen_cluster(client=True)
+async def test_nested_task_annotations(c, s, a, b):
+    dsk = {"v": (annotate(inc, {"worker": a.address}), (inc, 1))}
+
+    with check_annotation(s, {"v": dsk["v"][0]}):
+        result = await c.get(dsk, "v", sync=False)
+
+    assert s.who_has["v"] == set([a.address])
+    assert result == 3
