@@ -685,9 +685,9 @@ class CurrentLoad(DashboardComponent):
                     nbytes_color.append("black")
                 elif nb > pause:
                     nbytes_color.append("red")
-                elif nb > spill:
-                    nbytes_color.append("orange")
                 elif nb > target:
+                    nbytes_color.append("orange")
+                elif nb > target * 0.85:
                     nbytes_color.append("yellow")
                 else:
                     nbytes_color.append("blue")
