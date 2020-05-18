@@ -1,3 +1,4 @@
+import os
 import pynvml
 
 handles = None
@@ -8,7 +9,16 @@ def _pynvml_handles():
     if handles is None:
         pynvml.nvmlInit()
         count = pynvml.nvmlDeviceGetCount()
-        handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(count)]
+        cuda_visible_devices = [
+            int(idx) for idx in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+        ]
+        if not cuda_visible_devices:
+            cuda_visible_devices = list(range(count))
+        handles = [
+            pynvml.nvmlDeviceGetHandleByIndex(i)
+            for i in range(count)
+            if i in cuda_visible_devices
+        ]
     return handles
 
 
