@@ -33,7 +33,7 @@ def dumps(x, *, buffer_callback=None):
     """
     buffers = []
     dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
-    if HIGHEST_PROTOCOL >= 5:
+    if HIGHEST_PROTOCOL >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
         del buffers[:]
