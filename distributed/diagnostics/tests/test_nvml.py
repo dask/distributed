@@ -1,8 +1,9 @@
 import pytest
 import os
-from distributed.diagnostics import nvml
 
 pytest.importorskip("pynvml")
+
+from distributed.diagnostics import nvml
 
 
 def test_one_time():
