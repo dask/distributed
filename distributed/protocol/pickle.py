@@ -31,23 +31,30 @@ def dumps(x, *, buffer_callback=None):
     2.  If it is short then check if it contains __main__
     3.  If it is long, then first check type, then check __main__
     """
+    buffers = []
     dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
     if HIGHEST_PROTOCOL >= 5:
-        dump_kwargs["buffer_callback"] = buffer_callback
+        dump_kwargs["buffer_callback"] = buffers.append
     try:
+        del buffers[:]
         result = pickle.dumps(x, **dump_kwargs)
         if len(result) < 1000:
             if b"__main__" in result:
+                del buffers[:]
                 result = cloudpickle.dumps(x, **dump_kwargs)
         else:
             if not (_always_use_pickle_for(x) or b"__main__" not in result):
+                del buffers[:]
                 result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
+            del buffers[:]
             result = cloudpickle.dumps(x, **dump_kwargs)
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
+    for b in buffers:
+        buffer_callback(b)
     return result
 
 
