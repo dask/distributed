@@ -665,18 +665,29 @@ class CurrentLoad(DashboardComponent):
                     or inf
                 )
                 pause = (
-                    getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
+                    getattr(
+                        self.scheduler.workers[ws.address],
+                        "memory_target_fraction",
+                        inf,
+                    )
                     or inf
                 )
                 spill = (
-                    getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
+                    getattr(
+                        self.scheduler.workers[ws.address],
+                        "memory_target_fraction",
+                        inf,
+                    )
                     or inf
                 )
                 target = (
-                    getattr(self.scheduler.workers[ws.address], "memory_target_fraction",inf)
+                    getattr(
+                        self.scheduler.workers[ws.address],
+                        "memory_target_fraction",
+                        inf,
+                    )
                     or inf
                 )
-
 
                 if limit > max_limit and limit != inf:
                     max_limit = limit
