@@ -32,8 +32,11 @@ OFFLOAD_FCOUNT_KEY = "_$fcount"
 
 
 def _make_offload_value(header, frame_index, frame_count):
-    return {OFFLOAD_HEADER_KEY: header, OFFLOAD_FINDEX_KEY: frame_index,
-            OFFLOAD_FCOUNT_KEY: frame_count}
+    return {
+        OFFLOAD_HEADER_KEY: header,
+        OFFLOAD_FINDEX_KEY: frame_index,
+        OFFLOAD_FCOUNT_KEY: frame_count,
+    }
 
 
 def _extract_offload_value(value):
@@ -126,15 +129,11 @@ def dumps(msg, serializers=None, on_error="message", context=None):
 
 def loads(frames, deserialize=True, deserializers=None):
     """ Transform bytestream back into Python value """
-    if not isinstance(frames, list):
-        frames = list(frames)
+    frames = list(frames)
     try:
         small_header = frames[0]
         small_payload = frames[1]
         msg = loads_msgpack(small_header, small_payload)
-        if len(frames) < 3:
-            return msg
-
         out_frames_start = 2
 
         def _traverse(item):
@@ -160,13 +159,12 @@ def loads(frames, deserialize=True, deserializers=None):
                     value = Serialized(header, fs)
                 return value
 
-            if isinstance(item, (list, tuple)):
+            if isinstance(item, list):
+                return list(_traverse(i) for i in item)
+            elif isinstance(item, tuple):
                 return tuple(_traverse(i) for i in item)
             elif isinstance(item, dict):
-                return {
-                    key: _traverse(val)
-                    for (key, val) in item.items()
-                }
+                return {key: _traverse(val) for (key, val) in item.items()}
             else:
                 return item
 
