@@ -52,8 +52,9 @@ def dumps(x, *, buffer_callback=None):
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
-    for b in buffers:
-        buffer_callback(b)
+    if buffer_callback is not None:
+        for b in buffers:
+            buffer_callback(b)
     return result
 
 
