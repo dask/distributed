@@ -42,10 +42,9 @@ def dumps(x, *, buffer_callback=None):
             if b"__main__" in result:
                 del buffers[:]
                 result = cloudpickle.dumps(x, **dump_kwargs)
-        else:
-            if not (_always_use_pickle_for(x) or b"__main__" not in result):
-                del buffers[:]
-                result = cloudpickle.dumps(x, **dump_kwargs)
+        elif not (_always_use_pickle_for(x) or b"__main__" not in result):
+            del buffers[:]
+            result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
             del buffers[:]
