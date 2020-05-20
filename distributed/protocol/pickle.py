@@ -36,18 +36,18 @@ def dumps(x, *, buffer_callback=None):
     if HIGHEST_PROTOCOL >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
-        del buffers[:]
+        buffers.clear()
         result = pickle.dumps(x, **dump_kwargs)
         if len(result) < 1000:
             if b"__main__" in result:
-                del buffers[:]
+                buffers.clear()
                 result = cloudpickle.dumps(x, **dump_kwargs)
         elif not _always_use_pickle_for(x) and b"__main__" in result:
-            del buffers[:]
+            buffers.clear()
             result = cloudpickle.dumps(x, **dump_kwargs)
     except Exception:
         try:
-            del buffers[:]
+            buffers.clear()
             result = cloudpickle.dumps(x, **dump_kwargs)
         except Exception as e:
             logger.info("Failed to serialize %s. Exception: %s", x, e)
