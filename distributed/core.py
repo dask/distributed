@@ -297,7 +297,7 @@ class Server:
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    async def listen(self, port_or_addr=None, **kwargs):
+    async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -311,7 +311,7 @@ class Server:
             addr,
             self.handle_comm,
             deserialize=self.deserialize,
-            allow_offload=False,
+            allow_offload=allow_offload,
             **kwargs,
         )
         self.listeners.append(listener)

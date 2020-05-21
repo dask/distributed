@@ -1440,7 +1440,7 @@ class Scheduler(ServerNode):
 
         if self.status != "running":
             for addr in self._start_address:
-                await self.listen(addr, **self.security.get_listen_args("scheduler"))
+                await self.listen(addr, allow_offload=False, **self.security.get_listen_args("scheduler"))
                 self.ip = get_address_host(self.listen_address)
                 listen_ip = self.ip
 
