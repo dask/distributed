@@ -77,6 +77,12 @@ class EventExtension:
             finally:
                 self._waiter_count[name] -= 1
 
+                if not self._waiter_count[name] and not event.is_set():
+                    # No one is waiting for this
+                    # and as the default flag for an event is false
+                    # we can safely remove it
+                    self._delete_event(name)
+
             return True
 
     async def event_set(self, stream=None, name=None):
@@ -99,10 +105,7 @@ class EventExtension:
                 # No one is waiting for this
                 # and as the default flag for an event is false
                 # we can safely remove it
-                with suppress(KeyError):
-                    del self._waiter_count[name]
-                with suppress(KeyError):
-                    del self._events[name]
+                self._delete_event(name)
 
             else:
                 # There are waiters
@@ -139,6 +142,13 @@ class EventExtension:
             self._events[name] = asyncio.Event()
 
         return self._events[name]
+
+    def _delete_event(self, name):
+        """ Helper function to delete an event """
+        with suppress(KeyError):
+            del self._waiter_count[name]
+        with suppress(KeyError):
+            del self._events[name]
 
 
 class Event:
