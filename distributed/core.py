@@ -308,7 +308,11 @@ class Server:
             addr = port_or_addr
             assert isinstance(addr, str)
         listener = await listen(
-            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
+            addr,
+            self.handle_comm,
+            deserialize=self.deserialize,
+            allow_offload=False,
+            **kwargs,
         )
         self.listeners.append(listener)
 
