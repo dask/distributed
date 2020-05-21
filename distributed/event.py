@@ -47,12 +47,14 @@ class EventExtension:
         # we can remove the event
         self._waiter_count = defaultdict(int)
 
-        self.scheduler.handlers.update({
-            "event_wait": self.event_wait,
-            "event_set": self.event_set,
-            "event_clear": self.event_clear,
-            "event_is_set": self.event_is_set
-        })
+        self.scheduler.handlers.update(
+            {
+                "event_wait": self.event_wait,
+                "event_set": self.event_set,
+                "event_clear": self.event_clear,
+                "event_is_set": self.event_is_set,
+            }
+        )
 
         self.scheduler.extensions["events"] = self
 
@@ -122,7 +124,7 @@ class EventExtension:
         with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false
-            if not name in self._events:
+            if name not in self._events:
                 return False
 
             return self._events[name].is_set()
@@ -178,6 +180,7 @@ class Event:
     >>> event_2.set() # doctest: +SKIP
     >>> # now event_1 will stop waiting
     """
+
     def __init__(self, name=None, client=None):
         try:
             self.client = client or Client.current()
@@ -205,9 +208,7 @@ class Event:
         True if the event was set of false, if a timeout happend
         """
         result = self.client.sync(
-            self.client.scheduler.event_wait,
-            name=self.name,
-            timeout=timeout,
+            self.client.scheduler.event_wait, name=self.name, timeout=timeout,
         )
         return result
 
@@ -216,9 +217,7 @@ class Event:
 
         All waiters will now block.
         """
-        result = self.client.sync(
-            self.client.scheduler.event_clear, name=self.name,
-        )
+        result = self.client.sync(self.client.scheduler.event_clear, name=self.name,)
         return result
 
     def set(self):
@@ -226,16 +225,12 @@ class Event:
 
         All waiters will now be released.
         """
-        result = self.client.sync(
-            self.client.scheduler.event_set, name=self.name,
-        )
+        result = self.client.sync(self.client.scheduler.event_set, name=self.name,)
         return result
 
     def is_set(self):
         """ Check if the event is set """
-        result = self.client.sync(
-            self.client.scheduler.event_is_set, name=self.name,
-        )
+        result = self.client.sync(self.client.scheduler.event_is_set, name=self.name,)
         return result
 
     def __enter__(self):

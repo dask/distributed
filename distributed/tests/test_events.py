@@ -1,10 +1,6 @@
 import pickle
-from time import sleep
 
-import pytest
-
-from distributed import Event, get_client, Client
-from distributed.metrics import time
+from distributed import Event
 from distributed.utils_test import gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 
