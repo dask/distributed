@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+from contextlib import suppress
 from functools import partial
 import gc
 import logging
@@ -57,7 +58,6 @@ from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import (
-    ignoring,
     mp_context,
     sync,
     tmp_text,
@@ -2889,7 +2889,7 @@ async def test_rebalance_unprepared(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_rebalance_raises_missing_data(c, s, a, b):
-    with pytest.raises(ValueError, match=f"keys were found to be missing"):
+    with pytest.raises(ValueError, match="keys were found to be missing"):
         futures = await c.scatter(range(100))
         keys = [f.key for f in futures]
         del futures
@@ -3391,7 +3391,7 @@ def test_close_idempotent(c):
 @nodebug
 def test_get_returns_early(c):
     start = time()
-    with ignoring(RuntimeError):
+    with suppress(RuntimeError):
         result = c.get({"x": (throws, 1), "y": (sleep, 1)}, ["x", "y"])
     assert time() < start + 0.5
     # Futures should be released and forgotten
@@ -3402,7 +3402,7 @@ def test_get_returns_early(c):
     x = c.submit(inc, 1)
     x.result()
 
-    with ignoring(RuntimeError):
+    with suppress(RuntimeError):
         result = c.get({"x": (throws, 1), x.key: (inc, 1)}, ["x", x.key])
     assert x.key in c.futures
 
@@ -3620,8 +3620,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                     return
                 w = worker(s["address"], loop=loop)
                 running[w] = None
-                workers.add(w)
                 await w
+                workers.add(w)
                 addr = w.worker_address
                 running[w] = addr
                 await asyncio.sleep(duration)
@@ -3648,6 +3648,9 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             while c.nthreads():
                 sleep(0.2)
                 assert time() < start + 10
+
+            while len(workers) < count * repeat:
+                sleep(0.2)
 
             status = False
 

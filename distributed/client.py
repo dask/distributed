@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 import copy
 import errno
@@ -51,9 +51,15 @@ from .utils_comm import (
     retry_operation,
 )
 from .cfexecutor import ClientExecutor
-from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
+from .core import (
+    connect,
+    rpc,
+    clean_exception,
+    CommClosedError,
+    PooledRPCCall,
+    ConnectionPool,
+)
 from .metrics import time
-from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -66,7 +72,6 @@ from .diagnostics.plugin import WorkerPlugin
 from .utils import (
     All,
     sync,
-    ignoring,
     tokey,
     log_errors,
     str_graph,
@@ -492,7 +497,7 @@ class AllExit(Exception):
     """
 
 
-class Client(Node):
+class Client:
     """ Connect to and submit computation to a Dask cluster
 
     The Client connects users to a Dask cluster.  It provides an asynchronous
@@ -590,6 +595,7 @@ class Client(Node):
         deserializers=None,
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
+        connection_limit=512,
         **kwargs,
     ):
         if timeout == no_default:
@@ -647,7 +653,7 @@ class Client(Node):
         elif hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 loop = address.loop
             if security is None:
                 security = getattr(self.cluster, "security", None)
@@ -671,7 +677,7 @@ class Client(Node):
         self._asynchronous = asynchronous
         self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
+        self.io_loop = self.loop = self._loop_runner.loop
 
         self._gather_keys = None
         self._gather_future = None
@@ -714,12 +720,14 @@ class Client(Node):
             "erred": self._handle_task_erred,
         }
 
-        super(Client, self).__init__(
-            connection_args=self.connection_args,
-            io_loop=self.loop,
+        self.rpc = ConnectionPool(
+            limit=connection_limit,
             serializers=serializers,
             deserializers=deserializers,
+            deserialize=True,
+            connection_args=self.connection_args,
             timeout=timeout,
+            server=self,
         )
 
         for ext in extensions:
@@ -961,8 +969,7 @@ class Client(Node):
             )
 
     async def _start(self, timeout=no_default, **kwargs):
-
-        await super().start()
+        await self.rpc.start()
 
         if timeout == no_default:
             timeout = self._timeout
@@ -1275,7 +1282,7 @@ class Client(Node):
         for state in self.futures.values():
             state.cancel()
         self.futures.clear()
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             self._restart_event.set()
 
     def _handle_error(self, exception=None):
@@ -1295,7 +1302,7 @@ class Client(Node):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 # clear the dask.config set keys
                 with self._set_config:
                     pass
@@ -1312,7 +1319,7 @@ class Client(Node):
 
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
-            with ignoring(AttributeError, asyncio.CancelledError, TimeoutError):
+            with suppress(AttributeError, asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(
                     asyncio.shield(self._handle_scheduler_coroutine), 0.1
                 )
@@ -1328,7 +1335,7 @@ class Client(Node):
                 self._release_key(key=key)
 
             if self._start_arg is None:
-                with ignoring(AttributeError):
+                with suppress(AttributeError):
                     await self.cluster.close()
 
             await self.rpc.close()
@@ -1342,17 +1349,17 @@ class Client(Node):
             for f in self.coroutines:
                 # cancel() works on asyncio futures (Tornado 5)
                 # but is a no-op on Tornado futures
-                with ignoring(RuntimeError):
+                with suppress(RuntimeError):
                     f.cancel()
                 if f.cancelled():
                     coroutines.remove(f)
             del self.coroutines[:]
 
             if not fast:
-                with ignoring(TimeoutError, asyncio.CancelledError):
+                with suppress(TimeoutError, asyncio.CancelledError):
                     await asyncio.wait_for(asyncio.gather(*coroutines), 2)
 
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 await self.scheduler.close_rpc()
 
             self.scheduler = None
@@ -1394,7 +1401,7 @@ class Client(Node):
             return future
 
         if self._start_arg is None:
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 f = self.cluster.close()
                 if asyncio.iscoroutine(f):
 
@@ -1415,7 +1422,7 @@ class Client(Node):
         if self.cluster:
             await self.cluster.close()
         else:
-            with ignoring(CommClosedError):
+            with suppress(CommClosedError):
                 self.status = "closing"
                 await self.scheduler.terminate(close_workers=True)
 
@@ -1802,7 +1809,7 @@ class Client(Node):
         while True:
             logger.debug("Waiting on futures to clear before gather")
 
-            with ignoring(AllExit):
+            with suppress(AllExit):
                 await All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
