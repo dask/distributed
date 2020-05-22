@@ -241,19 +241,5 @@ class Event:
         result = self.client.sync(self.client.scheduler.event_is_set, name=self.name,)
         return result
 
-    def __enter__(self):
-        self.set()
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self.clear()
-
-    async def __aenter__(self):
-        await self.set()
-        return self
-
-    async def __aexit__(self, *args, **kwargs):
-        await self.clear()
-
     def __reduce__(self):
         return (Event, (self.name,))
