@@ -6,7 +6,9 @@ from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)
-async def test_event(c, s, a, b):
+async def test_event_on_workers(c, s, a, b):
+    # Test the "typical" use case of events:
+    # workers set, clear and wait for it
     def wait_for_it_failing(x):
         event = Event("x")
 
@@ -48,33 +50,83 @@ async def test_event(c, s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-def test_default_event(client):
+@gen_cluster()
+async def test_default_event(s, a, b):
+    # The default flag for events should be false
     event = Event("x")
-    assert not event.is_set()
+    assert not await event.is_set()
+
+    await event.clear()
+
+    # Cleanup should have happened
+    assert not s.extensions["events"]._events
+    assert not s.extensions["events"]._waiter_count
 
 
-def test_set_not_set(client):
+@gen_cluster()
+async def test_set_not_set(s, a, b):
+    # Set and unset the event and check if the flag is
+    # propagated correctly
     event = Event("x")
 
-    event.clear()
-    assert not event.is_set()
+    await event.clear()
+    assert not await event.is_set()
 
-    event.set()
-    assert event.is_set()
+    await event.set()
+    assert await event.is_set()
 
-    event.set()
-    assert event.is_set()
+    await event.set()
+    assert await event.is_set()
 
-    event.clear()
-    assert not event.is_set()
+    await event.clear()
+    assert not await event.is_set()
+
+    # Cleanup should have happened
+    assert not s.extensions["events"]._events
+    assert not s.extensions["events"]._waiter_count
 
 
-def test_timeout_sync(client):
+@gen_cluster()
+async def test_set_not_set_many_events(s, a, b):
+    # Set and unset the event and check if the flag is
+    # propagated correctly with many events
+    events = [Event(name) for name in range(100)]
+
+    for event in events:
+        await event.clear()
+        assert not await event.is_set()
+
+    for i, event in enumerate(events):
+        if i % 2 == 0:
+            await event.set()
+            assert await event.is_set()
+        else:
+            assert not await event.is_set()
+
+    for event in events:
+        await event.clear()
+        assert not await event.is_set()
+
+    # Cleanup should have happened
+    assert not s.extensions["events"]._events
+    assert not s.extensions["events"]._waiter_count
+
+
+@gen_cluster()
+async def test_timeout(s, a, b):
+    # The event should not be set and the timeout should happen
     event = Event("x")
-    assert Event("x").wait(timeout=0.1) is False
+    assert not await Event("x").wait(timeout=0.1)
+
+    await event.set()
+    assert await Event("x").wait(timeout=0.1)
+
+    await event.clear()
+    assert not await Event("x").wait(timeout=0.1)
 
 
 def test_event_sync(client):
+    # Assert that we call the client.sync correctly
     def wait_for_it_failing(x):
         event = Event("x")
 
@@ -103,8 +155,9 @@ def test_event_sync(client):
     client.gather(wait_futures)
 
 
-@gen_cluster(client=True)
-async def test_event_types(c, s, a, b):
+@gen_cluster()
+async def test_event_types(s, a, b):
+    # Event names could be strings, numbers or tuples
     for name in [1, ("a", 1), ["a", 1], b"123", "123"]:
         event = Event(name)
         assert event.name == name
@@ -120,6 +173,7 @@ async def test_event_types(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_serializable(c, s, a, b):
+    # Pickling an event should work properly
     def f(x, event=None):
         assert event.name == "x"
         return x + 1
@@ -134,7 +188,8 @@ async def test_serializable(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_two_events(c, s, a, b):
+async def test_two_events_on_workers(c, s, a, b):
+    # Longer test with multiple events and two workers
     def event_not_set(event_name):
         assert not Event(event_name).wait(timeout=0.05)
 
