@@ -165,11 +165,11 @@ class Event:
     ----------
     name: string (optional)
         Name of the event.  Choosing the same name allows two
-        disconnected processes to coordinate an event.  If not given, a random
-        name will be generated.
+        disconnected processes to coordinate an event.  
+        If not given, a random name will be generated.
     client: Client (optional)
-        Client to use for communication with the scheduler.  If not given, the
-        default global client will be used.
+        Client to use for communication with the scheduler.  
+        If not given, the default global client will be used.
 
     Examples
     --------
