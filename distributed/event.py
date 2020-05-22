@@ -217,8 +217,7 @@ class Event:
 
         All waiters will now block.
         """
-        result = self.client.sync(self.client.scheduler.event_clear, name=self.name,)
-        return result
+        return self.client.sync(self.client.scheduler.event_clear, name=self.name)
 
     def set(self):
         """ Set the event (set its flag to false).
