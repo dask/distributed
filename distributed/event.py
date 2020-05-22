@@ -87,7 +87,7 @@ class EventExtension:
 
             return True
 
-    async def event_set(self, comm=None, name=None):
+    def event_set(self, comm=None, name=None):
         """ Set the event with the given name to true.
 
         All waiters on this event will be notified.
@@ -97,9 +97,9 @@ class EventExtension:
             # No matter if someone is listening or not,
             # we set the event to true
             event = self._get_or_create_event(name)
-            self.scheduler.loop.add_callback(event.set)
+            event.set()
 
-    async def event_clear(self, comm=None, name=None):
+    def event_clear(self, comm=None, name=None):
         """Set the event with the given name to false."""
         with log_errors():
             name = self._normalize_name(name)
@@ -115,12 +115,12 @@ class EventExtension:
                 # In principle, the event should be unset at this point
                 # (because if it is set, all waiters should have been
                 # notified). But to prevent race conditions
-                # do to unlucky timing, we clear anyways
+                # due to unlucky timing, we clear anyways
                 assert name in self._events
                 event = self._events[name]
-                self.scheduler.loop.add_callback(event.clear)
+                event.clear()
 
-    async def event_is_set(self, comm=None, name=None):
+    def event_is_set(self, comm=None, name=None):
         with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false
