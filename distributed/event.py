@@ -193,6 +193,7 @@ class Event:
 
         even though no waiting is implied
         """
+
         async def _():
             return self
 
