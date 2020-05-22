@@ -58,7 +58,7 @@ class EventExtension:
 
         self.scheduler.extensions["events"] = self
 
-    async def event_wait(self, stream=None, name=None, timeout=None):
+    async def event_wait(self, comm=None, name=None, timeout=None):
         """ Wait until the event is set to true.
         Returns false, when this did not happen in the given time
         and true otherwise.
@@ -87,7 +87,7 @@ class EventExtension:
 
             return True
 
-    async def event_set(self, stream=None, name=None):
+    async def event_set(self, comm=None, name=None):
         """ Set the event with the given name to true.
 
         All waiters on this event will be notified.
@@ -99,7 +99,7 @@ class EventExtension:
             event = self._get_or_create_event(name)
             self.scheduler.loop.add_callback(event.set)
 
-    async def event_clear(self, stream=None, name=None):
+    async def event_clear(self, comm=None, name=None):
         """Set the event with the given name to false."""
         with log_errors():
             name = self._normalize_name(name)
@@ -120,7 +120,7 @@ class EventExtension:
                 event = self._events[name]
                 self.scheduler.loop.add_callback(event.clear)
 
-    async def event_is_set(self, stream=None, name=None):
+    async def event_is_set(self, comm=None, name=None):
         with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false
