@@ -50,8 +50,8 @@ async def test_event_on_workers(c, s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-@gen_cluster()
-async def test_default_event(s, a, b):
+@gen_cluster(client=True)
+async def test_default_event(c, s, a, b):
     # The default flag for events should be false
     event = Event("x")
     assert not await event.is_set()
@@ -63,8 +63,8 @@ async def test_default_event(s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-@gen_cluster()
-async def test_set_not_set(s, a, b):
+@gen_cluster(client=True)
+async def test_set_not_set(c, s, a, b):
     # Set and unset the event and check if the flag is
     # propagated correctly
     event = Event("x")
@@ -86,8 +86,8 @@ async def test_set_not_set(s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-@gen_cluster()
-async def test_set_not_set_many_events(s, a, b):
+@gen_cluster(client=True)
+async def test_set_not_set_many_events(c, s, a, b):
     # Set and unset the event and check if the flag is
     # propagated correctly with many events
     events = [Event(name) for name in range(100)]
@@ -112,8 +112,8 @@ async def test_set_not_set_many_events(s, a, b):
     assert not s.extensions["events"]._waiter_count
 
 
-@gen_cluster()
-async def test_timeout(s, a, b):
+@gen_cluster(client=True)
+async def test_timeout(c, s, a, b):
     # The event should not be set and the timeout should happen
     event = Event("x")
     assert not await Event("x").wait(timeout=0.1)
@@ -155,8 +155,8 @@ def test_event_sync(client):
     client.gather(wait_futures)
 
 
-@gen_cluster()
-async def test_event_types(s, a, b):
+@gen_cluster(client=True)
+async def test_event_types(c, s, a, b):
     # Event names could be strings, numbers or tuples
     for name in [1, ("a", 1), ["a", 1], b"123", "123"]:
         event = Event(name)
