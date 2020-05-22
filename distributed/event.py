@@ -42,7 +42,7 @@ class EventExtension:
     def __init__(self, scheduler):
         self.scheduler = scheduler
         # Keep track of all current events, identified by their name
-        self._events = dict()
+        self._events = defaultdict(asyncio.Event)
         # Keep track on how many waiters are present, so we know when
         # we can remove the event
         self._waiter_count = defaultdict(int)
@@ -66,7 +66,7 @@ class EventExtension:
         with log_errors():
             name = self._normalize_name(name)
 
-            event = self._get_or_create_event(name)
+            event = self._events[name]
             future = event.wait()
             if timeout is not None:
                 future = asyncio.wait_for(future, timeout)
@@ -96,8 +96,7 @@ class EventExtension:
             name = self._normalize_name(name)
             # No matter if someone is listening or not,
             # we set the event to true
-            event = self._get_or_create_event(name)
-            event.set()
+            self._events[name].set()
 
     def event_clear(self, comm=None, name=None):
         """Set the event with the given name to false."""
@@ -124,6 +123,9 @@ class EventExtension:
         with log_errors():
             name = self._normalize_name(name)
             # the default flag value is false
+            # we could also let the defaultdict
+            # create a new event for us, but that
+            # could produce many unused events
             if name not in self._events:
                 return False
 
@@ -135,15 +137,6 @@ class EventExtension:
             name = tuple(name)
 
         return name
-
-    def _get_or_create_event(self, name):
-        """ Helper function to return or create and return an event """
-        if name not in self._events:
-            # It seems we are the first one accessing it,
-            # so lets create a new event
-            self._events[name] = asyncio.Event()
-
-        return self._events[name]
 
     def _delete_event(self, name):
         """ Helper function to delete an event """
