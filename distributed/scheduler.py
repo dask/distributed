@@ -5050,6 +5050,7 @@ class Scheduler(ServerNode):
 
         # Task stream
         task_stream = self.get_task_stream(start=start)
+        total_tasks = len(task_stream)
         from .diagnostics.task_stream import rectangles
         from .dashboard.components.scheduler import task_stream_figure
 
@@ -5076,6 +5077,7 @@ class Scheduler(ServerNode):
         <i> Select different tabs on the top for additional information </i>
 
         <h2> Duration: {time} </h2>
+        <h2> Number of Tasks: {ntasks} </h2>
 
         <h2> Scheduler Information </h2>
         <ul>
@@ -5091,6 +5093,7 @@ class Scheduler(ServerNode):
         </pre>
         """.format(
             time=format_time(stop - start),
+            ntasks=total_tasks,
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),
