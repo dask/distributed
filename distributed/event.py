@@ -140,6 +140,8 @@ class EventExtension:
 
     def _delete_event(self, name):
         """ Helper function to delete an event """
+        # suppress key errors to make calling this method
+        # also possible if we do not even have such an event
         with suppress(KeyError):
             del self._waiter_count[name]
         with suppress(KeyError):
