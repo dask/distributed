@@ -160,10 +160,10 @@ class Event:
     ----------
     name: string (optional)
         Name of the event.  Choosing the same name allows two
-        disconnected processes to coordinate an event.  
+        disconnected processes to coordinate an event.
         If not given, a random name will be generated.
     client: Client (optional)
-        Client to use for communication with the scheduler.  
+        Client to use for communication with the scheduler.
         If not given, the default global client will be used.
 
     Examples
@@ -183,6 +183,20 @@ class Event:
             # Initialise new client
             self.client = get_worker().client
         self.name = name or "event-" + uuid.uuid4().hex
+
+    def __await__(self):
+        """ async constructor
+
+        Make it possible to write
+
+        >>> event = await Event("x") # doctest: +SKIP
+
+        even though no waiting is implied
+        """
+        async def _():
+            return self
+
+        return _().__await__()
 
     def wait(self, timeout=None):
         """ Wait until the event is set.
