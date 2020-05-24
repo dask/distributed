@@ -1,12 +1,13 @@
 import asyncio
 from collections import defaultdict
+from contextlib import suppress
 import logging
 import uuid
 
 from tlz import merge
 
-from .client import Future, _get_global_client, Client
-from .utils import tokey, log_errors, TimeoutError, ignoring
+from .client import Future, Client
+from .utils import tokey, log_errors, TimeoutError, parse_timedelta
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class VariableExtension:
 
                 await asyncio.wait_for(_(), timeout=left)
             finally:
-                with ignoring(RuntimeError):  # Python 3.6 loses lock on finally clause
+                with suppress(RuntimeError):  # Python 3.6 loses lock on finally clause
                     self.started.release()
 
         record = self.variables[name]
@@ -113,9 +114,9 @@ class VariableExtension:
             else:
                 if old["type"] == "Future":
                     await self.release(old["value"], name)
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 del self.waiting_conditions[name]
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 del self.variables[name]
 
 
@@ -142,7 +143,7 @@ class Variable:
         If not given, a random name will be generated.
     client: Client (optional)
         Client used for communication with the scheduler. Defaults to the
-        value of ``_get_global_client()``.
+        value of ``Client.current()``.
 
     Examples
     --------
@@ -161,7 +162,7 @@ class Variable:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or _get_global_client()
+        self.client = client or Client.current()
         self.name = name or "variable-" + uuid.uuid4().hex
 
     async def _set(self, value):
@@ -203,7 +204,16 @@ class Variable:
         return value
 
     def get(self, timeout=None, **kwargs):
-        """ Get the value of this variable """
+        """ Get the value of this variable
+
+        Parameters
+        ----------
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
+        """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, **kwargs)
 
     def delete(self):

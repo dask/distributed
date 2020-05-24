@@ -66,6 +66,11 @@ def test_dashboard(loop):
     pytest.importorskip("bokeh")
 
     with popen(["dask-scheduler"]) as proc:
+        for line in proc.stderr:
+            if b"dashboard at" in line:
+                dashboard_port = int(line.decode().split(":")[-1].strip())
+                break
+
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             pass
 
@@ -78,7 +83,7 @@ def test_dashboard(loop):
             try:
                 # All addresses should respond
                 for name in names:
-                    uri = "http://%s:8787/status/" % name
+                    uri = "http://%s:%d/status/" % (name, dashboard_port)
                     response = requests.get(uri)
                     assert response.ok
                 break
@@ -88,7 +93,7 @@ def test_dashboard(loop):
                 assert time() < start + 10
 
     with pytest.raises(Exception):
-        requests.get("http://127.0.0.1:8787/status/")
+        requests.get("http://127.0.0.1:%d/status/" % dashboard_port)
 
 
 def test_dashboard_non_standard_ports(loop):
@@ -241,6 +246,7 @@ _scheduler_info = {}
 
 def dask_setup(scheduler):
     _scheduler_info['address'] = scheduler.address
+    scheduler.foo = "bar"
 
 def get_scheduler_address():
     return _scheduler_info['address']
@@ -297,6 +303,31 @@ def test_preload_module(loop):
                     assert c.run_on_scheduler(check_scheduler) == c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_preload_remote_module(loop, tmp_path):
+    with open(tmp_path / "scheduler_info.py", "w") as f:
+        f.write(PRELOAD_TEXT)
+
+    with popen([sys.executable, "-m", "http.server", "9382"], cwd=tmp_path):
+        with popen(
+            [
+                "dask-scheduler",
+                "--scheduler-file",
+                str(tmp_path / "scheduler-file.json"),
+                "--preload",
+                "http://localhost:9382/scheduler_info.py",
+            ],
+        ) as proc:
+            with Client(
+                scheduler_file=tmp_path / "scheduler-file.json", loop=loop
+            ) as c:
+                assert (
+                    c.run_on_scheduler(
+                        lambda dask_scheduler: getattr(dask_scheduler, "foo", None)
+                    )
+                    == "bar"
+                )
 
 
 PRELOAD_COMMAND_TEXT = """

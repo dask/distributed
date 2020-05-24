@@ -4,7 +4,7 @@ import atexit
 import click
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import functools
 from hashlib import md5
 import html
@@ -192,14 +192,6 @@ def get_ip_interface(ifname):
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
 
 
-@contextmanager
-def ignoring(*exceptions):
-    try:
-        yield
-    except exceptions as e:
-        pass
-
-
 # FIXME: this breaks if changed to async def...
 @gen.coroutine
 def ignore_exceptions(coroutines, *exceptions):
@@ -211,7 +203,7 @@ def ignore_exceptions(coroutines, *exceptions):
     wait_iterator = gen.WaitIterator(*coroutines)
     results = []
     while not wait_iterator.done():
-        with ignoring(*exceptions):
+        with suppress(*exceptions):
             result = yield wait_iterator.next()
             results.append(result)
     raise gen.Return(results)
@@ -481,7 +473,7 @@ class LoopRunner:
             try:
                 self._loop.add_callback(self._loop.stop)
                 self._loop_thread.join(timeout=timeout)
-                with ignoring(KeyError):  # IOLoop can be missing
+                with suppress(KeyError):  # IOLoop can be missing
                     self._loop.close()
             finally:
                 self._loop_thread = None
@@ -1033,7 +1025,7 @@ def import_file(path):
         names_to_import.append(name)
     if ext == ".py":  # Ensure that no pyc file will be reused
         cache_file = cache_from_source(path)
-        with ignoring(OSError):
+        with suppress(OSError):
             os.remove(cache_file)
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
@@ -1317,6 +1309,64 @@ def format_dashboard_link(host, port):
     return template.format(
         **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
     )
+
+
+def parse_ports(port):
+    """ Parse input port information into list of ports
+
+    Parameters
+    ----------
+    port : int, str, None
+        Input port or ports. Can be an integer like 8787, a string for a
+        single port like "8787", a string for a sequential range of ports like
+        "8000:8200", or None.
+
+    Returns
+    -------
+    ports : list
+        List of ports
+
+    Examples
+    --------
+    A single port can be specified using an integer:
+
+    >>> parse_ports(8787)
+    >>> [8787]
+
+    or a string:
+
+    >>> parse_ports("8787")
+    >>> [8787]
+
+    A sequential range of ports can be specified by a string which indicates
+    the first and last ports which should be included in the sequence of ports:
+
+    >>> parse_ports("8787:8790")
+    >>> [8787, 8788, 8789, 8790]
+
+    An input of ``None`` is also valid and can be used to indicate that no port
+    has been specified:
+
+    >>> parse_ports(None)
+    >>> [None]
+
+    """
+    if isinstance(port, str) and ":" not in port:
+        port = int(port)
+
+    if isinstance(port, (int, type(None))):
+        ports = [port]
+    else:
+        port_start, port_stop = map(int, port.split(":"))
+        if port_stop <= port_start:
+            raise ValueError(
+                "When specifying a range of ports like port_start:port_stop, "
+                "port_stop must be greater than port_start, but got "
+                f"port_start={port_start} and port_stop={port_stop}"
+            )
+        ports = list(range(port_start, port_stop + 1))
+
+    return ports
 
 
 def is_coroutine_function(f):

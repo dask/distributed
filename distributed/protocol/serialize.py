@@ -52,11 +52,16 @@ def dask_loads(header, frames):
 
 
 def pickle_dumps(x):
-    return {"serializer": "pickle"}, [pickle.dumps(x)]
+    header = {"serializer": "pickle"}
+    frames = [None]
+    buffer_callback = lambda f: frames.append(memoryview(f))
+    frames[0] = pickle.dumps(x, buffer_callback=buffer_callback)
+    return header, frames
 
 
 def pickle_loads(header, frames):
-    return pickle.loads(b"".join(frames))
+    x, buffers = frames[0], frames[1:]
+    return pickle.loads(x, buffers=buffers)
 
 
 def msgpack_dumps(x):
@@ -556,7 +561,7 @@ def normalize_Serialized(o):
 
 
 # Teach serialize how to handle bytestrings
-@dask_serialize.register((bytes, bytearray))
+@dask_serialize.register((bytes, bytearray, memoryview))
 def _serialize_bytes(obj):
     header = {}  # no special metadata
     frames = [obj]
@@ -566,6 +571,15 @@ def _serialize_bytes(obj):
 @dask_deserialize.register((bytes, bytearray))
 def _deserialize_bytes(header, frames):
     return b"".join(frames)
+
+
+@dask_deserialize.register(memoryview)
+def _serialize_memoryview(header, frames):
+    if len(frames) == 1:
+        out = frames[0]
+    else:
+        out = b"".join(frames)
+    return memoryview(out)
 
 
 #########################

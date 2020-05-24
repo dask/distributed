@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import gc
 import logging
 import os
@@ -14,11 +15,11 @@ from tornado.ioloop import IOLoop
 
 import dask
 from distributed.diagnostics import SchedulerPlugin
-from distributed import Nanny, rpc, Scheduler, Worker, Client, wait
+from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import ignoring, tmpfile, TimeoutError
+from distributed.utils import tmpfile, TimeoutError, parse_ports
 from distributed.utils_test import (  # noqa: F401
     gen_cluster,
     gen_test,
@@ -88,7 +89,7 @@ async def test_nanny_process_failure(c, s):
     await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
     pid = n.pid
     assert pid is not None
-    with ignoring(CommClosedError):
+    with suppress(CommClosedError):
         await c.run(os._exit, 0, workers=[n.worker_address])
 
     start = time()
@@ -502,3 +503,57 @@ async def test_config(cleanup):
             async with Client(s.address, asynchronous=True) as client:
                 config = await client.run(dask.config.get, "foo")
                 assert config[n.worker_address] == "bar"
+
+
+@pytest.mark.asyncio
+async def test_nanny_port_range(cleanup):
+    async with Scheduler() as s:
+        async with Client(s.address, asynchronous=True) as client:
+            nanny_port = "9867:9868"
+            worker_port = "9869:9870"
+            async with Nanny(s.address, port=nanny_port, worker_port=worker_port) as n1:
+                assert n1.port == 9867  # Selects first port in range
+                async with Nanny(
+                    s.address, port=nanny_port, worker_port=worker_port
+                ) as n2:
+                    assert n2.port == 9868  # Selects next port in range
+                    with pytest.raises(
+                        ValueError, match="Could not start Nanny"
+                    ):  # No more ports left
+                        async with Nanny(
+                            s.address, port=nanny_port, worker_port=worker_port
+                        ):
+                            pass
+
+                    # Ensure Worker ports are in worker_port range
+                    def get_worker_port(dask_worker):
+                        return dask_worker.port
+
+                    worker_ports = await client.run(get_worker_port)
+                    assert list(worker_ports.values()) == parse_ports(worker_port)
+
+
+class KeyboardInterruptWorker(worker.Worker):
+    """A Worker that raises KeyboardInterrupt almost immediately"""
+
+    async def heartbeat(self):
+        def raise_err():
+            raise KeyboardInterrupt()
+
+        self.loop.add_callback(raise_err)
+
+
+@pytest.mark.parametrize("protocol", ["tcp", "ucx"])
+@pytest.mark.asyncio
+async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
+    if protocol == "ucx":  # Skip if UCX isn't available
+        pytest.importorskip("ucp")
+
+    async with Scheduler(protocol=protocol) as s:
+        async with Nanny(
+            s.address, nthreads=1, worker_class=KeyboardInterruptWorker
+        ) as n:
+            n.auto_restart = False
+            await n.process.stopped.wait()
+            # Check that the scheduler has been notified about the closed worker
+            assert len(s.workers) == 0

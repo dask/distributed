@@ -1,6 +1,39 @@
 Changelog
 =========
 
+2.16.0 - 2020-05-08
+-------------------
+
+- ``Client.get_dataset`` to always create ``Futures`` attached to itself (:pr:`3729`) `crusaderky`_
+- Remove dev-requirements since it is unused (:pr:`3782`) `Julia Signell`_
+- Use bokeh column for ``/system`` instead of custom css (:pr:`3781`) `Julia Signell`_
+- Attempt to fix ``test_preload_remote_module`` on windows (:pr:`3775`) `James Bourbeau`_
+- Fix broadcast for TLS comms (:pr:`3766`) `Florian Jetter`_
+- Don't validate http preloads locally (:pr:`3768`) `Rami Chowdhury`_
+- Allow range of ports to be specified for ``Workers`` (:pr:`3704`) `James Bourbeau`_
+- Add UCX support for RDMACM (:pr:`3759`) `Peter Andreas Entschev`_
+- Support web addresses in preload (:pr:`3755`) `Matthew Rocklin`_
+
+
+2.15.2 - 2020-05-01
+-------------------
+
+- Connect to dashboard when address provided (:pr:`3758`) `Tom Augspurger`_
+- Move ``test_gpu_metrics test`` (:pr:`3721`) `Tom Augspurger`_
+- Nanny closing worker on ``KeyboardInterrupt`` (:pr:`3747`) `Mads R. B. Kristensen`_
+- Replace ``OrderedDict`` with ``dict`` in scheduler (:pr:`3740`) `Matthew Rocklin`_
+- Fix exception handling typo (:pr:`3751`) `Jonas Haag`_
+
+
+2.15.1 - 2020-04-28
+-------------------
+
+- Ensure ``BokehTornado`` uses prefix (:pr:`3746`) `James Bourbeau`_
+- Warn if cluster closes before starting (:pr:`3735`) `Matthew Rocklin`_
+- Memoryview serialisation (:pr:`3743`) `Martin Durant`_
+- Allows logging config under distributed key (:pr:`2952`) `Dillon Niederhut`_
+
+
 2.15.0 - 2020-04-24
 -------------------
 
@@ -1714,3 +1747,5 @@ significantly without many new features.
 .. _`Rami Chowdhury`: https://github.com/necaris
 .. _`crusaderky`: https://github.com/crusaderky
 .. _`Nicholas Smith`: https://github.com/nsmith-
+.. _`Dillon Niederhut`: https://github.com/deniederhut
+.. _`Jonas Haag`: https://github.com/jonashaag

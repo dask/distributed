@@ -3,9 +3,10 @@ from collections import defaultdict, deque
 import logging
 import uuid
 
-from .client import _get_global_client
+from .client import Client
 from .utils import log_errors, TimeoutError
 from .worker import get_worker
+from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,11 @@ class Lock:
     """
 
     def __init__(self, name=None, client=None):
-        self.client = client or _get_global_client() or get_worker().client
+        try:
+            self.client = client or Client.current()
+        except ValueError:
+            # Initialise new client
+            self.client = get_worker().client
         self.name = name or "lock-" + uuid.uuid4().hex
         self.id = uuid.uuid4().hex
         self._locked = False
@@ -105,20 +110,24 @@ class Lock:
         ----------
         blocking : bool, optional
             If false, don't wait on the lock in the scheduler at all.
-        timeout : number, optional
+        timeout : string or number or timedelta, optional
             Seconds to wait on the lock in the scheduler.  This does not
             include local coroutine time, network transfer time, etc..
             It is forbidden to specify a timeout when blocking is false.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
 
         Examples
         --------
         >>> lock = Lock('x')  # doctest: +SKIP
-        >>> lock.acquire(timeout=1)  # doctest: +SKIP
+        >>> lock.acquire(timeout="1s")  # doctest: +SKIP
 
         Returns
         -------
         True or False whether or not it sucessfully acquired the lock
         """
+        timeout = parse_timedelta(timeout)
+
         if not blocking:
             if timeout is not None:
                 raise ValueError("can't specify a timeout for a non-blocking call")

@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+from contextlib import suppress
 from functools import partial
 import gc
 import logging
@@ -57,7 +58,6 @@ from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import (
-    ignoring,
     mp_context,
     sync,
     tmp_text,
@@ -1201,7 +1201,7 @@ async def test_get_releases_data(c, s, a, b):
         assert time() < start + 2
 
 
-def test_Current(s, a, b):
+def test_current(s, a, b):
     with Client(s["address"]) as c:
         assert Client.current() is c
     with pytest.raises(ValueError):
@@ -2889,7 +2889,7 @@ async def test_rebalance_unprepared(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_rebalance_raises_missing_data(c, s, a, b):
-    with pytest.raises(ValueError, match=f"keys were found to be missing"):
+    with pytest.raises(ValueError, match="keys were found to be missing"):
         futures = await c.scatter(range(100))
         keys = [f.key for f in futures]
         del futures
@@ -3391,7 +3391,7 @@ def test_close_idempotent(c):
 @nodebug
 def test_get_returns_early(c):
     start = time()
-    with ignoring(RuntimeError):
+    with suppress(RuntimeError):
         result = c.get({"x": (throws, 1), "y": (sleep, 1)}, ["x", "y"])
     assert time() < start + 0.5
     # Futures should be released and forgotten
@@ -3402,7 +3402,7 @@ def test_get_returns_early(c):
     x = c.submit(inc, 1)
     x.result()
 
-    with ignoring(RuntimeError):
+    with suppress(RuntimeError):
         result = c.get({"x": (throws, 1), x.key: (inc, 1)}, ["x", x.key])
     assert x.key in c.futures
 
@@ -3620,8 +3620,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                     return
                 w = worker(s["address"], loop=loop)
                 running[w] = None
-                workers.add(w)
                 await w
+                workers.add(w)
                 addr = w.worker_address
                 running[w] = addr
                 await asyncio.sleep(duration)
@@ -3648,6 +3648,9 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             while c.nthreads():
                 sleep(0.2)
                 assert time() < start + 10
+
+            while len(workers) < count * repeat:
+                sleep(0.2)
 
             status = False
 
@@ -3876,38 +3879,148 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster(client=False)
 async def test_serialize_future(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+    c1 = await Client(s.address, asynchronous=True)
+    c2 = await Client(s.address, asynchronous=True)
 
-    future = c.submit(lambda: 1)
+    future = c1.submit(lambda: 1)
     result = await future
 
-    with temp_default_client(f):
-        future2 = pickle.loads(pickle.dumps(future))
-        assert future2.client is f
-        assert tokey(future2.key) in f.futures
-        result2 = await future2
-        assert result == result2
+    for ci in (c1, c2):
+        for ctxman in ci.as_current, lambda: temp_default_client(ci):
+            with ctxman():
+                future2 = pickle.loads(pickle.dumps(future))
+                assert future2.client is ci
+                assert tokey(future2.key) in ci.futures
+                result2 = await future2
+                assert result == result2
 
-    await c.close()
-    await f.close()
+    await c1.close()
+    await c2.close()
 
 
 @gen_cluster(client=False)
-async def test_temp_client(s, a, b):
-    c = await Client(s.address, asynchronous=True)
-    f = await Client(s.address, asynchronous=True)
+async def test_temp_default_client(s, a, b):
+    c1 = await Client(s.address, asynchronous=True)
+    c2 = await Client(s.address, asynchronous=True)
+
+    with temp_default_client(c1):
+        assert default_client() is c1
+        assert default_client(c2) is c2
+
+    with temp_default_client(c2):
+        assert default_client() is c2
+        assert default_client(c1) is c1
+
+    await c1.close()
+    await c2.close()
+
+
+@gen_cluster(client=True)
+async def test_as_current(c, s, a, b):
+    c1 = await Client(s.address, asynchronous=True)
+    c2 = await Client(s.address, asynchronous=True)
 
     with temp_default_client(c):
-        assert default_client() is c
-        assert default_client(f) is f
+        assert Client.current() is c
+        with pytest.raises(ValueError):
+            Client.current(allow_global=False)
+        with c1.as_current():
+            assert Client.current() is c1
+            assert Client.current(allow_global=True) is c1
+        with c2.as_current():
+            assert Client.current() is c2
+            assert Client.current(allow_global=True) is c2
 
-    with temp_default_client(f):
-        assert default_client() is f
-        assert default_client(c) is c
+    await c1.close()
+    await c2.close()
 
-    await c.close()
-    await f.close()
+
+def test_as_current_is_thread_local(s):
+    l1 = threading.Lock()
+    l2 = threading.Lock()
+    l3 = threading.Lock()
+    l4 = threading.Lock()
+    l1.acquire()
+    l2.acquire()
+    l3.acquire()
+    l4.acquire()
+
+    def run1():
+        with Client(s.address) as c:
+            with c.as_current():
+                l1.acquire()
+                l2.release()
+                try:
+                    # This line runs only when both run1 and run2 are inside the
+                    # context manager
+                    assert Client.current(allow_global=False) is c
+                finally:
+                    l3.acquire()
+                    l4.release()
+
+    def run2():
+        with Client(s.address) as c:
+            with c.as_current():
+                l1.release()
+                l2.acquire()
+                try:
+                    # This line runs only when both run1 and run2 are inside the
+                    # context manager
+                    assert Client.current(allow_global=False) is c
+                finally:
+                    l3.release()
+                    l4.acquire()
+
+    t1 = threading.Thread(target=run1)
+    t2 = threading.Thread(target=run2)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+
+@pytest.mark.xfail(
+    sys.version_info < (3, 7),
+    reason="Python 3.6 contextvars are not copied on Task creation",
+)
+@gen_cluster(client=False)
+async def test_as_current_is_task_local(s, a, b):
+    l1 = asyncio.Lock()
+    l2 = asyncio.Lock()
+    l3 = asyncio.Lock()
+    l4 = asyncio.Lock()
+    await l1.acquire()
+    await l2.acquire()
+    await l3.acquire()
+    await l4.acquire()
+
+    async def run1():
+        async with Client(s.address, asynchronous=True) as c:
+            with c.as_current():
+                await l1.acquire()
+                l2.release()
+                try:
+                    # This line runs only when both run1 and run2 are inside the
+                    # context manager
+                    assert Client.current(allow_global=False) is c
+                finally:
+                    await l3.acquire()
+                    l4.release()
+
+    async def run2():
+        async with Client(s.address, asynchronous=True) as c:
+            with c.as_current():
+                l1.release()
+                await l2.acquire()
+                try:
+                    # This line runs only when both run1 and run2 are inside the
+                    # context manager
+                    assert Client.current(allow_global=False) is c
+                finally:
+                    l3.release()
+                    await l4.acquire()
+
+    await asyncio.gather(run1(), run2())
 
 
 @nodebug  # test timing is fragile

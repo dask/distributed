@@ -3,9 +3,10 @@ from collections import defaultdict
 import logging
 import uuid
 
-from .client import Future, _get_global_client, Client
+from .client import Future, Client
 from .utils import tokey, sync, thread_state
 from .worker import get_client
+from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ class Queue:
         not given, a random name will be generated.
     client: Client (optional)
         Client used for communication with the scheduler. Defaults to the
-        value of ``_get_global_client()``.
+        value of ``Client.current()``.
     maxsize: int (optional)
         Number of items allowed in the queue. If 0 (the default), the queue
         size is unbounded.
@@ -167,7 +168,7 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or _get_global_client()
+        self.client = client or Client.current()
         self.name = name or "queue-" + uuid.uuid4().hex
         self._event_started = asyncio.Event()
         if self.client.asynchronous or getattr(
@@ -208,7 +209,16 @@ class Queue:
             )
 
     def put(self, value, timeout=None, **kwargs):
-        """ Put data into the queue """
+        """ Put data into the queue
+
+        Parameters
+        ----------
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
+        """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._put, value, timeout=timeout, **kwargs)
 
     def get(self, timeout=None, batch=False, **kwargs):
@@ -216,13 +226,16 @@ class Queue:
 
         Parameters
         ----------
-        timeout: Number (optional)
-            Time in seconds to wait before timing out
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
         batch: boolean, int (optional)
             If True then return all elements currently waiting in the queue.
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time
          """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):

@@ -67,6 +67,10 @@ conda create -n dask-distributed -c conda-forge -c defaults \
 
 source activate dask-distributed
 
+if [[ $PYTHON == 3.6 ]]; then
+  conda install -c conda-forge -c defaults contextvars
+fi
+
 # stacktrace is not currently avaiable for Python 3.8.
 # Remove the version check block below when it is avaiable.
 if [[ $PYTHON != 3.8 ]]; then
@@ -92,8 +96,8 @@ fi
 python -m pip install --no-deps -e .
 
 # For debugging
-echo -e "--\n--Conda Environment\n--"
-conda list
+echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
+conda env export | grep -E -v '^prefix:.*$'
 
 echo -e "--\n--Pip Environment\n--"
 python -m pip list --format=columns

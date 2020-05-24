@@ -4,7 +4,8 @@ from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 import copy
 import errno
 from functools import partial
@@ -50,9 +51,15 @@ from .utils_comm import (
     retry_operation,
 )
 from .cfexecutor import ClientExecutor
-from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
+from .core import (
+    connect,
+    rpc,
+    clean_exception,
+    CommClosedError,
+    PooledRPCCall,
+    ConnectionPool,
+)
 from .metrics import time
-from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -65,7 +72,6 @@ from .diagnostics.plugin import WorkerPlugin
 from .utils import (
     All,
     sync,
-    ignoring,
     tokey,
     log_errors,
     str_graph,
@@ -89,6 +95,7 @@ logger = logging.getLogger(__name__)
 _global_clients = weakref.WeakValueDictionary()
 _global_client_index = [0]
 
+_current_client = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = [PubSubClientExtension]
 
@@ -162,7 +169,7 @@ class Future(WrappedKey):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
-        self.client = client or _get_global_client()
+        self.client = client or Client.current()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
 
@@ -353,11 +360,14 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return (self.key, self.client.scheduler.address)
+        return self.key, self.client.scheduler.address
 
     def __setstate__(self, state):
         key, address = state
-        c = get_client(address)
+        try:
+            c = Client.current(allow_global=False)
+        except ValueError:
+            c = get_client(address)
         Future.__init__(self, key, c)
         c._send_to_scheduler(
             {
@@ -487,7 +497,7 @@ class AllExit(Exception):
     """
 
 
-class Client(Node):
+class Client:
     """ Connect to and submit computation to a Dask cluster
 
     The Client connects users to a Dask cluster.  It provides an asynchronous
@@ -585,6 +595,7 @@ class Client(Node):
         deserializers=None,
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
+        connection_limit=512,
         **kwargs,
     ):
         if timeout == no_default:
@@ -642,7 +653,7 @@ class Client(Node):
         elif hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 loop = address.loop
             if security is None:
                 security = getattr(self.cluster, "security", None)
@@ -666,7 +677,7 @@ class Client(Node):
         self._asynchronous = asynchronous
         self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        self.loop = self._loop_runner.loop
+        self.io_loop = self.loop = self._loop_runner.loop
 
         self._gather_keys = None
         self._gather_future = None
@@ -709,12 +720,14 @@ class Client(Node):
             "erred": self._handle_task_erred,
         }
 
-        super(Client, self).__init__(
-            connection_args=self.connection_args,
-            io_loop=self.loop,
+        self.rpc = ConnectionPool(
+            limit=connection_limit,
             serializers=serializers,
             deserializers=deserializers,
+            deserialize=True,
+            connection_args=self.connection_args,
             timeout=timeout,
+            server=self,
         )
 
         for ext in extensions:
@@ -727,10 +740,41 @@ class Client(Node):
 
         ReplayExceptionClient(self)
 
+    @contextmanager
+    def as_current(self):
+        """Thread-local, Task-local context manager that causes the Client.current class
+        method to return self. Any Future objects deserialized inside this context
+        manager will be automatically attached to this Client.
+        """
+        # In Python 3.6, contextvars are thread-local but not Task-local.
+        # We can still detect a race condition though.
+        if sys.version_info < (3, 7) and _current_client.get() not in (self, None):
+            raise RuntimeError(
+                "Detected race condition where multiple asynchronous clients tried "
+                "entering the as_current() context manager at the same time. "
+                "Please upgrade to Python 3.7+."
+            )
+
+        tok = _current_client.set(self)
+        try:
+            yield
+        finally:
+            _current_client.reset(tok)
+
     @classmethod
-    def current(cls):
-        """ Return global client if one exists, otherwise raise ValueError """
-        return default_client()
+    def current(cls, allow_global=True):
+        """When running within the context of `as_client`, return the context-local
+        current client. Otherwise, return the latest initialised Client.
+        If no Client instances exist, raise ValueError.
+        If allow_global is set to False, raise ValueError if running outside of the
+        `as_client` context manager.
+        """
+        out = _current_client.get()
+        if out:
+            return out
+        if allow_global:
+            return default_client()
+        raise ValueError("Not running inside the `as_current` context manager")
 
     @property
     def asynchronous(self):
@@ -925,8 +969,7 @@ class Client(Node):
             )
 
     async def _start(self, timeout=no_default, **kwargs):
-
-        await super().start()
+        await self.rpc.start()
 
         if timeout == no_default:
             timeout = self._timeout
@@ -1239,7 +1282,7 @@ class Client(Node):
         for state in self.futures.values():
             state.cancel()
         self.futures.clear()
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             self._restart_event.set()
 
     def _handle_error(self, exception=None):
@@ -1259,7 +1302,7 @@ class Client(Node):
         with log_errors():
             _del_global_client(self)
             self._scheduler_identity = {}
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 # clear the dask.config set keys
                 with self._set_config:
                     pass
@@ -1276,7 +1319,7 @@ class Client(Node):
 
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
-            with ignoring(AttributeError, asyncio.CancelledError, TimeoutError):
+            with suppress(AttributeError, asyncio.CancelledError, TimeoutError):
                 await asyncio.wait_for(
                     asyncio.shield(self._handle_scheduler_coroutine), 0.1
                 )
@@ -1292,7 +1335,7 @@ class Client(Node):
                 self._release_key(key=key)
 
             if self._start_arg is None:
-                with ignoring(AttributeError):
+                with suppress(AttributeError):
                     await self.cluster.close()
 
             await self.rpc.close()
@@ -1306,17 +1349,17 @@ class Client(Node):
             for f in self.coroutines:
                 # cancel() works on asyncio futures (Tornado 5)
                 # but is a no-op on Tornado futures
-                with ignoring(RuntimeError):
+                with suppress(RuntimeError):
                     f.cancel()
                 if f.cancelled():
                     coroutines.remove(f)
             del self.coroutines[:]
 
             if not fast:
-                with ignoring(TimeoutError, asyncio.CancelledError):
+                with suppress(TimeoutError, asyncio.CancelledError):
                     await asyncio.wait_for(asyncio.gather(*coroutines), 2)
 
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 await self.scheduler.close_rpc()
 
             self.scheduler = None
@@ -1358,7 +1401,7 @@ class Client(Node):
             return future
 
         if self._start_arg is None:
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 f = self.cluster.close()
                 if asyncio.iscoroutine(f):
 
@@ -1379,7 +1422,7 @@ class Client(Node):
         if self.cluster:
             await self.cluster.close()
         else:
-            with ignoring(CommClosedError):
+            with suppress(CommClosedError):
                 self.status = "closing"
                 await self.scheduler.terminate(close_workers=True)
 
@@ -1766,7 +1809,7 @@ class Client(Node):
         while True:
             logger.debug("Waiting on futures to clear before gather")
 
-            with ignoring(AllExit):
+            with suppress(AllExit):
                 await All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
@@ -2178,8 +2221,7 @@ class Client(Node):
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    @gen.coroutine
-    def _publish_dataset(self, *args, name=None, **kwargs):
+    async def _publish_dataset(self, *args, name=None, **kwargs):
         with log_errors():
             coroutines = []
 
@@ -2205,7 +2247,7 @@ class Client(Node):
             for name, data in kwargs.items():
                 add_coro(name, data)
 
-            yield coroutines
+            await asyncio.gather(*coroutines)
 
     def publish_dataset(self, *args, **kwargs):
         """
@@ -2285,13 +2327,12 @@ class Client(Node):
         return self.sync(self.scheduler.publish_list, **kwargs)
 
     async def _get_dataset(self, name):
-        out = await self.scheduler.publish_get(name=name, client=self.id)
-        if out is None:
-            raise KeyError("Dataset '%s' not found" % name)
+        with self.as_current():
+            out = await self.scheduler.publish_get(name=name, client=self.id)
 
-        with temp_default_client(self):
-            data = out["data"]
-        return data
+        if out is None:
+            raise KeyError(f"Dataset '{name}' not found")
+        return out["data"]
 
     def get_dataset(self, name, **kwargs):
         """
@@ -2533,6 +2574,7 @@ class Client(Node):
             dependencies = {
                 tokey(k): [tokey(dep) for dep in deps]
                 for k, deps in dependencies.items()
+                if deps
             }
             for k, deps in future_dependencies.items():
                 if deps:
@@ -4696,6 +4738,14 @@ class performance_report:
 @contextmanager
 def temp_default_client(c):
     """ Set the default client for the duration of the context
+
+    .. note::
+       This function should be used exclusively for unit testing the default client
+       functionality. In all other cases, please use ``Client.as_current`` instead.
+
+    .. note::
+       Unlike ``Client.as_current``, this context manager is neither thread-local nor
+       task-local.
 
     Parameters
     ----------
