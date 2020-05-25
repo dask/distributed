@@ -923,7 +923,7 @@ async def test_restrictions_ip_port_task_key(c, s, a, b):
     last_task = tasks[-1]
 
     # calculate all dependency keys
-    all_dependencies = list(last_task.dask.dependencies.keys())
+    all_dependencies = list(last_task.__dask_graph__())
     # only restrict to a single worker
     workers = {d: a.address for d in all_dependencies}
     result = c.compute(last_task, workers=workers)
