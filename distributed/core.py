@@ -602,6 +602,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
             typ, exc, tb = clean_exception(**response)
+            print("Error originated from", comm.peer_addr)
             raise exc.with_traceback(tb)
         else:
             raise Exception(response["text"])
