@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
 from collections.abc import Mapping, Set
+from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 import inspect
@@ -56,7 +57,6 @@ from .proctitle import setproctitle
 from .security import Security
 from .utils import (
     All,
-    ignoring,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -81,6 +81,7 @@ from .queues import QueueExtension
 from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
+from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
@@ -102,6 +103,7 @@ DEFAULT_EXTENSIONS = [
     VariableExtension,
     PubSubSchedulerExtension,
     SemaphoreExtension,
+    EventExtension,
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -756,7 +758,6 @@ class TaskGroup:
         self.types = set()
 
     def add(self, ts):
-        # self.tasks.add(ts)
         self.states[ts.state] += 1
         ts.group = self
 
@@ -1072,7 +1073,7 @@ class Scheduler(ServerNode):
         preload=None,
         preload_argv=(),
         plugins=(),
-        **kwargs
+        **kwargs,
     ):
         self._setup_logging(logger)
 
@@ -1083,7 +1084,6 @@ class Scheduler(ServerNode):
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
-        self.status = None
         self.proc = psutil.Process()
         self.delete_interval = parse_timedelta(delete_interval, default="ms")
         self.synchronize_worker_interval = parse_timedelta(
@@ -1356,7 +1356,7 @@ class Scheduler(ServerNode):
             connection_limit=connection_limit,
             deserialize=False,
             connection_args=self.connection_args,
-            **kwargs
+            **kwargs,
         )
 
         if self.worker_ttl:
@@ -1376,6 +1376,7 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
+        self.rpc.allow_offload = False
 
     ##################
     # Administration #
@@ -1430,39 +1431,39 @@ class Scheduler(ServerNode):
 
     async def start(self):
         """ Clear out old state and restart all running coroutines """
-
         await super().start()
+        assert self.status != "running"
 
         enable_gc_diagnosis()
 
         self.clear_task_state()
 
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             for c in self._worker_coroutines:
                 c.cancel()
 
-        if self.status != "running":
-            for addr in self._start_address:
-                await self.listen(addr, **self.security.get_listen_args("scheduler"))
-                self.ip = get_address_host(self.listen_address)
-                listen_ip = self.ip
+        for addr in self._start_address:
+            await self.listen(
+                addr, allow_offload=False, **self.security.get_listen_args("scheduler")
+            )
+            self.ip = get_address_host(self.listen_address)
+            listen_ip = self.ip
 
-                if listen_ip == "0.0.0.0":
-                    listen_ip = ""
+            if listen_ip == "0.0.0.0":
+                listen_ip = ""
 
-            if self.address.startswith("inproc://"):
-                listen_ip = "localhost"
+        if self.address.startswith("inproc://"):
+            listen_ip = "localhost"
 
-            # Services listen on all addresses
-            self.start_services(listen_ip)
+        # Services listen on all addresses
+        self.start_services(listen_ip)
 
-            self.status = "running"
-            for listener in self.listeners:
-                logger.info("  Scheduler at: %25s", listener.contact_address)
-            for k, v in self.services.items():
-                logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
+        for listener in self.listeners:
+            logger.info("  Scheduler at: %25s", listener.contact_address)
+        for k, v in self.services.items():
+            logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
-            self.loop.add_callback(self.reevaluate_occupancy)
+        self.loop.add_callback(self.reevaluate_occupancy)
 
         if self.scheduler_file:
             with open(self.scheduler_file, "w") as f:
@@ -1523,7 +1524,7 @@ class Scheduler(ServerNode):
         self.stop_services()
 
         for ext in self.extensions.values():
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
 
@@ -1532,7 +1533,7 @@ class Scheduler(ServerNode):
             if not comm.closed():
                 comm.send({"op": "close", "report": False})
                 comm.send({"op": "close-stream"})
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 futures.append(comm.close())
 
         for future in futures:  # TODO: do all at once
@@ -2092,7 +2093,7 @@ class Scheduler(ServerNode):
                     exception=exception,
                     traceback=traceback,
                     worker=worker,
-                    **kwargs
+                    **kwargs,
                 )
         else:
             recommendations = {}
@@ -2189,7 +2190,7 @@ class Scheduler(ServerNode):
             )
             logger.info("Remove worker %s", ws)
             if close:
-                with ignoring(AttributeError, CommClosedError):
+                with suppress(AttributeError, CommClosedError):
                     self.stream_comms[address].send({"op": "close", "report": False})
 
             self.remove_resources(address)
@@ -2941,7 +2942,11 @@ class Scheduler(ServerNode):
             finally:
                 await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
-            await self.start()
+            self.clear_task_state()
+
+            with suppress(AttributeError):
+                for c in self._worker_coroutines:
+                    c.cancel()
 
             self.log_event([client, "all"], {"action": "restart", "client": client})
             start = time()
@@ -3388,7 +3393,7 @@ class Scheduler(ServerNode):
         close_workers=False,
         names=None,
         lock=True,
-        **kwargs
+        **kwargs,
     ):
         """ Gracefully retire workers from cluster
 
@@ -4089,7 +4094,7 @@ class Scheduler(ServerNode):
         typename=None,
         worker=None,
         startstops=None,
-        **kwargs
+        **kwargs,
     ):
         try:
             ts = self.tasks[key]
@@ -5061,6 +5066,15 @@ class Scheduler(ServerNode):
 
         # Task stream
         task_stream = self.get_task_stream(start=start)
+        total_tasks = len(task_stream)
+        timespent = defaultdict(int)
+        for d in task_stream:
+            for x in d["startstops"]:
+                timespent[x["action"]] += x["stop"] - x["start"]
+        tasks_timings = ""
+        for k in sorted(timespent.keys()):
+            tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
+
         from .diagnostics.task_stream import rectangles
         from .dashboard.components.scheduler import task_stream_figure
 
@@ -5087,6 +5101,11 @@ class Scheduler(ServerNode):
         <i> Select different tabs on the top for additional information </i>
 
         <h2> Duration: {time} </h2>
+        <h2> Tasks Information </h2>
+        <ul>
+         <li> number of tasks: {ntasks} </li>
+         {tasks_timings}
+        </ul>
 
         <h2> Scheduler Information </h2>
         <ul>
@@ -5102,6 +5121,8 @@ class Scheduler(ServerNode):
         </pre>
         """.format(
             time=format_time(stop - start),
+            ntasks=total_tasks,
+            tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),

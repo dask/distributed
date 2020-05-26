@@ -2,6 +2,7 @@ import asyncio
 import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
+from contextlib import suppress
 from datetime import timedelta
 import errno
 from functools import partial
@@ -49,7 +50,6 @@ from .utils import (
     has_arg,
     _maybe_complex,
     log_errors,
-    ignoring,
     import_file,
     silence_logging,
     thread_state,
@@ -562,7 +562,6 @@ class Worker(ServerNode):
 
         self.actors = {}
         self.loop = loop or IOLoop.current()
-        self.status = None
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(
             self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
@@ -1130,7 +1129,7 @@ class Worker(ServerNode):
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
-            with ignoring(EnvironmentError, TimeoutError):
+            with suppress(EnvironmentError, TimeoutError):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
                         self.scheduler.unregister(
@@ -1151,7 +1150,7 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
-                with ignoring(TimeoutError):
+                with suppress(TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
 
             self.actor_executor._work_queue.queue.clear()
@@ -1594,7 +1593,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
-        self._notify_transition(key, start, finish, **kwargs)
+        self._notify_transition(key, start, state or finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -3187,7 +3186,7 @@ def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
 
     if memory_limit == "auto":
         memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
-    with ignoring(ValueError, TypeError):
+    with suppress(ValueError, TypeError):
         memory_limit = float(memory_limit)
         if isinstance(memory_limit, float) and memory_limit <= 1:
             memory_limit = int(memory_limit * system.MEMORY_LIMIT)
