@@ -3125,7 +3125,11 @@ class Scheduler(ServerNode):
                     return {
                         "status": "missing-data",
                         "keys": tuple(
-                            concat(r["keys"].keys() for r in result if r["status"] == "missing-data")
+                            concat(
+                                r["keys"].keys()
+                                for r in result
+                                if r["status"] == "missing-data"
+                            )
                         ),
                     }
 
