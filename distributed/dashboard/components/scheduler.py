@@ -667,7 +667,7 @@ class CurrentLoad(DashboardComponent):
                 pause = (
                     getattr(
                         self.scheduler.workers[ws.address],
-                        "memory_target_fraction",
+                        "memory_pause_fraction",
                         inf,
                     )
                     or inf
@@ -675,7 +675,7 @@ class CurrentLoad(DashboardComponent):
                 spill = (
                     getattr(
                         self.scheduler.workers[ws.address],
-                        "memory_target_fraction",
+                        "memory_spill_fraction",
                         inf,
                     )
                     or inf
