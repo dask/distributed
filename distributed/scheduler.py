@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
 from collections.abc import Mapping, Set
+from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 import inspect
@@ -56,7 +57,6 @@ from .proctitle import setproctitle
 from .security import Security
 from .utils import (
     All,
-    ignoring,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -81,6 +81,7 @@ from .queues import QueueExtension
 from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
+from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
@@ -102,6 +103,7 @@ DEFAULT_EXTENSIONS = [
     VariableExtension,
     PubSubSchedulerExtension,
     SemaphoreExtension,
+    EventExtension,
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
@@ -1067,7 +1069,7 @@ class Scheduler(ServerNode):
         preload=None,
         preload_argv=(),
         plugins=(),
-        **kwargs
+        **kwargs,
     ):
         self._setup_logging(logger)
 
@@ -1097,7 +1099,7 @@ class Scheduler(ServerNode):
             self.idle_timeout = parse_timedelta(idle_timeout)
         else:
             self.idle_timeout = None
-        self.time_started = time()
+        self.idle_since = time()
         self._lock = asyncio.Lock()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(float)
@@ -1350,7 +1352,7 @@ class Scheduler(ServerNode):
             connection_limit=connection_limit,
             deserialize=False,
             connection_args=self.connection_args,
-            **kwargs
+            **kwargs,
         )
 
         if self.worker_ttl:
@@ -1370,6 +1372,7 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
+        self.rpc.allow_offload = False
 
     ##################
     # Administration #
@@ -1431,12 +1434,14 @@ class Scheduler(ServerNode):
 
         self.clear_task_state()
 
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             for c in self._worker_coroutines:
                 c.cancel()
 
         for addr in self._start_address:
-            await self.listen(addr, **self.security.get_listen_args("scheduler"))
+            await self.listen(
+                addr, allow_offload=False, **self.security.get_listen_args("scheduler")
+            )
             self.ip = get_address_host(self.listen_address)
             listen_ip = self.ip
 
@@ -1515,7 +1520,7 @@ class Scheduler(ServerNode):
         self.stop_services()
 
         for ext in self.extensions.values():
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
 
@@ -1524,7 +1529,7 @@ class Scheduler(ServerNode):
             if not comm.closed():
                 comm.send({"op": "close", "report": False})
                 comm.send({"op": "close-stream"})
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 futures.append(comm.close())
 
         for future in futures:  # TODO: do all at once
@@ -2084,7 +2089,7 @@ class Scheduler(ServerNode):
                     exception=exception,
                     traceback=traceback,
                     worker=worker,
-                    **kwargs
+                    **kwargs,
                 )
         else:
             recommendations = {}
@@ -2181,7 +2186,7 @@ class Scheduler(ServerNode):
             )
             logger.info("Remove worker %s", ws)
             if close:
-                with ignoring(AttributeError, CommClosedError):
+                with suppress(AttributeError, CommClosedError):
                     self.stream_comms[address].send({"op": "close", "report": False})
 
             self.remove_resources(address)
@@ -2935,7 +2940,7 @@ class Scheduler(ServerNode):
 
             self.clear_task_state()
 
-            with ignoring(AttributeError):
+            with suppress(AttributeError):
                 for c in self._worker_coroutines:
                     c.cancel()
 
@@ -3119,7 +3124,13 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": tuple(concat(r["keys"].keys() for r in result)),
+                        "keys": tuple(
+                            concat(
+                                r["keys"].keys()
+                                for r in result
+                                if r["status"] == "missing-data"
+                            )
+                        ),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -3384,7 +3395,7 @@ class Scheduler(ServerNode):
         close_workers=False,
         names=None,
         lock=True,
-        **kwargs
+        **kwargs,
     ):
         """ Gracefully retire workers from cluster
 
@@ -4085,7 +4096,7 @@ class Scheduler(ServerNode):
         typename=None,
         worker=None,
         startstops=None,
-        **kwargs
+        **kwargs,
     ):
         try:
             ts = self.tasks[key]
@@ -4970,8 +4981,11 @@ class Scheduler(ServerNode):
             *(
                 self.rpc(w).profile(start=start, stop=stop, key=key, server=server)
                 for w in workers
-            )
+            ),
+            return_exceptions=True,
         )
+
+        results = [r for r in results if not isinstance(r, Exception)]
 
         if merge_workers:
             response = profile.merge(*results)
@@ -4998,9 +5012,11 @@ class Scheduler(ServerNode):
         else:
             workers = set(self.workers) & set(workers)
         results = await asyncio.gather(
-            *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers)
+            *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers),
+            return_exceptions=True,
         )
 
+        results = [r for r in results if not isinstance(r, Exception)]
         counts = [v["counts"] for v in results]
         counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
         counts = [(time, sum(pluck(1, group))) for time, group in counts]
@@ -5050,6 +5066,15 @@ class Scheduler(ServerNode):
 
         # Task stream
         task_stream = self.get_task_stream(start=start)
+        total_tasks = len(task_stream)
+        timespent = defaultdict(int)
+        for d in task_stream:
+            for x in d["startstops"]:
+                timespent[x["action"]] += x["stop"] - x["start"]
+        tasks_timings = ""
+        for k in sorted(timespent.keys()):
+            tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
+
         from .diagnostics.task_stream import rectangles
         from .dashboard.components.scheduler import task_stream_figure
 
@@ -5076,6 +5101,11 @@ class Scheduler(ServerNode):
         <i> Select different tabs on the top for additional information </i>
 
         <h2> Duration: {time} </h2>
+        <h2> Tasks Information </h2>
+        <ul>
+         <li> number of tasks: {ntasks} </li>
+         {tasks_timings}
+        </ul>
 
         <h2> Scheduler Information </h2>
         <ul>
@@ -5091,6 +5121,8 @@ class Scheduler(ServerNode):
         </pre>
         """.format(
             time=format_time(stop - start),
+            ntasks=total_tasks,
+            tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
             threads=sum(w.nthreads for w in self.workers.values()),
@@ -5225,18 +5257,13 @@ class Scheduler(ServerNode):
                 self.remove_worker(address=ws.address)
 
     def check_idle(self):
-        if any(ws.processing for ws in self.workers.values()):
+        if any(ws.processing for ws in self.workers.values()) or self.unrunnable:
+            self.idle_since = None
             return
-        if self.unrunnable:
-            return
+        elif not self.idle_since:
+            self.idle_since = time()
 
-        if not self.transition_log:
-            close = time() > self.time_started + self.idle_timeout
-        else:
-            last_task = self.transition_log[-1][-1]
-            close = time() > last_task + self.idle_timeout
-
-        if close:
+        if time() > self.idle_since + self.idle_timeout:
             logger.info(
                 "Scheduler closing after being idle for %s",
                 format_time(self.idle_timeout),

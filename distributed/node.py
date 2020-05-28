@@ -1,3 +1,4 @@
+from contextlib import suppress
 import logging
 import warnings
 import weakref
@@ -11,7 +12,7 @@ from .comm import get_address_host
 from .core import Server
 from .http.routing import RoutingApplication
 from .versions import get_versions
-from .utils import DequeHandler, clean_dashboard_address, ignoring
+from .utils import DequeHandler, clean_dashboard_address
 
 
 class ServerNode(Server):
@@ -96,11 +97,11 @@ class ServerNode(Server):
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
 
     def start_http_server(
-        self, routes, dashboard_address, default_port=0, ssl_options=None,
+        self, routes, dashboard_address, default_port=0, ssl_options=None
     ):
         """ This creates an HTTP Server running on this node """
 
-        self.http_application = RoutingApplication(routes,)
+        self.http_application = RoutingApplication(routes)
 
         # TLS configuration
         tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
@@ -125,18 +126,28 @@ class ServerNode(Server):
             if isinstance(address, (list, tuple)):
                 address = address[0]
             if address:
-                with ignoring(ValueError):
+                with suppress(ValueError):
                     http_address["address"] = get_address_host(address)
-        changed_port = False
-        try:
-            self.http_server.listen(**http_address)
-        except Exception:
-            changed_port = True
-            self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
+
+        change_port = False
+        retries_left = 3
+        while True:
+            try:
+                if not change_port:
+                    self.http_server.listen(**http_address)
+                else:
+                    self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
+                break
+            except Exception:
+                change_port = True
+                retries_left = retries_left - 1
+                if retries_left < 1:
+                    raise
+
         self.http_server.port = get_tcp_server_address(self.http_server)[1]
         self.services["dashboard"] = self.http_server
 
-        if changed_port and dashboard_address:
+        if change_port and dashboard_address:
             warnings.warn(
                 "Port {} is already in use.\n"
                 "Perhaps you already have a cluster running?\n"
