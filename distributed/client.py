@@ -648,24 +648,21 @@ class Client:
                 "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
             )
 
-        from .deploy import Cluster
-
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
-        elif isinstance(address, Cluster):
+        elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
             with suppress(AttributeError):
                 loop = address.loop
             if security is None:
                 security = getattr(self.cluster, "security", None)
-        elif address is not None and not isinstance(address, str):
-            if issubclass(address, Cluster):
-                raise ValueError(
-                    "address is a subclass of Cluster rather than an instance.\n"
-                    "Did you forget to instantiate the cluster?"
+        elif not isinstance(address, str):
+            raise ValueError(
+                "Scheduler address must be a string or a Cluster instance, got {}".format(
+                    address
                 )
-            raise ValueError("address must be a string or Cluster instance.")
+            )
 
         if security is None:
             security = Security()
