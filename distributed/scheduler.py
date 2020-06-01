@@ -1103,7 +1103,7 @@ class Scheduler(ServerNode):
             self.idle_timeout = parse_timedelta(idle_timeout)
         else:
             self.idle_timeout = None
-        self.time_started = time()
+        self.idle_since = time()
         self._lock = asyncio.Lock()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(float)
@@ -3128,7 +3128,13 @@ class Scheduler(ServerNode):
                 if not all(r["status"] == "OK" for r in result):
                     return {
                         "status": "missing-data",
-                        "keys": tuple(concat(r["keys"].keys() for r in result)),
+                        "keys": tuple(
+                            concat(
+                                r["keys"].keys()
+                                for r in result
+                                if r["status"] == "missing-data"
+                            )
+                        ),
                     }
 
                 for sender, recipient, ts in msgs:
@@ -4986,8 +4992,11 @@ class Scheduler(ServerNode):
             *(
                 self.rpc(w).profile(start=start, stop=stop, key=key, server=server)
                 for w in workers
-            )
+            ),
+            return_exceptions=True,
         )
+
+        results = [r for r in results if not isinstance(r, Exception)]
 
         if merge_workers:
             response = profile.merge(*results)
@@ -5014,9 +5023,11 @@ class Scheduler(ServerNode):
         else:
             workers = set(self.workers) & set(workers)
         results = await asyncio.gather(
-            *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers)
+            *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers),
+            return_exceptions=True,
         )
 
+        results = [r for r in results if not isinstance(r, Exception)]
         counts = [v["counts"] for v in results]
         counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
         counts = [(time, sum(pluck(1, group))) for time, group in counts]
@@ -5257,18 +5268,13 @@ class Scheduler(ServerNode):
                 self.remove_worker(address=ws.address)
 
     def check_idle(self):
-        if any(ws.processing for ws in self.workers.values()):
+        if any(ws.processing for ws in self.workers.values()) or self.unrunnable:
+            self.idle_since = None
             return
-        if self.unrunnable:
-            return
+        elif not self.idle_since:
+            self.idle_since = time()
 
-        if not self.transition_log:
-            close = time() > self.time_started + self.idle_timeout
-        else:
-            last_task = self.transition_log[-1][-1]
-            close = time() > last_task + self.idle_timeout
-
-        if close:
+        if time() > self.idle_since + self.idle_timeout:
             logger.info(
                 "Scheduler closing after being idle for %s",
                 format_time(self.idle_timeout),
