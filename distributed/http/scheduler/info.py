@@ -215,4 +215,4 @@ routes = [
 try:
     import distributed.dashboard.scheduler  # noqa: F401
 except ImportError:
-    routes.append((r"status", MissingBokeh, {}))
+    routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
