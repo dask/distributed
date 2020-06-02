@@ -26,7 +26,6 @@ from bokeh.models import (
     BoxSelectTool,
     GroupFilter,
     CDSView,
-    FactorRange,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
@@ -456,13 +455,13 @@ class ActionByKey(DashboardComponent):
                 self.plugin = es[0]
 
             compute_data = {
-                "counts": [0.2, 0.1],
+                "times": [0.2, 0.1],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["sum", "sum_partial"],
             }
 
             action_data = {
-                "counts": [0.2, 0.1],
+                "times": [0.2, 0.1],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["transfer", "compute"],
             }
@@ -491,8 +490,8 @@ class ActionByKey(DashboardComponent):
             rect_compute = fig_compute.vbar(
                 source=self.compute_source,
                 x="names",
-                top="counts",
-                width=1,
+                top="times",
+                width=0.7,
                 color="color",
                 legend_field="names",
             )
@@ -500,8 +499,8 @@ class ActionByKey(DashboardComponent):
             rect_aggregate = fig_aggregate.vbar(
                 source=self.action_source,
                 x="names",
-                top="counts",
-                width=1,
+                top="times",
+                width=0.7,
                 color="color",
                 legend_field="names",
             )
@@ -510,13 +509,16 @@ class ActionByKey(DashboardComponent):
                 (fig_compute, rect_compute),
                 (fig_aggregate, rect_aggregate),
             ]:
+                fig.y_range.start = 0
+                fig.min_border_right = 20
+                fig.min_border_bottom = 60
                 fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
                 fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
                 fig.xaxis.major_label_orientation = -math.pi / 12
                 rect.nonselection_glyph = None
 
                 fig.xaxis.minor_tick_line_alpha = 0
-                fig.ygrid.visible = False
+                fig.xgrid.visible = False
 
                 fig.toolbar.logo = None
                 fig.toolbar_location = None
@@ -525,7 +527,7 @@ class ActionByKey(DashboardComponent):
                 hover.tooltips = """
                 <div>
                     <p><b>Name:</b> @names</p>
-                    <p><b>Time:</b> @counts</p>
+                    <p><b>Time:</b> @times s</p>
                 </div>
                 """
                 hover.point_policy = "follow_mouse"
@@ -542,13 +544,13 @@ class ActionByKey(DashboardComponent):
 
             for key, ts in self.scheduler.task_prefixes.items():
                 name = key_split(key)
-                for action, time in ts.all_durations.items():
+                for action, t in ts.all_durations.items():
                     if action == "compute":
-                        compute_times[name] += time
+                        compute_times[name] += t
                     else:
-                        agg_times[action] += time
+                        agg_times[action] += t
 
-            # order my largest count first
+            # order by largest time first
             compute_times = sorted(
                 compute_times.items(), key=lambda x: x[1], reverse=True
             )
@@ -557,30 +559,19 @@ class ActionByKey(DashboardComponent):
             compute_colors = list()
             compute_names = list()
             compute_time = list()
-            for name, time in compute_times:
+            for name, t in compute_times:
                 compute_names.append(name)
                 compute_colors.append(ts_color_of(name))
-                compute_time.append(time)
+                compute_time.append(t)
 
             agg_colors = list()
             agg_names = list()
             agg_time = list()
-            for action, time in agg_times:
+            for action, t in agg_times:
                 agg_names.append(action)
                 agg_colors.append(ts_color_lookup[action])
-                agg_time.append(time)
+                agg_time.append(t)
 
-            # # compute time per key:
-            # for name_act, time in total_time:
-            #     # special case compute as these tasks
-            #     # will be multi-colored (read-csv, add, inc, etc.)
-            #     if name_act[1] == "compute":
-            #         # actions.append("compute")
-            #         compute_time.append(time)
-            #         compute_names.append(name_act[0])
-            #     else:
-            #         agg_time[name_act[1]] += time
-            #         agg_colors.append(ts_color_lookup[name_act[1]])
             self.fig_compute.x_range.factors = compute_names
             self.fig_compute.title.text = "Compute Time Per Key"
 
@@ -588,10 +579,10 @@ class ActionByKey(DashboardComponent):
             self.fig_aggregate.title.text = "Aggregate Time Per Action"
 
             compute_result = dict(
-                counts=compute_time, color=compute_colors, names=compute_names,
+                times=compute_time, color=compute_colors, names=compute_names,
             )
 
-            action_result = dict(counts=agg_time, color=agg_colors, names=agg_names,)
+            action_result = dict(times=agg_time, color=agg_colors, names=agg_names,)
 
             update(self.compute_source, compute_result)
             update(self.action_source, action_result)
@@ -2068,39 +2059,9 @@ def individual_action_by_key_doc(scheduler, extra, doc):
         component = ActionByKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig_aggregate)
-        doc.add_root(component.fig_compute)
+        layout = row(component.fig_compute, component.fig_aggregate)
+        doc.add_root(layout)
         doc.theme = BOKEH_THEME
-        doc.template = env.get_template("key-actions.html")
-        doc.template_variables.update(extra)
-
-        #         if len(scheduler.workers) < 50:
-        #     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-        #     current_load.update()
-        #     add_periodic_callback(doc, current_load, 100)
-        #     doc.add_root(current_load.nbytes_figure)
-        #     doc.add_root(current_load.processing_figure)
-        # else:
-        #     nbytes_hist = NBytesHistogram(scheduler, sizing_mode="stretch_both")
-        #     nbytes_hist.update()
-        #     processing_hist = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
-        #     processing_hist.update()
-        #     add_periodic_callback(doc, nbytes_hist, 100)
-        #     add_periodic_callback(doc, processing_hist, 100)
-        #     current_load_fig = row(
-        #         nbytes_hist.root, processing_hist.root, sizing_mode="stretch_both"
-        #     )
-
-        #     doc.add_root(nbytes_hist.root)
-        #     doc.add_root(processing_hist.root)
-
-        # doc.title = "Dask: Status"
-        # doc.add_root(task_progress.root)
-        # doc.add_root(task_stream.root)
-        # doc.theme = BOKEH_THEME
-        # doc.template = env.get_template("status.html")
-        # doc.template_variables.update(extra)
-        # doc.theme = BOKEH_THEME
 
 
 def profile_doc(scheduler, extra, doc):
