@@ -13,9 +13,42 @@ try:
         from a port to any valid endpoint'.
         """
 
+        def is_worker_host(self, proxy_handler, host=None):
+            """
+            Check whether host is a valid worker hostname
+
+            This is necessary to ensure that the Dashboard can actually proxy requests
+            to worker dashboards when running a distributed cluster where each worker
+            may be on a different hostname than the scheduler host
+
+            Parameters
+            ----------
+
+            host : str
+
+            Returns
+            -------
+            bool
+            """
+            if host is None:
+                return False
+            if self.scheduler is None:
+                return False
+            workers = list(self.scheduler.workers.values())
+            for w in workers:
+                if w.host == host:
+                    return True
+            return False
+
         def initialize(self, dask_server=None, extra=None):
             self.scheduler = dask_server
             self.extra = extra or {}
+
+            # Customise the host whitelist checking function
+            # Otherwise jupyter-server-proxy will only allow proxying
+            # localhost/127.0.0.1 which effectively means we can't proxy
+            # worker dashboards in distributed clusters
+            self.host_whitelist = self.is_worker_host
 
         async def http_get(self, port, host, proxied_path):
             # route here first
