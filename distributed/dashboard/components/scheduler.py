@@ -455,106 +455,146 @@ class ActionByKey(DashboardComponent):
             else:
                 self.plugin = es[0]
 
-            data = {
-                "name_actions": [("nokey", "transfer"), ("rk", "compute")],
+            compute_data = {
                 "counts": [0.2, 0.1],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
-                "actions": ["transfer", "compute"],
+                "names": ["sum", "sum_partial"],
             }
 
-            self.source = ColumnDataSource(data=data)
+            action_data = {
+                "counts": [0.2, 0.1],
+                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
+                "names": ["transfer", "compute"],
+            }
 
-            fig = figure(
-                title="Action by Key",
+            self.compute_source = ColumnDataSource(data=compute_data)
+            self.action_source = ColumnDataSource(data=action_data)
+
+            fig_compute = figure(
+                title="Compute Time Per Key",
                 tools="",
                 id="bk-Action-by-key-plot",
-                name="action_by_key",
-                x_range=FactorRange(),
+                name="compute_time_per_key",
+                x_range=["a", "b"],
                 **kwargs,
             )
 
-            rect = fig.vbar(
-                source=self.source,
-                x="name_actions",
-                top="counts",
-                width=0.9,
-                color="color",
-                legend_field="actions",
+            fig_aggregate = figure(
+                title="Aggregate Per Action",
+                tools="",
+                id="bk-aggregate-per-action-plot",
+                name="aggregate_per_action",
+                x_range=["a", "b"],
+                **kwargs,
             )
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
 
-            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = -math.pi / 12
-            rect.nonselection_glyph = None
+            rect_compute = fig_compute.vbar(
+                source=self.compute_source,
+                x="names",
+                top="counts",
+                width=1,
+                color="color",
+                legend_field="names",
+            )
 
-            fig.xaxis.minor_tick_line_alpha = 0
-            fig.ygrid.visible = False
+            rect_aggregate = fig_aggregate.vbar(
+                source=self.action_source,
+                x="names",
+                top="counts",
+                width=1,
+                color="color",
+                legend_field="names",
+            )
 
-            fig.toolbar.logo = None
-            fig.toolbar_location = None
+            for (fig, rect) in [
+                (fig_compute, rect_compute),
+                (fig_aggregate, rect_aggregate),
+            ]:
+                fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+                fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+                fig.xaxis.major_label_orientation = -math.pi / 12
+                rect.nonselection_glyph = None
 
-            hover = HoverTool()
-            hover.tooltips = """
-            <div>
-                <p><b>Name:</b> @names</p>
-                <p><b>Action:</b> @actions</p>
-            </div>
-            """
-            hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
+                fig.xaxis.minor_tick_line_alpha = 0
+                fig.ygrid.visible = False
 
-            fig.y_range.start = 0
-            fig.x_range.range_padding = 0.1
-            fig.xaxis.major_label_orientation = 1
-            fig.xaxis.axis_label_text_font_size = "0pt"
-            fig.xaxis.major_label_text_font_size = "0pt"
-            fig.xaxis.minor_tick_line_color = None
-            fig.xaxis.major_tick_line_color = None
-            fig.xgrid.grid_line_color = None
+                fig.toolbar.logo = None
+                fig.toolbar_location = None
 
-            self.fig = fig
+                hover = HoverTool()
+                hover.tooltips = """
+                <div>
+                    <p><b>Name:</b> @names</p>
+                    <p><b>Time:</b> @counts</p>
+                </div>
+                """
+                hover.point_policy = "follow_mouse"
+                fig.add_tools(hover)
+
+            self.fig_compute = fig_compute
+            self.fig_aggregate = fig_aggregate
 
     @without_property_validation
     def update(self):
         with log_errors():
-            total_time = defaultdict(float)
-            total_data = defaultdict(int)
+            compute_times = defaultdict(float)
+            agg_times = defaultdict(float)
 
             for key, ts in self.scheduler.task_prefixes.items():
                 name = key_split(key)
                 for action, time in ts.all_durations.items():
-                    total_time[(name, action)] += time
+                    if action == "compute":
+                        compute_times[name] += time
+                    else:
+                        agg_times[action] += time
 
-            name_actions = list(total_time.keys())
-            counts = list(total_time.values())
+            # order my largest count first
+            compute_times = sorted(
+                compute_times.items(), key=lambda x: x[1], reverse=True
+            )
+            agg_times = sorted(agg_times.items(), key=lambda x: x[1], reverse=True)
 
-            colors = list()
-            actions = list()
-            names = list()
+            compute_colors = list()
+            compute_names = list()
+            compute_time = list()
+            for name, time in compute_times:
+                compute_names.append(name)
+                compute_colors.append(ts_color_of(name))
+                compute_time.append(time)
 
-            for name_act in name_actions:
-                names.append(name_act[0])
-                # special case compute as these tasks
-                # will be multi-colored (read-csv, add, inc, etc.)
-                if name_act[1] == "compute":
-                    actions.append("compute")
-                    colors.append(ts_color_of(name_act[0]))
-                else:
-                    actions.append(name_act[1])
-                    colors.append(ts_color_lookup[name_act[1]])
+            agg_colors = list()
+            agg_names = list()
+            agg_time = list()
+            for action, time in agg_times:
+                agg_names.append(action)
+                agg_colors.append(ts_color_lookup[action])
+                agg_time.append(time)
 
-            self.fig.x_range.factors = name_actions
-            self.fig.title.text = "Action by Key"
+            # # compute time per key:
+            # for name_act, time in total_time:
+            #     # special case compute as these tasks
+            #     # will be multi-colored (read-csv, add, inc, etc.)
+            #     if name_act[1] == "compute":
+            #         # actions.append("compute")
+            #         compute_time.append(time)
+            #         compute_names.append(name_act[0])
+            #     else:
+            #         agg_time[name_act[1]] += time
+            #         agg_colors.append(ts_color_lookup[name_act[1]])
+            self.fig_compute.x_range.factors = compute_names
+            self.fig_compute.title.text = "Compute Time Per Key"
 
-            result = dict(
-                name_actions=name_actions,
-                counts=counts,
-                color=colors,
-                actions=actions,
-                names=names,
+            self.fig_aggregate.x_range.factors = agg_names
+            self.fig_aggregate.title.text = "Aggregate Time Per Action"
+
+            compute_result = dict(
+                counts=compute_time, color=compute_colors, names=compute_names,
             )
 
-            update(self.source, result)
+            action_result = dict(counts=agg_time, color=agg_colors, names=agg_names,)
+
+            update(self.compute_source, compute_result)
+            update(self.action_source, action_result)
 
 
 class MemoryByKey(DashboardComponent):
@@ -783,42 +823,14 @@ class CurrentLoad(DashboardComponent):
                     getattr(self.scheduler.workers[ws.address], "memory_limit", inf)
                     or inf
                 )
-                pause = (
-                    getattr(
-                        self.scheduler.workers[ws.address],
-                        "memory_target_fraction",
-                        inf,
-                    )
-                    or inf
-                )
-                spill = (
-                    getattr(
-                        self.scheduler.workers[ws.address],
-                        "memory_target_fraction",
-                        inf,
-                    )
-                    or inf
-                )
-                target = (
-                    getattr(
-                        self.scheduler.workers[ws.address],
-                        "memory_target_fraction",
-                        inf,
-                    )
-                    or inf
-                )
 
                 if limit > max_limit and limit != inf:
                     max_limit = limit
 
                 if nb > limit:
-                    nbytes_color.append("black")
-                elif nb > pause:
                     nbytes_color.append("red")
-                elif nb > target:
+                elif nb > limit / 2:
                     nbytes_color.append("orange")
-                elif nb > target * 0.85:
-                    nbytes_color.append("yellow")
                 else:
                     nbytes_color.append("blue")
 
@@ -2056,8 +2068,39 @@ def individual_action_by_key_doc(scheduler, extra, doc):
         component = ActionByKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
+        doc.add_root(component.fig_aggregate)
+        doc.add_root(component.fig_compute)
         doc.theme = BOKEH_THEME
+        doc.template = env.get_template("key-actions.html")
+        doc.template_variables.update(extra)
+
+        #         if len(scheduler.workers) < 50:
+        #     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
+        #     current_load.update()
+        #     add_periodic_callback(doc, current_load, 100)
+        #     doc.add_root(current_load.nbytes_figure)
+        #     doc.add_root(current_load.processing_figure)
+        # else:
+        #     nbytes_hist = NBytesHistogram(scheduler, sizing_mode="stretch_both")
+        #     nbytes_hist.update()
+        #     processing_hist = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
+        #     processing_hist.update()
+        #     add_periodic_callback(doc, nbytes_hist, 100)
+        #     add_periodic_callback(doc, processing_hist, 100)
+        #     current_load_fig = row(
+        #         nbytes_hist.root, processing_hist.root, sizing_mode="stretch_both"
+        #     )
+
+        #     doc.add_root(nbytes_hist.root)
+        #     doc.add_root(processing_hist.root)
+
+        # doc.title = "Dask: Status"
+        # doc.add_root(task_progress.root)
+        # doc.add_root(task_stream.root)
+        # doc.theme = BOKEH_THEME
+        # doc.template = env.get_template("status.html")
+        # doc.template_variables.update(extra)
+        # doc.theme = BOKEH_THEME
 
 
 def profile_doc(scheduler, extra, doc):

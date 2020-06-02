@@ -737,10 +737,11 @@ async def test_action_by_key(c, s, a, b):
         "http://localhost:%d/individual-action-by-key" % s.http_server.port
     )
     assert response.code == 200
+    assert ("sum-aggregate") in mbk.compute_source.data["names"]
+    assert ("inc") in mbk.compute_source.data["names"]
+    assert ("add") in mbk.compute_source.data["names"]
 
-    assert ("sum-aggregate", "transfer") in mbk.source.data["name_actions"]
-    assert ("inc", "compute") in mbk.source.data["name_actions"]
-    assert ("add", "compute") in mbk.source.data["name_actions"]
+    assert ("transfer") in mbk.action_source.data["names"]
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})
