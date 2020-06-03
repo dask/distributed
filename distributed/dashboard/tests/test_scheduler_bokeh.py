@@ -719,9 +719,6 @@ async def test_memory_by_key(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_aggregate_action(c, s, a, b):
-    from collections import defaultdict
-    from dask.utils import key_split
-
     mbk = AggregateAction(s)
 
     da = pytest.importorskip("dask.array")
@@ -745,9 +742,6 @@ async def test_aggregate_action(c, s, a, b):
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_computer_per_key(c, s, a, b):
-    from collections import defaultdict
-    from dask.utils import key_split
-
     mbk = ComputerPerKey(s)
 
     da = pytest.importorskip("dask.array")
