@@ -440,7 +440,7 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
-class ActionByKey(DashboardComponent):
+class ComputerPerKey(DashboardComponent):
     """ Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
@@ -460,34 +460,18 @@ class ActionByKey(DashboardComponent):
                 "names": ["sum", "sum_partial"],
             }
 
-            action_data = {
-                "times": [0.2, 0.1],
-                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
-                "names": ["transfer", "compute"],
-            }
-
             self.compute_source = ColumnDataSource(data=compute_data)
-            self.action_source = ColumnDataSource(data=action_data)
 
-            fig_compute = figure(
-                title="Compute Time Per Key",
+            fig = figure(
+                title="Compute Time Per Task",
                 tools="",
-                id="bk-Action-by-key-plot",
+                id="bk-Compute-by-key-plot",
                 name="compute_time_per_key",
                 x_range=["a", "b"],
                 **kwargs,
             )
 
-            fig_aggregate = figure(
-                title="Aggregate Per Action",
-                tools="",
-                id="bk-aggregate-per-action-plot",
-                name="aggregate_per_action",
-                x_range=["a", "b"],
-                **kwargs,
-            )
-
-            rect_compute = fig_compute.vbar(
+            rect = fig.vbar(
                 source=self.compute_source,
                 x="names",
                 top="times",
@@ -496,65 +480,48 @@ class ActionByKey(DashboardComponent):
                 legend_field="names",
             )
 
-            rect_aggregate = fig_aggregate.vbar(
-                source=self.action_source,
-                x="names",
-                top="times",
-                width=0.7,
-                color="color",
-                legend_field="names",
-            )
+            fig.y_range.start = 0
+            fig.min_border_right = 20
+            fig.min_border_bottom = 60
+            fig.yaxis.axis_label = "Time (s)"
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            fig.xaxis.major_label_orientation = -math.pi / 12
+            rect.nonselection_glyph = None
 
-            for (fig, rect) in [
-                (fig_compute, rect_compute),
-                (fig_aggregate, rect_aggregate),
-            ]:
-                fig.y_range.start = 0
-                fig.min_border_right = 20
-                fig.min_border_bottom = 60
-                fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
-                fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-                fig.xaxis.major_label_orientation = -math.pi / 12
-                rect.nonselection_glyph = None
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.xgrid.visible = False
 
-                fig.xaxis.minor_tick_line_alpha = 0
-                fig.xgrid.visible = False
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
 
-                fig.toolbar.logo = None
-                fig.toolbar_location = None
+            hover = HoverTool()
+            hover.tooltips = """
+            <div>
+                <p><b>Name:</b> @names</p>
+                <p><b>Time:</b> @times s</p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
 
-                hover = HoverTool()
-                hover.tooltips = """
-                <div>
-                    <p><b>Name:</b> @names</p>
-                    <p><b>Time:</b> @times s</p>
-                </div>
-                """
-                hover.point_policy = "follow_mouse"
-                fig.add_tools(hover)
-
-            self.fig_compute = fig_compute
-            self.fig_aggregate = fig_aggregate
+            self.fig = fig
 
     @without_property_validation
     def update(self):
         with log_errors():
             compute_times = defaultdict(float)
-            agg_times = defaultdict(float)
 
             for key, ts in self.scheduler.task_prefixes.items():
                 name = key_split(key)
                 for action, t in ts.all_durations.items():
                     if action == "compute":
                         compute_times[name] += t
-                    else:
-                        agg_times[action] += t
 
             # order by largest time first
             compute_times = sorted(
                 compute_times.items(), key=lambda x: x[1], reverse=True
             )
-            agg_times = sorted(agg_times.items(), key=lambda x: x[1], reverse=True)
 
             compute_colors = list()
             compute_names = list()
@@ -564,27 +531,112 @@ class ActionByKey(DashboardComponent):
                 compute_colors.append(ts_color_of(name))
                 compute_time.append(t)
 
-            agg_colors = list()
-            agg_names = list()
-            agg_time = list()
-            for action, t in agg_times:
-                agg_names.append(action)
-                agg_colors.append(ts_color_lookup[action])
-                agg_time.append(t)
-
-            self.fig_compute.x_range.factors = compute_names
-            self.fig_compute.title.text = "Compute Time Per Key"
-
-            self.fig_aggregate.x_range.factors = agg_names
-            self.fig_aggregate.title.text = "Aggregate Time Per Action"
+            self.fig.x_range.factors = compute_names
+            self.fig.title.text = "Compute Time Per Task"
 
             compute_result = dict(
                 times=compute_time, color=compute_colors, names=compute_names,
             )
 
+            update(self.compute_source, compute_result)
+
+
+class AggregateAction(DashboardComponent):
+    """ Bar chart showing time spend in action by key prefix"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.last = 0
+            self.scheduler = scheduler
+
+            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+            if not es:
+                self.plugin = TaskStreamPlugin(self.scheduler)
+            else:
+                self.plugin = es[0]
+
+            action_data = {
+                "times": [0.2, 0.1],
+                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
+                "names": ["transfer", "compute"],
+            }
+
+            self.action_source = ColumnDataSource(data=action_data)
+
+            fig = figure(
+                title="Aggregate Per Action",
+                tools="",
+                id="bk-aggregate-per-action-plot",
+                name="aggregate_per_action",
+                x_range=["a", "b"],
+                **kwargs,
+            )
+
+            rect = fig.vbar(
+                source=self.action_source,
+                x="names",
+                top="times",
+                width=0.7,
+                color="color",
+                legend_field="names",
+            )
+
+            fig.y_range.start = 0
+            fig.min_border_right = 20
+            fig.min_border_bottom = 60
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis.axis_label = "Time (s)"
+            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            fig.xaxis.major_label_orientation = -math.pi / 12
+            fig.xaxis.major_label_text_font_size = "16px"
+            rect.nonselection_glyph = None
+
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.xgrid.visible = False
+
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
+
+            hover = HoverTool()
+            hover.tooltips = """
+            <div>
+                <p><b>Name:</b> @names</p>
+                <p><b>Time:</b> @times s</p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
+
+            self.fig = fig
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            agg_times = defaultdict(float)
+
+            for key, ts in self.scheduler.task_prefixes.items():
+                for action, t in ts.all_durations.items():
+                    agg_times[action] += t
+
+            # order by largest time first
+            agg_times = sorted(agg_times.items(), key=lambda x: x[1], reverse=True)
+
+            agg_colors = list()
+            agg_names = list()
+            agg_time = list()
+            for action, t in agg_times:
+                agg_names.append(action)
+                if action == "compute":
+                    agg_colors.append("purple")
+                else:
+                    agg_colors.append(ts_color_lookup[action])
+                agg_time.append(t)
+
+            self.fig.x_range.factors = agg_names
+            self.fig.title.text = "Aggregate Time Per Action"
+
             action_result = dict(times=agg_time, color=agg_colors, names=agg_names,)
 
-            update(self.compute_source, compute_result)
             update(self.action_source, action_result)
 
 
@@ -2054,13 +2106,21 @@ def individual_memory_by_key_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-def individual_action_by_key_doc(scheduler, extra, doc):
+def individual_compute_time_per_key_doc(scheduler, extra, doc):
     with log_errors():
-        component = ActionByKey(scheduler, sizing_mode="stretch_both")
+        component = ComputerPerKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
-        layout = row(component.fig_compute, component.fig_aggregate)
-        doc.add_root(layout)
+        doc.add_root(component.fig)
+        doc.theme = BOKEH_THEME
+
+
+def individual_aggregate_time_per_action_doc(scheduler, extra, doc):
+    with log_errors():
+        component = AggregateAction(scheduler, sizing_mode="stretch_both")
+        component.update()
+        add_periodic_callback(doc, component, 500)
+        doc.add_root(component.fig)
         doc.theme = BOKEH_THEME
 
 

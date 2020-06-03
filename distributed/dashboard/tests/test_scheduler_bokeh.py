@@ -35,7 +35,8 @@ from distributed.dashboard.components.scheduler import (
     TaskGraph,
     ProfileServer,
     MemoryByKey,
-    ActionByKey,
+    AggregateAction,
+    ComputerPerKey,
 )
 from distributed.dashboard import scheduler
 
@@ -717,11 +718,11 @@ async def test_memory_by_key(c, s, a, b):
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
-async def test_action_by_key(c, s, a, b):
+async def test_aggregate_action(c, s, a, b):
     from collections import defaultdict
     from dask.utils import key_split
 
-    mbk = ActionByKey(s)
+    mbk = AggregateAction(s)
 
     da = pytest.importorskip("dask.array")
     x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
@@ -734,14 +735,38 @@ async def test_action_by_key(c, s, a, b):
     mbk.update()
     http_client = AsyncHTTPClient()
     response = await http_client.fetch(
-        "http://localhost:%d/individual-action-by-key" % s.http_server.port
+        "http://localhost:%d/individual-aggregate-time-per-action" % s.http_server.port
+    )
+    assert response.code == 200
+
+    assert ("transfer") in mbk.action_source.data["names"]
+    assert ("compute") in mbk.action_source.data["names"]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_computer_per_key(c, s, a, b):
+    from collections import defaultdict
+    from dask.utils import key_split
+
+    mbk = ComputerPerKey(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+
+    await x
+    y = await dask.delayed(inc)(1).persist()
+    z = (x + x.T) - x.mean(axis=0)
+    await c.compute(z.sum())
+
+    mbk.update()
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        "http://localhost:%d/individual-compute-time-per-key" % s.http_server.port
     )
     assert response.code == 200
     assert ("sum-aggregate") in mbk.compute_source.data["names"]
     assert ("inc") in mbk.compute_source.data["names"]
     assert ("add") in mbk.compute_source.data["names"]
-
-    assert ("transfer") in mbk.action_source.data["names"]
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})
