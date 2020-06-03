@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from collections.abc import Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
+from enum import Enum
 from functools import partial
 import inspect
 import itertools
@@ -107,6 +108,38 @@ DEFAULT_EXTENSIONS = [
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+
+
+class Status(Enum):
+    """
+    This Enum contains the various states a worker can be.
+    Those states can be observed and used in worker, scheduler and nanny.
+
+    """
+
+    running = "running"
+    closed = "closed"
+    closing = "closing"
+    closing_gracefully = "closing-gracefully"
+
+    def __eq__(self, other):
+        """
+        Implement equality checking with backward compatibility.
+
+        If other object instance is string, we compare with the values, but we
+        actually want to make sure the value compared with is in the list of
+        possible Status.
+        """
+        if isinstance(other, str):
+            assert other in [s.value for s in type(self)]
+            return other == self.value
+        elif isinstance(other, type(self)):
+            return self.value == other.value
+        raise TypeError(
+            f"'==' not supported between instances of"
+            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
+            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
+        )
 
 
 class ClientState:
@@ -274,7 +307,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
 
-        self.status = "running"
+        self.status = Status.running
         self.nbytes = 0
         self.occupancy = 0
         self.metrics = {}
@@ -1428,7 +1461,7 @@ class Scheduler(ServerNode):
     async def start(self):
         """ Clear out old state and restart all running coroutines """
         await super().start()
-        assert self.status != "running"
+        assert self.status != Status.running
 
         enable_gc_diagnosis()
 
@@ -1490,10 +1523,10 @@ class Scheduler(ServerNode):
         --------
         Scheduler.cleanup
         """
-        if self.status.startswith("clos"):
+        if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
             await self.finished()
             return
-        self.status = "closing"
+        self.status = Status.closing
 
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
@@ -1540,7 +1573,7 @@ class Scheduler(ServerNode):
 
         await self.rpc.close()
 
-        self.status = "closed"
+        self.status = Status.closed
         self.stop()
         await super(Scheduler, self).close()
 
@@ -2164,7 +2197,7 @@ class Scheduler(ServerNode):
         state.
         """
         with log_errors():
-            if self.status == "closed":
+            if self.status == Status.closed:
                 return
 
             address = self.coerce_address(address)
@@ -2499,7 +2532,7 @@ class Scheduler(ServerNode):
                 c.send(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
             except CommClosedError:
-                if self.status == "running":
+                if self.status == Status.running:
                     logger.critical("Tried writing to closed comm: %s", msg)
 
     async def add_client(self, comm, client=None, versions=None):
@@ -2545,14 +2578,14 @@ class Scheduler(ServerNode):
                 if not shutting_down():
                     await self.client_comms[client].close()
                     del self.client_comms[client]
-                    if self.status == "running":
+                    if self.status == Status.running:
                         logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
                 pass
 
     def remove_client(self, client=None):
         """ Remove client from network """
-        if self.status == "running":
+        if self.status == Status.running:
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
@@ -3613,7 +3646,7 @@ class Scheduler(ServerNode):
             if inspect.isawaitable(state):
                 state = await state
             try:
-                while self.status == "running":
+                while self.status == Status.running:
                     if state is None:
                         response = function(self)
                     else:
@@ -4780,7 +4813,7 @@ class Scheduler(ServerNode):
 
         This is useful for load balancing and adaptivity.
         """
-        if self.total_nthreads == 0 or ws.status == "closed":
+        if self.total_nthreads == 0 or ws.status == Status.closed:
             return
         if occ is None:
             occ = ws.occupancy
@@ -5191,7 +5224,7 @@ class Scheduler(ServerNode):
         """
         DELAY = 0.1
         try:
-            if self.status == "closed":
+            if self.status == Status.closed:
                 return
 
             last = time()
