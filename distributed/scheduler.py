@@ -5159,9 +5159,7 @@ class Scheduler(ServerNode):
         with tmpfile(extension=".html") as fn:
             output_file(filename=fn, title="Dask Performance Report")
             template_directory = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "dashboard",
-                "performance_templates",
+                os.path.dirname(os.path.abspath(__file__)), "dashboard", "templates"
             )
             template_environment = get_env()
             template_environment.loader.searchpath.append(template_directory)
