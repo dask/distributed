@@ -9,12 +9,13 @@ from tlz import valmap, get_in
 import msgpack
 
 from . import pickle
-from ..utils import has_keyword, typename
+from ..utils import has_keyword, nbytes, typename
 from .compression import maybe_compress, decompress
 from .utils import (
     unpack_frames,
     pack_frames_prelude,
     frame_split_size,
+    merge_frames,
     ensure_bytes,
     msgpack_opts,
 )
@@ -56,10 +57,13 @@ def pickle_dumps(x):
     frames = [None]
     buffer_callback = lambda f: frames.append(memoryview(f))
     frames[0] = pickle.dumps(x, buffer_callback=buffer_callback)
+    header["lengths"] = [nbytes(f) for f in frames]
+    frames = sum(map(frame_split_size, frames), [])
     return header, frames
 
 
 def pickle_loads(header, frames):
+    frames = merge_frames(header, frames)
     x, buffers = frames[0], frames[1:]
     return pickle.loads(x, buffers=buffers)
 
