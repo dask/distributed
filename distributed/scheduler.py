@@ -130,10 +130,10 @@ class Status(Enum):
         actually want to make sure the value compared with is in the list of
         possible Status.
         """
-        if isinstance(other, str):
+        if isinstance(other, str) or other is None:
             assert other in [s.value for s in type(self)]
             return other == self.value
-        elif isinstance(other, type(self)):
+        elif isinstance(other, Enum):
             return self.value == other.value
         raise TypeError(
             f"'==' not supported between instances of"
