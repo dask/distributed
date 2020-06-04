@@ -230,7 +230,7 @@ old_cluster_kwargs = {
 
 def SSHCluster(
     hosts: List[str] = None,
-    connect_options: dict = {},
+    connect_options: List[dict] or dict = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
@@ -311,11 +311,20 @@ def SSHCluster(
         kwargs.setdefault("worker_addrs", hosts)
         return OldSSHCluster(**kwargs)
 
+    if isinstance(connect_options, list):
+        if len(connect_options) != len(hosts):
+            raise RuntimeError(
+                "When specifying a list of connect_options you must provide a "
+                "dictionary for each address."
+            )
+
     scheduler = {
         "cls": Scheduler,
         "options": {
             "address": hosts[0],
-            "connect_options": connect_options,
+            "connect_options": connect_options
+            if isinstance(connect_options, dict)
+            else connect_options[0],
             "kwargs": scheduler_options,
             "remote_python": remote_python,
         },
@@ -325,7 +334,9 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "connect_options": connect_options,
+                "connect_options": connect_options
+                if isinstance(connect_options, dict)
+                else connect_options[i + 1],
                 "kwargs": worker_options,
                 "worker_module": worker_module,
                 "remote_python": remote_python,
