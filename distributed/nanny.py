@@ -1,6 +1,5 @@
 import asyncio
 from contextlib import suppress
-from enum import Enum
 import errno
 import logging
 from multiprocessing.queues import Empty

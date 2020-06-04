@@ -3,7 +3,6 @@ from collections import defaultdict, deque
 from collections.abc import Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
-from enum import Enum
 from functools import partial
 import inspect
 import itertools
