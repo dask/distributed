@@ -245,7 +245,7 @@ class WorkerState:
         "processing",
         "resources",
         "services",
-        "status",
+        "_status",
         "time_delay",
         "used_resources",
         "versions",
@@ -274,7 +274,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
 
-        self.status = Status.running
+        self._status = Status.running
         self.nbytes = 0
         self.occupancy = 0
         self.metrics = {}
@@ -295,6 +295,19 @@ class WorkerState:
 
     def __eq__(self, other):
         return type(self) == type(other) and self.address == other.address
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, new_status):
+        if isinstance(new_status, Status):
+            self._status = new_status
+        elif isinstance(new_status, str) or new_status is None:
+            corresponding_enum_variants = [s for s in Status if s.value == new_status]
+            assert len(corresponding_enum_variants) == 1
+            self._status = corresponding_enum_variants[0]
 
     @property
     def host(self):
@@ -1373,6 +1386,20 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
+        self.status = Status.undefined
+
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, new_status):
+        if isinstance(new_status, Status):
+            self._status = new_status
+        elif isinstance(new_status, str) or new_status is None:
+            corresponding_enum_variants = [s for s in Status if s.value == new_status]
+            assert len(corresponding_enum_variants) == 1
+            self._status = corresponding_enum_variants[0]
 
     ##################
     # Administration #

@@ -57,7 +57,7 @@ class Nanny(ServerNode):
 
     _instances = weakref.WeakSet()
     process = None
-    status = None
+    status = Status.undefined
 
     def __init__(
         self,
