@@ -19,7 +19,7 @@ from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
-from .core import RPCClosed, CommClosedError, coerce_to_address
+from .core import RPCClosed, CommClosedError, coerce_to_address, Status
 from .metrics import time
 from .node import ServerNode
 from . import preloading
@@ -36,43 +36,6 @@ from .utils import (
     TimeoutError,
 )
 from .worker import run, parse_memory_limit, Worker
-
-
-class Status(Enum):
-    """
-    This Enum contains the various states a worker can be.
-    Those states can be observed and used in worker, scheduler and nanny.
-
-    """
-
-    init = "init"
-    starting = "starting"
-    running = "running"
-    stopped = "stopped"
-    stopping = "stopping"
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status.
-        """
-        if isinstance(other, str) or other is None:
-            assert other in [s.value for s in type(self)]
-            return other == self.value
-        elif isinstance(other, Enum):
-            return self.value == other.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
-
 
 
 logger = logging.getLogger(__name__)

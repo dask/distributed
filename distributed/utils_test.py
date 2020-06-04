@@ -41,7 +41,7 @@ from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
 from .config import initialize_logging
-from .core import connect, rpc, CommClosedError, Status as WorkerStatus
+from .core import connect, rpc, CommClosedError, Status
 from .deploy import SpecCluster
 from .metrics import time
 from .process import _cleanup_dangling
@@ -61,7 +61,7 @@ from .utils import (
     TimeoutError,
 )
 from .worker import Worker
-from .nanny import Nanny, Status as NannyStatus
+from .nanny import Nanny
 
 try:
     import dask.array  # register config
@@ -1485,7 +1485,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == WorkerStatus.running:
+            if w.status == Status.running:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1501,8 +1501,7 @@ def check_instances():
         # raise ValueError("Unclosed Comms", L)
 
     assert all(
-        n.status == NannyStatus.closed or n.status == NannyStatus.init
-        for n in Nanny._instances
+        n.status == Status.closed or n.status == Status.init for n in Nanny._instances
     ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO

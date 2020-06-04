@@ -47,7 +47,7 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import rpc, send_recv, clean_exception, CommClosedError
+from .core import rpc, send_recv, clean_exception, CommClosedError, Status
 from .diagnostics.plugin import SchedulerPlugin
 
 from .http import get_handlers
@@ -108,38 +108,6 @@ DEFAULT_EXTENSIONS = [
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
-
-
-class Status(Enum):
-    """
-    This Enum contains the various states a worker can be.
-    Those states can be observed and used in worker, scheduler and nanny.
-
-    """
-
-    running = "running"
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status.
-        """
-        if isinstance(other, str) or other is None:
-            assert other in [s.value for s in type(self)]
-            return other == self.value
-        elif isinstance(other, Enum):
-            return self.value == other.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
 
 
 class ClientState:

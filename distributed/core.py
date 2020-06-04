@@ -42,16 +42,21 @@ from . import protocol
 
 class Status(Enum):
     """
-    This Enum contains the various states a worker can be.
-    Those states can be observed and used in worker, scheduler and nanny.
-
+    This Enum contains the various states a worker, scheduler and nanny can be
+    in. Some of the status can only be observed in one of nanny, scheduler or
+    worker but we put them in the same Enum as they are compared with each
+    other.
     """
 
-    undefined = None
-    running = "running"
     closed = "closed"
     closing = "closing"
     closing_gracefully = "closing-gracefully"
+    init = "init"
+    running = "running"
+    starting = "starting"
+    stopped = "stopped"
+    stopping = "stopping"
+    undefined = None
 
     def __eq__(self, other):
         """
@@ -59,13 +64,15 @@ class Status(Enum):
 
         If other object instance is string, we compare with the values, but we
         actually want to make sure the value compared with is in the list of
-        possible Status.
+        possible Status, this avoid comparison with non-existing status.
         """
-        if isinstance(other, str) or (other is None):
-            assert other in [s.value for s in type(self)]
-            return other == self.value
-        elif isinstance(other, Enum):
+        if isinstance(other, type(self)):
             return self.value == other.value
+        elif isinstance(other, str) or (other is None):
+            assert other in [
+                s.value for s in type(self)
+            ], f"comparison with non-existing states {other}"
+            return other == self.value
         raise TypeError(
             f"'==' not supported between instances of"
             f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
