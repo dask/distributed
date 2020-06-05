@@ -67,9 +67,6 @@ def merge_frames(header, frames):
     if all(len(f) == l for f, l in zip(frames, lengths)):
         return frames
 
-    if len(lengths) == 1 and len(frames) == 1:
-        return frames
-
     frames = frames[::-1]
     lengths = lengths[::-1]
 
