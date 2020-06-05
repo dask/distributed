@@ -199,8 +199,8 @@ def test_serialize_bytes(kwargs):
         "abc",
         np.arange(5),
         b"ab" * int(40e6),
-        2 ** 26 * b"ab",
-        (2 ** 25 * b"ab", 2 ** 25 * b"ab"),
+        int(2 ** 26) * b"ab",
+        (int(2 ** 25) * b"ab", int(2 ** 25) * b"ab"),
     ]:
         b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
