@@ -538,7 +538,7 @@ class SpecCluster(Cluster):
         maximum_cores: int = None,
         minimum_memory: str = None,
         maximum_memory: str = None,
-        **kwargs
+        **kwargs,
     ) -> Adaptive:
         """ Turn on adaptivity
 
