@@ -473,7 +473,7 @@ class SpecCluster(Cluster):
         --------
         scale
         """
-        worker_name_template = f'{self._name}-{{}}'
+        worker_name_template = f"{self._name}-{{}}"
         worker_name = worker_name_template.format(self._i)
         while worker_name in self.worker_spec:
             self._i += 1
