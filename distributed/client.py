@@ -660,7 +660,7 @@ class Client:
         elif address is not None and not isinstance(address, str):
             raise ValueError(
                 "Scheduler address must be a string or a Cluster instance, got {}".format(
-                    address
+                    type(address)
                 )
             )
 
