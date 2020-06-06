@@ -462,6 +462,14 @@ class SpecCluster(Cluster):
         if self.asynchronous:
             return NoOpAwaitable()
 
+    def _new_worker_name(self, worker_number):
+        """ Returns new worker name.
+
+        This can be overriden in SpecCluster derived classes to customise the
+        worker names.
+        """
+        return worker_number
+
     def new_worker_spec(self):
         """ Return name and spec for the next worker
 
@@ -473,13 +481,12 @@ class SpecCluster(Cluster):
         --------
         scale
         """
-        worker_name_template = f"{self._name}-{{}}"
-        worker_name = worker_name_template.format(self._i)
-        while worker_name in self.worker_spec:
+        new_worker_name = self._new_worker_name(self._i)
+        while new_worker_name in self.worker_spec:
             self._i += 1
-            worker_name = worker_name_template.format(self._i)
+            new_worker_name = self._new_worker_name(self._i)
 
-        return {worker_name: self.new_spec}
+        return {new_worker_name: self.new_spec}
 
     @property
     def _supports_scaling(self):
