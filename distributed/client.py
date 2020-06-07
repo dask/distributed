@@ -658,7 +658,7 @@ class Client:
             if security is None:
                 security = getattr(self.cluster, "security", None)
         elif address is not None and not isinstance(address, str):
-            raise ValueError(
+            raise TypeError(
                 "Scheduler address must be a string or a Cluster instance, got {}".format(
                     type(address)
                 )
