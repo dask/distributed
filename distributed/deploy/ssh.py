@@ -278,6 +278,9 @@ def SSHCluster(
 
     Examples
     --------
+    First, a basic example that works as long as your machine accepts SSH
+    connections (aka if port 22 is open):
+
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["localhost", "localhost", "localhost", "localhost"],
@@ -286,6 +289,31 @@ def SSHCluster(
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
     ... )
     >>> client = Client(cluster)
+
+    Now, an example with a remote cluser you have SSH access to as
+    user ``foo``:
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> import os
+    >>>
+    >>> auth = {"username": "foo", "password": os.environ.get("PASSWORD")}
+    >>> cluster = SSHCluster(
+    ...     ["machine1", "machine2", "machine3"]
+    ...     connect_options=auth,
+    ...     worker_options={"nthreads": 2},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
+    ... )
+    >>> client = Client(cluster)
+
+    This example assumes the password is set as an environment variable in the
+    current shell, with ``export PASSWORD=bar``,
+    which could be specified in shell initialization (e.g, ``.profile``).
+
+    .. warning::
+
+       Best practice is NOT to specify any password in the Python script.
+       If it's specified in the Python script there's a (very) strong chance
+       it'll leak unintentionally.
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
