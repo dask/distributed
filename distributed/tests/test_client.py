@@ -913,6 +913,31 @@ async def test_restrictions_ip_port(c, s, a, b):
     assert y.key in b.data
 
 
+@gen_cluster(client=True)
+async def test_restrictions_ip_port_task_key(c, s, a, b):
+    # Create a long dependency list
+    tasks = [delayed(inc)(1)]
+    for _ in range(100):
+        tasks.append(delayed(add)(tasks[-1], random.choice(tasks)))
+
+    last_task = tasks[-1]
+
+    # calculate all dependency keys
+    all_tasks = list(last_task.__dask_graph__())
+    # only restrict to a single worker
+    workers = {d: a.address for d in all_tasks}
+    result = c.compute(last_task, workers=workers)
+    await result
+
+    # all tasks should have been calculated by the first worker
+    for task in tasks:
+        assert s.worker_restrictions[task.key] == {a.address}
+
+    # and the data should also be there
+    assert last_task.key in a.data
+    assert last_task.key not in b.data
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
@@ -1820,6 +1845,15 @@ def test_bad_address():
         Client("127.0.0.1:1234", timeout=0.1)
     except (IOError, TimeoutError) as e:
         assert "connect" in str(e).lower()
+
+
+def test_informative_error_on_cluster_type():
+    with pytest.raises(TypeError) as exc_info:
+        Client(LocalCluster)
+
+    assert "Scheduler address must be a string or a Cluster instance" in str(
+        exc_info.value
+    )
 
 
 @gen_cluster(client=True)
@@ -5108,7 +5142,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": 100})
+@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await wait(futures)
@@ -5130,7 +5164,7 @@ async def test_profile(c, s, a, b):
     assert not result["count"]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": 100})
+@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     y = c.map(slowdec, range(10), delay=0.05, workers=a.address)

@@ -1,6 +1,45 @@
 Changelog
 =========
 
+2.18.0 - 2020-06-05
+-------------------
+
+- Merge frames in ``deserialize_bytes`` (:pr:`3639`) `John Kirkham`_
+- Allow ``SSHCluster`` to take a list of ``connect_options`` (:pr:`3854`) `Jacob Tomlinson`_
+- Add favicon to performance report (:pr:`3852`) `Jacob Tomlinson`_
+- Add dashboard plots for the amount of time spent per key and for transfer/serialization (:pr:`3792`) `Benjamin Zaitlen`_
+- Fix variable name in journey of a task documentation (:pr:`3840`) `Matthias Bussonnier`_
+- Fix typo in journey of a task doc (:pr:`3838`) `James Bourbeau`_
+- Register ``dask_cudf`` serializers (:pr:`3832`) `John Kirkham`_
+- Fix key check in ``rebalance`` missing keys (:pr:`3834`) `Jacob Tomlinson`_
+- Allow collection of partial profile information in case of exceptions (:pr:`3773`) `Florian Jetter`_
+
+
+2.17.0 - 2020-05-26
+-------------------
+
+- Record the time since the last run task on the scheduler (:pr:`3830`) `Matthew Rocklin`_
+- Set colour of ``nbytes`` pane based on thresholds (:pr:`3805`) `Krishan Bhasin`_
+- Include total number of tasks in the performance report (:pr:`3822`) `Abdulelah Bin Mahfoodh`_
+- Allow to pass in task key strings in the worker restrictions (:pr:`3826`) `Nils Braun`_
+- Control de/ser offload (:pr:`3793`) `Martin Durant`_
+- Parse timeout parameters in ``Variable``/``Event``/``Lock`` to support text timeouts (:pr:`3825`) `Nils Braun`_
+- Don't send empty dependencies (:pr:`3423`) `Jakub Beránek`_
+- Add distributed Dask ``Event`` that mimics ``threading.Event`` (:pr:`3821`) `Nils Braun`_
+- Enhance ``VersionMismatchWarning`` messages (:pr:`3786`) `Abdulelah Bin Mahfoodh`_
+- Support Pickle's protocol 5 (:pr:`3784`) `jakirkham`_
+- Replace ``utils.ignoring`` with ``contextlib.suppress`` (:pr:`3819`) `Nils Braun`_
+- Make re-creating conda environments from the CI output easier (:pr:`3816`) `Lucas Rademaker`_
+- Add prometheus metrics for semaphore (:pr:`3757`) `Lucas Rademaker`_
+- Fix worker plugin called with superseded transition (:pr:`3812`) `Nick Evans`_
+- Add retries to server listen (:pr:`3801`) `Jacob Tomlinson`_
+- Remove commented out lines from ``scheduler.py`` (:pr:`3803`) `James Bourbeau`_
+- Fix ``RuntimeWarning`` for never awaited coroutine when using ``distributed.Semaphore`` (:pr:`3713`) `Florian Jetter`_
+- Fix profile thread leakage during test teardown on some platforms (:pr:`3795`) `Florian Jetter`_
+- Await self before handling comms (:pr:`3788`) `Matthew Rocklin`_
+- Fix typo in ``Cluster`` docstring (:pr:`3787`) `Scott Sanderson`_
+
+
 2.16.0 - 2020-05-08
 -------------------
 
@@ -1749,3 +1788,7 @@ significantly without many new features.
 .. _`Nicholas Smith`: https://github.com/nsmith-
 .. _`Dillon Niederhut`: https://github.com/deniederhut
 .. _`Jonas Haag`: https://github.com/jonashaag
+.. _`Nils Braun`: https://github.com/nils-braun
+.. _`Nick Evans`: https://github.com/nre
+.. _`Scott Sanderson`: https://github.com/ssanderson
+.. _`Matthias Bussonnier`: https://github.com/Carreau

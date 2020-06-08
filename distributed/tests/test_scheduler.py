@@ -208,7 +208,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     )
 
     assert a.address in s.stream_comms
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
     s.validate_state()
@@ -217,9 +217,9 @@ async def test_remove_worker_from_scheduler(s, a, b):
 @gen_cluster()
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
-    assert s.remove_worker(address=a.name) == "OK"
+    assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
-    assert s.remove_worker(address=a.address) == "already-removed"
+    assert await s.remove_worker(address=a.address) == "already-removed"
     s.validate_state()
 
 
@@ -230,7 +230,7 @@ async def test_clear_events_worker_removal(s, a, b):
     assert b.address in s.events
     assert b.address in s.nthreads
 
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
     # Shortly after removal, the events should still be there
     assert a.address in s.events
     assert a.address not in s.nthreads
@@ -489,7 +489,7 @@ async def test_ready_remove_worker(s, a, b):
 
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
 
     assert set(s.workers) == {b.address}
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
@@ -1219,7 +1219,7 @@ async def test_service_hosts():
             assert sock.getsockname()[0] == "127.0.0.1"
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": 100})
+@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile_metadata(c, s, a, b):
     start = time() - 1
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
@@ -1234,7 +1234,28 @@ async def test_profile_metadata(c, s, a, b):
     assert not meta["counts"][-1][1]
 
 
-@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": 100})
+@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
+async def test_profile_metadata_timeout(c, s, a, b):
+    start = time() - 1
+
+    def raise_timeout(*args, **kwargs):
+        raise TimeoutError
+
+    b.handlers["profile_metadata"] = raise_timeout
+
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await wait(futures)
+    await asyncio.sleep(0.200)
+
+    meta = await s.get_profile_metadata(profile_cycle_interval=0.100)
+    now = time() + 1
+    assert meta
+    assert all(start < t < now for t, count in meta["counts"])
+    assert all(0 <= count < 30 for t, count in meta["counts"][:4])
+    assert not meta["counts"][-1][1]
+
+
+@gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile_metadata_keys(c, s, a, b):
     x = c.map(slowinc, range(10), delay=0.05)
     y = c.map(slowdec, range(10), delay=0.05)
@@ -1245,6 +1266,42 @@ async def test_profile_metadata_keys(c, s, a, b):
     assert (
         len(meta["counts"]) - 3 <= len(meta["keys"]["slowinc"]) <= len(meta["counts"])
     )
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.interval": "1ms",
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
+async def test_statistical_profiling(c, s, a, b):
+    futures = c.map(slowinc, range(10), delay=0.1)
+
+    await wait(futures)
+
+    profile = await s.get_profile()
+    assert profile["count"]
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.worker.profile.interval": "1ms",
+        "distributed.worker.profile.cycle": "100ms",
+    },
+)
+async def test_statistical_profiling_failure(c, s, a, b):
+    futures = c.map(slowinc, range(10), delay=0.1)
+
+    def raise_timeout(*args, **kwargs):
+        raise TimeoutError
+
+    b.handlers["profile"] = raise_timeout
+    await wait(futures)
+
+    profile = await s.get_profile()
+    assert profile["count"]
 
 
 @gen_cluster(client=True)
@@ -1540,8 +1597,11 @@ async def test_collect_versions(c, s, a, b):
 
 @gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "500ms"})
 async def test_idle_timeout(c, s, a, b):
+    beginning = time()
+    assert s.idle_since <= beginning
     future = c.submit(slowinc, 1)
     await future
+    assert s.idle_since is None or s.idle_since > beginning
 
     assert s.status != "closed"
 
@@ -1559,6 +1619,7 @@ async def test_idle_timeout(c, s, a, b):
     assert "idle" in logs.getvalue()
     assert "500" in logs.getvalue()
     assert "ms" in logs.getvalue()
+    assert s.idle_since > beginning
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})

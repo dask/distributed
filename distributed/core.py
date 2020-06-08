@@ -348,7 +348,7 @@ class Server:
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    async def listen(self, port_or_addr=None, **kwargs):
+    async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -359,7 +359,11 @@ class Server:
             addr = port_or_addr
             assert isinstance(addr, str)
         listener = await listen(
-            addr, self.handle_comm, deserialize=self.deserialize, **kwargs,
+            addr,
+            self.handle_comm,
+            deserialize=self.deserialize,
+            allow_offload=allow_offload,
+            **kwargs,
         )
         self.listeners.append(listener)
 
@@ -512,6 +516,7 @@ class Server:
                             handler = self.stream_handlers[op]
                             if is_coroutine_function(handler):
                                 self.loop.add_callback(handler, **merge(extra, msg))
+                                await gen.sleep(0)
                             else:
                                 handler(**merge(extra, msg))
                         else:
@@ -863,6 +868,7 @@ class ConnectionPool:
         limit=512,
         deserialize=True,
         serializers=None,
+        allow_offload=True,
         deserializers=None,
         connection_args=None,
         timeout=None,
@@ -873,6 +879,7 @@ class ConnectionPool:
         self.available = defaultdict(set)
         # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
+        self.allow_offload = allow_offload
         self.deserialize = deserialize
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
@@ -953,6 +960,7 @@ class ConnectionPool:
             )
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
+            comm.allow_offload = self.allow_offload
             self._created.add(comm)
         except Exception:
             self.semaphore.release()
