@@ -160,10 +160,10 @@ class TCP(Comm):
         pass
 
     def _get_finalizer(self):
-        def finalize(stream=self.stream, r=repr(self)):
-            if not stream.closed():
+        def finalize(comm=self.stream, r=repr(self)):
+            if not comm.closed():
                 logger.warning("Closing dangling stream in %s" % (r,))
-                stream.close()
+                comm.close()
 
         return finalize
 
