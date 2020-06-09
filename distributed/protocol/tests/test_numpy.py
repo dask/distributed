@@ -57,6 +57,7 @@ def test_serialize():
         np.array(["abc"], dtype="S3"),
         np.array(["abc"], dtype="U3"),
         np.array(["abc"], dtype=object),
+        np.array([np.arange(3), np.arange(4, 6)], dtype=object),
         np.ones(shape=(5,), dtype=("f8", 32)),
         np.ones(shape=(5,), dtype=[("x", "f8", 32)]),
         np.ones(shape=(5,), dtype=np.dtype([("a", "i1"), ("b", "f8")], align=False)),
