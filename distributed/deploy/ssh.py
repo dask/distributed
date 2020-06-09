@@ -297,7 +297,7 @@ def SSHCluster(
     >>> cluster = SSHCluster(
     ...     ["machine1", "machine1"],
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     connect_options={...})
+    ...     connect_options={"username": "user", "client_keys": "~/.ssh/dask-ssh"})
     >>> client = Client(cluster)
 
     An example using a different worker module, in particular the
