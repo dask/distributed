@@ -81,9 +81,10 @@ def test_dumps_serialize_numpy(x):
         assert isinstance(frame, (bytes, memoryview))
     y = deserialize(header, frames)
 
-    np.testing.assert_equal(x, y)
     if x.flags.c_contiguous or x.flags.f_contiguous:
         assert x.strides == y.strides
+
+    np.testing.assert_equal(x, y)
 
 
 @pytest.mark.parametrize(
