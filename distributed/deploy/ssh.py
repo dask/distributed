@@ -278,42 +278,27 @@ def SSHCluster(
 
     Examples
     --------
-    First, a basic example that works as long as your machine accepts SSH
-    connections (aka if port 22 is open):
+    The most relevant example is with a remote cluser you have SSH
+    access to as user ``foo``. Best practice is to generate a key-pair
+    following the `SSH keygen tutorial`_:
+
+    .. code:: bash
+
+       $ # Generate a key pair
+       $ ssh-keygen -t rsa -b 4096 -f ~/.ssh/dask-ssh -P ""
+       $ # Copy to remote machine
+       $ ssh-copy-id -i ~/.ssh/dask-ssh user@machine
+
+    Now it's possible to login to ``machine`` without entering a
+    password via ``ssh -i ~/.ssh-dask-ssh user@machine``.  Let's
+    create an ``SSHCluster``:
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
-    ...     ["localhost", "localhost", "localhost", "localhost"],
-    ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2},
-    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
-    ... )
+    ...     ["machine1", "machine1"],
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
+    ...     connect_options={...})
     >>> client = Client(cluster)
-
-    Now, an example with a remote cluser you have SSH access to as
-    user ``foo``:
-
-    >>> from dask.distributed import Client, SSHCluster
-    >>> import os
-    >>>
-    >>> auth = {"username": "foo", "password": os.environ.get("PASSWORD")}
-    >>> cluster = SSHCluster(
-    ...     ["machine1", "machine2", "machine3"]
-    ...     connect_options=auth,
-    ...     worker_options={"nthreads": 2},
-    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
-    ... )
-    >>> client = Client(cluster)
-
-    This example assumes the password is set as an environment variable in the
-    current shell, with ``export PASSWORD=bar``,
-    which could be specified in shell initialization (e.g, ``.profile``).
-
-    .. warning::
-
-       Best practice is NOT to specify any password in the Python script.
-       If it's specified in the Python script there's a (very) strong chance
-       it'll leak unintentionally.
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
@@ -331,6 +316,8 @@ def SSHCluster(
     dask.distributed.Scheduler
     dask.distributed.Worker
     asyncssh.connect
+
+    .. _SSH keygen tutorial: https://www.ssh.com/ssh/keygen/
     """
     if set(kwargs) & old_cluster_kwargs:
         from .old_ssh import SSHCluster as OldSSHCluster
