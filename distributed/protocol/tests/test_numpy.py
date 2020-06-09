@@ -86,7 +86,11 @@ def test_dumps_serialize_numpy(x):
     if x.flags.c_contiguous or x.flags.f_contiguous:
         assert x.strides == y.strides
 
-    np.testing.assert_equal(x, y)
+    if x.dtype.char == "O":
+        for e_x, e_y in zip(x.flat, y.flat):
+            np.testing.assert_equal(e_x, e_y)
+    else:
+        np.testing.assert_equal(x, y)
 
 
 @pytest.mark.parametrize(
