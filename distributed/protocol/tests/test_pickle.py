@@ -74,6 +74,20 @@ def test_pickle_numpy():
     assert (loads(dumps(x)) == x).all()
     assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
 
+    x = np.array([np.arange(3), np.arange(4, 6)], dtype=object)
+    x2 = loads(dumps(x))
+    assert x.shape == x2.shape
+    assert x.dtype == x2.dtype
+    assert x.strides == x2.strides
+    for e_x, e_x2 in zip(x.flat, x2.flat):
+        np.testing.assert_equal(e_x, e_x2)
+    x3 = deserialize(*serialize(x, serializers=("pickle",)))
+    assert x.shape == x3.shape
+    assert x.dtype == x3.dtype
+    assert x.strides == x3.strides
+    for e_x, e_x3 in zip(x.flat, x3.flat):
+        np.testing.assert_equal(e_x, e_x3)
+
     if HIGHEST_PROTOCOL >= 5:
         x = np.ones(5000)
 
