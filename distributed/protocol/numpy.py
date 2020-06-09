@@ -1,7 +1,6 @@
 import math
 import numpy as np
 
-from .utils import merge_frames
 from .serialize import dask_serialize, dask_deserialize
 from . import pickle
 
@@ -97,9 +96,6 @@ def serialize_numpy_ndarray(x):
 @dask_deserialize.register(np.ndarray)
 def deserialize_numpy_ndarray(header, frames):
     with log_errors():
-        if len(frames) > 1:
-            frames = merge_frames(header, frames)
-
         if header.get("pickle"):
             return pickle.loads(frames[0])
 
