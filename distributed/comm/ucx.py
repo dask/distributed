@@ -37,13 +37,13 @@ host_array = None
 device_array = None
 
 
-def synchronize_stream(comm=0):
+def synchronize_stream(stream=0):
     import numba.cuda
 
     ctx = numba.cuda.current_context()
-    cu_stream = numba.cuda.driver.drvapi.cu_stream(comm)
-    comm = numba.cuda.driver.Stream(ctx, cu_stream, None)
-    comm.synchronize()
+    cu_stream = numba.cuda.driver.drvapi.cu_stream(stream)
+    stream = numba.cuda.driver.Stream(ctx, cu_stream, None)
+    stream.synchronize()
 
 
 def init_once():
