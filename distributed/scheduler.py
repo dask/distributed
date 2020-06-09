@@ -85,6 +85,7 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .worker import dumps_task
 
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,10 @@ DEFAULT_EXTENSIONS = [
 ]
 
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+
+
+def noop(x):
+    return x
 
 
 class ClientState:
@@ -683,6 +688,12 @@ class TaskState:
         self.dependencies.add(other)
         self.group.dependencies.add(other.group)
         other.dependents.add(self)
+
+    def discard_dependency(self, other: "TaskState"):
+        """ Remove dependency from this task """
+        self.dependencies.discard(other)
+        self.group.dependencies.discard(other.group)
+        other.dependents.discard(self)
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
@@ -1288,6 +1299,7 @@ class Scheduler(ServerNode):
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
+            "insert_tasks": self.insert_tasks,
         }
 
         client_handlers = {
@@ -1342,6 +1354,7 @@ class Scheduler(ServerNode):
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
+            "insert_tasks": self.insert_tasks,
         }
 
         self._transitions = {
@@ -2071,6 +2084,85 @@ class Scheduler(ServerNode):
         tg.add(ts)
         self.tasks[key] = ts
         return ts
+
+    def insert_tasks(
+        self,
+        comm=None,
+        cur_key=None,
+        new_tasks=None,
+        rearguard_key=None,
+        rearguard_input=None,
+    ):
+        """
+        Insert new tasks immediately after a running task.
+
+        `new_tasks` specifies the new tasks and must for each task include a list of
+        dependencies and/or dependents. Since a dependency might not exist when
+        calling this function (e.g. if the dependency is created by a later call to
+        `insert_tasks()`), a task can also specify its dependents.
+
+        To tie the output of the new tasks back into the graph, we use a rearguard
+        task. The rearguard should be a dummy operation immediately after the callee.
+
+        Parameters
+        ----------
+        comm:
+            Ignored, needed by the RPC call
+        cur_key : str
+            The key of the currently running the new tasks will be inserted after.
+        new_tasks : list[dict]
+            Dictionaries of tasks, which should contain the following information:
+                - "key": the key of new task
+                - "dependencies": list of dependencies of the task
+                - "dependents": list of dependents of the task
+                - "task": the Dask task (serialized)
+                - "priority": the priority of the task (optional)
+        rearguard_key : str
+            The key of the rearguard
+        rearguard_input: str
+            The input keys for the rearguard
+        """
+
+        recomendations = {}
+        cur_ts = self.tasks[cur_key]
+        cur_dependents = list(cur_ts.dependents)
+        rearguard_ts = self.tasks[rearguard_key]
+        assert rearguard_ts in cur_ts.dependents
+
+        # Create new tasks
+        for task in new_tasks:
+            key = task["key"]
+            assert key not in self.tasks
+            ts = self.new_task(key, task["task"], "released")
+            priority = task.get("priority")
+            if priority is not None:
+                ts.priority = (self.generation, priority)
+            else:
+                ts.priority = cur_ts.priority
+            recomendations[key] = "waiting"
+            for dep in task.get("dependencies", []):
+                if dep in self.tasks:
+                    ts.add_dependency(self.tasks[dep])
+            for dep in task.get("dependents", []):
+                if dep in self.tasks:
+                    self.tasks[dep].add_dependency(ts)
+
+        # Remove the rearguard as a dependents of the current task
+        rearguard_ts.discard_dependency(cur_ts)
+        rearguard_ts.waiting_on.discard(cur_ts)
+        cur_ts.waiters.discard(rearguard_ts)
+
+        # Set the dependency and function input of the rearguard
+        ts = self.tasks[rearguard_input]
+        rearguard_ts.add_dependency(ts)
+        if rearguard_ts._state == "waiting":
+            rearguard_ts.waiting_on.add(ts)
+            ts.waiters.add(rearguard_ts)
+        # TODO: use a "memory task" instead
+        rearguard_ts.run_spec = dumps_task((noop, rearguard_input))
+
+        # Finally transition all recomendations
+        self.transitions(recomendations)
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
