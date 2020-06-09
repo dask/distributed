@@ -1,7 +1,7 @@
 import math
 import numpy as np
 
-from .utils import frame_split_size, merge_frames
+from .utils import merge_frames
 from .serialize import dask_serialize, dask_deserialize
 from . import pickle
 
@@ -87,10 +87,7 @@ def serialize_numpy_ndarray(x):
     if broadcast_to is not None:
         header["broadcast_to"] = broadcast_to
 
-    if x.nbytes > 1e5:
-        frames = frame_split_size(data)
-    else:
-        frames = [data]
+    frames = [data]
 
     header["lengths"] = [x.nbytes]
 
