@@ -96,8 +96,10 @@ def serialize_numpy_ndarray(x):
 @dask_deserialize.register(np.ndarray)
 def deserialize_numpy_ndarray(header, frames):
     with log_errors():
+        (frame,) = frames
+
         if header.get("pickle"):
-            return pickle.loads(frames[0])
+            return pickle.loads(frame)
 
         is_custom, dt = header["dtype"]
         if is_custom:
@@ -110,7 +112,7 @@ def deserialize_numpy_ndarray(header, frames):
         else:
             shape = header["shape"]
 
-        x = np.ndarray(shape, dtype=dt, buffer=frames[0], strides=header["strides"])
+        x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
 
         return x
 
