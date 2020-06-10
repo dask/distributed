@@ -303,12 +303,7 @@ def SSHCluster(
 
     This depends on a successful connection between the your machine
     and the Dask scheduler. Firewalls can complicate this, which results in a
-    timeout because a connection can't be made. This snippet will resolve any
-    networking if only port 22 is open for SSH access:
-
-    .. code:: python
-
-       SSHCluster(..., scheduler_options={"port": 22})
+    timeout because a connection can't be made.
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
