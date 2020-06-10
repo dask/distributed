@@ -274,7 +274,8 @@ def SSHCluster(
     worker_module: str, optional
         Python module to call to start the worker.
     remote_python: str, optional
-        Path to Python on remote nodes.
+        Path to Python on remote nodes. This can specified to use the
+        Python executable of a conda environment.
 
     Examples
     --------
