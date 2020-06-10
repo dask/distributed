@@ -287,18 +287,27 @@ def SSHCluster(
        $ # Generate a key pair
        $ ssh-keygen -t rsa -b 4096 -f ~/.ssh/dask-ssh -P ""
        $ # Copy to remote machine
-       $ ssh-copy-id -i ~/.ssh/dask-ssh user@machine
+       $ ssh-copy-id -i ~/.ssh/dask-ssh foo@machine
 
     Now it's possible to login to ``machine`` without entering a
-    password via ``ssh -i ~/.ssh-dask-ssh user@machine``.  Let's
+    password via ``ssh -i ~/.ssh-dask-ssh foo@machine``.  Let's
     create an ``SSHCluster``:
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["machine1", "machine1"],
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     connect_options={"username": "user", "client_keys": "~/.ssh/dask-ssh"})
+    ...     connect_options={"username": "foo", "client_keys": "~/.ssh/dask-ssh"})
     >>> client = Client(cluster)
+
+    This depends on a successful connection between the your machine
+    and the Dask scheduler. Firewalls can complicate this, which results in a
+    timeout because a connection can't be made. This snippet will resolve any
+    networking if only port 22 is open for SSH access:
+
+    .. code:: python
+
+       SSHCluster(..., scheduler_options={"port": 22})
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
