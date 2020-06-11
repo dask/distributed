@@ -310,7 +310,9 @@ def SSHCluster(
 
     .. code:: bash
 
-       $ # Remote setup: dask-scheduler (default ports of 8786 and 8787)
+       $ # Remote setup: Dask cluster with dask-scheduler and dask-worker
+       $ # (by default, scheduler uses port 8786 and dashboard at 8787
+       $
        $ # On local machine:
        $ ssh -L 8796:localhost:8786 -L 8797:localhost:8787 foo@machine
        $ python
