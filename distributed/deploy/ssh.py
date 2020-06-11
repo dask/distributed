@@ -32,12 +32,15 @@ class Process(ProcessInterface):
     async def start(self):
         assert self.connection
         weakref.finalize(
-            self, self.proc.kill
+            self, self.proc.stdin.write, "\x03"
         )  # https://github.com/ronf/asyncssh/issues/112
         await super().start()
 
     async def close(self):
-        self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
+        # https://github.com/ronf/asyncssh/issues/112
+        await self.proc.stdin.write("\x03")
+        await self.proc.wait_closed()
+
         self.connection.close()
         await super().close()
 
@@ -120,7 +123,7 @@ class Worker(Process):
             + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
 
-        self.proc = await self.connection.create_process(cmd)
+        self.proc = await self.connection.create_process(cmd, term_type="ansi")
 
         # We watch stderr in order to get the address, then we return
         while True:
@@ -194,7 +197,7 @@ class Scheduler(Process):
             ]
             + cli_keywords(self.kwargs, cls=_Scheduler)
         )
-        self.proc = await self.connection.create_process(cmd)
+        self.proc = await self.connection.create_process(cmd, term_type="ansi")
 
         # We watch stderr in order to get the address, then we return
         while True:
