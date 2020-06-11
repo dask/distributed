@@ -33,11 +33,11 @@ class Process(ProcessInterface):
         assert self.connection
         weakref.finalize(
             self, self.proc.stdin.write, "\x03"
-        )  # https://github.com/ronf/asyncssh/issues/112
+        )  # Workaround from https://github.com/ronf/asyncssh/issues/112
         await super().start()
 
     async def close(self):
-        # https://github.com/ronf/asyncssh/issues/112
+        # Workaround from https://github.com/ronf/asyncssh/issues/112
         await self.proc.stdin.write("\x03")
         await self.proc.wait_closed()
 
