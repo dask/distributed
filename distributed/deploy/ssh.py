@@ -303,7 +303,26 @@ def SSHCluster(
 
     This depends on a successful connection between the your machine
     and the Dask scheduler. Firewalls can complicate this, which results in a
-    timeout because a connection can't be made.
+    timeout because a connection can't be made. An alternative approach to
+    circumvent this issue is to start the Dask scheduler and it's workers on
+    the cluster, then port-forward the Dask scheduler and dashboard to your
+    local machine:
+
+    .. code:: bash
+
+       $ # Remote setup: dask-scheduler (default ports of 8786 and 8787)
+       $ # On local machine:
+       $ ssh -L 8796:localhost:8786 -L 8797:localhost:8787 foo@machine
+       $ python
+       >>> from distributed import Client
+       >>> client = Client("localhost:8796")
+       >>> # Perform simple computation on remote machine:
+       >>> client.submit(sum, [1, 2])
+
+    Now, all computation submitted to Dask scheduler will happen on the remote
+    cluster but development will take place on your local machine. The
+    dashboard will be available from the local machine at
+    ``http://localhost:8796`` to track the computation.
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
