@@ -212,9 +212,7 @@ routes = [
     (r"eventstream", EventstreamHandler, {}),
 ]
 try:
-    # import distributed.dashboard.scheduler  # noqa: F401
-    raise ImportError(
-        "Is it the double import of distributed.dashboard.scheduler that causes a problem?"
-    )
+    import distributed.dashboard.scheduler  # noqa: F401
 except ImportError:
+    logger.error("Is this happening?")
     routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
