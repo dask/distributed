@@ -1137,7 +1137,7 @@ class Scheduler(ServerNode):
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             except Exception as e:
-                logger.error(f"Whats the problem: {e}")
+                print(f"Whats the problem: {e}")
             else:
                 distributed.dashboard.scheduler.connect(
                     self.http_application, self.http_server, self, prefix=http_prefix

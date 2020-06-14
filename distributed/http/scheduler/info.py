@@ -214,5 +214,5 @@ routes = [
 try:
     import distributed.dashboard.scheduler  # noqa: F401
 except ImportError:
-    logger.error("Is this happening?")
+    print("Is this happening?")
     routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
