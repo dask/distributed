@@ -212,8 +212,8 @@ routes = [
     (r"eventstream", EventstreamHandler, {}),
 ]
 
-try:
-    import distributed.dashboard.scheduler  # noqa: F401
-except ImportError:
-    # routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
-    pass
+# try:
+# import distributed.dashboard.scheduler  # noqa: F401
+# except ImportError:
+# routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
+# pass
