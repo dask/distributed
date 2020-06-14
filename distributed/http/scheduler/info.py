@@ -189,16 +189,6 @@ class EventstreamHandler(WebSocketHandler):
         self.server.remove_plugin(self.plugin)
 
 
-class MissingBokeh(RequestHandler):
-    def get(self):
-        with log_errors():
-            self.write(
-                "<p>Dask needs bokeh >= 0.13.0 for the dashboard.</p>"
-                "<p>Install with conda: conda install bokeh>=0.13.0</p>"
-                "<p>Install with pip: pip install bokeh>=0.13.0</p>"
-            )
-
-
 routes = [
     (r"info", redirect("info/main/workers.html"), {}),
     (r"info/main/workers.html", Workers, {}),
@@ -211,8 +201,3 @@ routes = [
     (r"individual-plots.json", IndividualPlots, {}),
     (r"eventstream", EventstreamHandler, {}),
 ]
-try:
-    import distributed.dashboard.scheduler  # noqa: F401
-except ImportError:
-    print("Is this happening?")
-    routes += [(r"/", redirect("status"), {}), (r"status", MissingBokeh, {})]
