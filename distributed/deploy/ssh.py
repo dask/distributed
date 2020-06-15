@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from typing import List, Union
@@ -150,10 +151,20 @@ class Scheduler(Process):
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
         dask.distributed.Scheduler class
+    forward_scheduler_port: int, optional
+        Local port to forward the remote scheduler port to.
+    forward_dashboard_port: int, optional
+        Local port to forward the remote dashboard port to.
     """
 
     def __init__(
-        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
+        self,
+        address: str,
+        connect_options: dict,
+        kwargs: dict,
+        remote_python=None,
+        forward_scheduler_port: int = None,
+        forward_dashboard_port: int = None,
     ):
         super().__init__()
 
@@ -161,6 +172,9 @@ class Scheduler(Process):
         self.kwargs = kwargs
         self.connect_options = connect_options
         self.remote_python = remote_python
+        self.forward_scheduler_port = forward_scheduler_port
+        self.forward_dashboard_port = forward_dashboard_port
+        self.port_forwards = []
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -204,9 +218,36 @@ class Scheduler(Process):
             logger.info(line.strip())
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
+                if self.forward_scheduler_port:
+                    port = self.address.split(":")[-1]
+                    self.port_forwards.append(
+                        await self.connection.forward_remote_port(
+                            "localhost",
+                            int(self.forward_scheduler_port),
+                            "localhost",
+                            int(port),
+                        )
+                    )
+                    self.address = "tcp://localhost:{}".format(
+                        self.forward_scheduler_port
+                    )
+                if self.forward_dashboard_port:
+                    self.port_forwards.append(
+                        await self.connection.forward_remote_port(
+                            "localhost",
+                            int(self.forward_dashboard_port),
+                            "localhost",
+                            8787,
+                        )
+                    )
                 break
+
         logger.debug("%s", line)
         await super().start()
+
+    async def close(self):
+        await asyncio.gather(*[p.wait_closed() for p in self.port_forwards])
+        await super().close()
 
 
 old_cluster_kwargs = {
@@ -235,6 +276,8 @@ def SSHCluster(
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
     remote_python: str = None,
+    forward_scheduler_port: int = None,
+    forward_dashboard_port: int = None,
     **kwargs,
 ):
     """ Deploy a Dask cluster using SSH
@@ -275,6 +318,10 @@ def SSHCluster(
         Python module to call to start the worker.
     remote_python: str, optional
         Path to Python on remote nodes.
+    forward_scheduler_port: int, optional
+        Local port to forward the remote scheduler port to.
+    forward_dashboard_port: int, optional
+        Local port to forward the remote dashboard port to.
 
     Examples
     --------
@@ -334,6 +381,8 @@ def SSHCluster(
             else connect_options[0],
             "kwargs": scheduler_options,
             "remote_python": remote_python,
+            "forward_scheduler_port": forward_scheduler_port,
+            "forward_dashboard_port": forward_dashboard_port,
         },
     }
     workers = {
