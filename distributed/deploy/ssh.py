@@ -219,7 +219,7 @@ class Scheduler(Process):
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
                 if self.forward_scheduler_port:
-                    port = self.address.split(":")[-1]
+                    protocol, *_, port = self.address.split(":")
                     self.port_forwards.append(
                         await self.connection.forward_remote_port(
                             "localhost",
@@ -228,8 +228,8 @@ class Scheduler(Process):
                             int(port),
                         )
                     )
-                    self.address = "tcp://localhost:{}".format(
-                        self.forward_scheduler_port
+                    self.address = "{}://localhost:{}".format(
+                        protocol, self.forward_scheduler_port
                     )
                 if self.forward_dashboard_port:
                     self.port_forwards.append(
@@ -343,6 +343,20 @@ def SSHCluster(
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
     ...     worker_module='dask_cuda.dask_cuda_worker')
+    >>> client = Client(cluster)
+
+    An example of forwarding the Dask scheduler ports locally. Useful if
+    you only have SSH access to a host but the firewall blocks other ports.
+    This will forward to remote scheduler port and dashboard to 8786 and 8787
+    on your local machine respectively.
+
+    >>> from dask.distributed import Client, SSHCluster
+    >>> cluster = SSHCluster(
+    ...     ["localhost", "hostwithgpus", "anothergpuhost"],
+    ...     connect_options={"known_hosts": None},
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
+    ...     forward_scheduler_port=8786,
+    ...     forward_dashboard_port=8787)
     >>> client = Client(cluster)
 
     See Also
