@@ -1856,7 +1856,10 @@ class WorkerTable(DashboardComponent):
                 )
                 continue
             try:
-                data[name].insert(0, sum(data[name]))
+                total_data = sum(data[name])
+                if name == "memory_percent":
+                    total_data /= len(data[name])
+                data[name].insert(0, total_data)
             except TypeError:
                 data[name].insert(0, None)
 
