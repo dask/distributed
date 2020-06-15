@@ -156,3 +156,21 @@ async def test_list_of_connect_options_raises():
             worker_options={"death_timeout": "5s"},
         ) as _:
             pass
+
+
+@pytest.mark.asyncio
+async def test_port_forwarding():
+    async with SSHCluster(
+        ["127.0.0.1"] * 3,
+        connect_options=dict(known_hosts=None),
+        asynchronous=True,
+        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s"},
+        forward_scheduler_port=58786,
+        forward_dashboard_port=58787,
+    ) as cluster:
+        assert len(cluster.workers) == 2
+        assert "58786" in cluster.scheduler.address
+        async with Client(cluster, asynchronous=True) as client:
+            result = await client.submit(lambda x: x + 1, 10)
+            assert result == 11
