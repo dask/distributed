@@ -1,5 +1,3 @@
-from collections import namedtuple
-
 import pytest
 
 from distributed import Worker, WorkerPlugin
@@ -29,21 +27,22 @@ class MyPlugin(WorkerPlugin):
             for expected, real in zip(
                 self.expected_notifications, self.observed_notifications
             ):
-                assert type(expected) is type(real) and expected == real
+                assert expected == real
 
     def transition(self, key, start, finish, **kwargs):
-        self.observed_notifications.append(Transition(key, start, finish))
+        self.observed_notifications.append(
+            {"key": key, "start": start, "finish": finish,}
+        )
 
     def release_key(self, key, state, cause, reason, report):
-        self.observed_notifications.append(ReleasedKey(key, state))
+        self.observed_notifications.append(
+            {"key": key, "state": state,}
+        )
 
     def release_dep(self, dep, state, report):
-        self.observed_notifications.append(ReleasedDep(dep, state))
-
-
-Transition = namedtuple("Transition", "key, start, finish")
-ReleasedKey = namedtuple("ReleasedKey", "key, state")
-ReleasedDep = namedtuple("ReleasedDep", "dep, state")
+        self.observed_notifications.append(
+            {"dep": dep, "state": state,}
+        )
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -68,10 +67,10 @@ async def test_create_on_construction(c, s, a, b):
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_normal_task_transitions_called(c, s, w):
     expected_notifications = [
-        Transition("task", "waiting", "ready"),
-        Transition("task", "ready", "executing"),
-        Transition("task", "executing", "memory"),
-        ReleasedKey("task", "memory"),
+        {"key": "task", "start": "waiting", "finish": "ready"},
+        {"key": "task", "start": "ready", "finish": "executing"},
+        {"key": "task", "start": "executing", "finish": "memory"},
+        {"key": "task", "state": "memory"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -87,9 +86,9 @@ async def test_failing_task_transitions_called(c, s, w):
         raise Exception()
 
     expected_notifications = [
-        Transition("task", "waiting", "ready"),
-        Transition("task", "ready", "executing"),
-        Transition("task", "executing", "error"),
+        {"key": "task", "start": "waiting", "finish": "ready"},
+        {"key": "task", "start": "ready", "finish": "executing"},
+        {"key": "task", "start": "executing", "finish": "error"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -105,10 +104,10 @@ async def test_failing_task_transitions_called(c, s, w):
 )
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
-        Transition("task", "waiting", "constrained"),
-        Transition("task", "constrained", "executing"),
-        Transition("task", "executing", "memory"),
-        ReleasedKey("task", "memory"),
+        {"key": "task", "start": "waiting", "finish": "constrained"},
+        {"key": "task", "start": "constrained", "finish": "executing"},
+        {"key": "task", "start": "executing", "finish": "memory"},
+        {"key": "task", "state": "memory"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -126,15 +125,15 @@ async def test_release_dep_called(c, s, w):
     }
 
     expected_notifications = [
-        Transition("dep", "waiting", "ready"),
-        Transition("dep", "ready", "executing"),
-        Transition("dep", "executing", "memory"),
-        Transition("task", "waiting", "ready"),
-        Transition("task", "ready", "executing"),
-        Transition("task", "executing", "memory"),
-        ReleasedKey("dep", "memory"),
-        ReleasedDep("dep", "memory"),
-        ReleasedKey("task", "memory"),
+        {"key": "dep", "start": "waiting", "finish": "ready"},
+        {"key": "dep", "start": "ready", "finish": "executing"},
+        {"key": "dep", "start": "executing", "finish": "memory"},
+        {"key": "task", "start": "waiting", "finish": "ready"},
+        {"key": "task", "start": "ready", "finish": "executing"},
+        {"key": "task", "start": "executing", "finish": "memory"},
+        {"key": "dep", "state": "memory"},
+        {"dep": "dep", "state": "memory"},
+        {"key": "task", "state": "memory"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
