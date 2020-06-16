@@ -42,12 +42,7 @@ async def test_keywords():
         ["127.0.0.1"] * 3,
         connect_options=dict(known_hosts=None),
         asynchronous=True,
-        worker_options={
-            "nprocs": 2,  # nprocs checks custom arguments with cli_keywords
-            "nthreads": 2,
-            "memory_limit": "2 GiB",
-            "death_timeout": "5s",
-        },
+        worker_options={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s",},
         scheduler_options={"idle_timeout": "10s", "port": 0},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:

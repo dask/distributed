@@ -1,3 +1,4 @@
+import json
 import logging
 import sys
 from typing import List, Union
@@ -7,9 +8,6 @@ import weakref
 import dask
 
 from .spec import SpecCluster, ProcessInterface
-from ..utils import cli_keywords
-from ..scheduler import Scheduler as _Scheduler
-from ..worker import Worker as _Worker
 from ..utils import serialize_for_cli
 
 logger = logging.getLogger(__name__)
@@ -71,7 +69,8 @@ class Worker(Process):
         address: str,
         connect_options: dict,
         kwargs: dict,
-        worker_module="distributed.cli.dask_worker",
+        worker_module="deprecated",
+        worker_class="dask.distributed.Nanny",
         remote_python=None,
         loop=None,
         name=None,
@@ -80,7 +79,13 @@ class Worker(Process):
 
         self.address = address
         self.scheduler = scheduler
-        self.worker_module = worker_module
+        if worker_module != "deprecated":
+            raise ValueError(
+                "The worker_module= keyword has been deprecated. "
+                "Please use worker_class= and instead. "
+                "You will have to specify a Python class rather than a CLI command."
+            )
+        self.worker_class = worker_class
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.name = name
@@ -112,12 +117,17 @@ class Worker(Process):
                 set_env,
                 self.remote_python or sys.executable,
                 "-m",
-                self.worker_module,
+                "distributed.cli.dask_spec",
                 self.scheduler,
-                "--name",
-                str(self.name),
+                "--spec",
+                "'%s'"
+                % json.dumps(
+                    {
+                        "cls": self.worker_class,
+                        "opts": {**self.kwargs, "name": self.name,},
+                    }
+                ),
             ]
-            + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
 
         self.proc = await self.connection.create_process(cmd)
@@ -190,9 +200,13 @@ class Scheduler(Process):
                 set_env,
                 self.remote_python or sys.executable,
                 "-m",
-                "distributed.cli.dask_scheduler",
+                "distributed.cli.dask_spec",
+                "--spec",
+                "'%s'"
+                % json.dumps(
+                    {"cls": "dask.distributed.Scheduler", "opts": self.kwargs,}
+                ),
             ]
-            + cli_keywords(self.kwargs, cls=_Scheduler)
         )
         self.proc = await self.connection.create_process(cmd)
 
@@ -233,7 +247,8 @@ def SSHCluster(
     connect_options: Union[List[dict], dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
-    worker_module: str = "distributed.cli.dask_worker",
+    worker_module: str = "deprecated",
+    worker_class: str = "dask.distributed.Nanny",
     remote_python: str = None,
     **kwargs,
 ):
@@ -271,8 +286,8 @@ def SSHCluster(
         Keywords to pass on to workers.
     scheduler_options: dict, optional
         Keywords to pass on to scheduler.
-    worker_module: str, optional
-        Python module to call to start the worker.
+    worker_class: str, optional
+        Python class to use to create the worker
     remote_python: str, optional
         Path to Python on remote nodes.
 
@@ -288,14 +303,14 @@ def SSHCluster(
     >>> client = Client(cluster)
 
     An example using a different worker module, in particular the
-    ``dask-cuda-worker`` command from the ``dask-cuda`` project.
+    ``CUDAWorker`` command from the ``dask-cuda`` project.
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["localhost", "hostwithgpus", "anothergpuhost"],
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module='dask_cuda.dask_cuda_worker')
+    ...     worker_class='dask_cuda.CUDAWorker')
     >>> client = Client(cluster)
 
     See Also
@@ -304,6 +319,12 @@ def SSHCluster(
     dask.distributed.Worker
     asyncssh.connect
     """
+    if worker_module != "deprecated":
+        raise ValueError(
+            "The worker_module= keyword has been deprecated. "
+            "Please use worker_class= and instead. "
+            "You will have to specify a Python class rather than a CLI command."
+        )
     if set(kwargs) & old_cluster_kwargs:
         from .old_ssh import SSHCluster as OldSSHCluster
 
@@ -345,7 +366,7 @@ def SSHCluster(
                 if isinstance(connect_options, dict)
                 else connect_options[i + 1],
                 "kwargs": worker_options,
-                "worker_module": worker_module,
+                "worker_class": worker_class,
                 "remote_python": remote_python,
             },
         }
