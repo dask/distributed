@@ -1,13 +1,9 @@
-import asyncio
 from collections import namedtuple
 
 import pytest
 
 from distributed import Worker, WorkerPlugin
-from distributed.utils_test import gen_cluster, inc
-
-
-DELAY_BEFORE_TEARDOWN = 0.05
+from distributed.utils_test import async_wait_for, gen_cluster, inc
 
 
 class MyPlugin(WorkerPlugin):
@@ -82,7 +78,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await asyncio.sleep(DELAY_BEFORE_TEARDOWN)
+    await async_wait_for(lambda: not w.task_state, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -119,7 +115,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await asyncio.sleep(DELAY_BEFORE_TEARDOWN)
+    await async_wait_for(lambda: not w.task_state, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -145,7 +141,7 @@ async def test_release_dep_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await asyncio.sleep(DELAY_BEFORE_TEARDOWN)
+    await async_wait_for(lambda: not (w.task_state or w.dep_state), timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
