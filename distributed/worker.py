@@ -2839,14 +2839,13 @@ class Worker(ServerNode):
 
     def _notify_plugins(self, method_name, *args, **kwargs):
         for name, plugin in self.plugins.items():
-            try:
-                plugin_method = getattr(plugin, method_name)
-            except AttributeError:
-                continue
-            try:
-                plugin_method(*args, **kwargs)
-            except Exception:
-                logger.info("Plugin '%s' failed with exception" % name, exc_info=True)
+            if hasattr(plugin, method_name):
+                try:
+                    getattr(plugin, method_name)(*args, **kwargs)
+                except Exception:
+                    logger.info(
+                        "Plugin '%s' failed with exception" % name, exc_info=True
+                    )
 
     ##############
     # Validation #
