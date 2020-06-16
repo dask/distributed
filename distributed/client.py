@@ -4125,7 +4125,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause, reason, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
         ...         pass
         ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass

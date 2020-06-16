@@ -161,7 +161,8 @@ class WorkerPlugin:
             One of waiting, ready, executing, long-running, memory, error.
         cause: string or None
             Additional information on what triggered the release of the task.
-        reason:
+        reason: None
+            Not used.
         report: bool
             Whether the worker should report the released task to the scheduler.
         """
