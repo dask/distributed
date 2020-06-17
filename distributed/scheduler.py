@@ -2097,9 +2097,7 @@ class Scheduler(ServerNode):
         Insert new tasks immediately after a running task.
 
         `new_tasks` specifies the new tasks and must for each task include a list of
-        dependencies and/or dependents. Since a dependency might not exist when
-        calling this function (e.g. if the dependency is created by a later call to
-        `insert_tasks()`), a task can also specify its dependents.
+        dependencies.
 
         To tie the output of the new tasks back into the graph, we use a rearguard
         task. The rearguard should be a dummy operation immediately after the callee.
@@ -2114,8 +2112,8 @@ class Scheduler(ServerNode):
             Dictionaries of tasks, which should contain the following information:
                 - "key": the key of new task
                 - "dependencies": list of dependencies of the task
-                - "dependents": list of dependents of the task
                 - "task": the Dask task (serialized)
+                - "releases": list of tuples that specifies tasks to release (optional)
                 - "priority": the priority of the task (optional)
         rearguard_key : str
             The key of the rearguard
@@ -2125,9 +2123,12 @@ class Scheduler(ServerNode):
 
         recomendations = {}
         cur_ts = self.tasks[cur_key]
-        cur_dependents = list(cur_ts.dependents)
         rearguard_ts = self.tasks[rearguard_key]
-        assert rearguard_ts in cur_ts.dependents
+
+        if rearguard_ts not in cur_ts.dependents:
+            # self.to_graphviz()
+            # print(f"rearguard_ts: {rearguard_ts}, cur_ts{cur_ts}")
+            return
 
         # Create new tasks
         for task in new_tasks:
@@ -2141,16 +2142,17 @@ class Scheduler(ServerNode):
                 ts.priority = cur_ts.priority
             recomendations[key] = "waiting"
             for dep in task.get("dependencies", []):
-                if dep in self.tasks:
-                    ts.add_dependency(self.tasks[dep])
-            for dep in task.get("dependents", []):
-                if dep in self.tasks:
-                    self.tasks[dep].add_dependency(ts)
+                dep_ts = self.tasks[dep]
+                ts.add_dependency(self.tasks[dep])
 
-        # Remove the rearguard as a dependents of the current task
-        rearguard_ts.discard_dependency(cur_ts)
-        rearguard_ts.waiting_on.discard(cur_ts)
-        cur_ts.waiters.discard(rearguard_ts)
+            for to_release, after in task.get("releases", []):
+                to_release = self.tasks[to_release]
+                # TODO: Detecting rearguard by other than name
+                if after == len([d for d in to_release.dependents if "rearguard" not in d.key]):
+                    for dep in [d for d in to_release.dependents if "rearguard" in d.key]:
+                        dep.discard_dependency(to_release)
+                        dep.waiting_on.discard(to_release)
+                        to_release.waiters.discard(dep)
 
         # Set the dependency and function input of the rearguard
         ts = self.tasks[rearguard_input]

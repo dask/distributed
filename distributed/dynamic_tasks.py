@@ -1,57 +1,56 @@
+import math
+from operator import getitem
+
 from dask.base import tokenize
-import dask.dataframe as dd
-from distributed import get_worker, get_client
-from distributed.worker import dumps_task
-import dask
+from dask.dataframe.core import new_dd_object
 from dask.dataframe.shuffle import (
-    shuffle,
-    shuffle_group,
     _concat,
+    shuffle_group,
     shuffle_group_2,
     shuffle_group_get,
 )
-from dask.dataframe.core import new_dd_object
-from operator import getitem
 from dask.highlevelgraph import HighLevelGraph
+from dask.utils import digit, insert
+from distributed import get_client, get_worker
+from distributed.worker import dumps_task
 
 
 def _rearguard():
     pass
 
 
-def dynshuffle_kernel(df, rank, npartitions, name, col, ignore_index):
+def dynshuffle_kernel(
+    df, name, token, inp, stage, rank, n, k, nfinal, col, ignore_index,
+):
     worker = get_worker()
     client = get_client()
     myself = worker.get_current_task()
     assert name in myself
 
-    groups = shuffle_group(
-        df,
-        col,
-        0,
-        npartitions,
-        npartitions,
-        ignore_index=ignore_index,
-        nfinal=npartitions,
-    )
-    assert len(groups) == npartitions
+    shuffle_getitem_name = name + "-getitem-" + token
+    shuffle_concat_name = name + "-concat-" + token
+
+    groups = shuffle_group(df, col, stage, k, n, ignore_index, nfinal)
 
     new_tasks = []
-    for i in range(npartitions):
-        part = str((name, i))
+    for i in range(k):
+        getitem_key = insert(inp, stage, i)
         new_tasks.append(
             {
-                "key": f"shuffle_getitem_{myself}_{part}",
-                "dependencies": [part],
-                "task": dumps_task((getitem, part, rank)),
+                "key": str((shuffle_getitem_name, stage, rank, i)),
+                "dependencies": [str((f"{name}-{token}", stage, getitem_key))],
+                "task": dumps_task(
+                    (getitem, str((f"{name}-{token}", stage, getitem_key)), inp[stage])
+                ),
                 "priority": 0,
+                "releases": [(str((f"{name}-{token}", stage, getitem_key)), k)],
             }
         )
     getitem_keys = [t["key"] for t in new_tasks]
 
     new_tasks.append(
         {
-            "key": f"shuffle_join_{myself}",
+            "key": str((shuffle_concat_name, stage, rank)),
             "dependencies": getitem_keys,
             "task": dumps_task((_concat, getitem_keys)),
         }
@@ -61,54 +60,76 @@ def dynshuffle_kernel(df, rank, npartitions, name, col, ignore_index):
         worker.scheduler.insert_tasks,
         cur_key=myself,
         new_tasks=new_tasks,
-        rearguard_key=str(("rearguard_" + name, rank)),
-        rearguard_input=f"shuffle_join_{myself}",
+        rearguard_key=str((f"rearguard_{name}_{stage}-{token}", rank)),
+        rearguard_input=str((shuffle_concat_name, stage, rank)),
     )
 
     return groups
 
 
-def dd_dynamic_tasks_map(func, ddf, name, **kwargs):
-    n = ddf.npartitions
-    df_name = ddf._name
-    token = tokenize(ddf, func, name)
-    name = "%s-%s" % (name, token)
-    rearguard_name = "rearguard_" + name
-
-    layer = {}
-    for rank in range(n):
-        layer[(name, rank)] = (
-            dask.utils.apply,
-            func,
-            [(df_name, rank), rank, n, name],
-            kwargs,
-        )
-
-    ddf = new_dd_object(
-        HighLevelGraph.from_collections(name, layer, dependencies=[ddf]),
-        name,
-        ddf._meta,
-        ddf.divisions,
-    )
-
-    layer = {}
-    for rank in range(n):
-        layer[(rearguard_name, rank)] = (_rearguard, (name, rank))
-
-    ddf = new_dd_object(
-        HighLevelGraph.from_collections(rearguard_name, layer, dependencies=[ddf]),
-        rearguard_name,
-        ddf._meta,
-        ddf.divisions,
-    )
-    return ddf
-
-
 def rearrange_by_column_dynamic_tasks(
-    df, column, max_branch=32, npartitions=None, ignore_index=False
+    df, column, max_branch=None, npartitions=None, ignore_index=False
 ):
-    df2 = dd_dynamic_tasks_map(
-        dynshuffle_kernel, df, "dynshuffle", col=column, ignore_index=ignore_index,
+    token = tokenize(df, column, max_branch, npartitions, ignore_index)
+    max_branch = max_branch if max_branch else 32
+    n = df.npartitions
+    nfinal = npartitions if npartitions else n
+
+    stages = int(math.ceil(math.log(n) / math.log(max_branch)))
+    if stages > 1:
+        k = int(math.ceil(n ** (1 / stages)))
+    else:
+        k = n
+
+    inputs = [tuple(digit(i, j, k) for j in range(stages)) for i in range(k ** stages)]
+    name = "dynshuffle"
+
+    dsk = {}
+    for stage in range(stages):
+        for rank, inp in enumerate(inputs):
+            if stage == 0:
+                if rank < df.npartitions:
+                    start = (df._name, rank)
+                else:
+                    start = df._meta
+            else:
+                start = (f"rearguard_{name}_{stage-1}-{token}", rank)
+            dsk[(f"{name}-{token}", stage, inp)] = (
+                dynshuffle_kernel,
+                start,
+                name,
+                token,
+                inp,
+                stage,
+                rank,
+                n,
+                k,
+                nfinal,
+                column,
+                ignore_index,
+            )
+            if stage == stages - 1 and rank == df.npartitions - 1:
+                dsk[(f"rearguard_{name}_{stage}-{token}", rank)] = (
+                    _rearguard,
+                    [(f"{name}-{token}", stage, inn) for inn in inputs[rank:]]
+                    + [
+                        (f"rearguard_{name}_{stage}-{token}", r)
+                        for r in range(rank + 1, len(inputs))
+                    ],
+                )
+            else:
+                dsk[(f"rearguard_{name}_{stage}-{token}", rank)] = (
+                    _rearguard,
+                    (f"{name}-{token}", stage, inp),
+                )
+
+    df2 = new_dd_object(
+        HighLevelGraph.from_collections(
+            f"rearguard_{name}_{stages-1}-{token}", dsk, dependencies=[df]
+        ),
+        f"rearguard_{name}_{stages-1}-{token}",
+        df._meta,
+        df.divisions,
     )
 
     # If the npartitions doesn't match, we use the old shuffle code for now.
@@ -146,4 +167,5 @@ def rearrange_by_column_dynamic_tasks(
         df3 = df2
         df3.divisions = (None,) * (df.npartitions + 1)
 
+    # print(f"rearrange_by_column_dynamic_tasks() - len(dsk): {len(dsk)}")
     return df3
