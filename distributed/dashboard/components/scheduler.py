@@ -1856,7 +1856,9 @@ class WorkerTable(DashboardComponent):
                 )
                 continue
             try:
-                if name == "memory_percent":
+                if len(self.scheduler.workers) == 0:
+                    total_data = None
+                elif name == "memory_percent":
                     total_data = sum(
                         ws.metrics["memory"] for ws in self.scheduler.workers.values()
                     ) / sum(ws.memory_limit for ws in self.scheduler.workers.values())
