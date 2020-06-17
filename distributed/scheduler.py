@@ -5573,7 +5573,8 @@ def heartbeat_interval(n):
     elif n < 200:
         return 2
     else:
-        return 10
+        # no more than 200 hearbeats a second scaled by workers
+        return n / 200 + 1
 
 
 class KilledWorker(Exception):
