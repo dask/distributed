@@ -12,18 +12,23 @@ distributed:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
     blocked-handlers: []
-    default-data-size: 1000
+    default-data-size: 1kiB
     # Number of seconds to wait until workers or clients are removed from the events log
     # after they have been removed from the scheduler
     events-cleanup-delay: 1h
     idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
     transition-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
+    work-stealing-interval: 100ms  # Callback time for work stealing
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
-    preload: []
-    preload-argv: []
-    default-task-durations: {}  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+    preload: []             # Run custom modules with Scheduler
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    unknown-task-duration: 500ms  # Default duration for all tasks with unknown durations ("15m", "2h")
+    default-task-durations:  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+      rechunk-split: 1us
+      shuffle-split: 1us
+    validate: False         # Check scheduler state at every step for debugging
     dashboard:
       status:
         task-stream-length: 1000
@@ -33,17 +38,34 @@ distributed:
         ca-file: null
         key: null
         cert: null
+      bokeh-application:  # keywords to pass to BokehTornado application
+        allow_websocket_origin: ["*"]
+        keep_alive_milliseconds: 500
+        check_unused_sessions_milliseconds: 500
+    locks:
+      lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
+      lease-timeout: 30s  # The timeout after which a lease will be released if not refreshed
+
+    http:
+      routes:
+        - distributed.http.scheduler.prometheus
+        - distributed.http.scheduler.info
+        - distributed.http.scheduler.json
+        - distributed.http.health
+        - distributed.http.proxy
+        - distributed.http.statics
 
   worker:
     blocked-handlers: []
-    multiprocessing-method: forkserver
+    multiprocessing-method: spawn
     use-file-locking: True
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
-    preload: []
-    preload-argv: []
+    preload: []             # Run custom modules with Worker
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
     daemon: True
+    validate: False         # Check worker state at every step for debugging
     lifetime:
       duration: null        # Time after which to gracefully shutdown the worker
       stagger: 0 seconds    # Random amount by which to stagger lifetimes
@@ -63,14 +85,39 @@ distributed:
       pause: 0.80  # fraction at which we pause worker threads
       terminate: 0.95  # fraction at which we terminate the worker
 
+    http:
+      routes:
+        - distributed.http.worker.prometheus
+        - distributed.http.health
+        - distributed.http.statics
+
+  nanny:
+    preload: []             # Run custom modules with Nanny
+    preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+
   client:
-    heartbeat: 5s  # time between client heartbeats
+    heartbeat: 5s  # Interval between client heartbeats
+    scheduler-info-interval: 2s  # Interval between scheduler-info updates
 
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
+    cluster-repr-interval: 500ms  # Interval between calls to update cluster-repr for the widget
+
+  adaptive:
+    interval: 1s         # Interval between scaling evaluations
+    target-duration: 5s  # Time an entire graph calculation is desired to take ("1m", "30m")
+    minimum: 0           # Minimum number of workers
+    maximum: .inf        # Maximum number of workers
+    wait-count: 3        # Number of times a worker should be suggested for removal before removing it
 
   comm:
+    retry:  # some operations (such as gathering data) are subject to re-tries with the below parameters
+      count: 0  # the maximum retry attempts. 0 disables re-trying.
+      delay:
+         min: 1s  # the first non-zero delay between re-tries
+         max: 20s  # the maximum delay between re-tries
     compression: auto
+    offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
@@ -108,6 +155,7 @@ distributed:
   dashboard:
     link: "{scheme}://{host}:{port}/status"
     export-tool: False
+    graph-max-items: 5000  # maximum number of tasks to try to plot in graph view
 
   ##################
   # Administrative #
@@ -122,5 +170,12 @@ distributed:
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
-
-ucx: {}
+rmm:
+  pool-size: null
+ucx:
+  tcp: null  # enable tcp
+  nvlink: null  # enable cuda_ipc
+  infiniband: null # enable Infiniband
+  rdmacm: null # enable RDMACM
+  cuda_copy: null  # enable cuda-copy
+  net-devices: null  # define which Infiniband device to use

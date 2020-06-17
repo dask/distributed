@@ -20,7 +20,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import RdBu
 from bokeh.themes import Theme
 from dask.utils import format_bytes
-from toolz import merge, partition_all
+from tlz import merge, partition_all
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -37,13 +37,12 @@ from distributed.utils import log_errors, key_split, format_time
 
 logger = logging.getLogger(__name__)
 
-with open(os.path.join(os.path.dirname(__file__), "..", "templates", "base.html")) as f:
-    template_source = f.read()
-
 from jinja2 import Environment, FileSystemLoader
 
 env = Environment(
-    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "..", "templates"))
+    loader=FileSystemLoader(
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+    )
 )
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
@@ -638,7 +637,7 @@ def counters_doc(server, extra, doc):
 def profile_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask Worker Profile"
-        profile = ProfileTimePlot(server, sizing_mode="scale_width", doc=doc)
+        profile = ProfileTimePlot(server, sizing_mode="stretch_both", doc=doc)
         profile.trigger_update()
 
         doc.add_root(profile.root)
@@ -651,7 +650,7 @@ def profile_doc(server, extra, doc):
 def profile_server_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile of Event Loop"
-        prof = ProfileServer(server, sizing_mode="scale_width", doc=doc)
+        prof = ProfileServer(server, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template("simple.html")
         # doc.template_variables['active_page'] = ''

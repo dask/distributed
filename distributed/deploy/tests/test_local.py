@@ -7,15 +7,18 @@ from time import sleep
 from threading import Lock
 import unittest
 import weakref
+from distutils.version import LooseVersion
 
 from tornado.ioloop import IOLoop
-from tornado import gen
+import tornado
+from tornado.httpclient import AsyncHTTPClient
 import pytest
 
+from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
-from distributed.system import CPU_COUNT, MEMORY_LIMIT
+from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (  # noqa: F401
     clean,
     cleanup,
@@ -30,7 +33,7 @@ from distributed.utils_test import (  # noqa: F401
     tls_only_security,
 )
 from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync
+from distributed.utils import sync, TimeoutError
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -64,7 +67,6 @@ def test_local_cluster_supports_blocked_handlers(loop):
     )
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="fork issues")
 def test_close_twice():
     with LocalCluster() as cluster:
         with Client(cluster.scheduler_address) as client:
@@ -78,7 +80,6 @@ def test_close_twice():
         assert not log
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="multi-loop")
 def test_procs():
     with LocalCluster(
         2,
@@ -170,13 +171,11 @@ def test_transports_tcp_port():
             assert e.submit(inc, 4).result() == 5
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="")
 class LocalTest(ClusterTest, unittest.TestCase):
     Cluster = partial(LocalCluster, silence_logs=False, dashboard_address=None)
     kwargs = {"dashboard_address": None, "processes": False}
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="")
 def test_Client_with_local(loop):
     with LocalCluster(
         1, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
@@ -193,11 +192,18 @@ def test_Client_solo(loop):
 
 
 @gen_test()
-def test_duplicate_clients():
+async def test_duplicate_clients():
     pytest.importorskip("bokeh")
-    c1 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
+    c1 = await Client(
+        processes=False, silence_logs=False, dashboard_address=9876, asynchronous=True
+    )
     with pytest.warns(Warning) as info:
-        c2 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
+        c2 = await Client(
+            processes=False,
+            silence_logs=False,
+            dashboard_address=9876,
+            asynchronous=True,
+        )
 
     assert "dashboard" in c1.cluster.scheduler.services
     assert "dashboard" in c2.cluster.scheduler.services
@@ -209,8 +215,8 @@ def test_duplicate_clients():
         )
         for msg in info.list
     )
-    yield c1.close()
-    yield c2.close()
+    await c1.close()
+    await c2.close()
 
 
 def test_Client_kwargs(loop):
@@ -249,6 +255,7 @@ def test_Client_twice(loop):
 
 @pytest.mark.asyncio
 async def test_client_constructor_with_temporary_security(cleanup):
+    pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
@@ -401,7 +408,7 @@ def test_bokeh(loop, processes):
         processes=processes,
         dashboard_address=0,
     ) as c:
-        bokeh_port = c.scheduler.services["dashboard"].port
+        bokeh_port = c.scheduler.http_server.port
         url = "http://127.0.0.1:%d/status/" % bokeh_port
         start = time()
         while True:
@@ -418,7 +425,6 @@ def test_bokeh(loop, processes):
         requests.get(url, timeout=0.2)
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="Unknown")
 def test_blocks_until_full(loop):
     with Client(loop=loop) as c:
         assert len(c.nthreads()) > 0
@@ -449,6 +455,12 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
+@pytest.mark.xfail(
+    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
+    "See https://github.com/tornadoweb/tornado/pull/2683.",
+    strict=True,
+)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -521,7 +533,7 @@ def test_memory_nanny(loop, n_workers):
 
 
 def test_death_timeout_raises(loop):
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         with LocalCluster(
             scheduler_port=0,
             silence_logs=False,
@@ -533,20 +545,22 @@ def test_death_timeout_raises(loop):
     LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="Unknown")
-def test_bokeh_kwargs(loop):
+@pytest.mark.asyncio
+async def test_bokeh_kwargs(cleanup):
     pytest.importorskip("bokeh")
-    with LocalCluster(
+    async with LocalCluster(
         n_workers=0,
         scheduler_port=0,
         silence_logs=False,
-        loop=loop,
         dashboard_address=0,
-        service_kwargs={"dashboard": {"prefix": "/foo"}},
+        asynchronous=True,
+        scheduler_kwargs={"http_prefix": "/foo"},
     ) as c:
-
-        bs = c.scheduler.services["dashboard"]
-        assert bs.prefix == "/foo"
+        client = AsyncHTTPClient()
+        response = await client.fetch(
+            "http://localhost:{}/foo/status".format(c.scheduler.http_server.port)
+        )
+        assert "bokeh" in response.body.decode()
 
 
 def test_io_loop_periodic_callbacks(loop):
@@ -708,6 +722,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        pytest.importorskip("cryptography")
         security = True
     else:
         security = tls_only_security()
@@ -724,9 +739,9 @@ def test_local_tls(loop, temporary):
             loop,
             assert_can_connect_from_everywhere_4,
             c.scheduler.port,
-            connection_args=c.security.get_connection_args("client"),
             protocol="tls",
             timeout=3,
+            **c.security.get_connection_args("client"),
         )
 
         # If we connect to a TLS localculster without ssl information we should fail
@@ -734,19 +749,19 @@ def test_local_tls(loop, temporary):
             loop,
             assert_cannot_connect,
             addr="tcp://127.0.0.1:%d" % c.scheduler.port,
-            connection_args=c.security.get_connection_args("client"),
             exception_class=RuntimeError,
+            **c.security.get_connection_args("client"),
         )
 
 
 @gen_test()
-def test_scale_retires_workers():
+async def test_scale_retires_workers():
     class MyCluster(LocalCluster):
         def scale_down(self, *args, **kwargs):
             pass
 
     loop = IOLoop.current()
-    cluster = yield MyCluster(
+    cluster = await MyCluster(
         0,
         scheduler_port=0,
         processes=False,
@@ -755,26 +770,26 @@ def test_scale_retires_workers():
         loop=loop,
         asynchronous=True,
     )
-    c = yield Client(cluster, asynchronous=True)
+    c = await Client(cluster, asynchronous=True)
 
     assert not cluster.workers
 
-    yield cluster.scale(2)
+    await cluster.scale(2)
 
     start = time()
     while len(cluster.scheduler.workers) != 2:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
-    yield cluster.scale(1)
+    await cluster.scale(1)
 
     start = time()
     while len(cluster.scheduler.workers) != 1:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
         assert time() < start + 3
 
-    yield c.close()
-    yield cluster.close()
+    await c.close()
+    await cluster.close()
 
 
 def test_local_tls_restart(loop):
@@ -791,7 +806,6 @@ def test_local_tls_restart(loop):
         loop=loop,
     ) as c:
         with Client(c.scheduler.address, loop=loop, security=security) as client:
-            print(c.workers, c.workers[0].address)
             workers_before = set(client.scheduler_info()["workers"])
             assert client.submit(inc, 1).result() == 2
             client.restart()
@@ -823,8 +837,7 @@ def test_asynchronous_property(loop):
         loop=loop,
     ) as cluster:
 
-        @gen.coroutine
-        def _():
+        async def _():
             assert cluster.asynchronous
 
         cluster.sync(_)
@@ -895,10 +908,6 @@ async def test_worker_class_nanny_async(cleanup):
         asynchronous=True,
     ) as cluster:
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
-
-
-if sys.version_info >= (3, 5):
-    from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
 
 
 def test_starts_up_sync(loop):
@@ -992,6 +1001,7 @@ async def test_repr(cleanup):
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
+        pytest.importorskip("cryptography")
         security = True
     else:
         security = tls_only_security()
@@ -1018,3 +1028,12 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
     tasks = asyncio.all_tasks()
     assert tasks == start
+
+
+@pytest.mark.asyncio
+async def test_async_with():
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        w = cluster.workers
+        assert w
+
+    assert not w

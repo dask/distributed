@@ -1,29 +1,30 @@
 import asyncio
-from datetime import timedelta
+from contextlib import suppress
 import logging
 import threading
+import warnings
+from tornado.ioloop import PeriodicCallback
 
+import dask.config
 from dask.utils import format_bytes
-from tornado import gen
 
 from .adaptive import Adaptive
 
 from ..utils import (
-    PeriodicCallback,
     log_errors,
-    ignoring,
     sync,
     Log,
     Logs,
     thread_state,
     format_dashboard_link,
+    parse_timedelta,
 )
 
 
 logger = logging.getLogger(__name__)
 
 
-class Cluster(object):
+class Cluster:
     """ Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -35,7 +36,7 @@ class Cluster(object):
     2.  Implement ``scale``, which takes an integer and scales the cluster to
         that many workers, or else set ``_supports_scaling`` to False
 
-    For that, should should get the following:
+    For that, you should get the following:
 
     1.  A standard ``__repr__``
     2.  A live IPython widget
@@ -49,7 +50,7 @@ class Cluster(object):
     _supports_scaling = True
 
     def __init__(self, asynchronous):
-        self.scheduler_info = {}
+        self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
 
@@ -79,12 +80,12 @@ class Cluster(object):
         self.status = "closed"
 
     def close(self, timeout=None):
-        with ignoring(RuntimeError):  # loop closed during process shutdown
+        with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
         if self.status != "closed":
-            with ignoring(AttributeError, RuntimeError):  # during closing
+            with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
@@ -120,7 +121,7 @@ class Cluster(object):
         --------
         >>> cluster.adapt(minimum=0, maximum=10, interval='500ms')
         """
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             self._adaptive.stop()
         if not hasattr(self, "_adaptive_options"):
             self._adaptive_options = {}
@@ -136,8 +137,8 @@ class Cluster(object):
         n: int
             Target number of workers
 
-        Example
-        -------
+        Examples
+        --------
         >>> cluster.scale(10)  # scale cluster to ten workers
         """
         raise NotImplementedError()
@@ -156,16 +157,16 @@ class Cluster(object):
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(self.loop, func, *args, **kwargs)
 
-    async def _logs(self, scheduler=True, workers=True):
+    async def _get_logs(self, scheduler=True, workers=True):
         logs = Logs()
 
         if scheduler:
-            L = await self.scheduler_comm.logs()
+            L = await self.scheduler_comm.get_logs()
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
@@ -175,7 +176,7 @@ class Cluster(object):
 
         return logs
 
-    def logs(self, scheduler=True, workers=True):
+    def get_logs(self, scheduler=True, workers=True):
         """ Return logs for the scheduler and workers
 
         Parameters
@@ -192,7 +193,11 @@ class Cluster(object):
             A dictionary of logs, with one item for the scheduler and one for
             each worker
         """
-        return self.sync(self._logs, scheduler=scheduler, workers=workers)
+        return self.sync(self._get_logs, scheduler=scheduler, workers=workers)
+
+    def logs(self, *args, **kwargs):
+        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
+        return self.get_logs(*args, **kwargs)
 
     @property
     def dashboard_link(self):
@@ -201,7 +206,7 @@ class Cluster(object):
         except KeyError:
             return ""
         else:
-            host = self.scheduler_address.split("://")[1].split(":")[0]
+            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
     def _widget_status(self):
@@ -300,7 +305,7 @@ class Cluster(object):
             def scale_cb(b):
                 with log_errors():
                     n = request.value
-                    with ignoring(AttributeError):
+                    with suppress(AttributeError):
                         self._adaptive.stop()
                     self.scale(n)
                     update()
@@ -316,7 +321,10 @@ class Cluster(object):
         def update():
             status.value = self._widget_status()
 
-        pc = PeriodicCallback(update, 500, io_loop=self.loop)
+        cluster_repr_interval = parse_timedelta(
+            dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
+        )
+        pc = PeriodicCallback(update, cluster_repr_interval * 1000)
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
@@ -348,6 +356,12 @@ class Cluster(object):
 
             data = {"text/plain": repr(self), "text/html": self._repr_html_()}
             display(data, raw=True)
+
+    def __enter__(self):
+        return self.sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return self.sync(self.__aexit__, typ, value, traceback)
 
     async def __aenter__(self):
         await self

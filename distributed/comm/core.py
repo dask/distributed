@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod, abstractproperty
-from datetime import timedelta
+import asyncio
+from contextlib import suppress
+import inspect
 import logging
 import weakref
 
 import dask
-from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta, ignoring
+from ..utils import parse_timedelta, TimeoutError
 from . import registry
 from .addressing import parse_address
 
@@ -39,6 +40,7 @@ class Comm(ABC):
 
     def __init__(self):
         self._instances.add(self)
+        self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
 
     # XXX add set_close_callback()?
@@ -58,7 +60,7 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, on_error=None):
+    def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
@@ -130,7 +132,7 @@ class Comm(ABC):
 
 class Listener(ABC):
     @abstractmethod
-    def start(self):
+    async def start(self):
         """
         Start listening for incoming connections.
         """
@@ -156,12 +158,21 @@ class Listener(ABC):
         address such as 'tcp://0.0.0.0:123'.
         """
 
-    def __enter__(self):
-        self.start()
+    async def __aenter__(self):
+        await self.start()
         return self
 
-    def __exit__(self, *exc):
-        self.stop()
+    async def __aexit__(self, *exc):
+        future = self.stop()
+        if inspect.isawaitable(future):
+            await future
+
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
 
 
 class Connector(ABC):
@@ -175,7 +186,7 @@ class Connector(ABC):
         """
 
 
-async def connect(addr, timeout=None, deserialize=True, connection_args=None):
+async def connect(addr, timeout=None, deserialize=True, **connection_args):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -203,18 +214,20 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         )
         raise IOError(msg)
 
+    backoff = 0.01
+    if timeout and timeout / 20 < backoff:
+        backoff = timeout / 20
+
     # This starts a thread
     while True:
         try:
             while deadline - time() > 0:
                 future = connector.connect(
-                    loc, deserialize=deserialize, **(connection_args or {})
+                    loc, deserialize=deserialize, **connection_args
                 )
-                with ignoring(gen.TimeoutError):
-                    comm = await gen.with_timeout(
-                        timedelta(seconds=min(deadline - time(), 1)),
-                        future,
-                        quiet_exceptions=EnvironmentError,
+                with suppress(TimeoutError):
+                    comm = await asyncio.wait_for(
+                        future, timeout=min(deadline - time(), 1)
                     )
                     break
             if not comm:
@@ -224,8 +237,10 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await gen.sleep(0.01)
-                logger.debug("sleeping on connect")
+                logger.debug("Could not connect, waiting before retrying")
+                await asyncio.sleep(backoff)
+                backoff *= 1.5
+                backoff = min(backoff, 1)  # wait at most one second
             else:
                 _raise(error)
         else:
@@ -234,7 +249,7 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
     return comm
 
 
-def listen(addr, handle_comm, deserialize=True, connection_args=None):
+def listen(addr, handle_comm, deserialize=True, **kwargs):
     """
     Create a listener object with the given parameters.  When its ``start()``
     method is called, the listener will listen on the given address
@@ -246,7 +261,7 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
     try:
         scheme, loc = parse_address(addr, strict=True)
     except ValueError:
-        if connection_args and connection_args.get("ssl_context"):
+        if kwargs.get("ssl_context"):
             addr = "tls://" + addr
         else:
             addr = "tcp://" + addr
@@ -254,6 +269,4 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
 
     backend = registry.get_backend(scheme)
 
-    return backend.get_listener(
-        loc, handle_comm, deserialize, **(connection_args or {})
-    )
+    return backend.get_listener(loc, handle_comm, deserialize, **kwargs)

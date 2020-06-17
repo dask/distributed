@@ -26,10 +26,8 @@ from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 import dask
 from tornado import gen
-import toolz
 
 from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
-from distributed.diagnostics.progress_stream import nbytes_bar
 from distributed import profile
 from distributed.utils import log_errors, parse_timedelta
 
@@ -43,7 +41,7 @@ profile_interval = dask.config.get("distributed.worker.profile.interval")
 profile_interval = parse_timedelta(profile_interval, default="ms")
 
 
-class DashboardComponent(object):
+class DashboardComponent:
     """ Base class for Dask.distributed UI dashboard components.
 
     This class must have two attributes, ``root`` and ``source``, and one

@@ -1,5 +1,3 @@
-import sys
-
 import dask
 import pytest
 
@@ -166,7 +164,9 @@ def test_loads_without_deserialization_avoids_compression():
 
 def eq_frames(a, b):
     if b"headers" in a:
-        return msgpack.loads(a, use_list=False) == msgpack.loads(b, use_list=False)
+        return msgpack.loads(a, use_list=False, strict_map_key=False) == msgpack.loads(
+            b, use_list=False, strict_map_key=False
+        )
     else:
         return a == b
 
@@ -207,7 +207,6 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="NumPy doesnt use memoryviews")
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip("numpy")
     pytest.importorskip("lz4")

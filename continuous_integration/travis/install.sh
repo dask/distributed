@@ -5,6 +5,12 @@
 
 # Note we disable progress bars to make Travis log loading much faster
 
+# Set default variable values if unset
+# (useful when this script is not invoked by Travis)
+: ${PYTHON:=3.8}
+: ${TORNADO:=6}
+: ${PACKAGES:=python-snappy python-blosc}
+
 # Install conda
 case "$(uname -s)" in
     'Darwin')
@@ -16,70 +22,82 @@ case "$(uname -s)" in
     *)  ;;
 esac
 
-wget https://repo.continuum.io/miniconda/$MINICONDA_FILENAME -O miniconda.sh
-bash miniconda.sh -b -p $HOME/miniconda
-export PATH="$HOME/miniconda/bin:$PATH"
-conda config --set always_yes yes --set changeps1 no
-conda update -q conda
+if ! which conda; then
+  wget https://repo.continuum.io/miniconda/$MINICONDA_FILENAME -O miniconda.sh
+  bash miniconda.sh -b -p $HOME/miniconda
+  export PATH="$HOME/miniconda/bin:$PATH"
+fi
+
+conda config --set always_yes yes --set quiet yes --set changeps1 no
+conda update conda
 
 # Create conda environment
-conda create -q -n test-environment python=$PYTHON
-source activate test-environment
-
-# Install dependencies
-conda install -q \
+conda create -n dask-distributed -c conda-forge -c defaults \
+    asyncssh \
     bokeh \
     click \
     coverage \
     dask \
-    dill \
     flake8 \
     h5py \
     ipykernel \
     ipywidgets \
     joblib \
     jupyter_client \
+    'msgpack-python>=0.6.0' \
     netcdf4 \
     paramiko \
     prometheus_client \
     psutil \
-    pytest>=4 \
+    'pytest>=4' \
+    pytest-asyncio \
+    pytest-faulthandler \
+    pytest-repeat \
     pytest-timeout \
     python=$PYTHON \
     requests \
+    scikit-learn \
     scipy \
-    tblib \
+    sortedcollections \
+    'tblib>=1.5.0' \
     toolz \
     tornado=$TORNADO \
+    zstandard \
     $PACKAGES
 
-# For low-level profiler, install libunwind and stacktrace from conda-forge
-# For stacktrace we use --no-deps to avoid upgrade of python
-conda install -c defaults -c conda-forge libunwind zstandard asyncssh
-conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
+source activate dask-distributed
 
-pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
+if [[ $PYTHON == 3.6 ]]; then
+  conda install -c conda-forge -c defaults contextvars
+fi
 
-pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
-pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
-pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
-pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
-pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
-pip install -q sortedcollections msgpack --no-deps
-pip install -q keras --upgrade --no-deps
-pip install -q asyncssh 
+# stacktrace is not currently avaiable for Python 3.8.
+# Remove the version check block below when it is avaiable.
+if [[ $PYTHON != 3.8 ]]; then
+    # For low-level profiler, install libunwind and stacktrace from conda-forge
+    # For stacktrace we use --no-deps to avoid upgrade of python
+    conda install -c conda-forge -c defaults libunwind
+    conda install --no-deps -c conda-forge -c defaults -c numba stacktrace
+fi
+
+python -m pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
+python -m pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
+python -m pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
+python -m pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
+python -m pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
+python -m pip install -q keras --upgrade --no-deps
 
 if [[ $CRICK == true ]]; then
-    conda install -q cython
-    pip install -q git+https://github.com/jcrist/crick.git
-fi;
+    conda install -c conda-forge -c defaults cython
+    python -m pip install -q git+https://github.com/jcrist/crick.git
+fi
 
 # Install distributed
-pip install --no-deps -e .
+python -m pip install --no-deps -e .
 
 # For debugging
-echo -e "--\n--Conda Environment\n--"
-conda list
+echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
+conda env export | grep -E -v '^prefix:.*$'
 
 echo -e "--\n--Pip Environment\n--"
-pip list --format=columns
+python -m pip list --format=columns

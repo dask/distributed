@@ -3,11 +3,13 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+from contextlib import suppress
+from functools import partial
 import logging
 import random
 
 import dask
-from toolz import identity, partial
+from tlz import identity
 
 try:
     import blosc
@@ -18,7 +20,7 @@ try:
 except ImportError:
     blosc = False
 
-from ..utils import ignoring, ensure_bytes
+from ..utils import ensure_bytes
 
 
 compressions = {None: {"compress": identity, "decompress": identity}}
@@ -32,12 +34,12 @@ default_compression = None
 logger = logging.getLogger(__name__)
 
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import zlib
 
     compressions["zlib"] = {"compress": zlib.compress, "decompress": zlib.decompress}
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import snappy
 
     def _fixed_snappy_decompress(data):
@@ -52,7 +54,7 @@ with ignoring(ImportError):
     }
     default_compression = "snappy"
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import lz4
 
     try:
@@ -94,7 +96,7 @@ with ignoring(ImportError):
     default_compression = "lz4"
 
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import zstandard
 
     zstd_compressor = zstandard.ZstdCompressor(
@@ -113,7 +115,7 @@ with ignoring(ImportError):
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
 
 
-with ignoring(ImportError):
+with suppress(ImportError):
     import blosc
 
     compressions["blosc"] = {

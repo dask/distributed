@@ -1,9 +1,10 @@
-from distributed import Worker, SchedulerPlugin
-from distributed.utils_test import inc, gen_cluster
+import pytest
+from distributed import Scheduler, Worker, SchedulerPlugin
+from distributed.utils_test import inc, gen_cluster, cleanup  # noqa: F401
 
 
 @gen_cluster(client=True)
-def test_simple(c, s, a, b):
+async def test_simple(c, s, a, b):
     class Counter(SchedulerPlugin):
         def start(self, scheduler):
             self.scheduler = scheduler
@@ -24,7 +25,7 @@ def test_simple(c, s, a, b):
     y = c.submit(inc, x)
     z = c.submit(inc, y)
 
-    yield z
+    await z
 
     assert counter.count == 3
     s.remove_plugin(counter)
@@ -32,7 +33,7 @@ def test_simple(c, s, a, b):
 
 
 @gen_cluster(nthreads=[], client=False)
-def test_add_remove_worker(s):
+async def test_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
@@ -50,10 +51,10 @@ def test_add_remove_worker(s):
 
     a = Worker(s.address)
     b = Worker(s.address)
-    yield a
-    yield b
-    yield a.close()
-    yield b.close()
+    await a
+    await b
+    await a.close()
+    await b.close()
 
     assert events == [
         ("add_worker", a.address),
@@ -64,6 +65,62 @@ def test_add_remove_worker(s):
 
     events[:] = []
     s.remove_plugin(plugin)
-    a = yield Worker(s.address)
-    yield a.close()
+    a = await Worker(s.address)
+    await a.close()
     assert events == []
+
+
+@gen_cluster(nthreads=[], client=False)
+async def test_async_add_remove_worker(s):
+    events = []
+
+    class MyPlugin(SchedulerPlugin):
+        async def add_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append(("add_worker", worker))
+
+        async def remove_worker(self, worker, scheduler):
+            assert scheduler is s
+            events.append(("remove_worker", worker))
+
+    plugin = MyPlugin()
+    s.add_plugin(plugin)
+    assert events == []
+
+    async with Worker(s.address) as a:
+        async with Worker(s.address) as b:
+            pass
+
+    assert set(events) == {
+        ("add_worker", a.address),
+        ("add_worker", b.address),
+        ("remove_worker", a.address),
+        ("remove_worker", b.address),
+    }
+
+    events[:] = []
+    s.remove_plugin(plugin)
+    async with Worker(s.address):
+        pass
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_lifecycle(cleanup):
+    class LifeCycle(SchedulerPlugin):
+        def __init__(self):
+            self.history = []
+
+        async def start(self, scheduler):
+            self.scheduler = scheduler
+            self.history.append("started")
+
+        async def close(self):
+            self.history.append("closed")
+
+    plugin = LifeCycle()
+    async with Scheduler(plugins=[plugin]) as s:
+        pass
+
+    assert plugin.history == ["started", "closed"]
+    assert plugin.scheduler is s

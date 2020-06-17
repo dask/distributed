@@ -1,10 +1,11 @@
+from contextlib import suppress
 import logging
 import html
 from timeit import default_timer
 import sys
 import weakref
 
-from toolz import valmap
+from tlz import valmap
 from tornado.ioloop import IOLoop
 
 from .progress import format_time, Progress, MultiProgress
@@ -12,7 +13,7 @@ from .progress import format_time, Progress, MultiProgress
 from ..core import connect, coerce_to_address, CommClosedError
 from ..client import default_client, futures_of
 from ..protocol.pickle import dumps
-from ..utils import ignoring, key_split, is_kernel, LoopRunner, parse_timedelta
+from ..utils import key_split, is_kernel, LoopRunner, parse_timedelta
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ def get_scheduler(scheduler):
     return coerce_to_address(scheduler)
 
 
-class ProgressBar(object):
+class ProgressBar:
     def __init__(self, keys, scheduler=None, interval="100ms", complete=True):
         self.scheduler = get_scheduler(scheduler)
 
@@ -63,8 +64,7 @@ class ProgressBar(object):
             return result
 
         self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
+            self.scheduler, **(self.client().connection_args if self.client else {}),
         )
         logger.debug("Progressbar Connected to scheduler")
 
@@ -99,7 +99,7 @@ class ProgressBar(object):
         pass
 
     def __del__(self):
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             self.comm.abort()
 
 
@@ -131,7 +131,7 @@ class TextProgressBar(ProgressBar):
         msg = "\r[{0:<{1}}] | {2}% Completed | {3}".format(
             bar, self.width, percent, elapsed
         )
-        with ignoring(ValueError):
+        with suppress(ValueError):
             sys.stdout.write(msg)
             sys.stdout.flush()
 
@@ -207,7 +207,7 @@ class ProgressWidget(ProgressBar):
         )
 
 
-class MultiProgressBar(object):
+class MultiProgressBar:
     def __init__(
         self,
         keys,
@@ -287,7 +287,7 @@ class MultiProgressBar(object):
         pass
 
     def __del__(self):
-        with ignoring(AttributeError):
+        with suppress(AttributeError):
             self.comm.abort()
 
 

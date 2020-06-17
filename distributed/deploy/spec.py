@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+from contextlib import suppress
 import copy
 import logging
 import math
@@ -10,8 +11,15 @@ from tornado import gen
 
 from .adaptive import Adaptive
 from .cluster import Cluster
-from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes, parse_timedelta
+from ..core import rpc, CommClosedError, Status
+from ..utils import (
+    LoopRunner,
+    silence_logging,
+    parse_bytes,
+    parse_timedelta,
+    import_term,
+    TimeoutError,
+)
 from ..scheduler import Scheduler
 from ..security import Security
 
@@ -33,6 +41,7 @@ class ProcessInterface:
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
+        self._event_finished = asyncio.Event()
 
     def __await__(self):
         async def _():
@@ -65,6 +74,11 @@ class ProcessInterface:
         need to worry about shutting down gracefully
         """
         self.status = "closed"
+        self._event_finished.set()
+
+    async def finished(self):
+        """ Wait until the server has finished """
+        await self._event_finished.wait()
 
     def __repr__(self):
         return "<%s: status=%s>" % (type(self).__name__, self.status)
@@ -77,7 +91,7 @@ class ProcessInterface:
         await self.close()
 
 
-class NoOpAwaitable(object):
+class NoOpAwaitable:
     """An awaitable object that always returns None.
 
     Useful to return from a method that can be called in both asynchronous and
@@ -254,15 +268,17 @@ class SpecCluster(Cluster):
 
         if self.scheduler_spec is None:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard  # noqa: F401
             except ImportError:
-                services = {}
+                pass
             else:
-                services = {("dashboard", 8787): BokehScheduler}
-            self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
-        self.scheduler = self.scheduler_spec["cls"](
-            **self.scheduler_spec.get("options", {})
-        )
+                options = {"dashboard": True}
+            self.scheduler_spec = {"cls": Scheduler, "options": options}
+
+        cls = self.scheduler_spec["cls"]
+        if isinstance(cls, str):
+            cls = import_term(cls)
+        self.scheduler = cls(**self.scheduler_spec.get("options", {}))
 
         self.status = "starting"
         self.scheduler = await self.scheduler
@@ -288,12 +304,12 @@ class SpecCluster(Cluster):
             pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
-                if self.scheduler.status == "running":
+                if self.scheduler.status == Status.running:
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
                 tasks = [self.workers[w].close() for w in to_close if w in self.workers]
                 await asyncio.wait(tasks)
                 for task in tasks:  # for tornado gen.coroutine support
-                    with ignoring(RuntimeError):
+                    with suppress(RuntimeError):
                         await task
             for name in to_close:
                 if name in self.workers:
@@ -307,6 +323,8 @@ class SpecCluster(Cluster):
                 if "name" not in opts:
                     opts = opts.copy()
                     opts["name"] = name
+                if isinstance(cls, str):
+                    cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
                 workers.append(worker)
@@ -364,12 +382,15 @@ class SpecCluster(Cluster):
         for future in self._futures:
             await future
         async with self._lock:
-            with ignoring(CommClosedError):
-                await self.scheduler_comm.close(close_workers=True)
+            with suppress(CommClosedError):
+                if self.scheduler_comm:
+                    await self.scheduler_comm.close(close_workers=True)
+                else:
+                    logger.warning("Cluster closed without starting up")
 
         await self.scheduler.close()
         for w in self._created:
-            assert w.status == "closed", w.status
+            assert w.status == Status.closed, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
@@ -378,13 +399,14 @@ class SpecCluster(Cluster):
 
         await super()._close()
 
-    def __enter__(self):
-        self.sync(self._correct_state)
+    async def __aenter__(self):
+        await self
+        await self._correct_state()
         assert self.status == "running"
         return self
 
     def __exit__(self, typ, value, traceback):
-        self.close()
+        super().__exit__(typ, value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
@@ -393,7 +415,7 @@ class SpecCluster(Cluster):
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 return self.new_spec["options"][name]
 
         if not self.new_spec:
@@ -407,7 +429,7 @@ class SpecCluster(Cluster):
             )
 
         for name in ["memory_limit", "memory"]:
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 return parse_bytes(self.new_spec["options"][name])
 
         raise ValueError(
@@ -440,6 +462,14 @@ class SpecCluster(Cluster):
         if self.asynchronous:
             return NoOpAwaitable()
 
+    def _new_worker_name(self, worker_number):
+        """ Returns new worker name.
+
+        This can be overriden in SpecCluster derived classes to customise the
+        worker names.
+        """
+        return worker_number
+
     def new_worker_spec(self):
         """ Return name and spec for the next worker
 
@@ -451,10 +481,12 @@ class SpecCluster(Cluster):
         --------
         scale
         """
-        while self._i in self.worker_spec:
+        new_worker_name = self._new_worker_name(self._i)
+        while new_worker_name in self.worker_spec:
             self._i += 1
+            new_worker_name = self._new_worker_name(self._i)
 
-        return {self._i: self.new_spec}
+        return {new_worker_name: self.new_spec}
 
     @property
     def _supports_scaling(self):
@@ -513,7 +545,7 @@ class SpecCluster(Cluster):
         maximum_cores: int = None,
         minimum_memory: str = None,
         maximum_memory: str = None,
-        **kwargs
+        **kwargs,
     ) -> Adaptive:
         """ Turn on adaptivity
 
@@ -532,7 +564,7 @@ class SpecCluster(Cluster):
         minimum_memory : str
             Minimum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
-        maximum_cores : int
+        maximum_memory : str
             Maximum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
 
@@ -566,9 +598,24 @@ class SpecCluster(Cluster):
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
 
 
+async def run_spec(spec: dict, *args):
+    workers = {}
+    for k, d in spec.items():
+        cls = d["cls"]
+        if isinstance(cls, str):
+            cls = import_term(cls)
+        workers[k] = cls(*args, **d.get("opts", {}))
+
+    if workers:
+        await asyncio.gather(*workers.values())
+        for w in workers.values():
+            await w  # for tornado gen.coroutine support
+    return workers
+
+
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring(gen.TimeoutError):
+        with suppress(gen.TimeoutError, TimeoutError):
             if cluster.status != "closed":
                 cluster.close(timeout=10)
