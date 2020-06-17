@@ -65,6 +65,8 @@ class VariableExtension:
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
 
+        self.scheduler.remove_client("variable-%s" % name)
+
     async def future_release(self, name=None, key=None, token=None, client=None):
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
