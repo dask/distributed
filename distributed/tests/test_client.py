@@ -340,6 +340,13 @@ async def test_persist_retries(c, s, a, b):
     assert await z == 80
 
 
+# def test_retries_dask_array():
+#     da = pytest.importorskip("dask.array")
+#     x = da.ones((10, 10), chunks=(3, 3))
+#     future = da.compute(x.sum())
+#     assert future[0] == 100
+
+
 @gen_cluster(client=True)
 async def test_retries_dask_array(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -625,29 +632,29 @@ async def test_get(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_task_annotations(c, s, a, b):
-    from distributed.core import TaskAnnotation as TA
+    from dask.task import Task, annotate
 
     #  Test priority
-    dsk = {"x": (inc, 1, TA({"priority": 1}))}
+    dsk = {"x": (annotate(inc, {"priority": 1}), 1)}
     result = yield c.get(dsk, "x", sync=False)
     assert result == 2
 
     # Test specifying a worker
-    dsk = {"y": (inc, 1, TA({"worker": a.address}))}
+    dsk = {"y": (annotate(inc, {"worker": a.address}), 1)}
     result = yield c.get(dsk, "y", sync=False)
 
     assert s.who_has["y"] == set([a.address])
     assert result == 2
 
     # Test specifying multiple workers
-    dsk = {"w": (inc, 1, TA({"worker": [a.address, b.address]}))}
+    dsk = {"w": (annotate(inc, {"worker": [a.address, b.address]}), 1)}
     result = yield c.get(dsk, "w", sync=False)
 
     assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    dsk = {"z": (inc, 1, TA({"worker": "tcp://2.2.2.2/", "allow_other_workers": True}))}
+    dsk = {"z": (annotate(inc, {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}), 1)}
     result = yield c.get(dsk, "z", sync=False)
 
     assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
@@ -656,9 +663,9 @@ def test_task_annotations(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_nested_task_annotations(c, s, a, b):
-    from distributed.core import TaskAnnotation as TA
+    from dask.task import Task, annotate
 
-    dsk = {"v": (inc, (inc, 1), TA({"worker": a.address}))}
+    dsk = {"v": (annotate(inc, {"worker": a.address}), (inc, 1))}
 
     result = yield c.get(dsk, "v", sync=False)
     assert s.who_has["v"] == set([a.address])
@@ -4533,11 +4540,11 @@ async def test_get_future_error_simple(c, s, a, b):
     await wait(f)
     assert f.status == "error"
 
-    function, args, kwargs, deps = await c._get_futures_error(f)
+    task, deps = await c._get_futures_error(f)
     # args contains only solid values, not keys
-    assert function.__name__ == "div"
+    assert task.function.__name__ == "div"
     with pytest.raises(ZeroDivisionError):
-        function(*args, **kwargs)
+        task.function(*task.args, **task.kwargs)
 
 
 @gen_cluster(client=True)
@@ -4552,9 +4559,9 @@ async def test_get_futures_error(c, s, a, b):
     await wait(f)
     assert f.status == "error"
 
-    function, args, kwargs, deps = await c._get_futures_error(f)
-    assert function.__name__ == "div"
-    assert args == (1, y0.key)
+    task, deps = await c._get_futures_error(f)
+    assert task.function.__name__ == "div"
+    assert task.args == [1, y0.key]
 
 
 @gen_cluster(client=True)

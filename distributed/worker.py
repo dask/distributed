@@ -19,9 +19,10 @@ import warnings
 import weakref
 
 import dask
-from dask.core import istask
 from dask.compatibility import apply
+from dask.task import Task, TupleTask, spec_type
 from dask.utils import format_bytes, funcname
+from dask.task import spec_type, TupleTask, Task
 from dask.system import CPU_COUNT
 
 from tlz import pluck, merge, first, keymap
@@ -95,7 +96,8 @@ DEFAULT_METRICS = {}
 
 DEFAULT_STARTUP_INFORMATION = {}
 
-SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
+SerializedTask = namedtuple("SerializedTask",
+                            ["function", "args", "kwargs", "annotations", "task"])
 
 
 class Worker(ServerNode):
@@ -1391,6 +1393,7 @@ class Worker(ServerNode):
         function=None,
         args=None,
         kwargs=None,
+        annotations=None,
         task=no_value,
         who_has=None,
         nbytes=None,
@@ -1430,7 +1433,7 @@ class Worker(ServerNode):
                 return
 
             self.log.append((key, "new"))
-            self.tasks[key] = SerializedTask(function, args, kwargs, task)
+            self.tasks[key] = SerializedTask(function, args, kwargs, annotations, task)
             if actor:
                 self.actors[key] = None
 
@@ -2453,14 +2456,14 @@ class Worker(ServerNode):
             return self.tasks[key]
         try:
             start = time()
-            function, args, kwargs = _deserialize(*self.tasks[key])
+            task = _deserialize(*self.tasks[key])
             stop = time()
 
             if stop - start > 0.010:
                 self.startstops[key].append(
                     {"action": "deserialize", "start": start, "stop": stop}
                 )
-            return function, args, kwargs
+            return task
         except Exception as e:
             logger.warning("Could not deserialize task", exc_info=True)
             emsg = error_message(e)
@@ -2517,7 +2520,7 @@ class Worker(ServerNode):
                 assert key not in self.waiting_for_data
                 assert self.task_state[key] == "executing"
 
-            function, args, kwargs = self.tasks[key]
+            task = self.tasks[key]
 
             start = time()
             data = {}
@@ -2528,8 +2531,8 @@ class Worker(ServerNode):
                     from .actor import Actor  # TODO: create local actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, str))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+            args2 = pack_data(task.args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(task.kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
                 self.startstops[key].append(
@@ -2546,7 +2549,7 @@ class Worker(ServerNode):
                     key,
                     apply_function,
                     args=(
-                        function,
+                        task.function,
                         args2,
                         kwargs2,
                         self.execution_state,
@@ -2590,7 +2593,7 @@ class Worker(ServerNode):
                         "args:      %s\n"
                         "kwargs:    %s\n"
                         "Exception: %s\n",
-                        str(funcname(function))[:1000],
+                        str(funcname(task.function))[:1000],
                         convert_args_to_str(args2, max_len=1000),
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
@@ -3284,7 +3287,7 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-def _deserialize(function=None, args=None, kwargs=None, task=no_value):
+def _deserialize(function=None, args=None, kwargs=None, annotations=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
         function = loads_function(function)
@@ -3292,13 +3295,15 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
         args = pickle.loads(args)
     if kwargs:
         kwargs = pickle.loads(kwargs)
+    if annotations:
+        annotations = pickle.loads(annotations)
 
     if task is not no_value:
         assert not function and not args and not kwargs
         function = execute_task
-        args = (task,)
+        args = [task]
 
-    return function, args or (), kwargs or {}
+    return Task(function, args, kwargs, annotations)
 
 
 def execute_task(task):
@@ -3310,7 +3315,22 @@ def execute_task(task):
     >>> execute_task((sum, [1, 2, (inc, 3)]))
     7
     """
-    if istask(task):
+    task_type = spec_type(task)
+
+    if task_type is Task:
+        return task.function(
+            *(
+                (execute_task(a) for a in task.args)
+                if isinstance(task.args, list)
+                else execute_task(task.args)
+            ),
+            **(
+                {k: execute_task(v) for k, v in task.kwargs.items()}
+                if isinstance(task.kwargs, dict)
+                else execute_task(task.kwargs)
+            )
+        )
+    elif task_type is TupleTask:
         func, args = task[0], task[1:]
         return func(*map(execute_task, args))
     elif isinstance(task, list):
@@ -3359,43 +3379,27 @@ def dumps_task(task):
     >>> dumps_task(1)  # doctest: +SKIP
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
-    if istask(task):
-        annot = None
+    task_type = spec_type(task)
 
-        # (apply, func, args [,kwargs])
-        if task[0] is apply:
-            args = task[2]
+    if task_type is TupleTask:
+        task = Task.from_spec(task)
+        task_type = Task
 
-            # Strip out annotation at end of args
-            if len(args) > 0 and type(args[-1]) == TaskAnnotation:
-                annot = args[-1]
-                args = args[:-1]
-
-            if any(map(_maybe_complex, (args,) + tuple(task[3:]))):
-                d = {"task": to_serialize((apply, task[1], args) + task[3:])}
-            else:
-                d = {"function": dumps_function(task[1]), "args": warn_dumps(args)}
-
-                if len(task) == 4:
-                    d["kwargs"] = warn_dumps(task[3])
-
-        # (func, arg0, arg1, ..., argn)
+    if task_type is Task:
+        if task.is_complex():
+            d = {"task": to_serialize(task)}
         else:
-            # Strip out annotation at end of args
-            if type(task[-1]) == TaskAnnotation:
-                annot = task[-1]
-                task = task[:-1]
+            d = {"function": dumps_function(task.function),
+                 "args": warn_dumps(task.args)}
 
-            if any(map(_maybe_complex, task[1:])):
-                d = {"task": to_serialize(task)}
-            else:
-                d = {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
+            if task.kwargs:
+                d["kwargs"] = warn_dumps(task.kwargs)
 
-        # Add any extracted annotations
-        if annot is not None:
-            d["annotation"] = warn_dumps(annot)
+        if task.annotations:
+            d["annotations"] = warn_dumps(task.annotations)
 
         return d
+
 
     return to_serialize(task)
 

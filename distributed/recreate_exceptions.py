@@ -82,11 +82,11 @@ class ReplayExceptionClient:
         out = await self.scheduler.cause_of_failure(keys=[f.key for f in futures])
         deps, task = out["deps"], out["task"]
         if isinstance(task, dict):
-            function, args, kwargs = _deserialize(**task)
-            return (function, args, kwargs, deps)
+            task = _deserialize(**task)
+            return (task, deps)
         else:
-            function, args, kwargs = _deserialize(task=task)
-            return (function, args, kwargs, deps)
+            task = _deserialize(task=task)
+            return (task, deps)
 
     def get_futures_error(self, future):
         """
@@ -107,9 +107,7 @@ class ReplayExceptionClient:
         -------
 
         Tuple:
-        - the function that raised an exception
-        - argument list (a tuple), may include values and keys
-        - keyword arguments (a dictionary), may include values and keys
+        - Task that raised the exception
         - list of keys that the function requires to be fetched to run
 
         See Also
@@ -121,12 +119,12 @@ class ReplayExceptionClient:
     async def _recreate_error_locally(self, future):
         await wait(future)
         out = await self._get_futures_error(future)
-        function, args, kwargs, deps = out
+        task, deps = out
         futures = self.client._graph_to_futures({}, deps)
         data = await self.client._gather(futures)
-        args = pack_data(args, data)
-        kwargs = pack_data(kwargs, data)
-        return (function, args, kwargs)
+        args = pack_data(task.args, data)
+        kwargs = pack_data(task.kwargs, data)
+        return (task.function, args, kwargs)
 
     def recreate_error_locally(self, future):
         """

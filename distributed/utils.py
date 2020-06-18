@@ -36,6 +36,7 @@ except ImportError:
 
 import dask
 from dask import istask
+from dask.task import Task, TupleTask, spec_type
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
@@ -780,12 +781,19 @@ def _maybe_complex(task):
 
 
 def convert(task, dsk, extra_values):
-    if type(task) is list:
+    task_type = spec_type(task)
+
+    if task_type is list:
         return [convert(v, dsk, extra_values) for v in task]
-    if type(task) is dict:
+    if task_type is dict:
         return {k: convert(v, dsk, extra_values) for k, v in task.items()}
-    if istask(task):
+    if task_type is TupleTask:
         return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+    if task_type is Task:
+        return Task(task.function,
+                    convert(task.args, dsk, extra_values),
+                    convert(task.kwargs, dsk, extra_values),
+                    task.annotations)
     try:
         if task in dsk or task in extra_values:
             return tokey(task)

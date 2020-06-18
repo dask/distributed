@@ -7,6 +7,7 @@ import random
 
 from dask.optimization import SubgraphCallable
 import dask.config
+from dask.task import spec_type, Task, TupleTask
 from dask.utils import parse_timedelta
 from tlz import merge, concat, groupby, drop
 
@@ -195,11 +196,11 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
         out = unpack_remotedata(o, byte_keys, myset)
         return out, myset
 
-    typ = type(o)
+    typ = spec_type(o)
 
     if typ is tuple:
-        if not o:
-            return o
+        return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
+    elif typ is TupleTask:
         if type(o[0]) is SubgraphCallable:
             sc = o[0]
             futures = set()
@@ -207,6 +208,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
                 k: unpack_remotedata(v, byte_keys, futures) for k, v in sc.dsk.items()
             }
             args = tuple(unpack_remotedata(i, byte_keys, futures) for i in o[1:])
+
             if futures:
                 myset.update(futures)
                 futures = (
@@ -224,6 +226,40 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
                 return o
         else:
             return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
+    elif typ is Task:
+        if type(o.function) is SubgraphCallable:
+            sc = o.function
+            futures = set()
+            dsk = {
+                k: unpack_remotedata(v, byte_keys, futures) for k, v in sc.dsk.items()
+            }
+            args = tuple(unpack_remotedata(i, byte_keys, futures)
+                         for i in o.args)
+
+            assert not o.kwargs
+
+            if futures:
+                myset.update(futures)
+
+                futures = (
+                    tuple(tokey(f.key) for f in futures)
+                    if byte_keys
+                    else tuple(f.key for f in futures)
+                )
+
+                inkeys = sc.inkeys + futures
+
+                return Task(
+                    SubgraphCallable(dsk, sc.outkey, inkeys, sc.name),
+                    list(args + futures),
+                    annotations=o.annotations)
+            else:
+                return o
+        else:
+            args = unpack_remotedata(o.args, byte_keys, myset)
+            kw = unpack_remotedata(o.kwargs, byte_keys, myset)
+            return Task(o.function, args, kw, o.annotations)
+
     if typ in collection_types:
         if not o:
             return o
@@ -272,7 +308,12 @@ def pack_data(o, d, key_types=object):
     except TypeError:
         pass
 
-    if typ in collection_types:
+    if typ is Task:
+        return Task(o.function,
+                    pack_data(o.args, d, key_types=key_types),
+                    pack_data(o.kwargs, d, key_types=key_types),
+                    o.annotations)
+    elif typ in collection_types:
         return typ([pack_data(x, d, key_types=key_types) for x in o])
     elif typ is dict:
         return {k: pack_data(v, d, key_types=key_types) for k, v in o.items()}
@@ -298,9 +339,21 @@ def subs_multiple(o, d):
     {'a': (sum, [1, 2])}
 
     """
-    typ = type(o)
-    if typ is tuple and o and callable(o[0]):  # istask(o)
+    typ = spec_type(o)
+
+    if typ is TupleTask:
         return (o[0],) + tuple(subs_multiple(i, d) for i in o[1:])
+    elif typ is Task:
+        return Task(
+            o.function,
+            subs_multiple(o.args, d),
+            (None if not o.kwargs
+             else {k: subs_multiple(v, d)
+                   for k, v in o.kwargs.items()}
+                   if isinstance(o, dict)
+             else o.kwargs),
+            o.annotations,
+        )
     elif typ is list:
         return [subs_multiple(i, d) for i in o]
     elif typ is dict:

@@ -29,6 +29,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
+from dask.task import Task
 from dask.utils import ensure_dict, format_bytes, funcname
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
@@ -1561,10 +1562,7 @@ class Client:
             restrictions = {}
             loose_restrictions = []
 
-        if kwargs:
-            dsk = {skey: (apply, func, list(args), kwargs)}
-        else:
-            dsk = {skey: (func,) + tuple(args)}
+        dsk = {skey: Task(func, list(args), kwargs if kwargs else None)}
 
         futures = self._graph_to_futures(
             dsk,
@@ -1726,7 +1724,7 @@ class Client:
                 )
 
         if not kwargs:
-            dsk = {key: (func,) + args for key, args in zip(keys, zip(*iterables))}
+            dsk = {key: Task(func, list(args)) for key, args in zip(keys, zip(*iterables))}
         else:
             kwargs2 = {}
             dsk = {}
@@ -1739,7 +1737,7 @@ class Client:
                     kwargs2[k] = v
             dsk.update(
                 {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
+                    key: Task(func, list(args), kwargs2)
                     for key, args in zip(keys, zip(*iterables))
                 }
             )
@@ -2544,13 +2542,23 @@ class Client:
                 for k, v in dsk.items()
                 if isinstance(v, Future) and k not in keyset
             }
+
             if values:
                 dsk = subs_multiple(dsk, values)
 
+            from pprint import pprint
             d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
             extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
             extra_keys = {tokey(future.key) for future in extra_futures}
             dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
+            # pprint(dict(dsk))
+            # print("\n\n\n")
+            # print(extra_keys)
+            # print("\n\n\n")
+            # pprint(d)
+            print("\n\n\n")
+            pprint(dsk2)
+            import pdb; pdb.set_trace
             dsk3 = {k: v for k, v in dsk2.items() if k is not v}
             for future in extra_futures:
                 if future.client is not self:

@@ -1874,10 +1874,10 @@ class Scheduler(ServerNode):
             if not isinstance(task, dict):
                 continue
 
-            if "annotation" not in task:
+            if "annotations" not in task:
                 continue
 
-            annotations[k] = annotation = pickle.loads(task["annotation"]).annotation
+            annotations[k] = annotation = pickle.loads(task["annotations"])
 
             if "priority" in annotation:
                 priority[k] = annotation["priority"]
