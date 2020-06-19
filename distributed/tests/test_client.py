@@ -4572,7 +4572,7 @@ async def test_recreate_error_delayed(c, s, a, b):
     function, args, kwargs = await c._recreate_error_locally(f)
     assert f.status == "error"
     assert function.__name__ == "div"
-    assert args == (1, 0)
+    assert args == [1, 0]
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4591,7 +4591,7 @@ async def test_recreate_error_futures(c, s, a, b):
     function, args, kwargs = await c._recreate_error_locally(f)
     assert f.status == "error"
     assert function.__name__ == "div"
-    assert args == (1, 0)
+    assert args == [1, 0]
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
