@@ -340,13 +340,6 @@ async def test_persist_retries(c, s, a, b):
     assert await z == 80
 
 
-# def test_retries_dask_array():
-#     da = pytest.importorskip("dask.array")
-#     x = da.ones((10, 10), chunks=(3, 3))
-#     future = da.compute(x.sum())
-#     assert future[0] == 100
-
-
 @gen_cluster(client=True)
 async def test_retries_dask_array(c, s, a, b):
     da = pytest.importorskip("dask.array")
