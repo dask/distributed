@@ -537,8 +537,11 @@ class Server:
                 # result is not type stable:
                 # when LHS is not Status then RHS must not be Status or it raises.
                 # when LHS is Status then RHS must be status or it raises in tests
+                is_dont_reply = False
+                if isinstance(result, Status) and (result == Status.dont_reply):
+                    is_dont_reply = True
 
-                if reply and result != Status.dont_reply.value:
+                if reply and not is_dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (EnvironmentError, TypeError) as e:
