@@ -2125,9 +2125,10 @@ class Scheduler(ServerNode):
         cur_ts = self.tasks[cur_key]
         rearguard_ts = self.tasks[rearguard_key]
 
-        if rearguard_ts not in cur_ts.dependents:
-            # self.to_graphviz()
-            # print(f"rearguard_ts: {rearguard_ts}, cur_ts{cur_ts}")
+        # Avoid generating tasks more than once
+        if (rearguard_ts.run_spec is not None
+            and rearguard_ts.run_spec.get("tasks-inserted", False)):
+            print("going twice: ", cur_key)
             return
 
         # Create new tasks
@@ -2162,6 +2163,7 @@ class Scheduler(ServerNode):
             ts.waiters.add(rearguard_ts)
         # TODO: use a "memory task" instead
         rearguard_ts.run_spec = dumps_task((noop, rearguard_input))
+        rearguard_ts.run_spec["tasks-inserted"] = True
 
         # Finally transition all recomendations
         self.transitions(recomendations)
