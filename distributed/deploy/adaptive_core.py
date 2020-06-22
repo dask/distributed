@@ -75,11 +75,13 @@ class AdaptiveCore:
         self.maximum = maximum
         self.wait_count = wait_count
         self.interval = parse_timedelta(interval, "seconds") if interval else interval
-        self.periodic_callback = None
+        self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
 
         def f():
-            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
-            self.periodic_callback.start()
+            try:
+                self.periodic_callback.start()
+            except AttributeError:
+                pass
 
         if self.interval:
             try:
