@@ -75,7 +75,7 @@ class AdaptiveCore:
         self.maximum = maximum
         self.wait_count = wait_count
         self.interval = parse_timedelta(interval, "seconds") if interval else interval
-        self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
+        self.periodic_callback = None
 
         def f():
             try:
@@ -84,6 +84,7 @@ class AdaptiveCore:
                 pass
 
         if self.interval:
+            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
             try:
                 self.loop.add_callback(f)
             except AttributeError:
