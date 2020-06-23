@@ -1637,24 +1637,19 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_delete_data(client, s, w):
+async def test_delete_data(c, s, w):
     df = dask.datasets.timeseries(dtypes={"x": int, "y": float}, freq="1s").reset_index(
         drop=True
     )
 
-    await client.compute(df.map_partitions(lambda df: df.__sizeof__()))
-
     df2 = df.persist()
     await df2
 
-    def _check_data(empty):
-        if empty is True:
-            assert len(get_worker().data) == 0
-        else:
-            assert len(get_worker().data) > 0
-
     del df
-    await client.run(_check_data, False)
+    assert len(w.data) > 0
 
     del df2
-    await client.run(_check_data, True)
+    start = time()
+    while w.data:
+        await asyncio.sleep(0.01)
+        assert time() < start + 2
