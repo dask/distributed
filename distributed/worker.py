@@ -1352,12 +1352,6 @@ class Worker(ServerNode):
                     self.release_dep(key)
 
             logger.debug("Deleted %d keys", len(keys))
-            if report:
-                logger.debug("Reporting loss of keys to scheduler")
-                # TODO: this route seems to not exist?
-                self.scheduler.remove_keys(
-                    address=self.contact_address, keys=list(keys)
-                )
         return "OK"
 
     async def set_resources(self, **resources):
