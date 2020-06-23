@@ -1638,9 +1638,8 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_delete_data(client, s, w):
-    df = (
-        dask.datasets.timeseries(dtypes={"x": int, "y": float}, freq="1s")
-        .reset_index(drop=True)
+    df = dask.datasets.timeseries(dtypes={"x": int, "y": float}, freq="1s").reset_index(
+        drop=True
     )
 
     await client.compute(df.map_partitions(lambda df: df.__sizeof__()))
