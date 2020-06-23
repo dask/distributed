@@ -770,6 +770,12 @@ properties:
         - "null"
         description:
           The size of the memory pool in bytes
+      logging:
+        type:
+        - bool
+        - "False"
+        description:
+          Whether to enable logging with RMM
   ucx:
     type: object
     description: |

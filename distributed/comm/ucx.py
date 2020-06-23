@@ -101,10 +101,15 @@ def init_once():
                 )
 
     pool_size_str = dask.config.get("rmm.pool-size")
+    enable_logging = dask.config.get("rmm.logging")
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
         rmm.reinitialize(
-            pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+            pool_allocator=True,
+            managed_memory=False,
+            initial_pool_size=pool_size,
+            logging=enable_logging,
+            log_file_name="",  # Something more useful here ;)
         )
 
 

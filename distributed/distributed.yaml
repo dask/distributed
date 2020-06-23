@@ -172,6 +172,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
 rmm:
   pool-size: null
+  logging: False
 ucx:
   tcp: null  # enable tcp
   nvlink: null  # enable cuda_ipc
