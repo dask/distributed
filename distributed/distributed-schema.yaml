@@ -772,7 +772,7 @@ properties:
           The size of the memory pool in bytes
       logging:
         type:
-        - bool
+        - boolean
         - "False"
         description:
           Whether to enable logging with RMM
