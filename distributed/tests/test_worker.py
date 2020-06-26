@@ -1634,22 +1634,3 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                 else:
                     assert w.status == "closed"
     assert "Heartbeat to scheduler failed" in logger.getvalue()
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
-async def test_delete_data(c, s, w):
-    df = dask.datasets.timeseries(dtypes={"x": int, "y": float}, freq="1s").reset_index(
-        drop=True
-    )
-
-    df2 = df.persist()
-    await df2
-
-    del df
-    assert len(w.data) > 0
-
-    del df2
-    start = time()
-    while w.data:
-        await asyncio.sleep(0.01)
-        assert time() < start + 2
