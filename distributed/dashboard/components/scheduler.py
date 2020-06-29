@@ -456,6 +456,7 @@ class ComputePerKey(DashboardComponent):
 
             compute_data = {
                 "times": [0.2, 0.1],
+                "formatted_time": ["0.2 ms", "2.8 us"],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["sum", "sum_partial"],
             }
@@ -498,7 +499,7 @@ class ComputePerKey(DashboardComponent):
             hover.tooltips = """
             <div>
                 <p><b>Name:</b> @names</p>
-                <p><b>Time:</b> @times s</p>
+                <p><b>Time:</b> @formatted_time</p>
             </div>
             """
             hover.point_policy = "follow_mouse"
@@ -534,7 +535,10 @@ class ComputePerKey(DashboardComponent):
             self.fig.title.text = "Compute Time Per Task"
 
             compute_result = dict(
-                times=compute_time, color=compute_colors, names=compute_names
+                times=compute_time,
+                color=compute_colors,
+                names=compute_names,
+                formatted_time=[format_time(t) for t in compute_time],
             )
 
             update(self.compute_source, compute_result)
@@ -658,6 +662,7 @@ class AggregateAction(DashboardComponent):
 
             action_data = {
                 "times": [0.2, 0.1],
+                "formatted_time": ["0.2 ms", "2.8 us"],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["transfer", "compute"],
             }
@@ -701,7 +706,7 @@ class AggregateAction(DashboardComponent):
             hover.tooltips = """
             <div>
                 <p><b>Name:</b> @names</p>
-                <p><b>Time:</b> @times s</p>
+                <p><b>Time:</b> @formatted_time</p>
             </div>
             """
             hover.point_policy = "follow_mouse"
@@ -735,7 +740,12 @@ class AggregateAction(DashboardComponent):
             self.fig.x_range.factors = agg_names
             self.fig.title.text = "Aggregate Time Per Action"
 
-            action_result = dict(times=agg_time, color=agg_colors, names=agg_names)
+            action_result = dict(
+                times=agg_time,
+                color=agg_colors,
+                names=agg_names,
+                formatted_time=[format_time(t) for t in agg_time],
+            )
 
             update(self.action_source, action_result)
 
