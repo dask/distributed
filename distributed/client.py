@@ -1126,6 +1126,8 @@ class Client:
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
 
+        if msg[0].get("error"):
+            raise ImportError(msg[0]["error"])
         if msg[0].get("warning"):
             warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
@@ -3681,8 +3683,10 @@ class Client:
 
         if check:
             msg = version_module.error_message(scheduler, workers, client)
-            if msg:
-                raise ValueError(msg)
+            if msg["warning"]:
+                warnings.warn(msg["warning"])
+            if msg["error"]:
+                raise ValueError(msg["error"])
 
         return result
 
