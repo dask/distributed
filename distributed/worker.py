@@ -2361,10 +2361,10 @@ class Worker(ServerNode):
         # logger.info("Finish job %d, %s", i, key)
         raise gen.Return(result)
 
-    def run(self, comm, function, args=(), wait=True, kwargs={}):
+    def run(self, comm, function, args=(), wait=True, kwargs=None):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    def run_coroutine(self, comm, function, args=(), kwargs={}, wait=True):
+    def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     async def plugin_add(self, comm=None, plugin=None, name=None):
@@ -3523,7 +3523,8 @@ def weight(k, v):
     return sizeof(v)
 
 
-async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+    kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
         is_coro = iscoroutinefunction(function)
