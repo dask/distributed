@@ -459,6 +459,7 @@ class ComputePerKey(DashboardComponent):
             compute_data = {
                 "times": [0.2, 0.1],
                 "formatted_time": ["0.2 ms", "2.8 us"],
+                "angles": [3.14, 0.785],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["sum", "sum_partial"],
             }
@@ -518,8 +519,6 @@ class ComputePerKey(DashboardComponent):
                 "names": ["sum", "sum_partial"],
             }
 
-            self.compute_wedge_data = ColumnDataSource(data=compute_wedge_data)
-
             fig2 = figure(
                 title="Compute Time Per Task",
                 tools="",
@@ -538,7 +537,7 @@ class ComputePerKey(DashboardComponent):
                 line_color="white",
                 fill_color="color",
                 legend_field="names",
-                source=self.compute_wedge_data,
+                source=self.compute_source,
             )
 
             fig2.axis.axis_label = None
@@ -575,6 +574,9 @@ class ComputePerKey(DashboardComponent):
                 compute_times.items(), key=lambda x: x[1], reverse=True
             )
 
+            # keep only time which are 2% of max or greater
+            max_time = compute_times[0][1] * 0.02
+            compute_times = [(n, t) for n, t in compute_times if t > max_time]
             compute_colors = list()
             compute_names = list()
             compute_time = list()
@@ -587,25 +589,10 @@ class ComputePerKey(DashboardComponent):
 
             angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            compute_wedge_data = dict(
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                angles=angles,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
-
-            update(self.compute_wedge_data, compute_wedge_data)
-
-            # keep only time which are 2% of max or greater
-            max_time = compute_time[0] * 0.02
-            compute_time = [t for t in compute_time if t >= max_time]
-            compute_names = compute_names[: len(compute_time)]
-            compute_colors = compute_colors[: len(compute_time)]
-
             self.fig.x_range.factors = compute_names
 
             compute_result = dict(
+                angles=angles,
                 times=compute_time,
                 color=compute_colors,
                 names=compute_names,

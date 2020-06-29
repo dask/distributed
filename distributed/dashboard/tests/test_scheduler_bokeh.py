@@ -760,11 +760,7 @@ async def test_compute_per_key(c, s, a, b):
     assert response.code == 200
     assert ("sum-aggregate") in mbk.compute_source.data["names"]
     assert ("add") in mbk.compute_source.data["names"]
-
-    assert ("sum-aggregate") in mbk.compute_wedge_data.data["names"]
-    assert ("inc") in mbk.compute_wedge_data.data["names"]
-    assert ("add") in mbk.compute_wedge_data.data["names"]
-    assert "angles" in mbk.compute_wedge_data.data.keys()
+    assert "angles" in mbk.compute_source.data.keys()
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})
