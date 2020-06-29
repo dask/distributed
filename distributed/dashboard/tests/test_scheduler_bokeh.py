@@ -37,7 +37,6 @@ from distributed.dashboard.components.scheduler import (
     MemoryByKey,
     AggregateAction,
     ComputePerKey,
-    ComputePerKeyPie,
 )
 from distributed.dashboard import scheduler
 
@@ -760,19 +759,12 @@ async def test_compute_per_key(c, s, a, b):
     )
     assert response.code == 200
     assert ("sum-aggregate") in mbk.compute_source.data["names"]
-    assert ("inc") in mbk.compute_source.data["names"]
     assert ("add") in mbk.compute_source.data["names"]
 
-    mbkpie = ComputePerKeyPie(s)
-    mbkpie.update()
-    response = await http_client.fetch(
-        "http://localhost:%d/individual-compute-time-per-key-pie" % s.http_server.port
-    )
-    assert response.code == 200
-    assert ("sum-aggregate") in mbkpie.compute_source.data["names"]
-    assert ("inc") in mbkpie.compute_source.data["names"]
-    assert ("add") in mbkpie.compute_source.data["names"]
-    assert "angles" in mbkpie.compute_source.data.keys()
+    assert ("sum-aggregate") in mbk.compute_wedge_data.data["names"]
+    assert ("inc") in mbk.compute_wedge_data.data["names"]
+    assert ("add") in mbk.compute_wedge_data.data["names"]
+    assert "angles" in mbk.compute_wedge_data.data.keys()
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})

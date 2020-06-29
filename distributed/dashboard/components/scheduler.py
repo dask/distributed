@@ -26,6 +26,8 @@ from bokeh.models import (
     BoxSelectTool,
     GroupFilter,
     CDSView,
+    Tabs,
+    Panel,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
@@ -506,59 +508,9 @@ class ComputePerKey(DashboardComponent):
             fig.add_tools(hover)
 
             self.fig = fig
+            tab1 = Panel(child=fig, title="Bar Chart")
 
-    @without_property_validation
-    def update(self):
-        with log_errors():
-            compute_times = defaultdict(float)
-
-            for key, ts in self.scheduler.task_prefixes.items():
-                name = key_split(key)
-                for action, t in ts.all_durations.items():
-                    if action == "compute":
-                        compute_times[name] += t
-
-            # order by largest time first
-            compute_times = sorted(
-                compute_times.items(), key=lambda x: x[1], reverse=True
-            )
-
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-
-            self.fig.x_range.factors = compute_names
-            self.fig.title.text = "Compute Time Per Task"
-
-            compute_result = dict(
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
-
-            update(self.compute_source, compute_result)
-
-
-class ComputePerKeyPie(DashboardComponent):
-    """ Pie!!!!! chart showing time spend in action by key prefix"""
-
-    def __init__(self, scheduler, **kwargs):
-        with log_errors():
-            self.last = 0
-            self.scheduler = scheduler
-
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
-
-            compute_data = {
+            compute_wedge_data = {
                 "times": [0.2, 0.1],
                 "formatted_time": ["0.2 ms", "2.8 us"],
                 "angles": [1.4, 0.8],
@@ -566,9 +518,9 @@ class ComputePerKeyPie(DashboardComponent):
                 "names": ["sum", "sum_partial"],
             }
 
-            self.compute_source = ColumnDataSource(data=compute_data)
+            self.compute_wedge_data = ColumnDataSource(data=compute_wedge_data)
 
-            fig = figure(
+            fig2 = figure(
                 title="Compute Time Per Task",
                 tools="",
                 id="bk-Compute-by-key-pie",
@@ -577,7 +529,7 @@ class ComputePerKeyPie(DashboardComponent):
                 **kwargs,
             )
 
-            wedge = fig.wedge(
+            wedge = fig2.wedge(
                 x=0,
                 y=1,
                 radius=0.4,
@@ -586,12 +538,12 @@ class ComputePerKeyPie(DashboardComponent):
                 line_color="white",
                 fill_color="color",
                 legend_field="names",
-                source=self.compute_source,
+                source=self.compute_wedge_data,
             )
 
-            fig.axis.axis_label = None
-            fig.axis.visible = False
-            fig.grid.grid_line_color = None
+            fig2.axis.axis_label = None
+            fig2.axis.visible = False
+            fig2.grid.grid_line_color = None
 
             hover = HoverTool()
             hover.tooltips = """
@@ -601,9 +553,11 @@ class ComputePerKeyPie(DashboardComponent):
             </div>
             """
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
+            fig2.add_tools(hover)
+            self.wedge_fig = fig2
+            tab2 = Panel(child=fig2, title="Pie Chart")
 
-            self.fig = fig
+            self.tabs = Tabs(tabs=[tab1, tab2])
 
     @without_property_validation
     def update(self):
@@ -633,13 +587,28 @@ class ComputePerKeyPie(DashboardComponent):
 
             angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.title.text = "Compute Time Per Task"
+            compute_wedge_data = dict(
+                times=compute_time,
+                color=compute_colors,
+                names=compute_names,
+                angles=angles,
+                formatted_time=[format_time(t) for t in compute_time],
+            )
+
+            update(self.compute_wedge_data, compute_wedge_data)
+
+            # keep only time which are 2% of max or greater
+            max_time = compute_time[0] * 0.02
+            compute_time = [t for t in compute_time if t >= max_time]
+            compute_names = compute_names[: len(compute_time)]
+            compute_colors = compute_colors[: len(compute_time)]
+
+            self.fig.x_range.factors = compute_names
 
             compute_result = dict(
                 times=compute_time,
                 color=compute_colors,
                 names=compute_names,
-                angles=angles,
                 formatted_time=[format_time(t) for t in compute_time],
             )
 
@@ -2242,16 +2211,7 @@ def individual_compute_time_per_key_doc(scheduler, extra, doc):
         component = ComputePerKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
-        doc.theme = BOKEH_THEME
-
-
-def individual_compute_time_per_key_pie_doc(scheduler, extra, doc):
-    with log_errors():
-        component = ComputePerKeyPie(scheduler, sizing_mode="stretch_both")
-        component.update()
-        add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
+        doc.add_root(component.tabs)
         doc.theme = BOKEH_THEME
 
 
