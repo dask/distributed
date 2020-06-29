@@ -440,7 +440,7 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
-class ComputerPerKey(DashboardComponent):
+class ComputePerKey(DashboardComponent):
     """ Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
@@ -477,14 +477,13 @@ class ComputerPerKey(DashboardComponent):
                 top="times",
                 width=0.7,
                 color="color",
-                legend_field="names",
             )
 
             fig.y_range.start = 0
             fig.min_border_right = 20
             fig.min_border_bottom = 60
             fig.yaxis.axis_label = "Time (s)"
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
             rect.nonselection_glyph = None
@@ -578,13 +577,12 @@ class AggregateAction(DashboardComponent):
                 top="times",
                 width=0.7,
                 color="color",
-                legend_field="names",
             )
 
             fig.y_range.start = 0
             fig.min_border_right = 20
             fig.min_border_bottom = 60
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.axis_label = "Time (s)"
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
@@ -2129,7 +2127,7 @@ def individual_memory_by_key_doc(scheduler, extra, doc):
 
 def individual_compute_time_per_key_doc(scheduler, extra, doc):
     with log_errors():
-        component = ComputerPerKey(scheduler, sizing_mode="stretch_both")
+        component = ComputePerKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
         doc.add_root(component.fig)

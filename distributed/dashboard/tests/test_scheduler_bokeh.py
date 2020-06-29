@@ -36,7 +36,7 @@ from distributed.dashboard.components.scheduler import (
     ProfileServer,
     MemoryByKey,
     AggregateAction,
-    ComputerPerKey,
+    ComputePerKey,
 )
 from distributed.dashboard import scheduler
 
@@ -741,8 +741,8 @@ async def test_aggregate_action(c, s, a, b):
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
-async def test_computer_per_key(c, s, a, b):
-    mbk = ComputerPerKey(s)
+async def test_compute_per_key(c, s, a, b):
+    mbk = ComputePerKey(s)
 
     da = pytest.importorskip("dask.array")
     x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
