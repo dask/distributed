@@ -2361,11 +2361,10 @@ class Worker(ServerNode):
         # logger.info("Finish job %d, %s", i, key)
         raise gen.Return(result)
 
-    def run(self, comm, function, args=(), wait=True, kwargs=None):
-        kwargs = kwargs or {}
+    def run(self, comm, function, args=(), wait=True, kwargs={}):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
+    def run_coroutine(self, comm, function, args=(), kwargs={}, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     async def plugin_add(self, comm=None, plugin=None, name=None):
