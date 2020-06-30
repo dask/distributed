@@ -484,9 +484,10 @@ class Worker(ServerNode):
 
         if local_directory is None:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            local_directory = os.path.join(local_directory, "dask-worker-space")
+
+        if not os.path.exists(local_directory):
+            os.makedirs(local_directory)
+        local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
@@ -1341,7 +1342,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    async def delete_data(self, comm=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1352,12 +1353,6 @@ class Worker(ServerNode):
                     self.release_dep(key)
 
             logger.debug("Deleted %d keys", len(keys))
-            if report:
-                logger.debug("Reporting loss of keys to scheduler")
-                # TODO: this route seems to not exist?
-                await self.scheduler.remove_keys(
-                    address=self.contact_address, keys=list(keys)
-                )
         return "OK"
 
     async def set_resources(self, **resources):
@@ -2367,7 +2362,6 @@ class Worker(ServerNode):
         raise gen.Return(result)
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
-        kwargs = kwargs or {}
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
@@ -3529,7 +3523,8 @@ def weight(k, v):
     return sizeof(v)
 
 
-async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+    kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
         is_coro = iscoroutinefunction(function)
