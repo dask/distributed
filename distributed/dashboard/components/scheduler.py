@@ -28,6 +28,7 @@ from bokeh.models import (
     CDSView,
     Tabs,
     Panel,
+    Title,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
@@ -508,6 +509,14 @@ class ComputePerKey(DashboardComponent):
             hover.point_policy = "follow_mouse"
             fig.add_tools(hover)
 
+            fig.add_layout(
+                Title(
+                    text="Note: tasks less than 2% of max are not displayed",
+                    text_font_style="italic",
+                ),
+                "below",
+            )
+
             self.fig = fig
             tab1 = Panel(child=fig, title="Bar Chart")
 
@@ -543,6 +552,13 @@ class ComputePerKey(DashboardComponent):
             fig2.axis.axis_label = None
             fig2.axis.visible = False
             fig2.grid.grid_line_color = None
+            fig2.add_layout(
+                Title(
+                    text="Note: tasks less than 2% of max are not displayed",
+                    text_font_style="italic",
+                ),
+                "below",
+            )
 
             hover = HoverTool()
             hover.tooltips = """
