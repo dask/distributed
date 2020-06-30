@@ -415,6 +415,7 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     assert "timeout" not in text.lower()
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
 async def test_worker_time_to_live(c, s, a, b):
     from distributed.scheduler import heartbeat_interval
