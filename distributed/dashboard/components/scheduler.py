@@ -591,31 +591,32 @@ class ComputePerKey(DashboardComponent):
             )
 
             # keep only time which are 2% of max or greater
-            max_time = compute_times[0][1] * 0.02
-            compute_times = [(n, t) for n, t in compute_times if t > max_time]
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            total_time = 0
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
-                total_time += t
+            if compute_times:
+                max_time = compute_times[0][1] * 0.02
+                compute_times = [(n, t) for n, t in compute_times if t > max_time]
+                compute_colors = list()
+                compute_names = list()
+                compute_time = list()
+                total_time = 0
+                for name, t in compute_times:
+                    compute_names.append(name)
+                    compute_colors.append(ts_color_of(name))
+                    compute_time.append(t)
+                    total_time += t
 
-            angles = [t / total_time * 2 * math.pi for t in compute_time]
+                angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            self.fig.x_range.factors = compute_names
+                self.fig.x_range.factors = compute_names
 
-            compute_result = dict(
-                angles=angles,
-                times=compute_time,
-                color=compute_colors,
-                names=compute_names,
-                formatted_time=[format_time(t) for t in compute_time],
-            )
+                compute_result = dict(
+                    angles=angles,
+                    times=compute_time,
+                    color=compute_colors,
+                    names=compute_names,
+                    formatted_time=[format_time(t) for t in compute_time],
+                )
 
-            update(self.compute_source, compute_result)
+                update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
