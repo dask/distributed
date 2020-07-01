@@ -73,8 +73,7 @@ fi
 
 if [[ $PYTHON != 3.8 ]]; then
     # Install backport package for pickle protocol 5 support
-    conda install -c conda-forge -c defaults 'pickle5>=0.0.10'
-    pip install git+https://github.com/jakirkham/cloudpickle.git@opt_use_pickle5_redux
+    conda install -c conda-forge -c defaults 'pickle5>=0.0.11'
     # stacktrace is not currently avaiable for Python 3.8.
     # Remove the version check block below when it is avaiable.
     # For low-level profiler, install libunwind and stacktrace from conda-forge
