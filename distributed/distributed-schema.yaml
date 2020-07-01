@@ -771,9 +771,7 @@ properties:
         description:
           The size of the memory pool in bytes
       logging:
-        type:
-        - boolean
-        - "False"
+        type: boolean
         description:
           Whether to enable logging with RMM
   ucx:
