@@ -11,8 +11,44 @@ from ..utils import nbytes
 
 _deserialize = deserialize
 
-
 logger = logging.getLogger(__name__)
+
+"""
+Some values are sent in a serialized form, which does not need to be understood by the central server.
+These values are offloaded to separate MessagePack frames which are sent after the main message.
+The offloaded values in the main message are replaced by a placeholder object:
+key: {
+    [OFFLOAD_HEADER_KEY]: <message-pack encoded header of this offloaded value>,
+    [OFFLOAD_FINDEX_KEY]: <frames of this value start at this index in the frames array>,
+    [OFFLOAD_FCOUNT_KEY]: <number of frames of this offloaded value> 
+}
+
+The frames for a specific offloaded value can be found at frames[OFFLOAD_FINDEX_KEY:OFFLOAD_FINDEX_KEY+OFFLOAD_FCOUNT_KEY].
+"""
+
+OFFLOAD_HEADER_KEY = "_$header"
+OFFLOAD_FINDEX_KEY = "_$findex"
+OFFLOAD_FCOUNT_KEY = "_$fcount"
+
+
+def _make_offload_value(header, frame_index, frame_count):
+    return {
+        OFFLOAD_HEADER_KEY: header,
+        OFFLOAD_FINDEX_KEY: frame_index,
+        OFFLOAD_FCOUNT_KEY: frame_count,
+    }
+
+
+def _extract_offload_value(value):
+    if not isinstance(value, dict) or len(value) != 3:
+        return None
+    frame_index = value.get(OFFLOAD_FINDEX_KEY)
+    if frame_index is None:
+        return None
+    header = value.get(OFFLOAD_HEADER_KEY)
+    if header is None:
+        return None
+    return (header, frame_index)
 
 
 def dumps(msg, serializers=None, on_error="message", context=None):
@@ -22,10 +58,9 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         # Only lists and dicts can contain serialized values
         if isinstance(msg, (list, dict)):
             msg, data, bytestrings = extract_serialize(msg)
-        small_header, small_payload = dumps_msgpack(msg)
 
         if not data:  # fast path without serialized data
-            return small_header, small_payload
+            return dumps_msgpack(msg)
 
         pre = {
             key: (value.header, value.frames)
@@ -41,14 +76,17 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             if type(value) is Serialize
         }
 
-        header = {"headers": {}, "keys": [], "bytestrings": list(bytestrings)}
-
         out_frames = []
+
+        def patch_offload_header(path, header, frame_index, frame_count, context):
+            accessor, key = path[:-1], path[-1]
+            holder = reduce(operator.getitem, accessor, context)
+            header["deserialize"] = path in bytestrings
+            holder[key] = _make_offload_value(header, frame_index, frame_count)
 
         for key, (head, frames) in data.items():
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
-
             # Compress frames that are not yet compressed
             out_compression = []
             _out_frames = []
@@ -63,19 +101,16 @@ def dumps(msg, serializers=None, on_error="message", context=None):
                 else:  # already specified, so pass
                     out_compression.append(compression)
                     _out_frames.append(frame)
-
             head["compression"] = out_compression
             head["count"] = len(_out_frames)
-            header["headers"][key] = head
-            header["keys"].append(key)
+            patch_offload_header(key, head, len(out_frames), len(_out_frames), msg)
             out_frames.extend(_out_frames)
 
         for key, (head, frames) in pre.items():
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
             head["count"] = len(frames)
-            header["headers"][key] = head
-            header["keys"].append(key)
+            patch_offload_header(key, head, len(out_frames), len(frames), msg)
             out_frames.extend(frames)
 
         for i, frame in enumerate(out_frames):
@@ -86,11 +121,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
                     frame = frame.tobytes()
                 out_frames[i] = frame
 
-        return [
-            small_header,
-            small_payload,
-            msgpack.dumps(header, use_bin_type=True),
-        ] + out_frames
+        return dumps_msgpack(msg) + out_frames
     except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise
@@ -98,54 +129,46 @@ def dumps(msg, serializers=None, on_error="message", context=None):
 
 def loads(frames, deserialize=True, deserializers=None):
     """ Transform bytestream back into Python value """
-    frames = frames[::-1]  # reverse order to improve pop efficiency
-    if not isinstance(frames, list):
-        frames = list(frames)
+    frames = list(frames)
     try:
-        small_header = frames.pop()
-        small_payload = frames.pop()
+        small_header = frames[0]
+        small_payload = frames[1]
         msg = loads_msgpack(small_header, small_payload)
-        if not frames:
-            return msg
+        out_frames_start = 2
 
-        header = frames.pop()
-        header = msgpack.loads(header, use_list=False, **msgpack_opts)
-        keys = header["keys"]
-        headers = header["headers"]
-        bytestrings = set(header["bytestrings"])
-
-        for key in keys:
-            head = headers[key]
-            count = head["count"]
-            if count:
-                fs = frames[-count::][::-1]
-                del frames[-count:]
-            else:
-                fs = []
-
-            if deserialize or key in bytestrings:
-                if "compression" in head:
-                    fs = decompress(head, fs)
-                fs = merge_frames(head, fs)
-                value = _deserialize(head, fs, deserializers=deserializers)
-            else:
-                value = Serialized(head, fs)
-
-            def put_in(keys, coll, val):
-                """Inverse of get_in, but does type promotion in the case of lists"""
-                if keys:
-                    holder = reduce(operator.getitem, keys[:-1], coll)
-                    if isinstance(holder, tuple):
-                        holder = list(holder)
-                        coll = put_in(keys[:-1], coll, holder)
-                    holder[keys[-1]] = val
+        def _traverse(item):
+            placeholder = _extract_offload_value(item)
+            if placeholder is not None:
+                header, frame_index = placeholder
+                deserialize_key = header["deserialize"]
+                count = header["count"]
+                if count:
+                    start_index = out_frames_start + frame_index
+                    end_index = start_index + count
+                    fs = frames[start_index:end_index]
+                    frames[start_index:end_index] = [None] * count  # free memory
                 else:
-                    coll = val
-                return coll
+                    fs = []
 
-            msg = put_in(key, msg, value)
+                if deserialize or deserialize_key:
+                    if "compression" in header:
+                        fs = decompress(header, fs)
+                    fs = merge_frames(header, fs)
+                    value = _deserialize(header, fs, deserializers=deserializers)
+                else:
+                    value = Serialized(header, fs)
+                return value
 
-        return msg
+            if isinstance(item, list):
+                return list(_traverse(i) for i in item)
+            elif isinstance(item, tuple):
+                return tuple(_traverse(i) for i in item)
+            elif isinstance(item, dict):
+                return {key: _traverse(val) for (key, val) in item.items()}
+            else:
+                return item
+
+        return _traverse(msg)
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)
         raise
