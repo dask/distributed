@@ -138,8 +138,10 @@ class TypeCompressor(collections.abc.MutableMapping):
 
     def __getitem__(self, key):
         header, (compression, compressed) = self.storage[key]
-
-        frames = decompress({"compression": {compression}}, compressed)
+        if compression is None:
+            frames = compressed
+        else:
+            frames = decompress(compression, compressed)
         return deserialize(header, frames)
 
     def __delitem__(self, key):
