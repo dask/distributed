@@ -441,8 +441,10 @@ def test_serialize_lists(serializers):
     assert data_in == data_out
 
 
-def test_deser_memoryview():
-    data_in = memoryview(b"hello")
+@pytest.mark.parametrize(
+    "data_in", [memoryview(b"hello")],
+)
+def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
     assert header["type"] == "builtins.memoryview"
     assert frames[0] is data_in
