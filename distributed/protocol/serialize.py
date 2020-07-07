@@ -564,7 +564,7 @@ def normalize_Serialized(o):
 
 
 # Teach serialize how to handle bytestrings
-@dask_serialize.register((bytes, bytearray, memoryview))
+@dask_serialize.register((bytes, bytearray))
 def _serialize_bytes(obj):
     header = {}  # no special metadata
     frames = [obj]
@@ -574,6 +574,13 @@ def _serialize_bytes(obj):
 @dask_deserialize.register((bytes, bytearray))
 def _deserialize_bytes(header, frames):
     return b"".join(frames)
+
+
+@dask_serialize.register(memoryview)
+def _serialize_memoryview(obj):
+    header = {}  # no special metadata
+    frames = [obj]
+    return header, frames
 
 
 @dask_deserialize.register(memoryview)
