@@ -219,7 +219,7 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
     if timeout and timeout / 20 < backoff:
         backoff = timeout / 20
 
-    retry_timeout_backoff = 1
+    retry_timeout_backoff = random.randrange(140, 160) / 100
 
     # This starts a thread
     while True:
