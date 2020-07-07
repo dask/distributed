@@ -451,3 +451,9 @@ def test_deser_memoryview(data_in):
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out
+
+
+def test_ser_memoryview_object():
+    data_in = memoryview(np.array(["hello"], dtype=object))
+    with pytest.raises(TypeError):
+        serialize(data_in, on_error="raise")
