@@ -136,7 +136,7 @@ class UCX(Comm):
 
     The expected read cycle is
 
-    1. Read the frame describing number of frames
+    1. Read the frame describing number of frames (-1 means shutdown)
     2. Read the frame describing whether each data frame is gpu-bound
     3. Read the frame describing whether each data frame is sized
     4. Read all the data frames.
@@ -196,8 +196,8 @@ class UCX(Comm):
 
                 # Send meta data
 
-                # Send # of frames (uint64)
-                await self.ep.send(struct.pack("Q", nframes))
+                # Send # of frames (int64)
+                await self.ep.send(struct.pack("q", nframes))
                 # Send which frames are CUDA (bool) and
                 # how large each frame is (uint64)
                 await self.ep.send(
@@ -232,11 +232,13 @@ class UCX(Comm):
             try:
                 # Recv meta data
 
-                # Recv # of frames (uint64)
-                nframes_fmt = "Q"
-                nframes = host_array(struct.calcsize(nframes_fmt))
+                # Recv # of frames (int64) where -1 is a shutdown request
+                nframes = host_array(struct.calcsize("q"))
                 await self.ep.recv(nframes)
-                (nframes,) = struct.unpack(nframes_fmt, nframes)
+                (nframes,) = struct.unpack("q", nframes)
+
+                if nframes == -1:  # The writer is closing the connection
+                    raise CancelledError("Connection closed by writer")
 
                 # Recv which frames are CUDA (bool) and
                 # how large each frame is (uint64)
@@ -279,7 +281,8 @@ class UCX(Comm):
 
     async def close(self):
         if self._ep is not None:
-            await self._ep.close()
+            await self.ep.send(struct.pack("q", -1))
+            self.abort()
             self._ep = None
 
     def abort(self):
