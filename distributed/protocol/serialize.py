@@ -586,10 +586,10 @@ def _serialize_memoryview(obj):
 @dask_deserialize.register(memoryview)
 def _deserialize_memoryview(header, frames):
     if len(frames) == 1:
-        out = frames[0]
+        out = memoryview(frames[0]).cast("B")
     else:
-        out = b"".join(frames)
-    return memoryview(out)
+        out = memoryview(b"".join(frames))
+    return out
 
 
 #########################
