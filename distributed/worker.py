@@ -3535,10 +3535,6 @@ async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=T
             "We now automatically detect coroutines/async functions"
         )
     assert wait or is_coro, "Combination not supported"
-    if args:
-        args = pickle.loads(args)
-    if kwargs:
-        kwargs = pickle.loads(kwargs)
     if has_arg(function, "dask_worker"):
         kwargs["dask_worker"] = server
     if has_arg(function, "dask_scheduler"):

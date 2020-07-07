@@ -2355,7 +2355,10 @@ class Client:
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function), args=dumps(args), kwargs=dumps(kwargs), wait=wait
+            function=dumps(function),
+            args=to_serialize(args),
+            kwargs=to_serialize(kwargs),
+            wait=wait,
         )
         if response["status"] == "error":
             typ, exc, tb = clean_exception(**response)
@@ -2402,9 +2405,9 @@ class Client:
             msg=dict(
                 op="run",
                 function=dumps(function),
-                args=dumps(args),
+                args=to_serialize(args),
                 wait=wait,
-                kwargs=dumps(kwargs),
+                kwargs=to_serialize(kwargs),
             ),
             workers=workers,
             nanny=nanny,
