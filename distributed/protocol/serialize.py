@@ -578,7 +578,7 @@ def _deserialize_bytes(header, frames):
 
 @dask_serialize.register(memoryview)
 def _serialize_memoryview(obj):
-    header = {}  # no special metadata
+    header = {"format": obj.format, "shape": obj.shape}
     frames = [obj]
     return header, frames
 
@@ -589,6 +589,7 @@ def _deserialize_memoryview(header, frames):
         out = memoryview(frames[0]).cast("B")
     else:
         out = memoryview(b"".join(frames))
+    out = out.cast(header["format"], header["shape"])
     return out
 
 
