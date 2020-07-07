@@ -420,6 +420,7 @@ def test_compression_numpy_list():
         (tuple([MyObj(None)]), True),
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
+        (memoryview(np.random.random((3, 4))), True),
     ],
 )
 def test_check_dask_serializable(data, is_serializable):
@@ -442,7 +443,7 @@ def test_serialize_lists(serializers):
 
 
 @pytest.mark.parametrize(
-    "data_in", [memoryview(b"hello")],
+    "data_in", [memoryview(b"hello"), memoryview(np.random.random((3, 4)))],
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
