@@ -107,6 +107,25 @@ def init_once():
             pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
         )
 
+def get_create_endpoint():
+    init_once()
+    try:
+        from ucp.endpoint_reuse import EndpointReuse
+    except ImportError:
+        return ucp.create_endpoint
+    else:
+        return EndpointReuse.create_endpoint
+
+
+def get_create_listener():
+    init_once()
+    try:
+        from ucp.endpoint_reuse import EndpointReuse
+    except ImportError:
+        return ucp.create_listener
+    else:
+        return EndpointReuse.create_listener
+
 
 class UCX(Comm):
     """Comm object using UCP.
@@ -309,8 +328,7 @@ class UCXConnector(Connector):
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
-        init_once()
-        ep = await ucp.create_endpoint(ip, port)
+        ep = await get_create_endpoint()(ip, port)
         return self.comm_class(
             ep,
             local_addr=None,
@@ -362,8 +380,7 @@ class UCXListener(Listener):
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
-        init_once()
-        self.ucp_server = ucp.create_listener(serve_forever, port=self._input_port)
+        self.ucp_server = get_create_listener()(serve_forever, port=self._input_port)
 
     def stop(self):
         self.ucp_server = None
