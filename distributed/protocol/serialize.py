@@ -578,6 +578,8 @@ def _deserialize_bytes(header, frames):
 
 @dask_serialize.register(memoryview)
 def _serialize_memoryview(obj):
+    if obj.format == "O":
+        raise ValueError("Cannot serialize `memoryview` containing Python objects")
     header = {"format": obj.format, "shape": obj.shape}
     frames = [obj]
     return header, frames
