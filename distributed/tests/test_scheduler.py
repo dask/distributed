@@ -1233,8 +1233,8 @@ async def test_service_hosts():
     port = 0
     for url, expected in [
         ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", "127.0.0.1"),
-        ("tcp://127.0.0.1:38275", "127.0.0.1"),
+        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
+        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
     ]:
         async with Scheduler(host=url) as s:
             sock = first(s.http_server._sockets.values())
@@ -2175,3 +2175,8 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster()
+async def test_unknown_task_duration_config(s, a, b):
+    assert s.idle_since == s.time_started
