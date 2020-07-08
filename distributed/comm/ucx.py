@@ -136,7 +136,7 @@ class UCX(Comm):
 
     The expected read cycle is
 
-    1. Read the frame describing number of frames or if the connection is closing
+    1. Read the frame describing if connection is closing and number of frames
     2. Read the frame describing whether each data frame is gpu-bound
     3. Read the frame describing whether each data frame is sized
     4. Read all the data frames.
