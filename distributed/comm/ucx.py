@@ -136,7 +136,7 @@ class UCX(Comm):
 
     The expected read cycle is
 
-    1. Read the frame describing number of frames (-1 means shutdown)
+    1. Read the frame describing number of frames or if the connection is closing
     2. Read the frame describing whether each data frame is gpu-bound
     3. Read the frame describing whether each data frame is sized
     4. Read all the data frames.
@@ -196,8 +196,8 @@ class UCX(Comm):
 
                 # Send meta data
 
-                # Send # of frames (int64)
-                await self.ep.send(struct.pack("q", nframes))
+                # Send close flag and number of frames (_Bool, int64)
+                await self.ep.send(struct.pack("?Q", False, nframes))
                 # Send which frames are CUDA (bool) and
                 # how large each frame is (uint64)
                 await self.ep.send(
@@ -232,12 +232,12 @@ class UCX(Comm):
             try:
                 # Recv meta data
 
-                # Recv # of frames (int64) where -1 is a shutdown request
-                nframes = host_array(struct.calcsize("q"))
-                await self.ep.recv(nframes)
-                (nframes,) = struct.unpack("q", nframes)
+                # Recv close flag and number of frames (_Bool, int64)
+                msg = host_array(struct.calcsize("?Q"))
+                await self.ep.recv(msg)
+                (shutdown, nframes) = struct.unpack("?Q", msg)
 
-                if nframes == -1:  # The writer is closing the connection
+                if shutdown:  # The writer is closing the connection
                     raise CancelledError("Connection closed by writer")
 
                 # Recv which frames are CUDA (bool) and
@@ -281,7 +281,7 @@ class UCX(Comm):
 
     async def close(self):
         if self._ep is not None:
-            await self.ep.send(struct.pack("q", -1))
+            await self.ep.send(struct.pack("?Q", True, 0))
             self.abort()
             self._ep = None
 
@@ -429,7 +429,7 @@ def _scrub_ucx_config():
 
     # configuration of UCX can happen in two ways:
     # 1) high level on/off flags which correspond to UCX configuration
-    # 2) explicity defined UCX configuration flags
+    # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
     from ucp import get_config
