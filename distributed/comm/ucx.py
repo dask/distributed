@@ -35,8 +35,8 @@ logger = logging.getLogger(__name__)
 ucp = None
 host_array = None
 device_array = None
-reuse_endpoints_create = None
-reuse_endpoints_listener = None
+ucx_create_endpoint = None
+ucx_create_listener = None
 
 
 def synchronize_stream(stream=0):
@@ -49,7 +49,7 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array
+    global ucp, host_array, device_array, ucx_create_endpoint, ucx_create_listener
     if ucp is not None:
         return
 
@@ -109,37 +109,18 @@ def init_once():
             pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
         )
 
-
-def get_create_endpoint():
-    global reuse_endpoints_create
-    if reuse_endpoints_create is None:
-        init_once()
-        try:
-            from ucp.endpoint_reuse import EndpointReuse
-        except ImportError:
-            reuse_endpoints_create = ucp.create_endpoint
+    try:
+        from ucp.endpoint_reuse import EndpointReuse
+    except ImportError:
+        ucx_create_endpoint = ucp.create_endpoint
+        ucx_create_listener = ucp.create_listener
+    else:
+        if dask.config.get("ucx.reuse-endpoints", default=True):
+            ucx_create_endpoint = EndpointReuse.create_endpoint
+            ucx_create_listener = EndpointReuse.create_listener
         else:
-            if dask.config.get("ucx.reuse-endpoints", default=True):
-                reuse_endpoints_create = EndpointReuse.create_endpoint
-            else:
-                reuse_endpoints_create = ucp.create_endpoint
-    return reuse_endpoints_create
-
-
-def get_create_listener():
-    global reuse_endpoints_listener
-    if reuse_endpoints_listener is None:
-        init_once()
-        try:
-            from ucp.endpoint_reuse import EndpointReuse
-        except ImportError:
-            reuse_endpoints_listener = ucp.create_listener
-        else:
-            if dask.config.get("ucx.reuse-endpoints", default=True):
-                reuse_endpoints_listener = EndpointReuse.create_listener
-            else:
-                reuse_endpoints_listener = ucp.create_listener
-    return reuse_endpoints_listener
+            ucx_create_endpoint = ucp.create_endpoint
+            ucx_create_listener = ucp.create_listener
 
 
 class UCX(Comm):
@@ -343,7 +324,8 @@ class UCXConnector(Connector):
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
-        ep = await get_create_endpoint()(ip, port)
+        init_once()
+        ep = await ucx_create_endpoint(ip, port)
         return self.comm_class(
             ep,
             local_addr=None,
@@ -395,7 +377,8 @@ class UCXListener(Listener):
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
-        self.ucp_server = get_create_listener()(serve_forever, port=self._input_port)
+        init_once()
+        self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
         self.ucp_server = None
