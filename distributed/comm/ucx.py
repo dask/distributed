@@ -109,6 +109,7 @@ def init_once():
             pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
         )
 
+
 def get_create_endpoint():
     global reuse_endpoints_create
     if reuse_endpoints_create is None:
