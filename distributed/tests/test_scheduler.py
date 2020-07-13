@@ -722,6 +722,28 @@ async def test_retire_workers(c, s, a, b):
     assert not workers
 
 
+@gen_cluster(client=True, timeout=1000)
+async def test_retire_workers_dynamic_garbage_collect(c, s, a, b):
+    [x] = await c.scatter([1], workers=a.address)
+    [y] = await c.scatter([list(range(1000))], workers=b.address)
+    print(s.tasks)
+
+    assert s.workers_to_close() == [a.address]
+
+    workers = await s.retire_workers()
+    assert list(workers) == [a.address]
+    assert workers[a.address]["nthreads"] == a.nthreads
+    assert list(s.nthreads) == [b.address]
+
+    assert s.workers_to_close() == []
+
+    assert s.workers[b.address].has_what == {s.tasks[x.key], s.tasks[y.key]}
+
+    workers = await s.retire_workers()
+    assert not workers
+    assert False
+
+
 @gen_cluster(client=True)
 async def test_retire_workers_n(c, s, a, b):
     await s.retire_workers(n=1, close_workers=True)
@@ -2147,3 +2169,18 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster(client=True, timeout=1000)
+async def test_retire_state_change(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    y = c.map(lambda x: x ** 2, range(10))
+    await c.scatter(y)
+    stuff = []
+    for x in range(2):
+        v = c.map(lambda i: i*np.random.randint(1000), y)
+        k = c.map(lambda i: i*np.random.randint(1000), v)
+        foo = c.map(lambda j: j*6, k)
+        step = c.compute(foo)
+        c.gather(step)
+    await c.retire_workers(workers=[a.address])
