@@ -115,7 +115,7 @@ def init_once():
         ucx_create_endpoint = ucp.create_endpoint
         ucx_create_listener = ucp.create_listener
     else:
-        if dask.config.get("ucx.reuse-endpoints", default=True):
+        if dask.config.get("ucx.reuse-endpoints"):
             ucx_create_endpoint = EndpointReuse.create_endpoint
             ucx_create_listener = EndpointReuse.create_listener
         else:
