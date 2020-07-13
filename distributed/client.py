@@ -1043,7 +1043,7 @@ class Client:
 
         try:
             await self._ensure_connected(timeout=timeout)
-        except OSError:
+        except (OSError, ImportError):
             await self._close()
             raise
 
@@ -1076,6 +1076,9 @@ class Client:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
                     timeout = deadline - self.loop.time()
+                except ImportError:
+                    await self._close()
+                    break
             else:
                 logger.error(
                     "Failed to reconnect to scheduler after %.2f "
