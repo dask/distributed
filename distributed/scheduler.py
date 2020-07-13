@@ -16,7 +16,7 @@ import pickle
 import random
 import warnings
 import weakref
-
+import gc
 import psutil
 import sortedcontainers
 
@@ -3221,6 +3221,7 @@ class Scheduler(ServerNode):
         assert branching_factor > 0
         async with self._lock if lock else empty_context:
             workers = {self.workers[w] for w in self.workers_list(workers)}
+            print(workers) #!#!#!#!#!
             if n is None:
                 n = len(workers)
             else:
@@ -3254,14 +3255,20 @@ class Scheduler(ServerNode):
             # Copy not-yet-filled data
             while tasks:
                 gathers = defaultdict(dict)
+                print(len(list(tasks)))
                 for ts in list(tasks):
+                    print(ts.who_has)
                     n_missing = n - len(ts.who_has & workers)
                     if n_missing <= 0:
                         # Already replicated enough
                         tasks.remove(ts)
                         continue
-
+                    
+                    print(f'nmissing {n_missing}')
+                    
+                    print(f'branching_factor * len(ts.who_has): {branching_factor * len(ts.who_has)}')
                     count = min(n_missing, branching_factor * len(ts.who_has))
+                    print(count)                                        
                     assert count > 0
 
                     for ws in random.sample(workers - ts.who_has, count):
@@ -3493,6 +3500,8 @@ class Scheduler(ServerNode):
                 workers = {self.workers[w] for w in workers if w in self.workers}
                 if not workers:
                     return []
+                for worker in workers:
+                    worker.paused = True
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
