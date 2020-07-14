@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import pickle
 import operator
 import re
 import sys
@@ -41,6 +40,14 @@ from distributed.utils_test import (  # noqa: F401
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
+
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 alice = "alice:1234"
@@ -1227,8 +1234,8 @@ async def test_service_hosts():
     port = 0
     for url, expected in [
         ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", "127.0.0.1"),
-        ("tcp://127.0.0.1:38275", "127.0.0.1"),
+        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
+        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
     ]:
         async with Scheduler(host=url) as s:
             sock = first(s.http_server._sockets.values())
@@ -2169,6 +2176,11 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster()
+async def test_unknown_task_duration_config(s, a, b):
+    assert s.idle_since == s.time_started
 
 
 @gen_cluster(client=True, timeout=1000)

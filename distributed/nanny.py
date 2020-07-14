@@ -97,6 +97,9 @@ class Nanny(ServerNode):
     ):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
+
+        if isinstance(security, dict):
+            security = Security(**security)
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
@@ -690,7 +693,7 @@ class WorkerProcess:
                     "Failed while trying to start worker process: %s", msg["exception"]
                 )
                 await self.process.join()
-                raise msg
+                raise msg["exception"]
             else:
                 return msg
 

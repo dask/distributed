@@ -1042,7 +1042,7 @@ async def test_service_hosts_match_worker(s):
 
     async with Worker(s.address, host="tcp://127.0.0.1") as w:
         sock = first(w.http_server._sockets.values())
-        assert sock.getsockname()[0] == "127.0.0.1"
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
 
 @gen_cluster(nthreads=[])
@@ -1458,6 +1458,15 @@ async def test_local_directory(s):
             w = await Worker(s.address)
             assert w.local_directory.startswith(fn)
             assert "dask-worker-space" in w.local_directory
+
+
+@gen_cluster(nthreads=[])
+async def test_local_directory_make_new_directory(s):
+    with tmpfile() as fn:
+        w = await Worker(s.address, local_directory=os.path.join(fn, "foo", "bar"))
+        assert w.local_directory.startswith(fn)
+        assert "foo" in w.local_directory
+        assert "dask-worker-space" in w.local_directory
 
 
 @pytest.mark.skipif(

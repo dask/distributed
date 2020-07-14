@@ -12,7 +12,7 @@ import math
 from numbers import Number
 import operator
 import os
-import pickle
+import sys
 import random
 import warnings
 import weakref
@@ -85,6 +85,14 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 logger = logging.getLogger(__name__)
@@ -1117,6 +1125,7 @@ class Scheduler(ServerNode):
         else:
             self.idle_timeout = None
         self.idle_since = time()
+        self.time_started = self.idle_since  # compatibility for dask-gateway
         self._lock = asyncio.Lock()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.bandwidth_workers = defaultdict(float)
@@ -1128,6 +1137,8 @@ class Scheduler(ServerNode):
             preload_argv = dask.config.get("distributed.scheduler.preload-argv")
         self.preloads = preloading.process_preloads(self, preload, preload_argv)
 
+        if isinstance(security, dict):
+            security = Security(**security)
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
@@ -1141,22 +1152,24 @@ class Scheduler(ServerNode):
             default_port=self.default_port,
         )
 
-        routes = get_handlers(
-            server=self,
-            modules=dask.config.get("distributed.scheduler.http.routes"),
-            prefix=http_prefix,
-        )
-        self.start_http_server(routes, dashboard_address, default_port=8787)
-
-        if dashboard or (dashboard is None and dashboard_address):
+        http_server_modules = dask.config.get("distributed.scheduler.http.routes")
+        show_dashboard = dashboard or (dashboard is None and dashboard_address)
+        missing_bokeh = False
+        # install vanilla route if show_dashboard but bokeh is not installed
+        if show_dashboard:
             try:
                 import distributed.dashboard.scheduler
             except ImportError:
-                logger.debug("To start diagnostics web server please install Bokeh")
-            else:
-                distributed.dashboard.scheduler.connect(
-                    self.http_application, self.http_server, self, prefix=http_prefix
-                )
+                missing_bokeh = True
+                http_server_modules.append("distributed.http.scheduler.missing_bokeh")
+        routes = get_handlers(
+            server=self, modules=http_server_modules, prefix=http_prefix,
+        )
+        self.start_http_server(routes, dashboard_address, default_port=8787)
+        if show_dashboard and not missing_bokeh:
+            distributed.dashboard.scheduler.connect(
+                self.http_application, self.http_server, self, prefix=http_prefix
+            )
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -1578,7 +1591,7 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
-    async def close_worker(self, stream=None, worker=None, safe=None):
+    async def close_worker(self, comm=None, worker=None, safe=None):
         """ Remove a worker from the cluster
 
         This both removes the worker from our local state and also sends a
@@ -2701,7 +2714,7 @@ class Scheduler(ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
-    def release_worker_data(self, stream=None, keys=None, worker=None):
+    def release_worker_data(self, comm=None, keys=None, worker=None):
         ws = self.workers[worker]
         tasks = {self.tasks[k] for k in keys}
         removed_tasks = tasks & ws.has_what
@@ -3805,7 +3818,7 @@ class Scheduler(ServerNode):
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
-    def set_metadata(self, stream=None, keys=None, value=None):
+    def set_metadata(self, comm=None, keys=None, value=None):
         try:
             metadata = self.task_metadata
             for key in keys[:-1]:
@@ -3818,7 +3831,7 @@ class Scheduler(ServerNode):
 
             pdb.set_trace()
 
-    def get_metadata(self, stream=None, keys=None, default=no_default):
+    def get_metadata(self, comm=None, keys=None, default=no_default):
         metadata = self.task_metadata
         for key in keys[:-1]:
             metadata = metadata[key]
@@ -3830,7 +3843,7 @@ class Scheduler(ServerNode):
             else:
                 raise
 
-    def get_task_status(self, stream=None, keys=None):
+    def get_task_status(self, comm=None, keys=None):
         return {
             key: (self.tasks[key].state if key in self.tasks else None) for key in keys
         }
@@ -4919,7 +4932,7 @@ class Scheduler(ServerNode):
     # Utility functions #
     #####################
 
-    def add_resources(self, stream=None, worker=None, resources=None):
+    def add_resources(self, comm=None, worker=None, resources=None):
         ws = self.workers[worker]
         if resources:
             ws.resources.update(resources)
@@ -5310,7 +5323,9 @@ class Scheduler(ServerNode):
     async def check_worker_ttl(self):
         now = time()
         for ws in self.workers.values():
-            if ws.last_seen < now - self.worker_ttl:
+            if (ws.last_seen < now - self.worker_ttl) and (
+                ws.last_seen < now - 10 * heartbeat_interval(len(self.workers))
+            ):
                 logger.warning(
                     "Worker failed to heartbeat within %s seconds. Closing: %s",
                     self.worker_ttl,
@@ -5578,7 +5593,8 @@ def heartbeat_interval(n):
     elif n < 200:
         return 2
     else:
-        return 5
+        # no more than 200 hearbeats a second scaled by workers
+        return n / 200 + 1
 
 
 class KilledWorker(Exception):

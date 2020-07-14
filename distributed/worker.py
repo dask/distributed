@@ -484,9 +484,10 @@ class Worker(ServerNode):
 
         if local_directory is None:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            local_directory = os.path.join(local_directory, "dask-worker-space")
+
+        if not os.path.exists(local_directory):
+            os.makedirs(local_directory)
+        local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
@@ -507,6 +508,8 @@ class Worker(ServerNode):
             self, preload, preload_argv, file_dir=self.local_directory
         )
 
+        if isinstance(security, dict):
+            security = Security(**security)
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
@@ -1339,7 +1342,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    async def delete_data(self, comm=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1350,12 +1353,6 @@ class Worker(ServerNode):
                     self.release_dep(key)
 
             logger.debug("Deleted %d keys", len(keys))
-            if report:
-                logger.debug("Reporting loss of keys to scheduler")
-                # TODO: this route seems to not exist?
-                await self.scheduler.remove_keys(
-                    address=self.contact_address, keys=list(keys)
-                )
         return "OK"
 
     async def set_resources(self, **resources):
@@ -1599,7 +1596,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
-        self._notify_transition(key, start, state or finish, **kwargs)
+        self._notify_plugins("transition", key, start, state or finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -2247,6 +2244,8 @@ class Worker(ServerNode):
 
             if report and state in PROCESSING:  # not finished
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
+
+            self._notify_plugins("release_key", key, state, cause, reason, report)
         except CommClosedError:
             pass
         except Exception as e:
@@ -2290,6 +2289,8 @@ class Worker(ServerNode):
 
             if report and state == "memory":
                 self.batched_stream.send({"op": "release-worker-data", "keys": [dep]})
+
+            self._notify_plugins("release_dep", dep, state, report)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2332,6 +2333,7 @@ class Worker(ServerNode):
     ################
 
     # FIXME: this breaks if changed to async def...
+    # xref: https://github.com/dask/distributed/issues/3938
     @gen.coroutine
     def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
         """ Safely run function in thread pool executor
@@ -2361,7 +2363,6 @@ class Worker(ServerNode):
         raise gen.Return(result)
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
-        kwargs = kwargs or {}
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
@@ -2831,11 +2832,11 @@ class Worker(ServerNode):
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
 
-    def _notify_transition(self, key, start, finish, **kwargs):
+    def _notify_plugins(self, method_name, *args, **kwargs):
         for name, plugin in self.plugins.items():
-            if hasattr(plugin, "transition"):
+            if hasattr(plugin, method_name):
                 try:
-                    plugin.transition(key, start, finish, **kwargs)
+                    getattr(plugin, method_name)(*args, **kwargs)
                 except Exception:
                     logger.info(
                         "Plugin '%s' failed with exception" % name, exc_info=True
@@ -3523,7 +3524,8 @@ def weight(k, v):
     return sizeof(v)
 
 
-async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+    kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
         is_coro = iscoroutinefunction(function)
