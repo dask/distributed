@@ -944,6 +944,48 @@ def ensure_bytes(s):
             ) from e
 
 
+def ensure_bytearray(s):
+    """Attempt to turn `s` into `bytearray`.
+
+    Parameters
+    ----------
+    s : Any
+        The object to be converted. Will correctly handled
+
+        * str
+        * bytes
+        * objects implementing the buffer protocol (memoryview, ndarray, etc.)
+
+    Returns
+    -------
+    b : bytes
+
+    Raises
+    ------
+    TypeError
+        When `s` cannot be converted
+
+    Examples
+    --------
+
+    >>> ensure_bytearray('123')
+    bytearray(b'123')
+    >>> ensure_bytearray(b'123')
+    bytearray(b'123')
+    """
+    if isinstance(s, bytearray):
+        return s
+    elif hasattr(s, "encode"):
+        return bytearray(s.encode())
+    else:
+        try:
+            return bytearray(s)
+        except Exception as e:
+            raise TypeError(
+                "Object %s is neither a bytes object nor has an encode method" % s
+            ) from e
+
+
 def divide_n_among_bins(n, bins):
     """
 
