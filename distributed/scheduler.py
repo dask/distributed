@@ -3510,8 +3510,6 @@ class Scheduler(ServerNode):
                 workers = {self.workers[w] for w in workers if w in self.workers}
                 if not workers:
                     return []
-                # for worker in workers:
-                #     worker.paused = True
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
