@@ -63,7 +63,6 @@ conda create -n dask-distributed -c conda-forge -c defaults \
     toolz \
     tornado=$TORNADO \
     zstandard \
-    pip \
     $PACKAGES
 
 source activate dask-distributed
