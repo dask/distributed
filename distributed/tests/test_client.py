@@ -647,7 +647,12 @@ def test_task_annotations(c, s, a, b):
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    dsk = {"z": (annotate(inc, {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}), 1)}
+    dsk = {
+        "z": (
+            annotate(inc, {"worker": "tcp://2.2.2.2/", "allow_other_workers": True}),
+            1,
+        )
+    }
     result = yield c.get(dsk, "z", sync=False)
 
     assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0

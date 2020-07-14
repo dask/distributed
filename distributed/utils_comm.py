@@ -233,8 +233,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
             dsk = {
                 k: unpack_remotedata(v, byte_keys, futures) for k, v in sc.dsk.items()
             }
-            args = tuple(unpack_remotedata(i, byte_keys, futures)
-                         for i in o.args)
+            args = tuple(unpack_remotedata(i, byte_keys, futures) for i in o.args)
 
             assert not o.kwargs
 
@@ -252,7 +251,8 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
                 return Task(
                     SubgraphCallable(dsk, sc.outkey, inkeys, sc.name),
                     list(args + futures),
-                    annotations=o.annotations)
+                    annotations=o.annotations,
+                )
             else:
                 return o
         else:
@@ -309,10 +309,12 @@ def pack_data(o, d, key_types=object):
         pass
 
     if typ is Task:
-        return Task(o.function,
-                    pack_data(o.args, d, key_types=key_types),
-                    pack_data(o.kwargs, d, key_types=key_types),
-                    o.annotations)
+        return Task(
+            o.function,
+            pack_data(o.args, d, key_types=key_types),
+            pack_data(o.kwargs, d, key_types=key_types),
+            o.annotations,
+        )
     elif typ in collection_types:
         return typ([pack_data(x, d, key_types=key_types) for x in o])
     elif typ is dict:
@@ -347,11 +349,13 @@ def subs_multiple(o, d):
         return Task(
             o.function,
             subs_multiple(o.args, d),
-            (None if not o.kwargs
-             else {k: subs_multiple(v, d)
-                   for k, v in o.kwargs.items()}
-                   if isinstance(o, dict)
-             else o.kwargs),
+            (
+                None
+                if not o.kwargs
+                else {k: subs_multiple(v, d) for k, v in o.kwargs.items()}
+                if isinstance(o, dict)
+                else o.kwargs
+            ),
             o.annotations,
         )
     elif typ is list:

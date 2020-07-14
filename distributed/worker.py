@@ -96,8 +96,9 @@ DEFAULT_METRICS = {}
 
 DEFAULT_STARTUP_INFORMATION = {}
 
-SerializedTask = namedtuple("SerializedTask",
-                            ["function", "args", "kwargs", "annotations", "task"])
+SerializedTask = namedtuple(
+    "SerializedTask", ["function", "args", "kwargs", "annotations", "task"]
+)
 
 
 class Worker(ServerNode):
@@ -3286,7 +3287,9 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-def _deserialize(function=None, args=None, kwargs=None, annotations=None, task=no_value):
+def _deserialize(
+    function=None, args=None, kwargs=None, annotations=None, task=no_value
+):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
         function = loads_function(function)
@@ -3327,7 +3330,7 @@ def execute_task(task):
                 {k: execute_task(v) for k, v in task.kwargs.items()}
                 if isinstance(task.kwargs, dict)
                 else execute_task(task.kwargs)
-            )
+            ),
         )
     elif task_type is TupleTask:
         func, args = task[0], task[1:]
@@ -3388,8 +3391,10 @@ def dumps_task(task):
         if task.is_complex():
             d = {"task": to_serialize(task)}
         else:
-            d = {"function": dumps_function(task.function),
-                 "args": warn_dumps(task.args)}
+            d = {
+                "function": dumps_function(task.function),
+                "args": warn_dumps(task.args),
+            }
 
             if task.kwargs:
                 d["kwargs"] = warn_dumps(task.kwargs)
@@ -3398,7 +3403,6 @@ def dumps_task(task):
             d["annotations"] = warn_dumps(task.annotations)
 
         return d
-
 
     return to_serialize(task)
 

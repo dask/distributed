@@ -790,10 +790,12 @@ def convert(task, dsk, extra_values):
     if task_type is TupleTask:
         return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
     if task_type is Task:
-        return Task(task.function,
-                    convert(task.args, dsk, extra_values),
-                    convert(task.kwargs, dsk, extra_values),
-                    task.annotations)
+        return Task(
+            task.function,
+            convert(task.args, dsk, extra_values),
+            convert(task.kwargs, dsk, extra_values),
+            task.annotations,
+        )
     try:
         if task in dsk or task in extra_values:
             return tokey(task)

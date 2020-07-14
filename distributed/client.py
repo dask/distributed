@@ -1725,7 +1725,9 @@ class Client:
                 )
 
         if not kwargs:
-            dsk = {key: Task(func, list(args)) for key, args in zip(keys, zip(*iterables))}
+            dsk = {
+                key: Task(func, list(args)) for key, args in zip(keys, zip(*iterables))
+            }
         else:
             kwargs2 = {}
             dsk = {}

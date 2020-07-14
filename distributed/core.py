@@ -43,6 +43,7 @@ from . import protocol
 # Depend on dask.core definition eventually
 TaskAnnotation = namedtuple("TaskAnnotation", ["annotation"])
 
+
 class Status(Enum):
     """
     This Enum contains the various states a worker, scheduler and nanny can be
