@@ -275,4 +275,3 @@ async def test_no_delay_during_large_transfer(c, s, w):
     nbytes -= nbytes[0]
     assert nbytes.max() < (x_nbytes * 2) / 1e6
     assert nbytes[-1] < (x_nbytes * 1.2) / 1e6
-
