@@ -62,7 +62,7 @@ def merge_frames(header, frames):
     assert sum(lengths) == sum(map(nbytes, frames))
 
     if all(len(f) == l for f, l in zip(frames, lengths)):
-        return frames
+        return list(map(ensure_bytearray, frames))
 
     frames = frames[::-1]
     lengths = lengths[::-1]
