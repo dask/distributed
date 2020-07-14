@@ -748,7 +748,6 @@ async def test_retire_workers_dynamic_garbage_collect(c, s, a, b):
 
     workers = await s.retire_workers()
     assert not workers
-    assert False
 
 
 @gen_cluster(client=True)
