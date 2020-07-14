@@ -82,7 +82,7 @@ def merge_frames(header, frames):
                 frames.append(mv[l:])
                 l = 0
         if len(L) == 1:  # no work necessary
-            out.extend(L)
+            out.append(L[0])
         else:
             out.append(bytearray().join(L))
     return out
