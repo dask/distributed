@@ -4362,13 +4362,12 @@ def test_normalize_collection_with_released_futures(c):
 @gen_cluster(client=True)
 async def test_auto_normalize_collection(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    delay = 1.0
 
     x = da.ones(10, chunks=5)
     assert len(x.dask) == 2
 
     with dask.config.set(optimizations=[c._optimize_insert_futures]):
-        y = x.map_blocks(slowinc, delay=1.0, dtype=x.dtype)
+        y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
         yy = c.persist(y)
 
         await wait(yy)
@@ -4377,21 +4376,20 @@ async def test_auto_normalize_collection(c, s, a, b):
         future = c.compute(y.sum())
         await future
         end = time()
-        assert end - start < delay + 0.2
+        assert end - start < 1
 
         start = time()
         z = c.persist(y + 1)
         await wait(z)
         end = time()
-        assert end - start < delay + 0.2
+        assert end - start < 1
 
 
 def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
-    delay = 1.0
 
-    y = x.map_blocks(slowinc, delay=delay, dtype=x.dtype)
+    y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
     yy = c.persist(y)
 
     wait(yy)
@@ -4400,7 +4398,7 @@ def test_auto_normalize_collection_sync(c):
         start = time()
         y.sum().compute()
         end = time()
-        assert end - start < delay + 0.2
+        assert end - start < 1
 
 
 def assert_no_data_loss(scheduler):
