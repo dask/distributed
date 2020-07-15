@@ -865,6 +865,12 @@ def test_worker_dir(worker):
         test_worker_dir()
 
 
+@gen_cluster(nthreads=[])
+async def test_false_worker_dir(s):
+    async with Worker(s.address, loop=s.loop, local_directory=""):
+        pass
+
+
 @gen_cluster(client=True)
 async def test_dataframe_attribute_error(c, s, a, b):
     class BadSize:
