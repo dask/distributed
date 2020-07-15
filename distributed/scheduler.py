@@ -1812,8 +1812,7 @@ class Scheduler(ServerNode):
                 versions,
                 client_name="This Worker",
             )
-            if version_warning:
-                msg["warning"] = version_warning
+            msg.update(version_warning)
 
             if comm:
                 await comm.write(msg)
@@ -2617,8 +2616,7 @@ class Scheduler(ServerNode):
                 {w: ws.versions for w, ws in self.workers.items()},
                 versions,
             )
-            if version_warning:
-                msg["warning"] = version_warning
+            msg.update(version_warning)
             bcomm.send(msg)
 
             try:
