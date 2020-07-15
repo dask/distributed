@@ -867,8 +867,11 @@ def test_worker_dir(worker):
 
 @gen_cluster(nthreads=[])
 async def test_false_worker_dir(s):
-    async with Worker(s.address, loop=s.loop, local_directory=""):
-        pass
+    async with Worker(s.address, local_directory="") as w:
+        local_directory = w.local_directory
+
+    cwd = os.getcwd()
+    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
 
 
 @gen_cluster(client=True)
