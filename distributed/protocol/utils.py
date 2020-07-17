@@ -85,6 +85,8 @@ def merge_frames(header, frames):
                 out.append(memoryview(bytearray().join(L)))
         frames = out
 
+    frames = [memoryview(bytearray(f)) if f.readonly else f for f in frames]
+
     return frames
 
 
