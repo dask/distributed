@@ -25,6 +25,7 @@ def test_merge_frames(lengths, frames):
         data = data[i:]
 
     assert all(isinstance(f, memoryview) for f in result)
+    assert all(not f.readonly for f in result)
     assert list(map(ensure_bytes, result)) == expected
 
 
