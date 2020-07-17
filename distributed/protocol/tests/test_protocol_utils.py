@@ -6,7 +6,12 @@ from distributed.utils import ensure_bytes
 
 @pytest.mark.parametrize(
     "lengths,frames",
-    [([3], [b"123"]), ([3, 3], [b"123", b"456"]), ([3, 4], [b"12", b"34", b"567"]),],
+    [
+        ([3], [b"123"]),
+        ([3, 3], [b"123", b"456"]),
+        ([2, 3], [b"12345"]),
+        ([3, 4], [b"12", b"34", b"567"]),
+    ],
 )
 def test_merge_frames(lengths, frames):
     header = {"lengths": lengths}
