@@ -501,7 +501,8 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
-    frames = merge_frames(header, frames)
+    if header["serializer"] in ("dask", "pickle"):
+        frames = merge_frames(header, frames)
     return deserialize(header, frames)
 
 
