@@ -126,7 +126,7 @@ def loads(frames, deserialize=True, deserializers=None):
             if deserialize or key in bytestrings:
                 if "compression" in head:
                     fs = decompress(head, fs)
-                if head["serializer"] in ("dask", "pickle"):
+                if not any(hasattr(f, "__cuda_array_interface__") for f in fs):
                     fs = merge_frames(head, fs)
                 value = _deserialize(head, fs, deserializers=deserializers)
             else:
