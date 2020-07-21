@@ -123,11 +123,11 @@ def unpack_frames(b):
     fmt = "Q"
     fmt_size = struct.calcsize(fmt)
     (n_frames,) = struct.unpack_from(fmt, b)
+    lengths = struct.unpack_from(f"{n_frames}{fmt}", b, fmt_size)
 
     frames = []
     start = fmt_size * (1 + n_frames)
-    for i in range(n_frames):
-        (length,) = struct.unpack(fmt, b[(i + 1) * fmt_size : (i + 2) * fmt_size])
+    for length in lengths:
         frame = b[start : start + length]
         frames.append(frame)
         start += length
