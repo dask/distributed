@@ -120,6 +120,8 @@ def unpack_frames(b):
     --------
     pack_frames
     """
+    b = memoryview(b)
+
     fmt = "Q"
     fmt_size = struct.calcsize(fmt)
 
