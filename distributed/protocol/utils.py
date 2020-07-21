@@ -124,7 +124,7 @@ def unpack_frames(b):
     (n_frames,) = struct.unpack(fmt, b[:8])
 
     frames = []
-    start = 8 + n_frames * 8
+    start = 8 * (1 + n_frames)
     for i in range(n_frames):
         (length,) = struct.unpack(fmt, b[(i + 1) * 8 : (i + 2) * 8])
         frame = b[start : start + length]
