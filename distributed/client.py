@@ -40,7 +40,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
-from.actor import ActorFuture
+from .actor import ActorFuture
 from .batched import BatchedSend
 from .utils_comm import (
     WrappedKey,

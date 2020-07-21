@@ -63,6 +63,7 @@ class Actor(WrappedKey):
                 self._worker = None
             try:
                 from .client import Future, default_client
+
                 self._client = default_client()
                 self._future = Future(key)
             except ValueError:
