@@ -3,7 +3,6 @@ import functools
 import threading
 from queue import Queue
 
-from .client import Future, default_client
 from .protocol import to_serialize
 from .utils import sync
 from .utils_comm import WrappedKey
@@ -63,6 +62,7 @@ class Actor(WrappedKey):
             except ValueError:
                 self._worker = None
             try:
+                from .client import Future, default_client
                 self._client = default_client()
                 self._future = Future(key)
             except ValueError:

@@ -40,6 +40,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from.actor import ActorFuture
 from .batched import BatchedSend
 from .utils_comm import (
     WrappedKey,
@@ -4379,8 +4380,8 @@ class as_completed:
         The added futures will emit from the iterator once they finish"""
         with self.lock:
             for f in futures:
-                if not isinstance(f, Future):
-                    raise TypeError("Input must be a future, got %s" % f)
+                if not isinstance(f, Future) and not isinstance(f, ActorFuture):
+                    raise TypeError("Input must be a Future or ActorFuture, got %s" % f)
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
 

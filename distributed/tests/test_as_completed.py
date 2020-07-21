@@ -272,3 +272,32 @@ async def test_clear(c, s, a, b):
 
     while s.tasks:
         await asyncio.sleep(0.3)
+
+
+def test_as_completed_with_actor(client):
+    class Counter:
+        n = 0
+
+        def __init__(self):
+            self.n = 0
+
+        def increment(self):
+            self.n += 1
+            return self.n
+
+        def add(self, x):
+            self.n += x
+            return self.n
+
+    future = client.submit(Counter, actor=True)
+    counter = future.result()
+
+    futures = []
+    for num in [0, 1, 2]:
+        futures.append(counter.add(num))
+
+    results = []
+    for future in as_completed(futures):
+        results.append(future.result())
+
+    assert sum(results) == 4  # i.e. future.result() returns 0, 1, 3
