@@ -122,7 +122,7 @@ def unpack_frames(b):
     """
     fmt = "Q"
     fmt_size = struct.calcsize(fmt)
-    (n_frames,) = struct.unpack(fmt, b[:fmt_size])
+    (n_frames,) = struct.unpack_from(fmt, b)
 
     frames = []
     start = fmt_size * (1 + n_frames)
