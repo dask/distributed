@@ -105,12 +105,9 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    prelude = [pack_frames_prelude(frames)]
-
-    if not isinstance(frames, list):
-        frames = list(frames)
-
-    return b"".join(prelude + frames)
+    data = [pack_frames_prelude(frames)]
+    data.extend(frames)
+    return b"".join(data)
 
 
 def unpack_frames(b):
