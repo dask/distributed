@@ -4,7 +4,14 @@ import pytest
 
 from dask.dataframe.utils import assert_eq
 
-from distributed.protocol import serialize, deserialize, decompress
+from distributed.protocol import (
+    serialize,
+    deserialize,
+    decompress,
+    dumps,
+    loads,
+    to_serialize,
+)
 
 
 dfs = [
@@ -70,3 +77,12 @@ def test_dumps_serialize_pandas(df):
     df2 = deserialize(header, frames)
 
     assert_eq(df, df2)
+
+
+def test_dumps_pandas_writable():
+    a1 = np.arange(1000)
+    a1.flags.writeable = False
+    s1 = pd.Series(a1)
+    (s2,) = loads(dumps([to_serialize(s1)]))
+    assert (s1 == s2).all()
+    s2[...] = 0
