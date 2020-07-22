@@ -276,17 +276,11 @@ async def test_clear(c, s, a, b):
 
 def test_as_completed_with_actor(client):
     class Counter:
-        n = 0
-
         def __init__(self):
             self.n = 0
 
         def increment(self):
             self.n += 1
-            return self.n
-
-        def add(self, x):
-            self.n += x
             return self.n
 
     future = client.submit(Counter, actor=True)
