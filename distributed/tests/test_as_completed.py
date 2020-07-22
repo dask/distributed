@@ -288,10 +288,12 @@ def test_as_completed_with_actor(client):
 
     futures = []
     for _ in range(3):
+        sleep(0.1)
         futures.append(counter.increment())
 
     results = []
     for future in as_completed(futures):
+        sleep(0.1)
         results.append(future.result())
 
     assert sum(results) == 6  # i.e. future.result() returns 1, 2, 3
