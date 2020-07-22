@@ -293,11 +293,11 @@ def test_as_completed_with_actor(client):
     counter = future.result()
 
     futures = []
-    for num in [0, 1, 2]:
-        futures.append(counter.add(num))
+    for _ in range(3):
+        futures.append(counter.increment())
 
     results = []
     for future in as_completed(futures):
         results.append(future.result())
 
-    assert sum(results) == 4  # i.e. future.result() returns 0, 1, 3
+    assert sum(results) == 6  # i.e. future.result() returns 1, 2, 3
