@@ -16,6 +16,7 @@ from dask.utils import format_bytes
 from dask.system import CPU_COUNT
 import pytest
 from tlz import pluck, sliding_window, first
+from zict import Buffer
 
 from distributed import (
     Client,
@@ -1274,7 +1275,7 @@ async def test_avoid_memory_monitor_if_zero_limit(c, s):
     },
 )
 async def test_dict_data_if_no_spill_to_disk(s, w):
-    assert type(w.data) is dict
+    assert type(w.data) is Buffer
 
 
 def test_get_worker_name(client):
