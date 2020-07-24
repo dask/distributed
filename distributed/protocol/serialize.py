@@ -64,6 +64,30 @@ def pickle_loads(header, frames):
     return pickle.loads(x, buffers=buffers)
 
 
+def msgpack_decode_default(obj):
+    """
+    Custom packer/unpackerfor msgpack to support enums
+    """
+    # avoid circular import
+    from ..core import Status
+
+    if "__Status__" in obj:
+        obj = getattr(Status, obj["as_str"])
+    return obj
+
+
+def msgpack_encode_default(obj):
+    """
+    Custom packer/unpackerfor msgpack to support enums
+    """
+    # avoid circular import
+    from ..core import Status
+
+    if isinstance(obj, Status):
+        return {"__Status__": True, "as_str": obj.name}
+    return obj
+
+
 def msgpack_dumps(x):
     try:
         frame = msgpack.dumps(x, use_bin_type=True)

@@ -5,7 +5,15 @@ import operator
 import msgpack
 
 from .compression import compressions, maybe_compress, decompress
-from .serialize import serialize, deserialize, Serialize, Serialized, extract_serialize
+from .serialize import (
+    serialize,
+    deserialize,
+    Serialize,
+    Serialized,
+    extract_serialize,
+    msgpack_decode_default,
+    msgpack_encode_default,
+)
 from .utils import frame_split_size, merge_frames, msgpack_opts
 from ..utils import nbytes
 
@@ -161,7 +169,7 @@ def dumps_msgpack(msg):
         loads_msgpack
     """
     header = {}
-    payload = msgpack.dumps(msg, use_bin_type=True)
+    payload = msgpack.dumps(msg, default=msgpack_encode_default, use_bin_type=True)
 
     fmt, payload = maybe_compress(payload)
     if fmt:
@@ -183,7 +191,9 @@ def loads_msgpack(header, payload):
     """
     header = bytes(header)
     if header:
-        header = msgpack.loads(header, use_list=False, **msgpack_opts)
+        header = msgpack.loads(
+            header, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+        )
     else:
         header = {}
 
