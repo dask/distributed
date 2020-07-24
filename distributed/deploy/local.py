@@ -161,8 +161,10 @@ class LocalCluster(SpecCluster):
             else:
                 n_workers = 1
                 threads_per_worker = CPU_COUNT
-        if n_workers is None and threads_per_worker is not None:
+        if n_workers is None and threads_per_worker:
             n_workers = max(1, CPU_COUNT // threads_per_worker)
+        if n_workers is None:
+            n_workers = 0
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
