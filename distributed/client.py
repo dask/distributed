@@ -4405,7 +4405,7 @@ class as_completed:
                 if isinstance(f, Future):
                     self.futures[f] += 1
                     self.loop.add_callback(self._track_future, f)
-                if isinstance(f, ActorFuture):
+                elif isinstance(f, ActorFuture):
                     self.futures[f] += 1
                     self.loop.add_callback(self._track_actorfuture, f)
                 else:
