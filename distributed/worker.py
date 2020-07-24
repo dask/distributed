@@ -3259,13 +3259,12 @@ async def get_data_from_worker(
 
 job_counter = [0]
 
-
 cache_loads = LRU(maxsize=100)
-
+enable_caching = dask.config.get("distributed.worker.cache", False)
 
 def loads_function(bytes_object):
     """ Load a function from bytes, cache bytes """
-    if len(bytes_object) < 100000:
+    if len(bytes_object) < 100000 and enable_caching:
         try:
             result = cache_loads[bytes_object]
         except KeyError:
