@@ -126,6 +126,13 @@ class LocalCluster(SpecCluster):
             )
             dashboard_address = diagnostics_port
 
+        if threads_per_worker == 0:
+            warnings.warn(
+                "Setting `threads_per_worker` to 0 is discouraged. "
+                "Please set to None or to a specific int to get best behavior."
+            )
+            threads_per_worker = None
+
         self.status = None
         self.processes = processes
 
@@ -161,10 +168,8 @@ class LocalCluster(SpecCluster):
             else:
                 n_workers = 1
                 threads_per_worker = CPU_COUNT
-        if n_workers is None and threads_per_worker:
+        if n_workers is None and threads_per_worker is not None:
             n_workers = max(1, CPU_COUNT // threads_per_worker)
-        if n_workers is None:
-            n_workers = 0
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))

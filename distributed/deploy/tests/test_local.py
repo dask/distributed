@@ -114,33 +114,6 @@ def test_procs():
         repr(c)
 
 
-def test_threads_per_worker_set_to_zero():
-    with LocalCluster(
-        None,
-        scheduler_port=0,
-        processes=False,
-        threads_per_worker=0,
-        dashboard_address=None,
-        silence_logs=False,
-    ) as c:
-        assert len(c.workers) == 0
-        repr(c)
-
-    with LocalCluster(
-        2,
-        scheduler_port=0,
-        processes=False,
-        threads_per_worker=0,
-        dashboard_address=None,
-        silence_logs=False,
-    ) as c:
-        assert len(c.workers) == 2
-        assert all(isinstance(w, Worker) for w in c.workers.values())
-        with Client(c.scheduler.address) as e:
-            assert all(w.nthreads == CPU_COUNT for w in c.workers.values())
-        repr(c)
-
-
 def test_move_unserializable_data():
     """
     Test that unserializable data is still fine to transfer over inproc
@@ -1022,6 +995,18 @@ async def test_repr(cleanup):
         n_workers=2, processes=False, memory_limit=None, asynchronous=True
     ) as cluster:
         assert "memory" not in repr(cluster)
+
+
+@pytest.mark.asyncio
+async def test_threads_per_worker_set_to_0(cleanup):
+    with pytest.warns(
+        Warning, match="Setting `threads_per_worker` to 0 is discouraged."
+    ):
+        async with LocalCluster(
+            n_workers=2, processes=False, threads_per_worker=0, asynchronous=True,
+        ) as cluster:
+            assert len(cluster.workers) == 2
+            assert all(w.nthreads < CPU_COUNT for w in cluster.workers.values())
 
 
 @pytest.mark.asyncio
