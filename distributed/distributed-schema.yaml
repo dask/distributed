@@ -377,6 +377,13 @@ properties:
                 description: |
                   Target fraction below which to try to keep memory
 
+              compress:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: |
+                  When the process memory (as observed by the operating system) gets above this amount we start compressing data in memory.
+
               spill:
                 type: number
                 minimum: 0

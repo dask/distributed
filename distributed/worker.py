@@ -39,7 +39,7 @@ from .metrics import time
 from .node import ServerNode
 from . import preloading
 from .proctitle import setproctitle
-from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
+from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytes
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -523,6 +523,12 @@ class Worker(ServerNode):
             self.memory_target_fraction = dask.config.get(
                 "distributed.worker.memory.target"
             )
+        if "memory_compress_fraction" in kwargs:
+            self.memory_compress_fraction = kwargs.pop("memory_compress_fraction")
+        else:
+            self.memory_compress_fraction = dask.config.get(
+                "distributed.worker.memory.compress"
+            )
         if "memory_spill_fraction" in kwargs:
             self.memory_spill_fraction = kwargs.pop("memory_spill_fraction")
         else:
@@ -543,7 +549,9 @@ class Worker(ServerNode):
         elif isinstance(data, tuple):
             self.data = data[0](**data[1])
         elif self.memory_limit and (
-            self.memory_target_fraction or self.memory_spill_fraction
+            self.memory_target_fraction
+            or self.memory_compress_fraction
+            or self.memory_spill_fraction
         ):
             try:
                 from zict import Buffer, File, Func
@@ -552,15 +560,20 @@ class Worker(ServerNode):
                     "Please `python -m pip install zict` for spill-to-disk workers"
                 )
             path = os.path.join(self.local_directory, "storage")
-            storage = Func(
-                partial(serialize_bytelist, on_error="raise"),
-                deserialize_bytes,
-                File(path),
+            disk = File(path)
+            compressed = Func(
+                partial(serialize_bytes, on_error="raise"), deserialize_bytes, {}
             )
             target = int(float(self.memory_limit) * self.memory_target_fraction)
+            compress = int(
+                float(self.memory_limit)
+                * (self.memory_compress_fraction - self.memory_target_fraction)
+            )
+            storage = Buffer(compressed, disk, compress, weight)
             self.data = Buffer({}, storage, target, weight)
             self.data.memory = self.data.fast
-            self.data.disk = self.data.slow
+            self.data.compressed = self.data.slow.fast
+            self.data.disk = self.data.slow.slow
         else:
             self.data = dict()
 
