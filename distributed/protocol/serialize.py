@@ -1,5 +1,7 @@
 from functools import partial
 import traceback
+import importlib
+from enum import Enum
 
 import dask
 from dask.base import normalize_token
@@ -66,25 +68,27 @@ def pickle_loads(header, frames):
 
 def msgpack_decode_default(obj):
     """
-    Custom packer/unpackerfor msgpack to support enums
+    Custom packer/unpacker for msgpack to support Enums
     """
-    # avoid circular import
-    from ..core import Status
-
-    if "__Status__" in obj:
-        obj = getattr(Status, obj["as_str"])
+    if "__Enum__" in obj:
+        mod = importlib.import_module(obj["__module__"])
+        enum_type = getattr(mod, obj["__name__"])
+        obj = getattr(enum_type, obj["name"])
     return obj
 
 
 def msgpack_encode_default(obj):
     """
-    Custom packer/unpackerfor msgpack to support enums
+    Custom packer/unpacker for msgpack to support Enums
     """
-    # avoid circular import
-    from ..core import Status
 
-    if isinstance(obj, Status):
-        return {"__Status__": True, "as_str": obj.name}
+    if isinstance(obj, Enum):
+        return {
+            "__Enum__": True,
+            "name": obj.name,
+            "__module__": obj.__module__,
+            "__name__": type(obj).__name__,
+        }
     return obj
 
 
