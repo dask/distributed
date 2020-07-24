@@ -4374,16 +4374,42 @@ class as_completed:
                 with self.thread_condition:
                     self.thread_condition.notify()
 
+    async def _track_actorfuture(self, actorfuture):
+        try:
+            await actorfuture  # "seems to be hanging here? I can't work out why - seems to never complete."
+        except CancelledError:
+            pass
+        # "Not yet needed: I do plan to add test for `with_results`"
+        # if self.with_results:
+        #     try:
+        #         result = await future._result(raiseit=False)
+        #     except CancelledError as exc:
+        #         result = exc
+        with self.lock:
+            if actorfuture in self.futures:
+                self.futures[future] -= 1  # My Understanding: "a marker indicating if the future has now ran"
+                if not self.futures[future]:
+                    del self.futures[future]  #  My Understanding: "as now ran, remove future from futures list"
+                self.queue.put_nowait((future, future.result()))
+                with self.condition:
+                    self.condition.notify()  #  My Understanding: "notify this future has finished, so release lock on thread to enable use by another coroutine" (asyncronous version)
+                with self.thread_condition:
+                    self.thread_condition.notify()  #  My Understanding: "notify this future has finished, so release lock on thread to enable use by another coroutine"
+
     def update(self, futures):
         """ Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
         with self.lock:
             for f in futures:
-                if not isinstance(f, Future) and not isinstance(f, ActorFuture):
+                if isinstance(f, Future):
+                    self.futures[f] += 1
+                    self.loop.add_callback(self._track_future, f)
+                if isinstance(f, ActorFuture):
+                    self.futures[f] += 1
+                    self.loop.add_callback(self._track_actorfuture, f)
+                else:
                     raise TypeError("Input must be a Future or ActorFuture, got %s" % f)
-                self.futures[f] += 1
-                self.loop.add_callback(self._track_future, f)
 
     def add(self, future):
         """ Add a future to the collection
