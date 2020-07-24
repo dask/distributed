@@ -431,6 +431,19 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
+    s.workers[a.address].memory_limit = 0
+    s.workers[b.address].memory_limit = 0
+
+    wt = WorkerTable(s)
+    wt.update()
+    assert all(wt.source.data.values())
+    assert wt.source.data["name"][0] == "Total (2)"
+    assert wt.source.data["memory_limit"][0] == 0
+    assert wt.source.data["memory_percent"][0] == ""
+
+
+@gen_cluster(client=True)
 async def test_TaskGraph(c, s, a, b):
     gp = TaskGraph(s)
     futures = c.map(inc, range(5))
