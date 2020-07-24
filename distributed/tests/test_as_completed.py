@@ -276,24 +276,31 @@ async def test_clear(c, s, a, b):
 
 def test_as_completed_with_actor(client):
     class Counter:
+        n = 0
+
         def __init__(self):
             self.n = 0
 
         def increment(self):
+            time.sleep(0.1)
             self.n += 1
             return self.n
 
     future = client.submit(Counter, actor=True)
     counter = future.result()
+    assert counter.n == 0
 
     futures = []
     for _ in range(3):
-        sleep(0.1)
         futures.append(counter.increment())
 
     results = []
     for future in as_completed(futures):
-        sleep(0.1)
         results.append(future.result())
 
+    assert counter.n == 3
     assert sum(results) == 6  # i.e. future.result() returns 1, 2, 3
+
+    # ToDo: test other `as_completed` arguments, e.g.:
+    # for future, n in as_completed(futures, with_results=True):
+    #     results.append(n)
