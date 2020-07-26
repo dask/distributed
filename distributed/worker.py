@@ -960,6 +960,7 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
+                cache_loads.clear()
             except Exception as e:
                 logger.exception(e)
                 return {"status": "error", "exception": to_serialize(e)}
