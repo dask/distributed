@@ -26,214 +26,237 @@ from tornado.ioloop import IOLoop, TimeoutError
 
 logger = logging.getLogger("distributed.dask_worker")
 
-
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
+worker_options = [
+    click.Option(
+        ["--tls-ca-file"],
+        type=pem_file_option_type,
+        default=None,
+        help="CA cert(s) file for TLS (in PEM format)",
+    ),
+    click.Option(
+        ["--tls-cert"],
+        type=pem_file_option_type,
+        default=None,
+        help="certificate file for TLS (in PEM format)",
+    ),
+    click.Option(
+        ["--tls-key"],
+        type=pem_file_option_type,
+        default=None,
+        help="private key file for TLS (in PEM format)",
+    ),
+    click.Option(
+        ["--worker-port"],
+        default=None,
+        help="Serving computation port, defaults to random. "
+        "When creating multiple workers with --nprocs, a sequential range of "
+        "worker ports may be used by specifying the first and last available "
+        "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
+        "will use ports 3000, 3001, ..., 3025, 3026.",
+    ),
+    click.Option(
+        ["--nanny-port"],
+        default=None,
+        help="Serving nanny port, defaults to random. "
+        "When creating multiple nannies with --nprocs, a sequential range of "
+        "nanny ports may be used by specifying the first and last available "
+        "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
+        "will use ports 3000, 3001, ..., 3025, 3026.",
+    ),
+    click.Option(
+        ["--bokeh-port"],
+        type=int,
+        default=None,
+        help="Deprecated.  See --dashboard-address",
+    ),
+    click.Option(
+        ["--dashboard-address"],
+        type=str,
+        default=":0",
+        help="Address on which to listen for diagnostics dashboard",
+    ),
+    click.Option(
+        ["--dashboard/--no-dashboard"],
+        default=True,
+        required=False,
+        help="Launch the Dashboard [default: --dashboard]",
+    ),
+    click.Option(
+        ["--bokeh/--no-bokeh"],
+        "bokeh",
+        default=None,
+        help="Deprecated.  See --dashboard/--no-dashboard.",
+        required=False,
+    ),
+    click.Option(
+        ["--listen-address"],
+        type=str,
+        default=None,
+        help="The address to which the worker binds. Example: tcp://0.0.0.0:9000",
+    ),
+    click.Option(
+        ["--contact-address"],
+        type=str,
+        default=None,
+        help="The address the worker advertises to the scheduler for "
+        "communication with it and other workers. "
+        "Example: tcp://127.0.0.1:9000",
+    ),
+    click.Option(
+        ["--host"],
+        type=str,
+        default=None,
+        help="Serving host. Should be an ip address that is"
+        " visible to the scheduler and other workers. "
+        "See --listen-address and --contact-address if you "
+        "need different listen and contact addresses. "
+        "See --interface.",
+    ),
+    click.Option(
+        ["--interface"],
+        type=str,
+        default=None,
+        help="Network interface like 'eth0' or 'ib0'",
+    ),
+    click.Option(
+        ["--protocol"], type=str, default=None, help="Protocol like tcp, tls, or ucx"
+    ),
+    click.Option(
+        ["--nthreads"], type=int, default=0, help="Number of threads per process."
+    ),
+    click.Option(
+        ["--nprocs"],
+        type=int,
+        default=1,
+        show_default=True,
+        help="Number of worker processes to launch.",
+    ),
+    click.Option(
+        ["--name"],
+        type=str,
+        default=None,
+        help="A unique name for this worker like 'worker-1'. "
+        "If used with --nprocs then the process number "
+        "will be appended like name-0, name-1, name-2, ...",
+    ),
+    click.Option(
+        ["--memory-limit"],
+        default="auto",
+        show_default=True,
+        help="Bytes of memory per process that the worker can use. "
+        "This can be an integer (bytes), "
+        "float (fraction of total system memory), "
+        "string (like 5GB or 5000M), "
+        "'auto', or zero for no memory management",
+    ),
+    click.Option(
+        ["--reconnect/--no-reconnect"],
+        default=True,
+        help="Reconnect to scheduler if disconnected [default: --reconnect]",
+    ),
+    click.Option(
+        ["--nanny/--no-nanny"],
+        default=True,
+        help="Start workers in nanny process for management [default: --nanny]",
+    ),
+    click.Option(
+        ["--pid-file"], type=str, default="", help="File to write the process PID"
+    ),
+    click.Option(
+        ["--local-directory"],
+        default=None,
+        type=str,
+        help="Directory to place worker files",
+    ),
+    click.Option(
+        ["--resources"],
+        type=str,
+        default=None,
+        help='Resources for task constraints like "GPU=2 MEM=10e9". '
+        "Resources are applied separately to each worker process "
+        "(only relevant when starting multiple worker processes with '--nprocs').",
+    ),
+    click.Option(
+        ["--scheduler-file"],
+        type=str,
+        default=None,
+        help="Filename to JSON encoded scheduler information. "
+        "Use with dask-scheduler --scheduler-file",
+    ),
+    click.Option(
+        ["--death-timeout"],
+        type=str,
+        default=None,
+        help="Seconds to wait for a scheduler before closing",
+    ),
+    click.Option(
+        ["--dashboard-prefix"], type=str, default="", help="Prefix for the dashboard"
+    ),
+    click.Option(
+        ["--lifetime"],
+        type=str,
+        default=None,
+        help="If provided, shut down the worker after this duration.",
+    ),
+    click.Option(
+        ["--lifetime-stagger"],
+        type=str,
+        default="0 seconds",
+        show_default=True,
+        help="Random amount by which to stagger lifetime values",
+    ),
+    click.Option(
+        ["--worker-class"],
+        type=str,
+        default="dask.distributed.Worker",
+        show_default=True,
+        help="Worker class used to instantiate workers from.",
+    ),
+    click.Option(
+        ["--lifetime-restart/--no-lifetime-restart"],
+        default=False,
+        show_default=True,
+        required=False,
+        help="Whether or not to restart the worker after the lifetime lapses. "
+        "This assumes that you are using the --lifetime and --nanny keywords",
+    ),
+    click.Option(
+        ["--preload"],
+        type=str,
+        multiple=True,
+        is_eager=True,
+        help="Module that should be loaded by each worker process "
+        'like "foo.bar" or "/path/to/foo.py"',
+    ),
+    click.Option(
+        ["--preload-nanny"],
+        type=str,
+        multiple=True,
+        is_eager=True,
+        help="Module that should be loaded by each nanny "
+        'like "foo.bar" or "/path/to/foo.py"',
+    ),
+    click.Argument(["scheduler"], type=str, required=False),
+    click.Argument(
+        ["preload_argv"],
+        nargs=-1,
+        type=click.UNPROCESSED,
+        callback=validate_preload_argv,
+    ),
+]
 
-@click.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("scheduler", type=str, required=False)
-@click.option(
-    "--tls-ca-file",
-    type=pem_file_option_type,
-    default=None,
-    help="CA cert(s) file for TLS (in PEM format)",
-)
-@click.option(
-    "--tls-cert",
-    type=pem_file_option_type,
-    default=None,
-    help="certificate file for TLS (in PEM format)",
-)
-@click.option(
-    "--tls-key",
-    type=pem_file_option_type,
-    default=None,
-    help="private key file for TLS (in PEM format)",
-)
-@click.option(
-    "--worker-port",
-    default=None,
-    help="Serving computation port, defaults to random. "
-    "When creating multiple workers with --nprocs, a sequential range of "
-    "worker ports may be used by specifying the first and last available "
-    "ports like <first-port>:<last-port>. For example, --worker-port=3000:3026 "
-    "will use ports 3000, 3001, ..., 3025, 3026.",
-)
-@click.option(
-    "--nanny-port",
-    default=None,
-    help="Serving nanny port, defaults to random. "
-    "When creating multiple nannies with --nprocs, a sequential range of "
-    "nanny ports may be used by specifying the first and last available "
-    "ports like <first-port>:<last-port>. For example, --nanny-port=3000:3026 "
-    "will use ports 3000, 3001, ..., 3025, 3026.",
-)
-@click.option(
-    "--bokeh-port", type=int, default=None, help="Deprecated.  See --dashboard-address"
-)
-@click.option(
-    "--dashboard-address",
-    type=str,
-    default=":0",
-    help="Address on which to listen for diagnostics dashboard",
-)
-@click.option(
-    "--dashboard/--no-dashboard",
-    "dashboard",
-    default=True,
-    required=False,
-    help="Launch the Dashboard [default: --dashboard]",
-)
-@click.option(
-    "--bokeh/--no-bokeh",
-    "bokeh",
-    default=None,
-    help="Deprecated.  See --dashboard/--no-dashboard.",
-    required=False,
-)
-@click.option(
-    "--listen-address",
-    type=str,
-    default=None,
-    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000",
-)
-@click.option(
-    "--contact-address",
-    type=str,
-    default=None,
-    help="The address the worker advertises to the scheduler for "
-    "communication with it and other workers. "
-    "Example: tcp://127.0.0.1:9000",
-)
-@click.option(
-    "--host",
-    type=str,
-    default=None,
-    help="Serving host. Should be an ip address that is"
-    " visible to the scheduler and other workers. "
-    "See --listen-address and --contact-address if you "
-    "need different listen and contact addresses. "
-    "See --interface.",
-)
-@click.option(
-    "--interface", type=str, default=None, help="Network interface like 'eth0' or 'ib0'"
-)
-@click.option(
-    "--protocol", type=str, default=None, help="Protocol like tcp, tls, or ucx"
-)
-@click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
-@click.option(
-    "--nprocs",
-    type=int,
-    default=1,
-    show_default=True,
-    help="Number of worker processes to launch.",
-)
-@click.option(
-    "--name",
-    type=str,
-    default=None,
-    help="A unique name for this worker like 'worker-1'. "
-    "If used with --nprocs then the process number "
-    "will be appended like name-0, name-1, name-2, ...",
-)
-@click.option(
-    "--memory-limit",
-    default="auto",
-    show_default=True,
-    help="Bytes of memory per process that the worker can use. "
-    "This can be an integer (bytes), "
-    "float (fraction of total system memory), "
-    "string (like 5GB or 5000M), "
-    "'auto', or zero for no memory management",
-)
-@click.option(
-    "--reconnect/--no-reconnect",
-    default=True,
-    help="Reconnect to scheduler if disconnected [default: --reconnect]",
-)
-@click.option(
-    "--nanny/--no-nanny",
-    default=True,
-    help="Start workers in nanny process for management [default: --nanny]",
-)
-@click.option("--pid-file", type=str, default="", help="File to write the process PID")
-@click.option(
-    "--local-directory", default=None, type=str, help="Directory to place worker files"
-)
-@click.option(
-    "--resources",
-    type=str,
-    default=None,
-    help='Resources for task constraints like "GPU=2 MEM=10e9". '
-    "Resources are applied separately to each worker process "
-    "(only relevant when starting multiple worker processes with '--nprocs').",
-)
-@click.option(
-    "--scheduler-file",
-    type=str,
-    default=None,
-    help="Filename to JSON encoded scheduler information. "
-    "Use with dask-scheduler --scheduler-file",
-)
-@click.option(
-    "--death-timeout",
-    type=str,
-    default=None,
-    help="Seconds to wait for a scheduler before closing",
-)
-@click.option(
-    "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard"
-)
-@click.option(
-    "--lifetime",
-    type=str,
-    default=None,
-    help="If provided, shut down the worker after this duration.",
-)
-@click.option(
-    "--lifetime-stagger",
-    type=str,
-    default="0 seconds",
-    show_default=True,
-    help="Random amount by which to stagger lifetime values",
-)
-@click.option(
-    "--worker-class",
-    type=str,
-    default="dask.distributed.Worker",
-    show_default=True,
-    help="Worker class used to instantiate workers from.",
-)
-@click.option(
-    "--lifetime-restart/--no-lifetime-restart",
-    "lifetime_restart",
-    default=False,
-    show_default=True,
-    required=False,
-    help="Whether or not to restart the worker after the lifetime lapses. "
-    "This assumes that you are using the --lifetime and --nanny keywords",
-)
-@click.option(
-    "--preload",
-    type=str,
-    multiple=True,
-    is_eager=True,
-    help="Module that should be loaded by each worker process "
-    'like "foo.bar" or "/path/to/foo.py"',
-)
-@click.argument(
-    "preload_argv", nargs=-1, type=click.UNPROCESSED, callback=validate_preload_argv
-)
-@click.option(
-    "--preload-nanny",
-    type=str,
-    multiple=True,
-    is_eager=True,
-    help="Module that should be loaded by each nanny "
-    'like "foo.bar" or "/path/to/foo.py"',
-)
+
+class WorkerCommand(click.Command):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.params = worker_options
+        self.context_settings = dict(ignore_unknown_options=True)
+
+
 @click.version_option()
+@click.command(cls=WorkerCommand)
 def main(
     scheduler,
     host,

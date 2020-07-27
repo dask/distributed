@@ -1,5 +1,6 @@
+import copy
 from tornado.ioloop import IOLoop
-
+from click.types import BoolParamType
 
 py3_err_msg = """
 Warning: Your terminal does not set locales.
@@ -64,3 +65,50 @@ def install_signal_handlers(loop=None, cleanup=None):
 
     for sig in [signal.SIGINT, signal.SIGTERM]:
         old_handlers[sig] = signal.signal(sig, handle_signal)
+
+
+def prepare_dask_ssh_options(entity, opt):
+    opt = copy.deepcopy(opt)
+    opt.name = f"{opt.name}__{entity}"
+    opt.opts[0] = f'--{entity}-{opt.opts[0].replace("--", "")}'
+    if opt.secondary_opts:
+        opt.secondary_opts[0] = f'--{entity}-{opt.secondary_opts[0].replace("--", "")}'
+
+    return opt
+
+
+def prepare_additional_options(entity, cmd, options, **kwargs):
+    options_copy = copy.deepcopy(options)
+    for opt in options_copy:
+        if opt.name in kwargs.keys():
+            value = kwargs.get(opt.name)
+            if value in [None, (), ""]:
+                continue
+
+            opt.name = opt.name.replace(f"__{entity}", "")
+            opt.opts[0] = "--{}".format(opt.opts[0].replace(f"--{entity}-", ""))
+            if opt.secondary_opts:
+                opt.secondary_opts[0] = "--{}".format(
+                    opt.secondary_opts[0].replace(f"--{entity}-", "")
+                )
+
+            opts = opt.opts[0]
+            if isinstance(opt.type, BoolParamType):
+                if not value:
+                    try:
+                        opts = opt.secondary_opts[0]
+                    except IndexError:
+                        continue
+                value = ""
+            if opt.multiple:
+                for i in value:
+                    if " " in i:
+                        i = f'"{i}"'
+                    cmd += f" {opts} {i}"
+                continue
+            if " " in value:
+                value = f'"{value}"'
+
+            cmd += f" {opts} {value}"
+
+    return cmd

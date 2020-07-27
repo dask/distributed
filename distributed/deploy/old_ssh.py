@@ -16,6 +16,9 @@ from tlz import merge
 
 from tornado import gen
 
+from distributed.cli.dask_scheduler import scheduler_options
+from distributed.cli.dask_worker import worker_options
+from distributed.cli.utils import prepare_additional_options
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +212,20 @@ def async_ssh(cmd_dict):
 
 
 def start_scheduler(
-    logdir, addr, port, ssh_username, ssh_port, ssh_private_key, remote_python=None,
+    logdir,
+    addr,
+    port,
+    ssh_username,
+    ssh_port,
+    ssh_private_key,
+    remote_python=None,
+    **kwargs,
 ):
     cmd = "{python} -m distributed.cli.dask_scheduler --port {port}".format(
         python=remote_python or sys.executable, port=port
     )
+
+    cmd = prepare_additional_options("scheduler", cmd, scheduler_options, **kwargs)
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
@@ -271,6 +283,7 @@ def start_worker(
     remote_python=None,
     remote_dask_worker="distributed.cli.dask_worker",
     local_directory=None,
+    **kwargs,
 ):
 
     cmd = (
@@ -308,6 +321,8 @@ def start_worker(
         cmd += " --local-directory {local_directory}".format(
             local_directory=local_directory
         )
+
+    cmd = prepare_additional_options("worker", cmd, worker_options, **kwargs)
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
@@ -360,6 +375,7 @@ class SSHCluster:
         nanny_port=None,
         remote_dask_worker="distributed.cli.dask_worker",
         local_directory=None,
+        **kwargs,
     ):
 
         self.scheduler_addr = scheduler_addr
@@ -410,12 +426,13 @@ class SSHCluster:
             ssh_port,
             ssh_private_key,
             remote_python,
+            **kwargs,
         )
 
         # Start worker nodes
         self.workers = []
         for i, addr in enumerate(worker_addrs):
-            self.add_worker(addr)
+            self.add_worker(addr, **kwargs)
 
     @gen.coroutine
     def _start(self):
@@ -445,7 +462,7 @@ class SSHCluster:
         except KeyboardInterrupt:
             pass  # Return execution to the calling process
 
-    def add_worker(self, address):
+    def add_worker(self, address, **kwargs):
         self.workers.append(
             start_worker(
                 self.logdir,
@@ -464,6 +481,7 @@ class SSHCluster:
                 self.remote_python,
                 self.remote_dask_worker,
                 self.local_directory,
+                **kwargs,
             )
         )
 
