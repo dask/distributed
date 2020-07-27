@@ -430,10 +430,8 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     assert s.workers[a.address].metrics["metric"] == -999
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
 async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
-    s.workers[a.address].memory_limit = 0
-    s.workers[b.address].memory_limit = 0
 
     wt = WorkerTable(s)
     wt.update()
