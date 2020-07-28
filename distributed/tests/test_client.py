@@ -1547,7 +1547,7 @@ async def test_upload_file_refresh_delayed(c, s, a, b):
             with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
                 await c.upload_file(fn)
 
-            sys.path.append(fn)
+            sys.path.append(os.path.dirname(fn))
             from myfile import f
 
             b = delayed(f)()
