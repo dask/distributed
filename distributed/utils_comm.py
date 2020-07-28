@@ -12,6 +12,7 @@ from tlz import merge, concat, groupby, drop
 
 from .core import rpc
 from .utils import All, tokey
+from .protocol.serialize import Serialized
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,12 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
                     )
                     missing_workers.add(worker)
                 else:
-                    response.update(r["data"])
+                    response.update(
+                        {
+                            k: (v.deserialize() if isinstance(v, Serialized) else v)
+                            for k, v in r["data"].items()
+                        }
+                    )
         finally:
             for r in rpcs.values():
                 await r.close_rpc()
