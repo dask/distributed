@@ -40,6 +40,7 @@ from .node import ServerNode
 from . import preloading
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
+from .protocol.serialize import Serialized
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -2021,7 +2022,7 @@ class Worker(ServerNode):
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
                     bw, cnt = self.bandwidth_workers[worker]
                     self.bandwidth_workers[worker] = (bw + bandwidth, cnt + 1)
-
+                    # this is going to be wrong as all types will be "Serialized", unless we delay this.
                     types = set(map(type, response["data"].values()))
                     if len(types) == 1:
                         [typ] = types
@@ -2031,9 +2032,11 @@ class Worker(ServerNode):
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
+                # that's still ok
                 self.counters["transfer-count"].add(len(response["data"]))
                 self.incoming_count += 1
 
+                # that's still ok
                 self.log.append(("receive-dep", worker, list(response["data"])))
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s", worker)
@@ -2053,10 +2056,12 @@ class Worker(ServerNode):
             finally:
                 self.comm_nbytes -= total_nbytes
                 busy = response.get("status", "") == "busy"
+                # print('assign data....')
                 data = response.get("data", {})
 
                 for d in self.in_flight_workers.pop(worker):
                     if not busy and d in data:
+                        # do we store data here ?
                         self.transition_dep(d, "memory", value=data[d])
                     elif self.dep_state.get(d) != "memory":
                         self.transition_dep(
@@ -2514,7 +2519,11 @@ class Worker(ServerNode):
             data = {}
             for k in self.dependencies[key]:
                 try:
-                    data[k] = self.data[k]
+                    d = self.data[k]
+                    if isinstance(d, Serialized):
+                        print("Decompress just in time")
+                        d = d.deserialize()
+                    data[k] = d
                 except KeyError:
                     from .actor import Actor  # TODO: create local actor
 

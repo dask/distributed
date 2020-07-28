@@ -123,7 +123,12 @@ def loads(frames, deserialize=True, deserializers=None):
             else:
                 fs = []
 
-            if deserialize or key in bytestrings:
+            import inspect
+
+            stack = inspect.stack()
+            get_data = any([s.function == "get_data_from_worker" for s in stack])
+
+            if (deserialize or key in bytestrings) and not get_data:
                 if "compression" in head:
                     fs = decompress(head, fs)
                 if not any(hasattr(f, "__cuda_array_interface__") for f in fs):
