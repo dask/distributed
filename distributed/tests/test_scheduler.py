@@ -1639,7 +1639,7 @@ async def test_bandwidth(c, s, a, b):
     y = c.submit(lambda x: x, x, workers=b.address)
     await y
     await b.heartbeat()
-    assert s.bandwidth < start  # we've learned that we're slower
+    assert s.bandwidth <= start  # we've learned that we're slower
     assert b.latency
     assert typename(bytes) in s.bandwidth_types
     assert (b.address, a.address) in s.bandwidth_workers
