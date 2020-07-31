@@ -80,8 +80,8 @@ def merge_frames(header, frames):
         frames = out
 
     frames = [
-        bytearray(f) if m and memoryview(f).readonly else f
-        for m, f in zip(header["writeable"], frames)
+        bytearray(f) if w and memoryview(f).readonly else f
+        for w, f in zip(header["writeable"], frames)
     ]
 
     return frames
