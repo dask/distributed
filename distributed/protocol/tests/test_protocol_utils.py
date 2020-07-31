@@ -5,19 +5,20 @@ from distributed.utils import ensure_bytes
 
 
 @pytest.mark.parametrize(
-    "lengths,frames",
+    "lengths,writeable,frames",
     [
-        ([3], [b"123"]),
-        ([3, 3], [b"123", b"456"]),
-        ([2, 3, 2], [b"12345", b"67"]),
-        ([5, 2], [b"123", b"45", b"67"]),
-        ([3, 4], [b"12", b"34", b"567"]),
+        ([3], [False], [b"123"]),
+        ([3], [True], [b"123"]),
+        ([3, 3], [False, False], [b"123", b"456"]),
+        ([2, 3, 2], [False, True, False], [b"12345", b"67"]),
+        ([5, 2], [False, True], [b"123", b"45", b"67"]),
+        ([3, 4], [False, False], [b"12", b"34", b"567"]),
     ],
 )
-def test_merge_frames(lengths, frames):
+def test_merge_frames(lengths, writeable, frames):
     header = {
         "lengths": lengths,
-        "writeable": len(lengths) * (False,),
+        "writeable": writeable,
     }
     result = merge_frames(header, frames)
 
