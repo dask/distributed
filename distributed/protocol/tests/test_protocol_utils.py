@@ -15,7 +15,10 @@ from distributed.utils import ensure_bytes
     ],
 )
 def test_merge_frames(lengths, frames):
-    header = {"lengths": lengths}
+    header = {
+        "lengths": lengths,
+        "writeable": len(lengths) * (False,),
+    }
     result = merge_frames(header, frames)
 
     data = b"".join(frames)
@@ -25,7 +28,7 @@ def test_merge_frames(lengths, frames):
         data = data[i:]
 
     assert all(isinstance(f, memoryview) for f in result)
-    assert all(not f.readonly for f in result)
+    assert tuple(not f.readonly for f in result) == header["writeable"]
     assert list(map(ensure_bytes, result)) == expected
 
 
