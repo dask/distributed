@@ -503,8 +503,7 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
-    if not any(hasattr(f, "__cuda_array_interface__") for f in frames):
-        frames = merge_frames(header, frames)
+    frames = merge_frames(header, frames)
     return deserialize(header, frames)
 
 
