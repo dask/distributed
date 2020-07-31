@@ -51,17 +51,20 @@ def merge_frames(header, frames):
     [b'123456']
     """
     lengths = list(header["lengths"])
+    writeables = list(header["writeable"])
 
-    assert len(lengths) == len(header["writeable"])
+    assert len(lengths) == len(writeables)
     assert sum(lengths) == sum(map(nbytes, frames))
 
     if not all(len(f) == l for f, l in zip(frames, lengths)):
         frames = frames[::-1]
         lengths = lengths[::-1]
+        writeables = writeables[::-1]
 
         out = []
         while lengths:
             l = lengths.pop()
+            w = writeables.pop()
             L = []
             while l:
                 frame = frames.pop()
@@ -75,6 +78,8 @@ def merge_frames(header, frames):
                     l = 0
             if len(L) == 1:  # no work necessary
                 out.append(L[0])
+            elif w:
+                out.append(bytearray().join(L))
             else:
                 out.append(bytes().join(L))
         frames = out
