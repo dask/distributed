@@ -51,7 +51,6 @@ def merge_frames(header, frames):
     [b'123456']
     """
     lengths = list(header["lengths"])
-    frames = list(map(memoryview, frames))
 
     assert sum(lengths) == sum(map(nbytes, frames))
 
@@ -69,17 +68,18 @@ def merge_frames(header, frames):
                     L.append(frame)
                     l -= nbytes(frame)
                 else:
+                    frame = memoryview(frame)
                     L.append(frame[:l])
                     frames.append(frame[l:])
                     l = 0
             if len(L) == 1:  # no work necessary
                 out.append(L[0])
             else:
-                out.append(memoryview(bytes().join(L)))
+                out.append(bytes().join(L))
         frames = out
 
     frames = [
-        memoryview(bytearray(f)) if m and f.readonly else f
+        bytearray(f) if m and memoryview(f).readonly else f
         for m, f in zip(header["writeable"], frames)
     ]
 
