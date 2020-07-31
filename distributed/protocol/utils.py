@@ -52,6 +52,7 @@ def merge_frames(header, frames):
     """
     lengths = list(header["lengths"])
 
+    assert len(lengths) == len(header["writeable"])
     assert sum(lengths) == sum(map(nbytes, frames))
 
     if not all(len(f) == l for f, l in zip(frames, lengths)):
