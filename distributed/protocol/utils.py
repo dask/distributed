@@ -78,7 +78,10 @@ def merge_frames(header, frames):
                 out.append(memoryview(bytes().join(L)))
         frames = out
 
-    frames = [memoryview(bytearray(f)) if f.readonly else f for f in frames]
+    frames = [
+        memoryview(bytearray(f)) if m and f.readonly else f
+        for m, f in zip(header["writeable"], frames)
+    ]
 
     return frames
 
