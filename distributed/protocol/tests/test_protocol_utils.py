@@ -28,7 +28,7 @@ def test_merge_frames(lengths, writeable, frames):
         expected.append(data[:i])
         data = data[i:]
 
-    assert tuple(not memoryview(f).readonly for f in result) == header["writeable"]
+    assert list(not memoryview(f).readonly for f in result) == header["writeable"]
     assert list(map(ensure_bytes, result)) == expected
 
 
