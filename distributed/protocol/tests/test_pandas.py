@@ -63,7 +63,7 @@ dfs = [
 
 
 @pytest.mark.parametrize("df", dfs)
-def test_dumps_serialize_numpy(df):
+def test_dumps_serialize_pandas(df):
     header, frames = serialize(df)
     if "compression" in header:
         frames = decompress(header, frames)
