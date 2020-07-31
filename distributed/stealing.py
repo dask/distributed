@@ -329,12 +329,12 @@ class WorkStealing(SchedulerPlugin):
             for level, cost_multiplier in enumerate(self.cost_multipliers):
                 if not idle:
                     break
-                for sat in list(saturated):
+                for sat in saturated:
                     stealable = self.stealable[sat.address][level]
                     if not stealable or not idle:
                         continue
 
-                    for ts in list(stealable):
+                    for ts in stealable.copy():
                         if ts not in self.key_stealable or ts.processing_on is not sat:
                             stealable.discard(ts)
                             continue
@@ -361,7 +361,7 @@ class WorkStealing(SchedulerPlugin):
 
                 if self.cost_multipliers[level] < 20:  # don't steal from public at cost
                     stealable = self.stealable_all[level]
-                    for ts in list(stealable):
+                    for ts in stealable.copy():
                         if not idle:
                             break
                         if ts not in self.key_stealable:

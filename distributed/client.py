@@ -999,7 +999,7 @@ class Client:
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
                 await asyncio.sleep(0.01)
-            for i in range(10):
+            for _ in range(10):
                 try:
                     with open(self.scheduler_file) as f:
                         cfg = json.load(f)
@@ -1678,9 +1678,11 @@ class Client:
         total_length = sum(len(x) for x in iterables)
 
         if batch_size and batch_size > 1 and total_length > batch_size:
-            batches = list(
-                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
-            )
+
+            def batch_gen(iterables, batch_size):
+                for iterable in iterables:
+                    yield partition_all(batch_size, iterable)
+
             return sum(
                 [
                     self.map(
@@ -1698,7 +1700,7 @@ class Client:
                         pure=pure,
                         **kwargs,
                     )
-                    for batch in batches
+                    for batch in zip(*batch_gen(iterables, batch_size))
                 ],
                 [],
             )
@@ -1743,12 +1745,9 @@ class Client:
                     dsk.update(vv.dask)
                 else:
                     kwargs2[k] = v
-            dsk.update(
-                {
-                    key: (apply, func, (tuple, list(args)), kwargs2)
-                    for key, args in zip(keys, zip(*iterables))
-                }
-            )
+
+            for key, args in zip(keys, zip(*iterables)):
+                dsk[key] = (apply, func, (tuple, list(args)), kwargs2)
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -1833,6 +1832,7 @@ class Client:
 
             exceptions = set()
             bad_keys = set()
+
             for key in keys:
                 if key not in self.futures or self.futures[key].status in failed:
                     exceptions.add(key)
@@ -1855,10 +1855,13 @@ class Client:
             keys = [k for k in keys if k not in bad_keys and k not in data]
 
             if local_worker:  # look inside local worker
-                data.update(
-                    {k: local_worker.data[k] for k in keys if k in local_worker.data}
-                )
-                keys = [k for k in keys if k not in data]
+                not_included_keys = []
+                for k in keys:
+                    if k in local_worker.data:
+                        data[k] = local_worker.data[k]
+                    else:
+                        not_included_keys.append(k)
+                keys = not_included_keys
 
             # We now do an actual remote communication with workers or scheduler
             if self._gather_future:  # attach onto another pending gather request
@@ -2553,15 +2556,25 @@ class Client:
             if values:
                 dsk = subs_multiple(dsk, values)
 
-            d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-            extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
-            extra_keys = {tokey(future.key) for future in extra_futures}
-            dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
-            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
+            d = {}
+            extra_futures_values = []
+            dsk2_dict = {}
+            dependencies = {}
+            for k, v in dsk.items():
+                d[k] = unpack_remotedata(v, byte_keys=True)
+                extra_futures_values.append(d[k][1])
+                dsk2_dict[k] = d[k][0]
+                dependencies[k] = get_dependencies(dsk, k)
+
+            extra_futures = set.union(*extra_futures_values) if d else set()
+            extra_keys = set()
             for future in extra_futures:
                 if future.client is not self:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
+                extra_keys.add(tokey(future.key))
+            dsk2 = str_graph(dsk2_dict, extra_keys)
+            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
 
             if restrictions:
                 restrictions = keymap(tokey, restrictions)
@@ -2569,17 +2582,6 @@ class Client:
 
             if loose_restrictions is not None:
                 loose_restrictions = list(map(tokey, loose_restrictions))
-
-            future_dependencies = {
-                tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
-            }
-
-            for s in future_dependencies.values():
-                for v in s:
-                    if v not in self.futures:
-                        raise CancelledError(v)
-
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
 
             if priority is None:
                 priority = dask.order.order(dsk, dependencies=dependencies)
@@ -2590,9 +2592,15 @@ class Client:
                 for k, deps in dependencies.items()
                 if deps
             }
-            for k, deps in future_dependencies.items():
-                if deps:
-                    dependencies[k] = list(set(dependencies.get(k, ())) | deps)
+
+            for key, value in d.items():
+                _key = tokey(key)
+                _value = {tokey(f.key) for f in value[1]}
+                for v in _value:
+                    if v not in self.futures:
+                        raise CancelledError(v)
+                if _value:
+                    dependencies[_key] = list(set(dependencies.get(_key, ())) | _value)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk3}
@@ -2706,7 +2714,7 @@ class Client:
         """
         with self._refcount_lock:
             changed = False
-            for key in list(dsk):
+            for key in dsk:
                 if tokey(key) in self.futures:
                     if not changed:
                         changed = True
@@ -2851,11 +2859,13 @@ class Client:
         variables = [a for a in collections if dask.is_dask_collection(a)]
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
-        names = ["finalize-%s" % tokenize(v) for v in variables]
+        names = []
         dsk2 = {}
-        for i, (name, v) in enumerate(zip(names, variables)):
+        for i, v in enumerate(variables):
+            name = "finalize-%s" % tokenize(v)
             func, extra_args = v.__dask_postcompute__()
             keys = v.__dask_keys__()
+            names.append(name)
             if func is single_key and len(keys) == 1 and not extra_args:
                 names[i] = keys[0]
             else:
@@ -2996,12 +3006,12 @@ class Client:
             fifo_timeout=fifo_timeout,
             actors=actors,
         )
-
-        postpersists = [c.__dask_postpersist__() for c in collections]
-        result = [
-            func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
-            for (func, args), c in zip(postpersists, collections)
-        ]
+        result = []
+        for c in collections:
+            (func, args) = c.__dask_postpersist__()
+            result.append(
+                func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
+            )
 
         if singleton:
             return first(result)
@@ -3369,7 +3379,7 @@ class Client:
         keys = keys or []
         if futures is not None:
             futures = self.futures_of(futures)
-            keys += list(map(tokey, {f.key for f in futures}))
+            keys.extend(map(tokey, {f.key for f in futures}))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -3904,10 +3914,12 @@ class Client:
         for k, v in resources.items():
             if isinstance(v, dict):
                 # It's a per-key requirement
-                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
+                for kk in cls._expand_key(k):
+                    per_key_reqs[kk] = v
             else:
                 # It's a global requirement
-                global_reqs.update((kk, {k: v}) for kk in all_keys)
+                for kk in all_keys:
+                    global_reqs[kk] = {k: v}
 
         if global_reqs and per_key_reqs:
             raise ValueError(
@@ -3934,7 +3946,8 @@ class Client:
                     keys = list(
                         {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
                     )
-                restrictions.update({k: ws for k in keys})
+                for k in keys:
+                    restrictions[k] = ws
         else:
             restrictions = {}
 
@@ -4210,11 +4223,15 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         future = asyncio.wait_for(future, timeout)
     await future
 
-    done, not_done = (
-        {fu for fu in fs if fu.status != "pending"},
-        {fu for fu in fs if fu.status == "pending"},
-    )
-    cancelled = [f.key for f in done if f.status == "cancelled"]
+    done, not_done, cancelled = set(), set(), []
+    for fu in fs:
+        if fu.status != "pending":
+            done.add(fu)
+            if fu.status == "cancelled":
+                cancelled.append(fu.key)
+        elif fu.status == "pending":
+            not_done.add(fu)
+
     if cancelled:
         raise CancelledError(cancelled)
 

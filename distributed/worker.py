@@ -2103,7 +2103,7 @@ class Worker(ServerNode):
             if not deps:
                 return
 
-            for dep in list(deps):
+            for dep in deps.copy():
                 suspicious = self.suspicious_deps[dep]
                 if suspicious > 5:
                     deps.remove(dep)

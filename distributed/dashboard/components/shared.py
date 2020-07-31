@@ -312,6 +312,7 @@ class ProfileTimePlot(DashboardComponent):
                     ts = metadata["keys"][self.key]
                 else:
                     ts = metadata["counts"]
+
                 times, counts = zip(*ts)
                 self.ts = {"count": counts, "time": [t * 1000 for t in times]}
 

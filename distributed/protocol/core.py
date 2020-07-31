@@ -27,48 +27,45 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         if not data:  # fast path without serialized data
             return small_header, small_payload
 
-        pre = {
-            key: (value.header, value.frames)
-            for key, value in data.items()
-            if type(value) is Serialized
-        }
-
-        data = {
-            key: serialize(
-                value.data, serializers=serializers, on_error=on_error, context=context
-            )
-            for key, value in data.items()
-            if type(value) is Serialize
-        }
+        pre = {}
 
         header = {"headers": {}, "keys": [], "bytestrings": list(bytestrings)}
 
         out_frames = []
 
-        for key, (head, frames) in data.items():
-            if "lengths" not in head:
-                head["lengths"] = tuple(map(nbytes, frames))
+        for key, value in data.items():
+            if type(value) is Serialize:
+                (head, frames) = serialize(
+                    value.data,
+                    serializers=serializers,
+                    on_error=on_error,
+                    context=context,
+                )
+                if "lengths" not in head:
+                    head["lengths"] = tuple(map(nbytes, frames))
 
-            # Compress frames that are not yet compressed
-            out_compression = []
-            _out_frames = []
-            for frame, compression in zip(
-                frames, head.get("compression") or [None] * len(frames)
-            ):
-                if compression is None:  # default behavior
-                    _frames = frame_split_size(frame)
-                    _compression, _frames = zip(*map(maybe_compress, _frames))
-                    out_compression.extend(_compression)
-                    _out_frames.extend(_frames)
-                else:  # already specified, so pass
-                    out_compression.append(compression)
-                    _out_frames.append(frame)
+                # Compress frames that are not yet compressed
+                out_compression = []
+                _out_frames = []
+                for frame, compression in zip(
+                    frames, head.get("compression") or [None] * len(frames)
+                ):
+                    if compression is None:  # default behavior
+                        _frames = frame_split_size(frame)
+                        _compression, _frames = zip(*map(maybe_compress, _frames))
+                        out_compression.extend(_compression)
+                        _out_frames.extend(_frames)
+                    else:  # already specified, so pass
+                        out_compression.append(compression)
+                        _out_frames.append(frame)
 
-            head["compression"] = out_compression
-            head["count"] = len(_out_frames)
-            header["headers"][key] = head
-            header["keys"].append(key)
-            out_frames.extend(_out_frames)
+                head["compression"] = out_compression
+                head["count"] = len(_out_frames)
+                header["headers"][key] = head
+                header["keys"].append(key)
+                out_frames.extend(_out_frames)
+            elif type(value) is Serialized:
+                pre[key] = (value.header, value.frames)
 
         for key, (head, frames) in pre.items():
             if "lengths" not in head:
@@ -86,11 +83,13 @@ def dumps(msg, serializers=None, on_error="message", context=None):
                     frame = frame.tobytes()
                 out_frames[i] = frame
 
-        return [
+        dump_list = [
             small_header,
             small_payload,
             msgpack.dumps(header, use_bin_type=True),
-        ] + out_frames
+        ]
+        dump_list.extend(out_frames)
+        return dump_list
     except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise

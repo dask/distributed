@@ -176,18 +176,14 @@ class LocalCluster(SpecCluster):
         if n_workers and "memory_limit" not in worker_kwargs:
             worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
 
-        worker_kwargs.update(
-            {
-                "nthreads": threads_per_worker,
-                "services": worker_services,
-                "dashboard_address": worker_dashboard_address,
-                "dashboard": worker_dashboard_address is not None,
-                "interface": interface,
-                "protocol": protocol,
-                "security": security,
-                "silence_logs": silence_logs,
-            }
-        )
+        worker_kwargs["nthreads"] = threads_per_worker
+        worker_kwargs["services"] = worker_services
+        worker_kwargs["dashboard_address"] = worker_dashboard_address
+        worker_kwargs["dashboard"] = worker_dashboard_address is not None
+        worker_kwargs["interface"] = interface
+        worker_kwargs["protocol"] = protocol
+        worker_kwargs["security"] = security
+        worker_kwargs["silence_logs"] = silence_logs
 
         scheduler = {
             "cls": Scheduler,

@@ -517,7 +517,8 @@ class SpecCluster(Cluster):
         out = set()
         for name, spec in self.worker_spec.items():
             if "group" in spec:
-                out.update({str(name) + suffix for suffix in spec["group"]})
+                for suffix in spec["group"]:
+                    out.add(str(name) + suffix)
             else:
                 out.add(name)
         return out
