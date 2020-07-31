@@ -46,6 +46,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         out_frames = []
 
         for key, (head, frames) in data.items():
+            head["writeable"] = tuple(not f.readonly for f in map(memoryview, frames))
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
 
@@ -71,6 +72,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             out_frames.extend(_out_frames)
 
         for key, (head, frames) in pre.items():
+            head["writeable"] = tuple(not f.readonly for f in map(memoryview, frames))
             if "lengths" not in head:
                 head["lengths"] = tuple(map(nbytes, frames))
             head["count"] = len(frames)

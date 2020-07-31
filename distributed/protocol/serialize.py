@@ -473,6 +473,7 @@ def nested_deserialize(x):
 
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize(x, **kwargs)
+    header["writeable"] = tuple(not f.readonly for f in map(memoryview, frames))
     if "lengths" not in header:
         header["lengths"] = tuple(map(nbytes, frames))
     if frames:
