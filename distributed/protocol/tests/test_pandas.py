@@ -12,6 +12,7 @@ from distributed.protocol import (
     loads,
     to_serialize,
 )
+from distributed.utils import ensure_bytes
 
 
 dfs = [
@@ -82,6 +83,9 @@ def test_dumps_serialize_pandas(df):
 def test_dumps_pandas_writable():
     a1 = np.arange(1000)
     s1 = pd.Series(a1)
-    (s2,) = loads(dumps([to_serialize(s1)]))
+    fs = dumps([to_serialize(s1)])
+    # Make all frames read-only
+    fs = list(map(ensure_bytes, fs))
+    (s2,) = loads(fs)
     assert (s1 == s2).all()
     s2[...] = 0
