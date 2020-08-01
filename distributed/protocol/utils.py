@@ -58,7 +58,7 @@ def merge_frames(header, frames):
 
     if all(len(f) == l for f, l in zip(frames, lengths)):
         return [
-            bytearray(f) if w and memoryview(f).readonly else f
+            (bytearray(f) if w else bytes(f)) if w == memoryview(f).readonly else f
             for w, f in zip(header["writeable"], frames)
         ]
 
