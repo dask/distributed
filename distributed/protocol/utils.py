@@ -77,7 +77,12 @@ def merge_frames(header, frames):
                     frames.append(frame[l:])
                     l = 0
             if len(L) == 1:  # no work necessary
-                out.append(L[0])
+                frame = L[0]
+                if w == memoryview(frame).readonly:
+                    frame = bytearray(frame)
+                else:
+                    frame = bytes(frame)
+                out.append(frame)
             elif w:
                 out.append(bytearray().join(L))
             else:
