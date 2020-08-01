@@ -87,9 +87,8 @@ def merge_frames(header, frames):
             out.append(bytearray().join(L))
         else:
             out.append(bytes().join(L))
-    frames = out
 
-    return frames
+    return out
 
 
 def pack_frames_prelude(frames):
