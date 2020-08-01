@@ -82,7 +82,7 @@ def merge_frames(header, frames):
                 frames.append(frame[l:])
                 l = 0
         if len(L) == 1 and w != memoryview(L[0]).readonly:  # no work necessary
-            out.append(L[0])
+            out.extend(L)
         elif w:
             out.append(bytearray().join(L))
         else:
