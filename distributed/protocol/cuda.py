@@ -19,7 +19,6 @@ def cuda_dumps(x):
     header["type-serialized"] = pickle.dumps(type(x))
     header["serializer"] = "cuda"
     header["compression"] = (False,) * len(frames)  # no compression for gpu data
-    header["writeable"] = (False,) * len(frames)  # no need to enforce writeable frames
     return header, frames
 
 
