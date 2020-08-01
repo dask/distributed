@@ -9,10 +9,14 @@ from distributed.utils import ensure_bytes
     [
         ([3], [False], [b"123"]),
         ([3], [True], [b"123"]),
+        ([3], [None], [b"123"]),
+        ([3], [False], [bytearray(b"123")]),
+        ([3], [True], [bytearray(b"123")]),
+        ([3], [None], [bytearray(b"123")]),
         ([3, 3], [False, False], [b"123", b"456"]),
-        ([2, 3, 2], [False, True, False], [b"12345", b"67"]),
+        ([2, 3, 2], [False, True, None], [b"12345", b"67"]),
         ([5, 2], [False, True], [b"123", b"45", b"67"]),
-        ([3, 4], [False, False], [b"12", b"34", b"567"]),
+        ([3, 4], [None, False], [b"12", b"34", b"567"]),
     ],
 )
 def test_merge_frames(lengths, writeable, frames):
@@ -28,7 +32,8 @@ def test_merge_frames(lengths, writeable, frames):
         expected.append(data[:i])
         data = data[i:]
 
-    assert list(not memoryview(f).readonly for f in result) == header["writeable"]
+    is_writeable = list(not memoryview(f).readonly for f in result)
+    assert (r == e for r, e in zip(is_writeable, header["writeable"]) if e is not None)
     assert list(map(ensure_bytes, result)) == expected
 
 
