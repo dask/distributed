@@ -56,43 +56,43 @@ def merge_frames(header, frames):
     assert len(lengths) == len(writeables)
     assert sum(lengths) == sum(map(nbytes, frames))
 
-    if not all(len(f) == l for f, l in zip(frames, lengths)):
-        frames = frames[::-1]
-        lengths = lengths[::-1]
-        writeables = writeables[::-1]
+    if all(len(f) == l for f, l in zip(frames, lengths)):
+        return [
+            bytearray(f) if w and memoryview(f).readonly else f
+            for w, f in zip(header["writeable"], frames)
+        ]
 
-        out = []
-        while lengths:
-            l = lengths.pop()
-            w = writeables.pop()
-            L = []
-            while l:
-                frame = frames.pop()
-                if nbytes(frame) <= l:
-                    L.append(frame)
-                    l -= nbytes(frame)
-                else:
-                    frame = memoryview(frame)
-                    L.append(frame[:l])
-                    frames.append(frame[l:])
-                    l = 0
-            if len(L) == 1:  # no work necessary
-                frame = L[0]
-                if w == memoryview(frame).readonly:
-                    frame = bytearray(frame)
-                else:
-                    frame = bytes(frame)
-                out.append(frame)
-            elif w:
-                out.append(bytearray().join(L))
+    frames = frames[::-1]
+    lengths = lengths[::-1]
+    writeables = writeables[::-1]
+
+    out = []
+    while lengths:
+        l = lengths.pop()
+        w = writeables.pop()
+        L = []
+        while l:
+            frame = frames.pop()
+            if nbytes(frame) <= l:
+                L.append(frame)
+                l -= nbytes(frame)
             else:
-                out.append(bytes().join(L))
-        frames = out
-
-    frames = [
-        bytearray(f) if w and memoryview(f).readonly else f
-        for w, f in zip(header["writeable"], frames)
-    ]
+                frame = memoryview(frame)
+                L.append(frame[:l])
+                frames.append(frame[l:])
+                l = 0
+        if len(L) == 1:  # no work necessary
+            frame = L[0]
+            if w == memoryview(frame).readonly:
+                frame = bytearray(frame)
+            else:
+                frame = bytes(frame)
+            out.append(frame)
+        elif w:
+            out.append(bytearray().join(L))
+        else:
+            out.append(bytes().join(L))
+    frames = out
 
     return frames
 
