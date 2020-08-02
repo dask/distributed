@@ -15,6 +15,7 @@ from distributed.utils import ensure_bytes
         ([3], [None], [bytearray(b"123")]),
         ([3, 3], [False, False], [b"123", b"456"]),
         ([2, 3, 2], [False, True, None], [b"12345", b"67"]),
+        ([2, 3, 2], [False, True, None], [bytearray(b"12345"), bytearray(b"67")]),
         ([5, 2], [False, True], [b"123", b"45", b"67"]),
         ([3, 4], [None, False], [b"12", b"34", b"567"]),
     ],
