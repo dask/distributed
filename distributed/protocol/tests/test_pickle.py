@@ -25,6 +25,13 @@ def test_pickle_data():
         assert deserialize(*serialize(d, serializers=("pickle",))) == d
 
 
+def test_pickle_protocol():
+    data = {"int": 1, "float": 2, "unicode": "abc", "bytes": b"def", "set": set()}
+    for p in range(HIGHEST_PROTOCOL):
+        assert loads(dumps(data, p)) == data
+        assert deserialize(*serialize(data, serializers=("pickle",))) == data
+
+
 def test_pickle_out_of_band():
     class MemoryviewHolder:
         def __init__(self, mv):
