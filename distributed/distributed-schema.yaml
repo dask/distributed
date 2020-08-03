@@ -759,6 +759,18 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
+  pickle:
+    type: object
+    description: |
+      Configuration for pickle serialization
+    properties:
+      protocol:
+        type:
+        - integer
+        - "null"
+        description:
+          The protocol version to use with pickle
+
   rmm:
     type: object
     description: |
