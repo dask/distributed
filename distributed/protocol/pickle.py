@@ -2,6 +2,7 @@ import logging
 import sys
 
 import cloudpickle
+import dask
 
 if sys.version_info < (3, 8):
     try:
@@ -40,7 +41,7 @@ def dumps(x, protocol=None, *, buffer_callback=None):
     2.  If it is short then check if it contains __main__
     3.  If it is long, then first check type, then check __main__
     """
-    protocol = protocol or HIGHEST_PROTOCOL
+    protocol = protocol or dask.config.get("pickle.protocol") or HIGHEST_PROTOCOL
     buffers = []
     dump_kwargs = {"protocol": protocol}
     if protocol >= 5 and buffer_callback is not None:
