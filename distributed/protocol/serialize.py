@@ -582,12 +582,18 @@ def _serialize_bytearray(obj):
 
 @dask_deserialize.register(bytes)
 def _deserialize_bytes(header, frames):
-    return bytes().join(frames)
+    if len(frames) == 1 and isinstance(frames[0], bytes):
+        return frames[0]
+    else:
+        return bytes().join(frames)
 
 
 @dask_deserialize.register(bytearray)
 def _deserialize_bytearray(header, frames):
-    return bytearray().join(frames)
+    if len(frames) == 1 and isinstance(frames[0], bytearray):
+        return frames[0]
+    else:
+        return bytearray().join(frames)
 
 
 @dask_serialize.register(memoryview)
