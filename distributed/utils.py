@@ -1107,6 +1107,14 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
+def is_writeable(frame):
+    """ Check whether frame is writeable """
+    try:
+        return not memoryview(frame).readonly
+    except TypeError:
+        return None
+
+
 @contextmanager
 def time_warn(duration, text):
     start = time()
