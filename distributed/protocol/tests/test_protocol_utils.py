@@ -1,7 +1,7 @@
 import pytest
 
 from distributed.protocol.utils import merge_frames, pack_frames, unpack_frames
-from distributed.utils import ensure_bytes
+from distributed.utils import ensure_bytes, is_writeable
 
 
 @pytest.mark.parametrize(
@@ -33,8 +33,8 @@ def test_merge_frames(lengths, writeable, frames):
         expected.append(data[:i])
         data = data[i:]
 
-    is_writeable = list(not memoryview(f).readonly for f in result)
-    assert (r == e for r, e in zip(is_writeable, header["writeable"]) if e is not None)
+    writeables = list(map(is_writeable, result))
+    assert (r == e for r, e in zip(writeables, header["writeable"]) if e is not None)
     assert list(map(ensure_bytes, result)) == expected
 
 

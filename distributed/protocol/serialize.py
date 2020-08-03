@@ -9,7 +9,7 @@ from tlz import valmap, get_in
 import msgpack
 
 from . import pickle
-from ..utils import has_keyword, nbytes, typename, ensure_bytes
+from ..utils import has_keyword, nbytes, typename, ensure_bytes, is_writeable
 from .compression import maybe_compress, decompress
 from .utils import (
     unpack_frames,
@@ -474,7 +474,7 @@ def nested_deserialize(x):
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize(x, **kwargs)
     if "writeable" not in header:
-        header["writeable"] = tuple(not f.readonly for f in map(memoryview, frames))
+        header["writeable"] = tuple(map(is_writeable, frames))
     if "lengths" not in header:
         header["lengths"] = tuple(map(nbytes, frames))
     if frames:
