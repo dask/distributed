@@ -71,6 +71,12 @@ def test_serialize_bytestrings():
         bb = deserialize(header, frames)
         assert type(bb) == type(b)
         assert bb == b
+        bb = deserialize(header, list(map(memoryview, frames)))
+        assert type(bb) == type(b)
+        assert bb == b
+        bb = deserialize(header, [b"", *frames])
+        assert type(bb) == type(b)
+        assert bb == b
 
 
 def test_Serialize():
