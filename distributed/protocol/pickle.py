@@ -33,16 +33,17 @@ def _always_use_pickle_for(x):
         return False
 
 
-def dumps(x, *, buffer_callback=None):
+def dumps(x, protocol=None, *, buffer_callback=None):
     """ Manage between cloudpickle and pickle
 
     1.  Try pickle
     2.  If it is short then check if it contains __main__
     3.  If it is long, then first check type, then check __main__
     """
+    protocol = protocol or HIGHEST_PROTOCOL
     buffers = []
-    dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
-    if HIGHEST_PROTOCOL >= 5 and buffer_callback is not None:
+    dump_kwargs = {"protocol": protocol}
+    if protocol >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
         buffers.clear()
