@@ -32,7 +32,7 @@ conda config --set always_yes yes --set quiet yes --set changeps1 no
 conda update conda
 
 # Create conda environment
-conda create -n dask-distributed -c conda-forge -c defaults \
+conda create -n dask-distributed -c pytorch -c conda-forge -c defaults \
     asyncssh \
     bokeh \
     click \
@@ -55,6 +55,8 @@ conda create -n dask-distributed -c conda-forge -c defaults \
     pytest-repeat \
     pytest-timeout \
     python=$PYTHON \
+    pytorch \
+    torchvision \
     requests \
     scikit-learn \
     scipy \
