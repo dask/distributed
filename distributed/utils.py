@@ -1555,9 +1555,6 @@ class LRU(UserDict):
             self.data.popitem(last=False)
         super().__setitem__(key, value)
 
-    def clear(self):
-        self.data.clear()
-
 
 def clean_dashboard_address(addr, default_listen_ip=""):
     """

@@ -625,10 +625,6 @@ def test_lru():
     assert len(l) == 3
     assert list(l.keys()) == ["c", "a", "d"]
 
-    # clear
-    l.clear()
-    assert len(l) == 0
-    assert list(l.keys()) == []
 
 @pytest.mark.asyncio
 async def test_offload():
