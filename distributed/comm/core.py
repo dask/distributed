@@ -4,6 +4,7 @@ from contextlib import suppress
 import inspect
 import logging
 import random
+import sys
 import weakref
 
 import dask
@@ -12,6 +13,8 @@ from ..metrics import time
 from ..utils import parse_timedelta, TimeoutError
 from . import registry
 from .addressing import parse_address
+from ..protocol.compression import default_compression
+from ..protocol import pickle
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,9 @@ class Comm(ABC):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
+        self.local_info = {}
+        self.remote_info = {}
+        self.handshake_options = {}
 
     # XXX add set_close_callback()?
 
@@ -118,6 +124,27 @@ class Comm(ABC):
         """
         return {}
 
+    @staticmethod
+    def handshake_info():
+        return {
+            "compression": default_compression,
+            "python": tuple(sys.version_info)[:3],
+            "pickle-protocol": pickle.HIGHEST_PROTOCOL,
+        }
+
+    @staticmethod
+    def handshake_configuration(local, remote):
+        out = {
+            "pickle-protocol": min(local["pickle-protocol"], remote["pickle-protocol"])
+        }
+
+        if local["compression"] == remote["compression"]:
+            out["compression"] = local["compression"]
+        else:
+            out["compression"] = None
+
+        return out
+
     def __repr__(self):
         clsname = self.__class__.__name__
         if self.closed():
@@ -174,6 +201,20 @@ class Listener(ABC):
             return self
 
         return _().__await__()
+
+    async def on_connection(self, comm: Comm):
+        write = comm.write(comm.handshake_info())
+        handshake = comm.read()
+        write, handshake = await asyncio.gather(write, handshake)
+
+        comm.remote_info = handshake
+        comm.remote_info["address"] = comm._peer_addr
+        comm.local_info = comm.handshake_info()
+        comm.local_info["address"] = comm._local_addr
+
+        comm.handshake_options = comm.handshake_configuration(
+            comm.local_info, comm.remote_info
+        )
 
 
 class Connector(ABC):
@@ -249,6 +290,19 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
                 _raise(error)
         else:
             break
+
+    write = comm.write(comm.handshake_info())
+    handshake = comm.read()
+    write, handshake = await asyncio.gather(write, handshake)
+
+    comm.remote_info = handshake
+    comm.remote_info["address"] = comm._peer_addr
+    comm.local_info = comm.handshake_info()
+    comm.local_info["address"] = comm._local_addr
+
+    comm.handshake_options = comm.handshake_configuration(
+        comm.local_info, comm.remote_info
+    )
 
     return comm
 

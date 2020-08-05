@@ -374,6 +374,7 @@ class UCXListener(Listener):
                 deserialize=self.deserialize,
             )
             ucx.allow_offload = self.allow_offload
+            await self.on_connection(ucx)
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
