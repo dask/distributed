@@ -28,6 +28,7 @@ from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedErr
 from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
 from ..protocol.compression import default_compression
 from ..protocol.utils import msgpack_opts
+from ..protocol import pickle
 
 
 logger = logging.getLogger(__name__)
@@ -590,15 +591,12 @@ def handshake_info():
     return {
         "compression": default_compression,
         "python": tuple(sys.version_info)[:3],
+        "pickle-protocol": pickle.HIGHEST_PROTOCOL,
     }
 
 
 def handshake_configuration(local, remote):
-    out = {}
-    if local["python"] >= (3, 8) and remote["python"] >= (3, 8):
-        out["pickle_protocol"] = 5
-    else:
-        out["pickle_protocol"] = 4
+    out = {"pickle-protocol": min(local["pickle-protocol"], remote["pickle-protocol"])}
 
     if local["compression"] == remote["compression"]:
         out["compression"] = local["compression"]
