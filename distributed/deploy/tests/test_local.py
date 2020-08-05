@@ -1050,3 +1050,32 @@ async def test_async_with():
         assert w
 
     assert not w
+
+
+@pytest.mark.asyncio
+async def test_get_client_async(cleanup):
+    async with LocalCluster(
+        n_workers=1,
+        processes=False,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as c:
+        async with c.get_client() as client:
+            result = await client.submit(lambda x: x + 1, 10)
+            assert result == 11
+
+
+def test_get_client_sync(loop):
+    with LocalCluster(
+        1,
+        processes=False,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        loop=loop,
+    ) as c:
+        with c.get_client() as client:
+            future = client.submit(lambda x: x + 1, 10)
+            assert future.result() == 11

@@ -11,6 +11,7 @@ from dask.utils import format_bytes
 from .adaptive import Adaptive
 
 from ..core import Status
+from ..client import Client
 from ..utils import (
     log_errors,
     sync,
@@ -412,3 +413,21 @@ class Cluster:
     @property
     def observed(self):
         return {d["name"] for d in self.scheduler_info["workers"].values()}
+
+    def get_client(self, set_as_default=True):
+        """Get a ``Client`` for this cluster.
+
+        Returns
+        -------
+        client : dask.distributed.Client
+
+        Examples
+        --------
+        >>> client = cluster.get_client()
+        """
+        return Client(
+            self,
+            set_as_default=set_as_default,
+            asynchronous=self.asynchronous,
+            loop=self.loop,
+        )
