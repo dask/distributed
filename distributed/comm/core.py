@@ -266,12 +266,28 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
     while True:
         try:
             while deadline - time() > 0:
-                future = connector.connect(
-                    loc, deserialize=deserialize, **connection_args
-                )
+
+                async def _():
+                    comm = await connector.connect(
+                        loc, deserialize=deserialize, **connection_args
+                    )
+                    write = comm.write(comm.handshake_info())
+                    handshake = comm.read()
+                    write, handshake = await asyncio.gather(write, handshake)
+
+                    comm.remote_info = handshake
+                    comm.remote_info["address"] = comm._peer_addr
+                    comm.local_info = comm.handshake_info()
+                    comm.local_info["address"] = comm._local_addr
+
+                    comm.handshake_options = comm.handshake_configuration(
+                        comm.local_info, comm.remote_info
+                    )
+                    return comm
+
                 with suppress(TimeoutError):
                     comm = await asyncio.wait_for(
-                        future, timeout=min(deadline - time(), retry_timeout_backoff)
+                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
                     )
                     break
             if not comm:
@@ -290,19 +306,6 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
                 _raise(error)
         else:
             break
-
-    write = comm.write(comm.handshake_info())
-    handshake = comm.read()
-    write, handshake = await asyncio.gather(write, handshake)
-
-    comm.remote_info = handshake
-    comm.remote_info["address"] = comm._peer_addr
-    comm.local_info = comm.handshake_info()
-    comm.local_info["address"] = comm._local_addr
-
-    comm.handshake_options = comm.handshake_configuration(
-        comm.local_info, comm.remote_info
-    )
 
     return comm
 
