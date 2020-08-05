@@ -54,11 +54,15 @@ def dask_loads(header, frames):
     return loads(header, frames)
 
 
-def pickle_dumps(x):
+def pickle_dumps(x, context=None):
     header = {"serializer": "pickle"}
     frames = [None]
     buffer_callback = lambda f: frames.append(memoryview(f))
-    frames[0] = pickle.dumps(x, buffer_callback=buffer_callback)
+    frames[0] = pickle.dumps(
+        x,
+        buffer_callback=buffer_callback,
+        protocol=context.get("pickle-protocol", None) if context else None,
+    )
     return header, frames
 
 

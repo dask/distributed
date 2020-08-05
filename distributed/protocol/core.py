@@ -53,6 +53,11 @@ def dumps(msg, serializers=None, on_error="message", context=None):
 
         out_frames = []
 
+        if context and "compression" in context:
+            compress_opts = {"compression": context["compression"]}
+        else:
+            compress_opts = {}
+
         for key, (head, frames) in data.items():
             if "writeable" not in head:
                 head["writeable"] = tuple(map(is_writeable, frames))
@@ -67,7 +72,9 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             ):
                 if compression is None:  # default behavior
                     _frames = frame_split_size(frame)
-                    _compression, _frames = zip(*map(maybe_compress, _frames))
+                    _compression, _frames = zip(
+                        *[maybe_compress(frame, **compress_opts) for frame in _frames]
+                    )
                     out_compression.extend(_compression)
                     _out_frames.extend(_frames)
                 else:  # already specified, so pass

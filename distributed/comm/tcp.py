@@ -12,6 +12,7 @@ except ImportError:
     ssl = None
 
 import dask
+import msgpack
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
@@ -25,6 +26,8 @@ from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
 from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
+from ..protocol.compression import default_compression
+from ..protocol.utils import msgpack_opts
 
 
 logger = logging.getLogger(__name__)
@@ -222,7 +225,11 @@ class TCP(Comm):
             allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
-            context={"sender": self._local_addr, "recipient": self._peer_addr},
+            context={
+                "sender": self.local_info,
+                "recipient": self.remote_info,
+                **self.handshake_options,
+            },
         )
 
         try:
@@ -355,10 +362,23 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
 
+        write_future = stream.write(msgpack.dumps(handshake_info()) + b"\n")
+        handshake = await stream.read_until(b"\n")
+        handshake = msgpack.loads(handshake.strip(), **msgpack_opts)
         local_address = self.prefix + get_stream_address(stream)
-        return self.comm_class(
+        comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
         )
+
+        comm.remote_info = handshake
+        comm.remote_info["address"] = self.prefix + address
+        comm.local_info = handshake_info()
+        comm.local_info["address"] = local_address
+        comm.handshake_options = handshake_configuration(
+            comm.local_info, comm.remote_info
+        )
+
+        return comm
 
 
 class TCPConnector(BaseTCPConnector):
@@ -444,6 +464,20 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
         comm.allow_offload = self.allow_offload
+        write_future = comm.stream.write(msgpack.dumps(handshake_info()) + b"\n")
+        handshake = await comm.stream.read_until(b"\n")
+        handshake = msgpack.loads(handshake.strip(), **msgpack_opts)
+
+        comm.remote_info = handshake
+        comm.remote_info["address"] = address
+        comm.local_info = handshake_info()
+        comm.local_info["address"] = local_address
+
+        comm.handshake_options = handshake_configuration(
+            comm.local_info, comm.remote_info
+        )
+
+        await write_future
         await self.comm_handler(comm)
 
     def get_host_port(self):
@@ -550,6 +584,28 @@ class TCPBackend(BaseTCPBackend):
 class TLSBackend(BaseTCPBackend):
     _connector_class = TLSConnector
     _listener_class = TLSListener
+
+
+def handshake_info():
+    return {
+        "compression": default_compression,
+        "python": tuple(sys.version_info)[:3],
+    }
+
+
+def handshake_configuration(local, remote):
+    out = {}
+    if local["python"] >= (3, 8) and remote["python"] >= (3, 8):
+        out["pickle_protocol"] = 5
+    else:
+        out["pickle_protocol"] = 4
+
+    if local["compression"] == remote["compression"]:
+        out["compression"] = local["compression"]
+    else:
+        out["compression"] = None
+
+    return out
 
 
 backends["tcp"] = TCPBackend()
