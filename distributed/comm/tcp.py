@@ -352,6 +352,10 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
 
+            write_future = stream.write(msgpack.dumps(handshake_info()) + b"\n")
+            handshake = await stream.read_until(b"\n")
+            await write_future
+
             # Under certain circumstances tornado will have a closed connnection with an error and not raise
             # a StreamClosedError.
             #
@@ -363,9 +367,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
 
-        write_future = stream.write(msgpack.dumps(handshake_info()) + b"\n")
-        handshake = await stream.read_until(b"\n")
         handshake = msgpack.loads(handshake.strip(), **msgpack_opts)
+
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
