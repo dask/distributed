@@ -683,6 +683,7 @@ async def check_comm_closed_implicit(addr, delay=None, listen_args={}, connect_a
     comm = await connect(listener.contact_address, **connect_args)
     with pytest.raises(CommClosedError):
         await comm.write({})
+        await comm.read()
 
     comm = await connect(listener.contact_address, **connect_args)
     with pytest.raises(CommClosedError):
