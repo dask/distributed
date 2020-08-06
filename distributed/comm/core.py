@@ -206,7 +206,9 @@ class Listener(ABC):
         write = comm.write(comm.handshake_info())
         handshake = comm.read()
         try:
-            write, handshake = await asyncio.gather(write, handshake)
+            handshake = await handshake
+            write = await write
+            # write, handshake = await asyncio.gather(write, handshake)
         except Exception:
             await comm.close()
             raise
@@ -278,7 +280,9 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
                     write = comm.write(comm.handshake_info())
                     handshake = comm.read()
                     try:
-                        write, handshake = await asyncio.gather(write, handshake)
+                        write = await write
+                        handshake = await handshake
+                        # write, handshake = await asyncio.gather(write, handshake)
                     except Exception:
                         await comm.close()
                         raise
