@@ -451,7 +451,11 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         comm = self.comm_class(stream, local_address, address, self.deserialize)
         comm.allow_offload = self.allow_offload
 
-        await self.on_connection(comm)
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.debug("Connection closed before handshake completed")
+            return
 
         await self.comm_handler(comm)
 

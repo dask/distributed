@@ -374,7 +374,11 @@ class UCXListener(Listener):
                 deserialize=self.deserialize,
             )
             ucx.allow_offload = self.allow_offload
-            await self.on_connection(ucx)
+            try:
+                await self.on_connection(ucx)
+            except CommClosedError:
+                logger.debug("Connection closed before handshake completed")
+                return
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
