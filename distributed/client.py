@@ -1310,8 +1310,9 @@ class Client:
 
         self.status = "closing"
 
-        for pc in self._periodic_callbacks.values():
-            pc.stop()
+        with suppress(AttributeError):
+            for pc in self._periodic_callbacks.values():
+                pc.stop()
 
         with log_errors():
             _del_global_client(self)
@@ -1405,8 +1406,9 @@ class Client:
             return
         self.status = "closing"
 
-        for pc in self._periodic_callbacks.values():
-            pc.stop()
+        with suppress(AttributeError):
+            for pc in self._periodic_callbacks.values():
+                pc.stop()
 
         if self.asynchronous:
             future = self._close()
