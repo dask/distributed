@@ -1145,7 +1145,6 @@ class Scheduler(ServerNode):
         self.connection_args = self.security.get_connection_args("scheduler")
         self.connection_args["handshake_overrides"] = {  # common denominator
             "pickle-protocol": 4,
-            "compression": None,
         }
 
         self._start_address = addresses_from_user_args(
