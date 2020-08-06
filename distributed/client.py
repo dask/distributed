@@ -634,6 +634,7 @@ class Client:
             deserializers = serializers
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
+        self._periodic_callbacks = dict()
 
         # Communication
         self.scheduler_comm = None
@@ -698,7 +699,6 @@ class Client:
             dask.config.get("distributed.client.scheduler-info-interval", default="ms")
         )
 
-        self._periodic_callbacks = dict()
         self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
             self._update_scheduler_info, scheduler_info_interval * 1000,
         )
