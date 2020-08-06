@@ -202,12 +202,14 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm):
-        write = comm.write(comm.handshake_info())
+    async def on_connection(self, comm: Comm, handshake_overrides={}):
+        local_info = {**comm.handshake_info(), **handshake_overrides}
+        write = comm.write(local_info)
         handshake = comm.read()
         try:
             handshake = await handshake
             write = await write
+            # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(write, handshake)
         except Exception:
             await comm.close()
@@ -215,7 +217,7 @@ class Listener(ABC):
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
-        comm.local_info = comm.handshake_info()
+        comm.local_info = local_info
         comm.local_info["address"] = comm._local_addr
 
         comm.handshake_options = comm.handshake_configuration(
@@ -234,7 +236,9 @@ class Connector(ABC):
         """
 
 
-async def connect(addr, timeout=None, deserialize=True, **connection_args):
+async def connect(
+    addr, timeout=None, deserialize=True, handshake_overrides={}, **connection_args
+):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -277,11 +281,13 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
                     comm = await connector.connect(
                         loc, deserialize=deserialize, **connection_args
                     )
-                    write = comm.write(comm.handshake_info())
+                    local_info = {**comm.handshake_info(), **handshake_overrides}
+                    write = comm.write(local_info)
                     handshake = comm.read()
                     try:
                         write = await write
                         handshake = await handshake
+                        # This would be better, but connections leak if worker is closed quickly
                         # write, handshake = await asyncio.gather(write, handshake)
                     except Exception:
                         await comm.close()
@@ -289,7 +295,7 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
 
                     comm.remote_info = handshake
                     comm.remote_info["address"] = comm._peer_addr
-                    comm.local_info = comm.handshake_info()
+                    comm.local_info = local_info
                     comm.local_info["address"] = comm._local_addr
 
                     comm.handshake_options = comm.handshake_configuration(

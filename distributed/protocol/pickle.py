@@ -42,7 +42,7 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     """
     buffers = []
     dump_kwargs = {"protocol": protocol or HIGHEST_PROTOCOL}
-    if HIGHEST_PROTOCOL >= 5 and buffer_callback is not None:
+    if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
         buffers.clear()
@@ -73,6 +73,6 @@ def loads(x, *, buffers=()):
             return pickle.loads(x, buffers=buffers)
         else:
             return pickle.loads(x)
-    except Exception:
+    except Exception as e:
         logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
         raise

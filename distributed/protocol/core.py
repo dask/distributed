@@ -182,9 +182,9 @@ def dumps_msgpack(msg):
     header = {}
     payload = msgpack.dumps(msg, default=msgpack_encode_default, use_bin_type=True)
 
-    fmt, payload = maybe_compress(payload)
-    if fmt:
-        header["compression"] = fmt
+    # fmt, payload = maybe_compress(payload)
+    # if fmt:
+    #     header["compression"] = fmt
 
     if header:
         header_bytes = msgpack.dumps(header, use_bin_type=True)
