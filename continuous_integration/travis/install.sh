@@ -32,7 +32,7 @@ conda config --set always_yes yes --set quiet yes --set changeps1 no
 conda update conda
 
 # Create conda environment
-conda create -n dask-distributed -c pytorch -c conda-forge -c defaults \
+conda create -n dask-distributed -c conda-forge -c defaults \
     asyncssh \
     bokeh \
     click \
@@ -55,8 +55,6 @@ conda create -n dask-distributed -c pytorch -c conda-forge -c defaults \
     pytest-repeat \
     pytest-timeout \
     python=$PYTHON \
-    pytorch \
-    torchvision \
     requests \
     scikit-learn \
     scipy \
@@ -71,6 +69,11 @@ source activate dask-distributed
 
 if [[ $PYTHON == 3.6 ]]; then
   conda install -c conda-forge -c defaults contextvars
+fi
+
+if [[ $PYTHON == 3.8 ]]; then
+    # Install pytorch to run related tests
+    conda install -c pytorch -c conda-forge -c defaults pytorch torchvision
 fi
 
 if [[ $PYTHON != 3.8 ]]; then
