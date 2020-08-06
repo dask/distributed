@@ -205,7 +205,11 @@ class Listener(ABC):
     async def on_connection(self, comm: Comm):
         write = comm.write(comm.handshake_info())
         handshake = comm.read()
-        write, handshake = await asyncio.gather(write, handshake)
+        try:
+            write, handshake = await asyncio.gather(write, handshake)
+        except Exception:
+            await comm.close()
+            raise
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
@@ -273,7 +277,11 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
                     )
                     write = comm.write(comm.handshake_info())
                     handshake = comm.read()
-                    write, handshake = await asyncio.gather(write, handshake)
+                    try:
+                        write, handshake = await asyncio.gather(write, handshake)
+                    except Exception:
+                        await comm.close()
+                        raise
 
                     comm.remote_info = handshake
                     comm.remote_info["address"] = comm._peer_addr
