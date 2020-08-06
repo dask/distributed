@@ -13,7 +13,7 @@ from ..metrics import time
 from ..utils import parse_timedelta, TimeoutError
 from . import registry
 from .addressing import parse_address
-from ..protocol.compression import default_compression
+from ..protocol.compression import get_default_compression
 from ..protocol import pickle
 
 
@@ -127,7 +127,7 @@ class Comm(ABC):
     @staticmethod
     def handshake_info():
         return {
-            "compression": default_compression,
+            "compression": get_default_compression(),
             "python": tuple(sys.version_info)[:3],
             "pickle-protocol": pickle.HIGHEST_PROTOCOL,
         }
