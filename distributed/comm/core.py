@@ -204,11 +204,9 @@ class Listener(ABC):
 
     async def on_connection(self, comm: Comm, handshake_overrides={}):
         local_info = {**comm.handshake_info(), **handshake_overrides}
-        write = comm.write(local_info)
-        handshake = comm.read()
         try:
-            handshake = await handshake
-            write = await write
+            write = await asyncio.wait_for(comm.write(local_info), 1)
+            handshake = await asyncio.wait_for(comm.read(), 1)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(write, handshake)
         except Exception:
@@ -282,11 +280,9 @@ async def connect(
                         loc, deserialize=deserialize, **connection_args
                     )
                     local_info = {**comm.handshake_info(), **handshake_overrides}
-                    write = comm.write(local_info)
-                    handshake = comm.read()
                     try:
-                        write = await write
-                        handshake = await handshake
+                        write = await asyncio.wait_for(comm.write(local_info), 1)
+                        handshake = await asyncio.wait_for(comm.read(), 1)
                         # This would be better, but connections leak if worker is closed quickly
                         # write, handshake = await asyncio.gather(write, handshake)
                     except Exception:
