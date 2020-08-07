@@ -454,8 +454,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         try:
             await self.on_connection(comm)
         except CommClosedError:
-            logger.debug("Connection closed before handshake completed")
-            return
+            logger.info("Connection closed before handshake completed")
 
         await self.comm_handler(comm)
 
