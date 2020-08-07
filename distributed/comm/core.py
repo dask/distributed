@@ -202,8 +202,8 @@ class Listener(ABC):
 
         return _().__await__()
 
-    async def on_connection(self, comm: Comm, handshake_overrides={}):
-        local_info = {**comm.handshake_info(), **handshake_overrides}
+    async def on_connection(self, comm: Comm, handshake_overrides=None):
+        local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
         try:
             write = await asyncio.wait_for(comm.write(local_info), 1)
             handshake = await asyncio.wait_for(comm.read(), 1)
@@ -236,7 +236,7 @@ class Connector(ABC):
 
 
 async def connect(
-    addr, timeout=None, deserialize=True, handshake_overrides={}, **connection_args
+    addr, timeout=None, deserialize=True, handshake_overrides=None, **connection_args
 ):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
@@ -280,7 +280,10 @@ async def connect(
                     comm = await connector.connect(
                         loc, deserialize=deserialize, **connection_args
                     )
-                    local_info = {**comm.handshake_info(), **handshake_overrides}
+                    local_info = {
+                        **comm.handshake_info(),
+                        **(handshake_overrides or {}),
+                    }
                     try:
                         handshake = await asyncio.wait_for(comm.read(), 1)
                         write = await asyncio.wait_for(comm.write(local_info), 1)
