@@ -818,6 +818,10 @@ class TaskPrefix:
 
        An exponentially weighted moving average duration of all tasks with this prefix
 
+    .. attribute:: duration_variance: float
+
+       The rolling variance of all tasks with this prefix
+
     .. attribute:: suspicious: int
 
        Numbers of times a task was marked as suspicious with this prefix
@@ -834,6 +838,11 @@ class TaskPrefix:
 
         # store timings for each prefix-action
         self.all_durations = defaultdict(float)
+
+        # state for rolling variance
+        self._count = 0
+        self._var_m = None
+        self._var_s = None
 
         if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
             self.duration_average = parse_timedelta(
@@ -860,6 +869,26 @@ class TaskPrefix:
     @property
     def active_states(self):
         return merge_with(sum, [g.states for g in self.active])
+
+    @property
+    def duration_variance(self):
+        if self._count > 1:
+            return self._var_s / (self._count - 1)
+        else:
+            return 0.0
+
+    def _update_duration_variance(self, x):
+        # Welford rolling variance algorithm
+        # https://www.johndcook.com/blog/standard_deviation/ for background.
+        self._count += 1
+        if self._count == 1:
+            m = x
+            s = 0.0
+        else:
+            m = self._var_m + (x - self._var_m) / self._count
+            s = self._var_s + (x - self._var_m) * (x - m)
+        self._var_m = m
+        self._var_s = s
 
     def __repr__(self):
         return (
@@ -4208,6 +4237,8 @@ class Scheduler(ServerNode):
 
                 ts.prefix.duration_average = avg_duration
                 ts.group.duration += new_duration
+
+                ts.prefix._update_duration_variance(new_duration)
 
                 for tts in self.unknown_durations.pop(ts.prefix.name, ()):
                     if tts.processing_on:

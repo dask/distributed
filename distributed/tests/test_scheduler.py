@@ -17,7 +17,7 @@ import pytest
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.comm import Comm
 from distributed.core import connect, rpc, ConnectionPool, Status
-from distributed.scheduler import Scheduler
+from distributed.scheduler import Scheduler, TaskPrefix
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -1794,6 +1794,7 @@ async def test_get_task_duration(c, s, a, b):
         future = c.submit(inc, 1)
         await future
         assert 10 < s.task_prefixes["inc"].duration_average < 100
+        assert s.task_prefixes["inc"].duration_variance < 0.1
 
         ts_pref1 = s.new_task("inc-abcdefab", None, "released")
         assert 10 < s.get_task_duration(ts_pref1) < 100
@@ -1808,6 +1809,16 @@ async def test_get_task_duration(c, s, a, b):
         assert s.get_task_duration(ts) == 0.5  # default
         assert len(s.unknown_durations) == 1
         assert len(s.unknown_durations["slowinc"]) == 1
+
+
+def test_duration_variance_algorithm():
+    ts = TaskPrefix("x")
+    assert ts.duration_variance == 0.0
+
+    for v in [17, 19, 24]:
+        ts._update_duration_variance(v)
+
+    assert ts.duration_variance == 13.0
 
 
 @pytest.mark.asyncio
