@@ -281,8 +281,8 @@ async def connect(
                     )
                     local_info = {**comm.handshake_info(), **handshake_overrides}
                     try:
-                        write = await asyncio.wait_for(comm.write(local_info), 1)
                         handshake = await asyncio.wait_for(comm.read(), 1)
+                        write = await asyncio.wait_for(comm.write(local_info), 1)
                         # This would be better, but connections leak if worker is closed quickly
                         # write, handshake = await asyncio.gather(write, handshake)
                     except Exception:
