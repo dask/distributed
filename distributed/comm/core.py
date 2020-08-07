@@ -212,7 +212,7 @@ class Listener(ABC):
         except Exception:
             with suppress(Exception):
                 await comm.close()
-            raise
+            raise CommClosedError()
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
@@ -289,7 +289,7 @@ async def connect(
                     except Exception:
                         with suppress(Exception):
                             await comm.close()
-                        raise
+                        raise CommClosedError()
 
                     comm.remote_info = handshake
                     comm.remote_info["address"] = comm._peer_addr
