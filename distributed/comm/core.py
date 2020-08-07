@@ -210,7 +210,8 @@ class Listener(ABC):
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(write, handshake)
         except Exception:
-            await comm.close()
+            with suppress(Exception):
+                await comm.close()
             raise
 
         comm.remote_info = handshake
@@ -286,7 +287,8 @@ async def connect(
                         # This would be better, but connections leak if worker is closed quickly
                         # write, handshake = await asyncio.gather(write, handshake)
                     except Exception:
-                        await comm.close()
+                        with suppress(Exception):
+                            await comm.close()
                         raise
 
                     comm.remote_info = handshake
