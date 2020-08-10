@@ -28,7 +28,7 @@ with open(fn) as f:
 
 if VALIDATE_CONFIG:
     fn = os.path.join(os.path.dirname(__file__), "distributed-schema.yaml")
-    ensure_file(source=fn)
+    dask.config.ensure_file(source=fn)
 
     with open(fn) as f:
         schema = yaml.safe_load(f)
