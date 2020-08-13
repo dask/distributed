@@ -118,7 +118,9 @@ def convert_stream_closed_error(obj, exc):
                 raise FatalCommClosedError(
                     "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
                 )
-        raise CommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc)) from exc
+        raise CommClosedError(
+            "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
+        ) from exc
     else:
         raise CommClosedError("in %s: %s" % (obj, exc)) from exc
 
