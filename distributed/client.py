@@ -650,16 +650,24 @@ class Client:
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
-        elif hasattr(address, "scheduler_address"):
+        elif isinstance(getattr(address, "scheduler_address", None), str):
             # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
             with suppress(AttributeError):
                 loop = address.loop
             if security is None:
                 security = getattr(self.cluster, "security", None)
+        elif address is not None and not isinstance(address, str):
+            raise TypeError(
+                "Scheduler address must be a string or a Cluster instance, got {}".format(
+                    type(address)
+                )
+            )
 
         if security is None:
             security = Security()
+        elif isinstance(security, dict):
+            security = Security(**security)
         elif security is True:
             security = Security.temporary()
             self._startup_kwargs["security"] = security
@@ -795,10 +803,10 @@ class Client:
 
     @property
     def dashboard_link(self):
-        scheduler, info = self._get_scheduler_info()
         try:
             return self.cluster.dashboard_link
         except AttributeError:
+            scheduler, info = self._get_scheduler_info()
             protocol, rest = scheduler.address.split("://")
 
             port = info["services"]["dashboard"]
@@ -810,6 +818,7 @@ class Client:
             return format_dashboard_link(host, port)
 
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
+        callback_timeout = parse_timedelta(callback_timeout)
         if (
             asynchronous
             or self.asynchronous
@@ -1035,7 +1044,7 @@ class Client:
 
         try:
             await self._ensure_connected(timeout=timeout)
-        except OSError:
+        except (OSError, ImportError):
             await self._close()
             raise
 
@@ -1068,6 +1077,9 @@ class Client:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
                     timeout = deadline - self.loop.time()
+                except ImportError:
+                    await self._close()
+                    break
             else:
                 logger.error(
                     "Failed to reconnect to scheduler after %.2f "
@@ -1118,6 +1130,8 @@ class Client:
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
 
+        if msg[0].get("error"):
+            raise ImportError(msg[0]["error"])
         if msg[0].get("warning"):
             warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
@@ -1296,8 +1310,9 @@ class Client:
 
         self.status = "closing"
 
-        for pc in self._periodic_callbacks.values():
-            pc.stop()
+        with suppress(AttributeError):
+            for pc in self._periodic_callbacks.values():
+                pc.stop()
 
         with log_errors():
             _del_global_client(self)
@@ -1391,8 +1406,9 @@ class Client:
             return
         self.status = "closing"
 
-        for pc in self._periodic_callbacks.values():
-            pc.stop()
+        with suppress(AttributeError):
+            for pc in self._periodic_callbacks.values():
+                pc.stop()
 
         if self.asynchronous:
             future = self._close()
@@ -2347,7 +2363,10 @@ class Client:
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
-            function=dumps(function), args=dumps(args), kwargs=dumps(kwargs), wait=wait
+            function=dumps(function, protocol=4),
+            args=dumps(args, protocol=4),
+            kwargs=dumps(kwargs, protocol=4),
+            wait=wait,
         )
         if response["status"] == "error":
             typ, exc, tb = clean_exception(**response)
@@ -2393,10 +2412,10 @@ class Client:
         responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
-                function=dumps(function),
-                args=dumps(args),
+                function=dumps(function, protocol=4),
+                args=dumps(args, protocol=4),
                 wait=wait,
-                kwargs=dumps(kwargs),
+                kwargs=dumps(kwargs, protocol=4),
             ),
             workers=workers,
             nanny=nanny,
@@ -3078,7 +3097,7 @@ class Client:
         --------
         >>> client.upload_file('mylibrary.egg')  # doctest: +SKIP
         >>> from mylibrary import myfunc  # doctest: +SKIP
-        >>> L = c.map(myfunc, seq)  # doctest: +SKIP
+        >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
         result = self.sync(
             self._upload_file, filename, raise_on_error=self.asynchronous, **kwargs
@@ -3673,8 +3692,10 @@ class Client:
 
         if check:
             msg = version_module.error_message(scheduler, workers, client)
-            if msg:
-                raise ValueError(msg)
+            if msg["warning"]:
+                warnings.warn(msg["warning"])
+            if msg["error"]:
+                raise ValueError(msg["error"])
 
         return result
 
@@ -4066,7 +4087,7 @@ class Client:
 
     async def _register_worker_plugin(self, plugin=None, name=None):
         responses = await self.scheduler.register_worker_plugin(
-            plugin=dumps(plugin), name=name
+            plugin=dumps(plugin, protocol=4), name=name
         )
         for response in responses.values():
             if response["status"] == "error":
@@ -4085,10 +4106,11 @@ class Client:
         on all currently connected workers. It will also be run on any worker
         that connects in the future.
 
-        The plugin may include methods ``setup``, ``teardown``, and
-        ``transition``.  See the ``dask.distributed.WorkerPlugin`` class or the
-        examples below for the interface and docstrings.  It must be
-        serializable with the pickle or cloudpickle modules.
+        The plugin may include methods ``setup``, ``teardown``, ``transition``,
+        ``release_key``, and ``release_dep``.  See the
+        ``dask.distributed.WorkerPlugin`` class or the examples below for the
+        interface and docstrings.  It must be serializable with the pickle or
+        cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  A a plugin with that name has
@@ -4115,6 +4137,10 @@ class Client:
         ...     def teardown(self, worker: dask.distributed.Worker):
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...         pass
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...         pass
+        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)

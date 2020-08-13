@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import pickle
 import operator
 import re
 import sys
@@ -17,7 +16,7 @@ import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.comm import Comm
-from distributed.core import connect, rpc, ConnectionPool
+from distributed.core import connect, rpc, ConnectionPool, Status
 from distributed.scheduler import Scheduler
 from distributed.client import wait
 from distributed.metrics import time
@@ -41,6 +40,14 @@ from distributed.utils_test import (  # noqa: F401
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
+
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 alice = "alice:1234"
@@ -208,7 +215,7 @@ async def test_remove_worker_from_scheduler(s, a, b):
     )
 
     assert a.address in s.stream_comms
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
     s.validate_state()
@@ -217,9 +224,9 @@ async def test_remove_worker_from_scheduler(s, a, b):
 @gen_cluster()
 async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert a.address in s.stream_comms
-    assert s.remove_worker(address=a.name) == "OK"
+    assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
-    assert s.remove_worker(address=a.address) == "already-removed"
+    assert await s.remove_worker(address=a.address) == "already-removed"
     s.validate_state()
 
 
@@ -230,7 +237,7 @@ async def test_clear_events_worker_removal(s, a, b):
     assert b.address in s.events
     assert b.address in s.nthreads
 
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
     # Shortly after removal, the events should still be there
     assert a.address in s.events
     assert a.address not in s.nthreads
@@ -489,7 +496,7 @@ async def test_ready_remove_worker(s, a, b):
 
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
-    s.remove_worker(address=a.address)
+    await s.remove_worker(address=a.address)
 
     assert set(s.workers) == {b.address}
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
@@ -736,7 +743,10 @@ async def test_retire_workers_n(c, s, a, b):
     await s.retire_workers(n=0, close_workers=True)
     assert len(s.workers) == 0
 
-    while not (a.status.startswith("clos") and b.status.startswith("clos")):
+    while not (
+        a.status in (Status.closed, Status.closing, Status.closing_gracefully)
+        and b.status in (Status.closed, Status.closing, Status.closing_gracefully)
+    ):
         await asyncio.sleep(0.01)
 
 
@@ -1117,7 +1127,7 @@ async def test_close_nanny(c, s, a, b):
         assert not a.is_alive()
         assert a.pid is None
 
-    while a.status != "closed":
+    while a.status != Status.closed:
         await asyncio.sleep(0.05)
         assert time() < start + 10
 
@@ -1126,7 +1136,7 @@ async def test_close_nanny(c, s, a, b):
 async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers
-    while a.status != "closed" and b.status != "closed":
+    while a.status != Status.closed and b.status != Status.closed:
         await asyncio.sleep(0.01)
 
 
@@ -1138,7 +1148,7 @@ async def test_retire_nannies_close(c, s, a, b):
 
     start = time()
 
-    while any(n.status != "closed" for n in nannies):
+    while any(n.status != Status.closed for n in nannies):
         await asyncio.sleep(0.05)
         assert time() < start + 10
 
@@ -1202,8 +1212,8 @@ async def test_service_hosts():
     port = 0
     for url, expected in [
         ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", "127.0.0.1"),
-        ("tcp://127.0.0.1:38275", "127.0.0.1"),
+        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
+        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
     ]:
         async with Scheduler(host=url) as s:
             sock = first(s.http_server._sockets.values())
@@ -1533,7 +1543,7 @@ async def test_closing_scheduler_closes_workers(s, a, b):
     await s.close()
 
     start = time()
-    while a.status != "closed" or b.status != "closed":
+    while a.status != Status.closed or b.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 2
 
@@ -1603,16 +1613,16 @@ async def test_idle_timeout(c, s, a, b):
     await future
     assert s.idle_since is None or s.idle_since > beginning
 
-    assert s.status != "closed"
+    assert s.status != Status.closed
 
     with captured_logger("distributed.scheduler") as logs:
         start = time()
-        while s.status != "closed":
+        while s.status != Status.closed:
             await asyncio.sleep(0.01)
             assert time() < start + 3
 
         start = time()
-        while not (a.status == "closed" and b.status == "closed"):
+        while not (a.status == Status.closed and b.status == Status.closed):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
@@ -1625,7 +1635,7 @@ async def test_idle_timeout(c, s, a, b):
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
-    x = c.submit(operator.mul, b"0", 1000000, workers=a.address)
+    x = c.submit(operator.mul, b"0", 1000001, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
     await y
     await b.heartbeat()
@@ -1676,8 +1686,8 @@ async def test_result_type(c, s, a, b):
 @gen_cluster()
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)
-    assert a.status == "closed"
-    assert b.status == "closed"
+    assert a.status == Status.closed
+    assert b.status == Status.closed
 
 
 @pytest.mark.skipif(
@@ -1731,9 +1741,9 @@ async def test_adaptive_target(c, s, a, b):
 @pytest.mark.asyncio
 async def test_async_context_manager(cleanup):
     async with Scheduler(port=0) as s:
-        assert s.status == "running"
+        assert s.status == Status.running
         async with Worker(s.address) as w:
-            assert w.status == "running"
+            assert w.status == Status.running
             assert s.workers
         assert not s.workers
 
@@ -2144,3 +2154,22 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster()
+async def test_unknown_task_duration_config(s, a, b):
+    assert s.idle_since == s.time_started
+
+
+@gen_cluster(client=True, timeout=1000)
+async def test_retire_state_change(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    y = c.map(lambda x: x ** 2, range(10))
+    await c.scatter(y)
+    for x in range(2):
+        v = c.map(lambda i: i * np.random.randint(1000), y)
+        k = c.map(lambda i: i * np.random.randint(1000), v)
+        foo = c.map(lambda j: j * 6, k)
+        step = c.compute(foo)
+        c.gather(step)
+    await c.retire_workers(workers=[a.address])

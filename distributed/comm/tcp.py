@@ -33,17 +33,17 @@ logger = logging.getLogger(__name__)
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
-def set_tcp_timeout(stream):
+def set_tcp_timeout(comm):
     """
     Set kernel-level TCP timeout on the stream.
     """
-    if stream.closed():
+    if comm.closed():
         return
 
     timeout = dask.config.get("distributed.comm.timeouts.tcp")
     timeout = int(parse_timedelta(timeout, default="seconds"))
 
-    sock = stream.socket
+    sock = comm.socket
 
     # Default (unsettable) value on Windows
     # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
@@ -92,15 +92,15 @@ def set_tcp_timeout(stream):
         logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
-def get_stream_address(stream):
+def get_stream_address(comm):
     """
     Get a stream's local address.
     """
-    if stream.closed():
+    if comm.closed():
         return "<closed>"
 
     try:
-        return unparse_host_port(*stream.socket.getsockname()[:2])
+        return unparse_host_port(*comm.socket.getsockname()[:2])
     except EnvironmentError:
         # Probably EBADF
         return "<closed>"
@@ -222,7 +222,11 @@ class TCP(Comm):
             allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
-            context={"sender": self._local_addr, "recipient": self._peer_addr},
+            context={
+                "sender": self.local_info,
+                "recipient": self.remote_info,
+                **self.handshake_options,
+            },
         )
 
         try:
@@ -356,9 +360,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             convert_stream_closed_error(self, e)
 
         local_address = self.prefix + get_stream_address(stream)
-        return self.comm_class(
+        comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
         )
+
+        return comm
 
 
 class TCPConnector(BaseTCPConnector):
@@ -444,6 +450,12 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
         comm.allow_offload = self.allow_offload
+
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.info("Connection closed before handshake completed")
+
         await self.comm_handler(comm)
 
     def get_host_port(self):

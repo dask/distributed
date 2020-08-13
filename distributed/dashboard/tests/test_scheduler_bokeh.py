@@ -35,6 +35,8 @@ from distributed.dashboard.components.scheduler import (
     TaskGraph,
     ProfileServer,
     MemoryByKey,
+    AggregateAction,
+    ComputePerKey,
 )
 from distributed.dashboard import scheduler
 
@@ -274,7 +276,7 @@ async def test_ProcessingHistogram(c, s, a, b):
 async def test_NBytesHistogram(c, s, a, b):
     nh = NBytesHistogram(s)
     nh.update()
-    assert (nh.source.data["top"] != 0).sum() == 1
+    assert any(nh.source.data["top"] != 0)
 
     futures = c.map(inc, range(10))
     await wait(futures)
@@ -426,6 +428,17 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     assert s.workers[a.address].metrics["executing"] != -999
     assert s.workers[a.address].metrics["cpu"] != -999
     assert s.workers[a.address].metrics["metric"] == -999
+
+
+@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
+
+    wt = WorkerTable(s)
+    wt.update()
+    assert all(wt.source.data.values())
+    assert wt.source.data["name"][0] == "Total (2)"
+    assert wt.source.data["memory_limit"][0] == 0
+    assert wt.source.data["memory_percent"][0] == ""
 
 
 @gen_cluster(client=True)
@@ -713,6 +726,52 @@ async def test_memory_by_key(c, s, a, b):
     mbk.update()
     assert mbk.source.data["name"] == ["add", "inc"]
     assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_aggregate_action(c, s, a, b):
+    mbk = AggregateAction(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+
+    await x
+    y = await dask.delayed(inc)(1).persist()
+    z = (x + x.T) - x.mean(axis=0)
+    await c.compute(z.sum())
+
+    mbk.update()
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        "http://localhost:%d/individual-aggregate-time-per-action" % s.http_server.port
+    )
+    assert response.code == 200
+
+    assert ("transfer") in mbk.action_source.data["names"]
+    assert ("compute") in mbk.action_source.data["names"]
+
+
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
+async def test_compute_per_key(c, s, a, b):
+    mbk = ComputePerKey(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.ones((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+
+    await x
+    y = await dask.delayed(inc)(1).persist()
+    z = (x + x.T) - x.mean(axis=0)
+    await c.compute(z.sum())
+
+    mbk.update()
+    http_client = AsyncHTTPClient()
+    response = await http_client.fetch(
+        "http://localhost:%d/individual-compute-time-per-key" % s.http_server.port
+    )
+    assert response.code == 200
+    assert ("sum-aggregate") in mbk.compute_source.data["names"]
+    assert ("add") in mbk.compute_source.data["names"]
+    assert "angles" in mbk.compute_source.data.keys()
 
 
 @gen_cluster(scheduler_kwargs={"http_prefix": "foo-bar", "dashboard": True})

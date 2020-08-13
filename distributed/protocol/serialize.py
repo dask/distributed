@@ -1,5 +1,8 @@
+from array import array
 from functools import partial
 import traceback
+import importlib
+from enum import Enum
 
 import dask
 from dask.base import normalize_token
@@ -9,13 +12,13 @@ from tlz import valmap, get_in
 import msgpack
 
 from . import pickle
-from ..utils import has_keyword, typename
+from ..utils import has_keyword, nbytes, typename, ensure_bytes, is_writeable
 from .compression import maybe_compress, decompress
 from .utils import (
     unpack_frames,
     pack_frames_prelude,
     frame_split_size,
-    ensure_bytes,
+    merge_frames,
     msgpack_opts,
 )
 
@@ -40,7 +43,7 @@ def dask_dumps(x, context=None):
         header, frames = dumps(x)
 
     header["type"] = type_name
-    header["type-serialized"] = pickle.dumps(type(x))
+    header["type-serialized"] = pickle.dumps(type(x), protocol=4)
     header["serializer"] = "dask"
     return header, frames
 
@@ -51,17 +54,47 @@ def dask_loads(header, frames):
     return loads(header, frames)
 
 
-def pickle_dumps(x):
+def pickle_dumps(x, context=None):
     header = {"serializer": "pickle"}
     frames = [None]
     buffer_callback = lambda f: frames.append(memoryview(f))
-    frames[0] = pickle.dumps(x, buffer_callback=buffer_callback)
+    frames[0] = pickle.dumps(
+        x,
+        buffer_callback=buffer_callback,
+        protocol=context.get("pickle-protocol", None) if context else None,
+    )
     return header, frames
 
 
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
     return pickle.loads(x, buffers=buffers)
+
+
+def msgpack_decode_default(obj):
+    """
+    Custom packer/unpacker for msgpack to support Enums
+    """
+    if "__Enum__" in obj:
+        mod = importlib.import_module(obj["__module__"])
+        enum_type = getattr(mod, obj["__name__"])
+        obj = getattr(enum_type, obj["name"])
+    return obj
+
+
+def msgpack_encode_default(obj):
+    """
+    Custom packer/unpacker for msgpack to support Enums
+    """
+
+    if isinstance(obj, Enum):
+        return {
+            "__Enum__": True,
+            "name": obj.name,
+            "__module__": obj.__module__,
+            "__name__": type(obj).__name__,
+        }
+    return obj
 
 
 def msgpack_dumps(x):
@@ -473,8 +506,12 @@ def nested_deserialize(x):
 
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize(x, **kwargs)
-    frames = sum(map(frame_split_size, frames), [])
+    if "writeable" not in header:
+        header["writeable"] = tuple(map(is_writeable, frames))
+    if "lengths" not in header:
+        header["lengths"] = tuple(map(nbytes, frames))
     if frames:
+        frames = sum(map(frame_split_size, frames), [])
         compression, frames = zip(*map(maybe_compress, frames))
     else:
         compression = []
@@ -482,7 +519,7 @@ def serialize_bytelist(x, **kwargs):
     header["count"] = len(frames)
 
     header = msgpack.dumps(header, use_bin_type=True)
-    frames2 = [header] + list(frames)
+    frames2 = [header, *frames]
     return [pack_frames_prelude(frames2)] + frames2
 
 
@@ -499,6 +536,7 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
+    frames = merge_frames(header, frames)
     return deserialize(header, frames)
 
 
@@ -560,26 +598,74 @@ def normalize_Serialized(o):
     return [o.header] + o.frames  # for dask.base.tokenize
 
 
-# Teach serialize how to handle bytestrings
-@dask_serialize.register((bytes, bytearray, memoryview))
+# Teach serialize how to handle bytes
+@dask_serialize.register(bytes)
 def _serialize_bytes(obj):
     header = {}  # no special metadata
     frames = [obj]
     return header, frames
 
 
-@dask_deserialize.register((bytes, bytearray))
+# Teach serialize how to handle bytestrings
+@dask_serialize.register(bytearray)
+def _serialize_bytearray(obj):
+    header = {}  # no special metadata
+    frames = [obj]
+    return header, frames
+
+
+@dask_deserialize.register(bytes)
 def _deserialize_bytes(header, frames):
-    return b"".join(frames)
+    if len(frames) == 1 and isinstance(frames[0], bytes):
+        return frames[0]
+    else:
+        return bytes().join(frames)
+
+
+@dask_deserialize.register(bytearray)
+def _deserialize_bytearray(header, frames):
+    if len(frames) == 1 and isinstance(frames[0], bytearray):
+        return frames[0]
+    else:
+        return bytearray().join(frames)
+
+
+@dask_serialize.register(array)
+def _serialize_array(obj):
+    header = {"typecode": obj.typecode, "writeable": (None,)}
+    frames = [memoryview(obj)]
+    return header, frames
+
+
+@dask_deserialize.register(array)
+def _deserialize_array(header, frames):
+    a = array(header["typecode"])
+    for f in map(memoryview, frames):
+        try:
+            f = f.cast("B")
+        except TypeError:
+            f = f.tobytes()
+        a.frombytes(f)
+    return a
+
+
+@dask_serialize.register(memoryview)
+def _serialize_memoryview(obj):
+    if obj.format == "O":
+        raise ValueError("Cannot serialize `memoryview` containing Python objects")
+    header = {"format": obj.format, "shape": obj.shape}
+    frames = [obj]
+    return header, frames
 
 
 @dask_deserialize.register(memoryview)
-def _serialize_memoryview(header, frames):
+def _deserialize_memoryview(header, frames):
     if len(frames) == 1:
-        out = frames[0]
+        out = memoryview(frames[0]).cast("B")
     else:
-        out = b"".join(frames)
-    return memoryview(out)
+        out = memoryview(b"".join(frames))
+    out = out.cast(header["format"], header["shape"])
+    return out
 
 
 #########################
@@ -610,7 +696,7 @@ class ObjectDictSerializer:
     def serialize(self, est):
         header = {
             "serializer": self.serializer,
-            "type-serialized": pickle.dumps(type(est)),
+            "type-serialized": pickle.dumps(type(est), protocol=4),
             "simple": {},
             "complex": {},
         }

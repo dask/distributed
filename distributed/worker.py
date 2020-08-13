@@ -68,6 +68,8 @@ from .utils_comm import pack_data, gather_from_workers, retry_operation
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 from .versions import get_versions
 
+from .core import Status
+
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -480,11 +482,11 @@ class Worker(ServerNode):
             warnings.warn("The local_dir keyword has moved to local_directory")
             local_directory = local_dir
 
-        if local_directory is None:
+        if not local_directory:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            local_directory = os.path.join(local_directory, "dask-worker-space")
+
+        os.makedirs(local_directory, exist_ok=True)
+        local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
@@ -505,6 +507,8 @@ class Worker(ServerNode):
             self, preload, preload_argv, file_dir=self.local_directory
         )
 
+        if isinstance(security, dict):
+            security = Security(**security)
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
@@ -832,7 +836,7 @@ class Worker(ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
-                self.status = "running"
+                self.status = Status.running
                 break
             except EnvironmentError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
@@ -881,7 +885,7 @@ class Worker(ServerNode):
 
                 if response["status"] == "missing":
                     for i in range(10):
-                        if self.status != "running":
+                        if self.status != Status.running:
                             break
                         else:
                             await asyncio.sleep(0.05)
@@ -918,7 +922,7 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect and self.status == "running":
+            if self.reconnect and self.status == Status.running:
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
@@ -956,6 +960,7 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
+                cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 return {"status": "error", "exception": to_serialize(e)}
@@ -991,9 +996,13 @@ class Worker(ServerNode):
     #############
 
     async def start(self):
-        if self.status and self.status.startswith("clos"):
+        if self.status and self.status in (
+            Status.closed,
+            Status.closing,
+            Status.closing_gracefully,
+        ):
             return
-        assert self.status is None, self.status
+        assert self.status is Status.undefined, self.status
 
         await super().start()
 
@@ -1095,7 +1104,7 @@ class Worker(ServerNode):
         self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
     ):
         with log_errors():
-            if self.status in ("closed", "closing"):
+            if self.status in (Status.closed, Status.closing):
                 await self.finished()
                 return
 
@@ -1106,9 +1115,9 @@ class Worker(ServerNode):
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status not in ("running", "closing-gracefully"):
+            if self.status not in (Status.running, Status.closing_gracefully):
                 logger.info("Closed worker has not yet started: %s", self.status)
-            self.status = "closing"
+            self.status = Status.closing
 
             for preload in self.preloads:
                 await preload.teardown()
@@ -1164,7 +1173,7 @@ class Worker(ServerNode):
             self.stop()
             await self.rpc.close()
 
-            self.status = "closed"
+            self.status = Status.closed
             await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
@@ -1176,14 +1185,14 @@ class Worker(ServerNode):
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere.  Afterwards, we close as normal
         """
-        if self.status.startswith("closing"):
+        if self.status in (Status.closing, Status.closing_gracefully):
             await self.finished()
 
-        if self.status == "closed":
+        if self.status == Status.closed:
             return
 
         logger.info("Closing worker gracefully: %s", self.address)
-        self.status = "closing-gracefully"
+        self.status = Status.closing_gracefully
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
@@ -1194,7 +1203,7 @@ class Worker(ServerNode):
     async def wait_until_closed(self):
         warnings.warn("wait_until_closed has moved to finished()")
         await self.finished()
-        assert self.status == "closed"
+        assert self.status == Status.closed
 
     ################
     # Worker Peers #
@@ -1305,7 +1314,7 @@ class Worker(ServerNode):
             }
         )
 
-        return "dont-reply"
+        return Status.dont_reply
 
     ###################
     # Local Execution #
@@ -1333,7 +1342,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    async def delete_data(self, comm=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1344,12 +1353,6 @@ class Worker(ServerNode):
                     self.release_dep(key)
 
             logger.debug("Deleted %d keys", len(keys))
-            if report:
-                logger.debug("Reporting loss of keys to scheduler")
-                # TODO: this route seems to not exist?
-                await self.scheduler.remove_keys(
-                    address=self.contact_address, keys=list(keys)
-                )
         return "OK"
 
     async def set_resources(self, **resources):
@@ -1593,7 +1596,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
-        self._notify_transition(key, start, state or finish, **kwargs)
+        self._notify_plugins("transition", key, start, state or finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -1707,7 +1710,7 @@ class Worker(ServerNode):
                 if key in self.dep_state:
                     self.transition_dep(key, "memory")
 
-            if report and self.batched_stream and self.status == "running":
+            if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -1880,7 +1883,7 @@ class Worker(ServerNode):
             except PicklingError:
                 # Some types fail pickling (example: _thread.lock objects),
                 # send their name as a best effort.
-                typ_serialized = pickle.dumps(typ.__name__)
+                typ_serialized = pickle.dumps(typ.__name__, protocol=4)
             d = {
                 "op": "task-finished",
                 "status": "OK",
@@ -1960,7 +1963,7 @@ class Worker(ServerNode):
         return deps, total_bytes
 
     async def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
-        if self.status != "running":
+        if self.status != Status.running:
             return
         with log_errors():
             response = {}
@@ -2241,6 +2244,8 @@ class Worker(ServerNode):
 
             if report and state in PROCESSING:  # not finished
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
+
+            self._notify_plugins("release_key", key, state, cause, reason, report)
         except CommClosedError:
             pass
         except Exception as e:
@@ -2284,6 +2289,8 @@ class Worker(ServerNode):
 
             if report and state == "memory":
                 self.batched_stream.send({"op": "release-worker-data", "keys": [dep]})
+
+            self._notify_plugins("release_dep", dep, state, report)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2326,6 +2333,7 @@ class Worker(ServerNode):
     ################
 
     # FIXME: this breaks if changed to async def...
+    # xref: https://github.com/dask/distributed/issues/3938
     @gen.coroutine
     def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
         """ Safely run function in thread pool executor
@@ -2355,7 +2363,6 @@ class Worker(ServerNode):
         raise gen.Return(result)
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
-        kwargs = kwargs or {}
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
@@ -2493,7 +2500,7 @@ class Worker(ServerNode):
 
     async def execute(self, key, report=False):
         executor_error = None
-        if self.status in ("closing", "closed", "closing-gracefully"):
+        if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
             return
         try:
             if key not in self.executing or key not in self.task_state:
@@ -2825,11 +2832,11 @@ class Worker(ServerNode):
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
 
-    def _notify_transition(self, key, start, finish, **kwargs):
+    def _notify_plugins(self, method_name, *args, **kwargs):
         for name, plugin in self.plugins.items():
-            if hasattr(plugin, "transition"):
+            if hasattr(plugin, method_name):
                 try:
-                    plugin.transition(key, start, finish, **kwargs)
+                    getattr(plugin, method_name)(*args, **kwargs)
                 except Exception:
                     logger.info(
                         "Plugin '%s' failed with exception" % name, exc_info=True
@@ -2928,7 +2935,7 @@ class Worker(ServerNode):
             raise
 
     def validate_state(self):
-        if self.status != "running":
+        if self.status != Status.running:
             return
         try:
             for key, workers in self.who_has.items():
@@ -3065,7 +3072,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status == "running")
+            return first(w for w in Worker._instances if w.status == Status.running)
         except StopIteration:
             raise ValueError("No workers found")
 
@@ -3315,12 +3322,12 @@ def dumps_function(func):
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
     return result
 
 
@@ -3360,7 +3367,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """ Dump an object to bytes, warn if those bytes are large """
-    b = dumps(obj)
+    b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)
@@ -3517,7 +3524,8 @@ def weight(k, v):
     return sizeof(v)
 
 
-async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
+async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+    kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
         is_coro = iscoroutinefunction(function)

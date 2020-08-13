@@ -9,10 +9,13 @@ import pytest
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 
-try:
-    from pickle import PickleBuffer
-except ImportError:
-    pass
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 def test_pickle_data():
@@ -29,7 +32,7 @@ def test_pickle_out_of_band():
 
         def __reduce_ex__(self, protocol):
             if protocol >= 5:
-                return MemoryviewHolder, (PickleBuffer(self.mv),)
+                return MemoryviewHolder, (pickle.PickleBuffer(self.mv),)
             else:
                 return MemoryviewHolder, (self.mv.tobytes(),)
 
@@ -42,7 +45,7 @@ def test_pickle_out_of_band():
         mvh2 = loads(d, buffers=l)
 
         assert len(l) == 1
-        assert isinstance(l[0], PickleBuffer)
+        assert isinstance(l[0], pickle.PickleBuffer)
         assert memoryview(l[0]) == mv
     else:
         mvh2 = loads(dumps(mvh))
@@ -78,13 +81,32 @@ def test_pickle_numpy():
     assert (loads(dumps(x)) == x).all()
     assert (deserialize(*serialize(x, serializers=("pickle",))) == x).all()
 
+    x = np.array([np.arange(3), np.arange(4, 6)], dtype=object)
+    x2 = loads(dumps(x))
+    assert x.shape == x2.shape
+    assert x.dtype == x2.dtype
+    assert x.strides == x2.strides
+    for e_x, e_x2 in zip(x.flat, x2.flat):
+        np.testing.assert_equal(e_x, e_x2)
+    h, f = serialize(x, serializers=("pickle",))
+    if HIGHEST_PROTOCOL >= 5:
+        assert len(f) == 3
+    else:
+        assert len(f) == 1
+    x3 = deserialize(h, f)
+    assert x.shape == x3.shape
+    assert x.dtype == x3.dtype
+    assert x.strides == x3.strides
+    for e_x, e_x3 in zip(x.flat, x3.flat):
+        np.testing.assert_equal(e_x, e_x3)
+
     if HIGHEST_PROTOCOL >= 5:
         x = np.ones(5000)
 
         l = []
         d = dumps(x, buffer_callback=l.append)
         assert len(l) == 1
-        assert isinstance(l[0], PickleBuffer)
+        assert isinstance(l[0], pickle.PickleBuffer)
         assert memoryview(l[0]) == memoryview(x)
         assert (loads(d, buffers=l) == x).all()
 

@@ -5,7 +5,7 @@ import pytest
 
 from distributed.versions import get_versions, error_message
 from distributed import Client, Worker
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import gen_cluster, loop  # noqa: F401
 
 
 # if one of the nodes reports this version, there's a mismatch
@@ -34,7 +34,7 @@ def kwargs_matching():
 
 
 def test_versions_match(kwargs_matching):
-    assert error_message(**kwargs_matching) == ""
+    assert error_message(**kwargs_matching)["warning"] == ""
 
 
 @pytest.fixture(params=["client", "scheduler", "worker-1"])
@@ -80,11 +80,13 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     column_matching = {"client": 1, "scheduler": 2, "workers": 3}
     msg = error_message(**kwargs_not_matching)
     i = column_matching.get(node, 3)
-    assert "Mismatched versions found" in msg
-    assert "distributed" in msg
+    assert "Mismatched versions found" in msg["warning"]
+    assert "distributed" in msg["warning"]
     assert (
         pattern
-        in re.search(r"distributed\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg)
+        in re.search(
+            r"distributed\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg["warning"]
+        )
         .group(0)
         .split("|")[i]
         .strip()
@@ -96,24 +98,24 @@ def test_scheduler_mismatched_irrelevant_package(kwargs_matching):
     kwargs_matching["scheduler"]["packages"]["numpy"] = "0.0.0"
     assert "numpy" in kwargs_matching["client"]["packages"]
 
-    assert error_message(**kwargs_matching) == ""
+    assert error_message(**kwargs_matching)["warning"] == ""
 
 
 def test_scheduler_additional_irrelevant_package(kwargs_matching):
     """An irrelevant package on the scheduler does not need to be present elsewhere."""
     kwargs_matching["scheduler"]["packages"]["pyspark"] = "0.0.0"
 
-    assert error_message(**kwargs_matching) == ""
+    assert error_message(**kwargs_matching)["warning"] == ""
 
 
 def test_python_mismatch(kwargs_matching):
     kwargs_matching["client"]["packages"]["python"] = "0.0.0"
     msg = error_message(**kwargs_matching)
-    assert "Mismatched versions found" in msg
-    assert "python" in msg
+    assert "Mismatched versions found" in msg["warning"]
+    assert "python" in msg["warning"]
     assert (
         "0.0.0"
-        in re.search(r"python\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg)
+        in re.search(r"python\s+(?:(?:\|[^|\r\n]*)+\|(?:\r?\n|\r)?)+", msg["warning"])
         .group(0)
         .split("|")[1]
         .strip()

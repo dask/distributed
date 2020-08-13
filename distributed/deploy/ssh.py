@@ -1,12 +1,13 @@
 import logging
 import sys
-from typing import List
+from typing import List, Union
 import warnings
 import weakref
 
 import dask
 
 from .spec import SpecCluster, ProcessInterface
+from ..core import Status
 from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
 from ..worker import Worker as _Worker
@@ -130,7 +131,7 @@ class Worker(Process):
             logger.info(line.strip())
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
-                self.status = "running"
+                self.status = Status.running
                 break
         logger.debug("%s", line)
         await super().start()
@@ -230,12 +231,12 @@ old_cluster_kwargs = {
 
 def SSHCluster(
     hosts: List[str] = None,
-    connect_options: dict = {},
+    connect_options: Union[List[dict], dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
     remote_python: str = None,
-    **kwargs
+    **kwargs,
 ):
     """ Deploy a Dask cluster using SSH
 
@@ -261,8 +262,12 @@ def SSHCluster(
     hosts: List[str]
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
-    connect_options: dict, optional
-        Keywords to pass through to ``asyncssh.connect``.
+    connect_options: dict or list of dict, optional
+        Keywords to pass through to :func:`asyncssh.connect`.
+        This could include things such as ``port``, ``username``, ``password``
+        or ``known_hosts``. See docs for :func:`asyncssh.connect` and
+        :class:`asyncssh.SSHClientConnectionOptions` for full information.
+        If a list it must have the same length as ``hosts``.
     worker_options: dict, optional
         Keywords to pass on to workers.
     scheduler_options: dict, optional
@@ -311,11 +316,23 @@ def SSHCluster(
         kwargs.setdefault("worker_addrs", hosts)
         return OldSSHCluster(**kwargs)
 
+    if not hosts:
+        raise ValueError(
+            f"`hosts` must be a non empty list, value {repr(hosts)!r} found."
+        )
+    if isinstance(connect_options, list) and len(connect_options) != len(hosts):
+        raise RuntimeError(
+            "When specifying a list of connect_options you must provide a "
+            "dictionary for each address."
+        )
+
     scheduler = {
         "cls": Scheduler,
         "options": {
             "address": hosts[0],
-            "connect_options": connect_options,
+            "connect_options": connect_options
+            if isinstance(connect_options, dict)
+            else connect_options[0],
             "kwargs": scheduler_options,
             "remote_python": remote_python,
         },
@@ -325,7 +342,9 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "connect_options": connect_options,
+                "connect_options": connect_options
+                if isinstance(connect_options, dict)
+                else connect_options[i + 1],
                 "kwargs": worker_options,
                 "worker_module": worker_module,
                 "remote_python": remote_python,

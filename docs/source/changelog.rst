@@ -1,6 +1,107 @@
 Changelog
 =========
 
+2.22.0 - 2020-07-31
+-------------------
+
+- Only call ``frame_split_size`` when there are frames (:pr:`3996`) `jakirkham`_
+- Fix failing ``test_bandwidth`` (:pr:`3999`) `jakirkham`_
+- Handle sum of memory percentage when ``memory_limit`` is 0 (:pr:`3984`) `Julia Signell`_
+- Drop msgpack pre-0.5.2 compat code (:pr:`3977`) `jakirkham`_
+- Revert to localhost for local IP if no network available (:pr:`3991`) `Matthew Rocklin`_
+- Add missing backtick in inline directive. (:pr:`3988`) `Matthias Bussonnier`_
+- Warn when ``threads_per_worker`` is set to zero (:pr:`3986`) `Julia Signell`_
+- Use ``memoryview`` in ``unpack_frames`` (:pr:`3980`) `jakirkham`_
+- Iterate over list of comms (:pr:`3959`) `Matthew Rocklin`_
+- Streamline ``pack_frames``/``unpack_frames`` frames (:pr:`3973`) `jakirkham`_
+- Always attempt to create ``dask-worker-space`` folder and continue if it exists (:pr:`3972`) `Jendrik Jördening`_
+- Use ``merge_frames`` with host memory only (:pr:`3971`) `jakirkham`_
+- Simplify ``pack_frames_prelude`` (:pr:`3961`) `jakirkham`_
+- Use continuation prompt for proper example parsing (:pr:`3966`) `Matthias Bussonnier`_
+- Ensure writable frames (:pr:`3967`) `jakirkham`_
+
+
+2.21.0 - 2020-07-17
+-------------------
+
+- Fix data replication error (:pr:`3963`) `Andrew Fulton`_
+- Treat falsey local directory as ``None`` (:pr:`3964`) `Tom Augspurger`_
+- Unpin ``numpydoc`` now that 1.1 is released (:pr:`3957`) `Gil Forsyth`_
+- Error hard when Dask has mismatched versions or lz4 installed (:pr:`3936`) `Matthew Rocklin`_
+- Skip coercing to ``bytes`` in ``merge_frames`` (:pr:`3960`) `jakirkham`_
+- UCX: reuse endpoints in order to fix NVLINK issue (:pr:`3953`) `Mads R. B. Kristensen`_
+- Optionally use ``pickle5`` (:pr:`3849`) `jakirkham`_
+- Update time per task chart with filtering and pie (:pr:`3933`) `Benjamin Zaitlen`_
+- UCX: explicit shutdown message (:pr:`3950`) `Mads R. B. Kristensen`_
+- Avoid too aggressive retry of connections (:pr:`3944`) `Matthias Bussonnier`_
+- Parse timeouts in ``Client.sync`` (:pr:`3952`) `Matthew Rocklin`_
+- Synchronize on non-trivial CUDA frame transmission (:pr:`3949`) `jakirkham`_
+- Serialize ``memoryview`` with ``shape`` and ``format`` (:pr:`3947`) `jakirkham`_
+- Move ``scheduler_comm`` into ``Cluster.__init__`` (:pr:`3945`) `Matthew Rocklin`_
+
+
+2.20.0 - 2020-07-02
+-------------------
+
+- Link issue on using ``async`` with ``executor_submit`` (:pr:`3939`) `jakirkham`_
+- Make dashboard server listens on all IPs by default even when interface is set explicitly (:pr:`3941`) `Loïc Estève`_
+- Update logic for worker removal in check ttl (:pr:`3927`) `Benjamin Zaitlen`_
+- Close a created cluster quietly (:pr:`3935`) `Matthew Rocklin`_
+- Ensure ``Worker.run*`` handles ``kwargs`` correctly (:pr:`3937`) `jakirkham`_
+- Restore ``Scheduler.time_started`` for Dask Gateway (:pr:`3934`) `Tom Augspurger`_
+- Fix exception handling in ``_wait_until_connected`` (:pr:`3912`) `Alexander Clausen`_
+- Make local directory if it does not exist (:pr:`3928`) `Matthew Rocklin`_
+- Install vanilla status route if bokeh dependency is not satisfied (:pr:`3844`) `joshreback`_
+- Make ``Worker.delete_data`` sync (:pr:`3922`) `Peter Andreas Entschev`_
+- Fix ``ensure_bytes`` import location (:pr:`3919`) `jakirkham`_
+- Fix race condition in repeated calls to ``cluster.adapt()`` (:pr:`3915`) `Jacob Tomlinson`_
+
+
+2.19.0 - 2020-06-19
+-------------------
+
+- Notify worker plugins when a task is released (:pr:`3817`) `Nick Evans`_
+- Update heartbeat checks in scheduler (:pr:`3896`) `Benjamin Zaitlen`_
+- Make encryption default if ``Security`` is given arguments (:pr:`3887`) `Matthew Rocklin`_
+- Show ``cpu_fraction`` on hover for dashboard workers circle plot. (:pr:`3906`) `Loïc Estève`_
+- Prune virtual client on variable deletion (:pr:`3910`) `Marco Neumann`_
+- Fix total aggregated metrics in dashboard (:pr:`3897`) `Loïc Estève`_
+- Support Bokeh 2.1 (:pr:`3904`) `Matthew Rocklin`_
+- Update ``related-work.rst`` (:pr:`3889`) `DomHudson`_
+- Skip ``test_pid_file`` in older versions of Python (:pr:`3888`) `Matthew Rocklin`_
+- Replace ``stream=`` with ``comm=`` in handlers (:pr:`3860`) `Julien Jerphanion`_
+- Check hosts for ``None`` value in SSH cluster. (:pr:`3883`) `Matthias Bussonnier`_
+- Allow dictionaries in ``security=`` keywords (:pr:`3874`) `Matthew Rocklin`_
+- Use pickle protocol 5 with NumPy object arrays (:pr:`3871`) `jakirkham`_
+- Cast any ``frame`` to ``uint8`` (same type as ``bytes``) (:pr:`3870`) `jakirkham`_
+- Use ``Enum`` for worker, scheduler and nanny status. (:pr:`3853`) `Matthias Bussonnier`_
+- Drop legacy ``buffer_interface`` assignment (:pr:`3869`) `jakirkham`_
+- Drop old frame splitting in NumPy serialization (:pr:`3868`) `jakirkham`_
+- Drop no longer needed local ``import pickle`` (:pr:`3865`) `jakirkham`_
+- Fix typo in ``feed``'s log message (:pr:`3867`) `jakirkham`_
+- Tidy pickle (:pr:`3866`) `jakirkham`_
+- Handle empty times in task stream (:pr:`3862`) `Benjamin Zaitlen`_
+- Change ``asyncssh`` objects to sphinx references (:pr:`3861`) `Jacob Tomlinson`_
+- Improve ``SSHCluster`` docstring for ``connect_options`` (:pr:`3859`) `Jacob Tomlinson`_
+- Validate address parameter in client constructor (:pr:`3842`) `joshreback`_
+- Use ``SpecCluster`` name in worker names (:pr:`3855`) `Loïc Estève`_
+- Allow async ``add_worker`` and ``remove_worker`` plugin methods (:pr:`3847`) `James Bourbeau`_
+
+
+2.18.0 - 2020-06-05
+-------------------
+
+- Merge frames in ``deserialize_bytes`` (:pr:`3639`) `John Kirkham`_
+- Allow ``SSHCluster`` to take a list of ``connect_options`` (:pr:`3854`) `Jacob Tomlinson`_
+- Add favicon to performance report (:pr:`3852`) `Jacob Tomlinson`_
+- Add dashboard plots for the amount of time spent per key and for transfer/serialization (:pr:`3792`) `Benjamin Zaitlen`_
+- Fix variable name in journey of a task documentation (:pr:`3840`) `Matthias Bussonnier`_
+- Fix typo in journey of a task doc (:pr:`3838`) `James Bourbeau`_
+- Register ``dask_cudf`` serializers (:pr:`3832`) `John Kirkham`_
+- Fix key check in ``rebalance`` missing keys (:pr:`3834`) `Jacob Tomlinson`_
+- Allow collection of partial profile information in case of exceptions (:pr:`3773`) `Florian Jetter`_
+
+
 2.17.0 - 2020-05-26
 -------------------
 
@@ -1777,3 +1878,10 @@ significantly without many new features.
 .. _`Nils Braun`: https://github.com/nils-braun
 .. _`Nick Evans`: https://github.com/nre
 .. _`Scott Sanderson`: https://github.com/ssanderson
+.. _`Matthias Bussonnier`: https://github.com/Carreau
+.. _`DomHudson`: https://github.com/DomHudson
+.. _`Julien Jerphanion`: https://github.com/jjerphan
+.. _`joshreback`: https://github.com/joshreback
+.. _`Alexander Clausen`: https://github.com/sk1p
+.. _`Andrew Fulton`: https://github.com/andrewfulton9
+.. _`Jendrik Jördening`: https://github.com/jendrikjoe

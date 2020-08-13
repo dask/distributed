@@ -931,7 +931,9 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if hasattr(s, "encode"):
+    if isinstance(s, bytes):
+        return s
+    elif hasattr(s, "encode"):
         return s.encode()
     else:
         try:
@@ -1103,6 +1105,19 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return frame.nbytes
         except AttributeError:
             return len(frame)
+
+
+def is_writeable(frame):
+    """
+    Check whether frame is writeable
+
+    Will return ``True`` if writeable, ``False`` if readonly, and
+    ``None`` if undetermined.
+    """
+    try:
+        return not memoryview(frame).readonly
+    except TypeError:
+        return None
 
 
 @contextmanager

@@ -1,3 +1,4 @@
+from array import array
 import copy
 import pickle
 
@@ -69,7 +70,28 @@ def test_serialize_bytestrings():
         header, frames = serialize(b)
         assert frames[0] is b
         bb = deserialize(header, frames)
+        assert type(bb) == type(b)
         assert bb == b
+        bb = deserialize(header, list(map(memoryview, frames)))
+        assert type(bb) == type(b)
+        assert bb == b
+        bb = deserialize(header, [b"", *frames])
+        assert type(bb) == type(b)
+        assert bb == b
+
+
+@pytest.mark.parametrize(
+    "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"],
+)
+def test_serialize_arrays(typecode):
+    a = array(typecode)
+    a.extend(range(5))
+    header, frames = serialize(a)
+    assert frames[0] == memoryview(a)
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
 
 
 def test_Serialize():
@@ -190,9 +212,19 @@ def test_empty_loads_deep():
     assert isinstance(e2[0][0][0], Empty)
 
 
-def test_serialize_bytes():
-    for x in [1, "abc", np.arange(5), b"ab" * int(40e6)]:
-        b = serialize_bytes(x)
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"serializers": ["pickle"]},],
+)
+def test_serialize_bytes(kwargs):
+    for x in [
+        1,
+        "abc",
+        np.arange(5),
+        b"ab" * int(40e6),
+        int(2 ** 26) * b"ab",
+        (int(2 ** 25) * b"ab", int(2 ** 25) * b"ab"),
+    ]:
+        b = serialize_bytes(x, **kwargs)
         assert isinstance(b, bytes)
         y = deserialize_bytes(b)
         assert str(x) == str(y)
@@ -309,12 +341,12 @@ async def test_context_specific_serialization(c, s, a, b):
 
         result = await c.run(check, workers=[b.address])
         expected = {"sender": a.address, "recipient": b.address}
-        assert result[b.address]["sender"] == a.address  # see origin worker
+        assert result[b.address]["sender"]["address"] == a.address  # see origin worker
 
         z = await y  # bring object to local process
 
         assert z.x == 1 and z.y == 2
-        assert z.context["sender"] == b.address
+        assert z.context["sender"]["address"] == b.address
     finally:
         from distributed.protocol.serialize import families
 
@@ -339,13 +371,12 @@ async def test_context_specific_serialization_class(c, s, a, b):
         return my_obj.context
 
     result = await c.run(check, workers=[b.address])
-    expected = {"sender": a.address, "recipient": b.address}
-    assert result[b.address]["sender"] == a.address  # see origin worker
+    assert result[b.address]["sender"]["address"] == a.address  # see origin worker
 
     z = await y  # bring object to local process
 
     assert z.x == 1 and z.y == 2
-    assert z.context["sender"] == b.address
+    assert z.context["sender"]["address"] == b.address
 
 
 def test_serialize_raises():
@@ -410,6 +441,7 @@ def test_compression_numpy_list():
         (tuple([MyObj(None)]), True),
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
+        (memoryview(np.random.random((3, 4))), True),
     ],
 )
 def test_check_dask_serializable(data, is_serializable):
@@ -431,10 +463,18 @@ def test_serialize_lists(serializers):
     assert data_in == data_out
 
 
-def test_deser_memoryview():
-    data_in = memoryview(b"hello")
+@pytest.mark.parametrize(
+    "data_in", [memoryview(b"hello"), memoryview(np.random.random((3, 4)))],
+)
+def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
     assert header["type"] == "builtins.memoryview"
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out
+
+
+def test_ser_memoryview_object():
+    data_in = memoryview(np.array(["hello"], dtype=object))
+    with pytest.raises(TypeError):
+        serialize(data_in, on_error="raise")
