@@ -140,8 +140,8 @@ class LocalCluster(SpecCluster):
         if "dashboard" in worker_kwargs:
             warnings.warn(
                 "Setting `dashboard` is discouraged. "
-                "Please set `worker_dashboard_address` or `dashboard_address` to "
-                "get best behavior."
+                "Please set `dashboard_address` affect the scheduler (more common) "
+                "and `worker_dashboard_address` to affect the worker (less common)."
             )
 
         self.status = None
