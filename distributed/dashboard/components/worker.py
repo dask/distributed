@@ -2,7 +2,7 @@ import logging
 import math
 import os
 
-from bokeh.layouts import row, column, widgetbox
+from bokeh.layouts import row, column
 from bokeh.models import (
     ColumnDataSource,
     DataRange1d,
@@ -309,7 +309,7 @@ class CrossFilter(DashboardComponent):
             else:
                 kw = {}
 
-            self.control = widgetbox(
+            self.control = column(
                 [self.x, self.y, self.color], width=200, **kw
             )
 
