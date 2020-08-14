@@ -309,9 +309,7 @@ class CrossFilter(DashboardComponent):
             else:
                 kw = {}
 
-            self.control = column(
-                [self.x, self.y, self.color], width=200, **kw
-            )
+            self.control = column([self.x, self.y, self.color], width=200, **kw)
 
             self.last_outgoing = 0
             self.last_incoming = 0
