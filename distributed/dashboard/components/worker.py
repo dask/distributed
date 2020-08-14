@@ -299,11 +299,6 @@ class CrossFilter(DashboardComponent):
             self.y = Select(title="Y-Axis", value="bandwidth", options=quantities)
             self.y.on_change("value", self.update_figure)
 
-            self.size = Select(
-                title="Size", value="None", options=["None"] + quantities
-            )
-            self.size.on_change("value", self.update_figure)
-
             self.color = Select(
                 title="Color", value="inout-color", options=["black"] + colors
             )
@@ -315,7 +310,7 @@ class CrossFilter(DashboardComponent):
                 kw = {}
 
             self.control = widgetbox(
-                [self.x, self.y, self.size, self.color], width=200, **kw
+                [self.x, self.y, self.color], width=200, **kw
             )
 
             self.last_outgoing = 0
@@ -368,11 +363,6 @@ class CrossFilter(DashboardComponent):
     def create_figure(self, **kwargs):
         with log_errors():
             fig = figure(title="", tools="", **kwargs)
-
-            size = self.size.value
-            if size == "None":
-                size = 1
-
             fig.circle(
                 source=self.source,
                 x=self.x.value,
