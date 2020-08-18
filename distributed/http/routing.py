@@ -1,3 +1,4 @@
+import os
 from tornado import web
 import tornado.httputil
 import tornado.routing
@@ -9,7 +10,16 @@ def _descend_routes(router, routers=set(), out=set()):
     routers.add(router)
     for rule in list(router.named_rules.values()) + router.rules:
         if isinstance(rule.matcher, tornado.routing.PathMatches):
-            out.add(rule.matcher.regex.pattern)
+            if issubclass(rule.target, tornado.web.StaticFileHandler):
+                prefix = rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
+                path = rule.target_kwargs['path']
+                for d, dirs, files in os.walk(path):
+                    for fn in files:
+                        fullpath = d + "/" + fn
+                        ourpath = fullpath.replace(path, prefix)
+                        out.add(ourpath)
+            else:
+                out.add(rule.matcher.regex.pattern)
         if isinstance(rule.target, tornado.routing.RuleRouter):
             _descend_routes(rule.target, routers, out)
 
@@ -33,7 +43,7 @@ class RoutingApplication(web.Application):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.applications = []
-        self.add_handlers(".*$", [(r"/sitemap.json", DirectoryHandler),])
+        self.add_handlers(".*$", [(r"/sitemap.json", DirectoryHandler), ])
 
     def find_handler(self, request: tornado.httputil.HTTPServerRequest, **kwargs):
         handler = super().find_handler(request, **kwargs)
