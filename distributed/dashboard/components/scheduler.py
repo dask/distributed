@@ -263,7 +263,9 @@ class NBytesHistogram(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
+        nbytes = np.asarray(
+            [ws.metrics["memory"] for ws in self.scheduler.workers.values()]
+        )
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
@@ -295,6 +297,7 @@ class BandwidthTypes(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
+            fig.xaxis.major_label_orientation = -0.5
             rect = fig.rect(
                 source=self.source,
                 x="bandwidth-half",

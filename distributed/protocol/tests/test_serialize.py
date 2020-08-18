@@ -1,3 +1,4 @@
+from array import array
 import copy
 import pickle
 
@@ -69,7 +70,28 @@ def test_serialize_bytestrings():
         header, frames = serialize(b)
         assert frames[0] is b
         bb = deserialize(header, frames)
+        assert type(bb) == type(b)
         assert bb == b
+        bb = deserialize(header, list(map(memoryview, frames)))
+        assert type(bb) == type(b)
+        assert bb == b
+        bb = deserialize(header, [b"", *frames])
+        assert type(bb) == type(b)
+        assert bb == b
+
+
+@pytest.mark.parametrize(
+    "typecode", ["b", "B", "h", "H", "i", "I", "l", "L", "q", "Q", "f", "d"],
+)
+def test_serialize_arrays(typecode):
+    a = array(typecode)
+    a.extend(range(5))
+    header, frames = serialize(a)
+    assert frames[0] == memoryview(a)
+    a2 = deserialize(header, frames)
+    assert type(a2) == type(a)
+    assert a2.typecode == a.typecode
+    assert a2 == a
 
 
 def test_Serialize():
@@ -319,12 +341,12 @@ async def test_context_specific_serialization(c, s, a, b):
 
         result = await c.run(check, workers=[b.address])
         expected = {"sender": a.address, "recipient": b.address}
-        assert result[b.address]["sender"] == a.address  # see origin worker
+        assert result[b.address]["sender"]["address"] == a.address  # see origin worker
 
         z = await y  # bring object to local process
 
         assert z.x == 1 and z.y == 2
-        assert z.context["sender"] == b.address
+        assert z.context["sender"]["address"] == b.address
     finally:
         from distributed.protocol.serialize import families
 
@@ -349,13 +371,12 @@ async def test_context_specific_serialization_class(c, s, a, b):
         return my_obj.context
 
     result = await c.run(check, workers=[b.address])
-    expected = {"sender": a.address, "recipient": b.address}
-    assert result[b.address]["sender"] == a.address  # see origin worker
+    assert result[b.address]["sender"]["address"] == a.address  # see origin worker
 
     z = await y  # bring object to local process
 
     assert z.x == 1 and z.y == 2
-    assert z.context["sender"] == b.address
+    assert z.context["sender"]["address"] == b.address
 
 
 def test_serialize_raises():

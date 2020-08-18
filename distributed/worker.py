@@ -970,6 +970,7 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
+                cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 return {"status": "error", "exception": to_serialize(e)}
@@ -1323,7 +1324,7 @@ class Worker(ServerNode):
             }
         )
 
-        return "dont-reply"
+        return Status.dont_reply
 
     ###################
     # Local Execution #
@@ -1893,7 +1894,7 @@ class Worker(ServerNode):
             except PicklingError:
                 # Some types fail pickling (example: _thread.lock objects),
                 # send their name as a best effort.
-                typ_serialized = pickle.dumps(typ.__name__)
+                typ_serialized = pickle.dumps(typ.__name__, protocol=4)
             d = {
                 "op": "task-finished",
                 "status": "OK",
@@ -3082,7 +3083,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status == "running")
+            return first(w for w in Worker._instances if w.status == Status.running)
         except StopIteration:
             raise ValueError("No workers found")
 
@@ -3351,12 +3352,12 @@ def dumps_function(func):
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
     return result
 
 
@@ -3411,7 +3412,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """ Dump an object to bytes, warn if those bytes are large """
-    b = dumps(obj)
+    b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)

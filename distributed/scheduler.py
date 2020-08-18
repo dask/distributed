@@ -315,6 +315,8 @@ class WorkerState:
             corresponding_enum_variants = [s for s in Status if s.value == new_status]
             assert len(corresponding_enum_variants) == 1
             self._status = corresponding_enum_variants[0]
+        else:
+            raise TypeError(f"expected Status or str, got {new_status}")
 
     @property
     def host(self):
@@ -1141,6 +1143,9 @@ class Scheduler(ServerNode):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
+        self.connection_args["handshake_overrides"] = {  # common denominator
+            "pickle-protocol": 4,
+        }
 
         self._start_address = addresses_from_user_args(
             host=host,
@@ -1404,19 +1409,6 @@ class Scheduler(ServerNode):
         self.rpc.allow_offload = False
         self.status = Status.undefined
 
-    @property
-    def status(self):
-        return self._status
-
-    @status.setter
-    def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-
     ##################
     # Administration #
     ##################
@@ -1483,7 +1475,10 @@ class Scheduler(ServerNode):
 
         for addr in self._start_address:
             await self.listen(
-                addr, allow_offload=False, **self.security.get_listen_args("scheduler")
+                addr,
+                allow_offload=False,
+                handshake_overrides={"pickle-protocol": 4, "compression": None},
+                **self.security.get_listen_args("scheduler"),
             )
             self.ip = get_address_host(self.listen_address)
             listen_ip = self.ip
@@ -2302,7 +2297,7 @@ class Scheduler(ServerNode):
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
-                            KilledWorker(task=k, last_worker=ws.clean()), -1
+                            KilledWorker(task=k, last_worker=ws.clean()), protocol=4,
                         )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)

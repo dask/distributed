@@ -9,6 +9,7 @@ import threading
 import traceback
 import uuid
 import weakref
+import warnings
 
 import dask
 import tblib
@@ -56,11 +57,13 @@ class Status(Enum):
     closing = "closing"
     closing_gracefully = "closing-gracefully"
     init = "init"
+    created = "created"
     running = "running"
     starting = "starting"
     stopped = "stopped"
     stopping = "stopping"
     undefined = None
+    dont_reply = "dont-reply"
 
     def __eq__(self, other):
         """
@@ -73,6 +76,11 @@ class Status(Enum):
         if isinstance(other, type(self)):
             return self.value == other.value
         elif isinstance(other, str) or (other is None):
+            warnings.warn(
+                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
             assert other in [
                 s.value for s in type(self)
             ], f"comparison with non-existing states {other}"
@@ -265,9 +273,16 @@ class Server:
         if isinstance(new_status, Status):
             self._status = new_status
         elif isinstance(new_status, str) or new_status is None:
+            warnings.warn(
+                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
             corresponding_enum_variants = [s for s in Status if s.value == new_status]
             assert len(corresponding_enum_variants) == 1
             self._status = corresponding_enum_variants[0]
+        else:
+            raise TypeError(f"expected Status or str, got {new_status}")
 
     async def finished(self):
         """ Wait until the server has finished """
@@ -523,7 +538,14 @@ class Server:
                         logger.exception(e)
                         result = error_message(e, status="uncaught-error")
 
-                if reply and result != "dont-reply":
+                # result is not type stable:
+                # when LHS is not Status then RHS must not be Status or it raises.
+                # when LHS is Status then RHS must be status or it raises in tests
+                is_dont_reply = False
+                if isinstance(result, Status) and (result == Status.dont_reply):
+                    is_dont_reply = True
+
+                if reply and not is_dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (EnvironmentError, TypeError) as e:
@@ -1130,13 +1152,13 @@ def error_message(e, status="error"):
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2)
+        e3 = protocol.pickle.dumps(e2, protocol=4)
         protocol.pickle.loads(e3)
     except Exception:
         e2 = Exception(str(e2))
     e4 = protocol.to_serialize(e2)
     try:
-        tb2 = protocol.pickle.dumps(tb)
+        tb2 = protocol.pickle.dumps(tb, protocol=4)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 

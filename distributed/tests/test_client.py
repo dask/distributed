@@ -40,6 +40,7 @@ from distributed import (
     TimeoutError,
     CancelledError,
 )
+from distributed.core import Status
 from distributed.comm import CommClosedError
 from distributed.client import (
     Client,
@@ -1588,6 +1589,22 @@ async def test_upload_file(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_upload_file_refresh_delayed(c, s, a, b):
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
+                await c.upload_file(fn)
+
+            sys.path.append(os.path.dirname(fn))
+            from myfile import f
+
+            b = delayed(f)()
+            bb = c.compute(b, sync=False)
+            result = await c.gather(bb)
+            assert result == value
+
+
+@gen_cluster(client=True)
 async def test_upload_file_no_extension(c, s, a, b):
     with tmp_text("myfile", "") as fn:
         await c.upload_file(fn)
@@ -1968,6 +1985,11 @@ async def test_badly_serialized_input(c, s, a, b):
     L = await c.gather(futures)
     assert list(L) == list(map(inc, range(10)))
     assert future.status == "error"
+
+    with pytest.raises(Exception) as info:
+        await future
+
+    assert "hello!" in str(info.value)
 
 
 @pytest.mark.skipif("True", reason="")
@@ -3737,13 +3759,18 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
             [c.sync(w.close) for w in list(workers)]
             for w in workers:
-                assert w.status == "closed"
+                assert w.status == Status.closed
 
     start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
         sleep(0.1)
-        assert time() < start + 10
+        if time() > start + 10:
+            if worker == Worker:  # this is an esoteric case
+                print("File descriptors did not clean up")
+                break
+            else:
+                raise ValueError("File descriptors did not clean up")
 
 
 @gen_cluster(client=False, timeout=None)
@@ -4672,7 +4699,7 @@ async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {b.address}
 
     start = time()
-    while a.status != "closed":
+    while a.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -5876,8 +5903,8 @@ async def test_shutdown(cleanup):
             async with Client(s.address, asynchronous=True) as c:
                 await c.shutdown()
 
-            assert s.status == "closed"
-            assert w.status == "closed"
+            assert s.status == Status.closed
+            assert w.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -5886,7 +5913,7 @@ async def test_shutdown_localcluster(cleanup):
         async with Client(lc, asynchronous=True) as c:
             await c.shutdown()
 
-        assert lc.scheduler.status == "closed"
+        assert lc.scheduler.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -6025,7 +6052,7 @@ def test_async_with(loop):
 
     assert result == 11
     assert client.status == "closed"
-    assert cluster.status == "closed"
+    assert cluster.status == Status.closed
 
 
 def test_client_sync_with_async_def(loop):
@@ -6167,3 +6194,22 @@ async def test_as_completed_condition_loop(c, s, a, b):
 def test_client_connectionpool_semaphore_loop(s, a, b):
     with Client(s["address"]) as c:
         assert c.rpc.semaphore._loop is c.loop.asyncio_loop
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_mixed_compression(cleanup):
+    pytest.importorskip("lz4")
+    da = pytest.importorskip("dask.array")
+    async with Scheduler(port=0, dashboard_address=":0") as s:
+        async with Nanny(
+            s.address, nthreads=1, config={"distributed.comm.compression": None}
+        ) as a:
+            async with Nanny(
+                s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
+            ) as b:
+                async with Client(s.address, asynchronous=True) as c:
+                    await c.get_versions()
+                    x = da.ones((10000, 10000))
+                    y = x + x.T
+                    await c.compute(y.sum())
