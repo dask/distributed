@@ -174,7 +174,7 @@ async def test_sitemap(s, a, b):
     assert "paths" in out
     assert "/sitemap.json$" in out["paths"]
     assert "/health$" in out["paths"]
-    assert "/statics/images/dask-logo.svg" in out['paths']
+    assert "/statics/images/dask-logo.svg" in out["paths"]
 
 
 @gen_cluster(client=True)
