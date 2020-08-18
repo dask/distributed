@@ -12,13 +12,13 @@ def _descend_routes(router, routers=set(), out=set()):
         if isinstance(rule.matcher, tornado.routing.PathMatches):
             if issubclass(rule.target, tornado.web.StaticFileHandler):
                 prefix = (
-                    rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/").rstrip("\\")
+                    rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
                 )
                 path = rule.target_kwargs["path"]
                 for d, dirs, files in os.walk(path):
                     for fn in files:
                         fullpath = d + "/" + fn
-                        ourpath = fullpath.replace(path, prefix)
+                        ourpath = fullpath.replace(path, prefix).replace("\\", "/")
                         out.add(ourpath)
             else:
                 out.add(rule.matcher.regex.pattern.rstrip("$"))
