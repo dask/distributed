@@ -11,9 +11,7 @@ def _descend_routes(router, routers=set(), out=set()):
     for rule in list(router.named_rules.values()) + router.rules:
         if isinstance(rule.matcher, tornado.routing.PathMatches):
             if issubclass(rule.target, tornado.web.StaticFileHandler):
-                prefix = (
-                    rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
-                )
+                prefix = rule.matcher.regex.pattern.rstrip("(.*)$").rstrip("/")
                 path = rule.target_kwargs["path"]
                 for d, dirs, files in os.walk(path):
                     for fn in files:
