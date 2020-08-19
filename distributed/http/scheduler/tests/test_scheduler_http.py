@@ -172,8 +172,8 @@ async def test_sitemap(s, a, b):
     )
     out = json.loads(response.body.decode())
     assert "paths" in out
-    assert "/sitemap.json$" in out["paths"]
-    assert "/health$" in out["paths"]
+    assert "/sitemap.json" in out["paths"]
+    assert "/health" in out["paths"]
     assert "/statics/css/base.css" in out["paths"]
 
 
