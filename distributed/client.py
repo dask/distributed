@@ -98,6 +98,8 @@ _global_client_index = [0]
 _current_client = ContextVar("_current_client", default=None)
 
 DEFAULT_EXTENSIONS = [PubSubClientExtension]
+# Placeholder used in the get_dataset function(s)
+NO_DEFAULT_PLACEHOLDER = "_no_default_"
 
 
 def _get_global_client():
@@ -2281,7 +2283,8 @@ class Client:
         ----------
         args : list of objects to publish as name
         name : optional name of the dataset to publish
-        override : if true, override any already present dataset with the same name
+        override : bool (optional, default False)
+            if true, override any already present dataset with the same name
         kwargs: dict
             named collections to publish on the scheduler
 
@@ -2344,21 +2347,29 @@ class Client:
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name, default):
+    async def _get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER):
         with self.as_current():
             out = await self.scheduler.publish_get(name=name, client=self.id)
 
         if out is None:
-            if default is None:
+            if default is NO_DEFAULT_PLACEHOLDER:
                 raise KeyError(f"Dataset '{name}' not found")
             else:
                 return default
         return out["data"]
 
-    def get_dataset(self, name, default=None, **kwargs):
+    def get_dataset(self, name, default=NO_DEFAULT_PLACEHOLDER, **kwargs):
         """
         Get named dataset from the scheduler if present.
         Return the default or raise a KeyError if not present.
+
+        Parameters
+        ----------
+        name : name of the dataset to retrieve
+        default : optional, not set by default
+            If set, do not raise a KeyError if the name is not present but return this default
+        kwargs: dict
+            additional arguments to _get_dataset
 
         See Also
         --------
