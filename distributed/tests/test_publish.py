@@ -222,6 +222,18 @@ def test_datasets_contains(client):
     assert key in client.datasets
 
 
+def test_datasets_republish(client):
+    key, value, value2 = "key", "value", "value2"
+    client.publish_dataset(key=value)
+    assert client.get_dataset(key) == value
+
+    with pytest.raises(KeyError) as exc_info:
+        client.publish_dataset(key=value)
+
+    client.publish_dataset(key=value2, override=True)
+    assert client.get_dataset(key) == value2
+
+
 def test_datasets_iter(client):
     keys = [n for n in range(10)]
     client.publish_dataset(**{str(key): key for key in keys})

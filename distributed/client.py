@@ -2237,7 +2237,7 @@ class Client:
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
-    async def _publish_dataset(self, *args, name=None, **kwargs):
+    async def _publish_dataset(self, *args, name=None, override=False, **kwargs):
         with log_errors():
             coroutines = []
 
@@ -2245,7 +2245,8 @@ class Client:
                 keys = [tokey(f.key) for f in futures_of(data)]
                 coroutines.append(
                     self.scheduler.publish_put(
-                        keys=keys, name=name, data=to_serialize(data), client=self.id
+                        keys=keys, name=name, data=to_serialize(data),
+                        override=override, client=self.id
                     )
                 )
 
@@ -2280,6 +2281,7 @@ class Client:
         ----------
         args : list of objects to publish as name
         name : optional name of the dataset to publish
+        override : if true, override any already present dataset with the same name
         kwargs: dict
             named collections to publish on the scheduler
 
