@@ -179,6 +179,7 @@ def test_datasets_setitem(client):
         value = "value"
         client.datasets[key] = value
         assert client.get_dataset(key) == value
+        assert client.get_dataset(key, default="something else") == value
 
 
 def test_datasets_getitem(client):
@@ -186,6 +187,19 @@ def test_datasets_getitem(client):
         value = "value"
         client.publish_dataset(value, name=key)
         assert client.datasets[key] == value
+        assert client.datasets.get(key) == value
+        assert client.datasets.get(key, default="something else") == value
+
+
+def test_datasets_getitem_default(client):
+    with pytest.raises(KeyError) as exc_info:
+        client.datasets.get("key")
+
+    with pytest.raises(KeyError) as exc_info:
+        client.get_dataset("key")
+
+    assert client.datasets.get("key", default="value") == "value"
+    assert client.get_dataset("key", default="value") == "value"
 
 
 def test_datasets_delitem(client):

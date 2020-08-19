@@ -116,3 +116,7 @@ class Datasets(MutableMapping):
                 "please use 'len(await client.list_datasets())' instead"
             )
         return len(self._client.list_datasets())
+
+    def get(self, key, default=None):
+        # just pass on to the client
+        return self._client.get_dataset(key, default=default)

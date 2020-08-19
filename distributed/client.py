@@ -2342,24 +2342,28 @@ class Client:
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    async def _get_dataset(self, name):
+    async def _get_dataset(self, name, default):
         with self.as_current():
             out = await self.scheduler.publish_get(name=name, client=self.id)
 
         if out is None:
-            raise KeyError(f"Dataset '{name}' not found")
+            if default is None:
+                raise KeyError(f"Dataset '{name}' not found")
+            else:
+                return default
         return out["data"]
 
-    def get_dataset(self, name, **kwargs):
+    def get_dataset(self, name, default=None, **kwargs):
         """
-        Get named dataset from the scheduler
+        Get named dataset from the scheduler if present.
+        Return the default or raise a KeyError if not present.
 
         See Also
         --------
         Client.publish_dataset
         Client.list_datasets
         """
-        return self.sync(self._get_dataset, name, **kwargs)
+        return self.sync(self._get_dataset, name, default=default, **kwargs)
 
     async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
         response = await self.scheduler.run_function(
