@@ -263,7 +263,7 @@ async def connect(
             timeout,
             error,
         )
-        raise IOError(msg) from error
+        raise IOError(msg)
 
     backoff = 0.01
     if timeout and timeout / 20 < backoff:
