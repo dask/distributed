@@ -196,7 +196,7 @@ def test_datasets_getitem_default(client):
         client.get_dataset("key")
 
     assert client.datasets.get("key", default="value") == "value"
-    assert client.datasets.get("key", default=None) == None
+    assert client.datasets.get("key", default=None) is None
     assert client.get_dataset("key", default="value") == "value"
 
 
