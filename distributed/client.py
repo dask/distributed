@@ -2247,8 +2247,11 @@ class Client:
                 keys = [tokey(f.key) for f in futures_of(data)]
                 coroutines.append(
                     self.scheduler.publish_put(
-                        keys=keys, name=name, data=to_serialize(data),
-                        override=override, client=self.id
+                        keys=keys,
+                        name=name,
+                        data=to_serialize(data),
+                        override=override,
+                        client=self.id,
                     )
                 )
 
