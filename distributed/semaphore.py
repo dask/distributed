@@ -372,6 +372,10 @@ class Semaphore:
             / 5
         )
         self._refreshing_leases = False
+
+        # Ensure that the PC below takes the correct IOLoop
+        if not self.client.io_loop.is_current:
+            self.client.io_loop.make_current()
         pc = PeriodicCallback(
             self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
