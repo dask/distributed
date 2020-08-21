@@ -362,8 +362,6 @@ class Semaphore:
         self.id = uuid.uuid4().hex
         self._leases = deque()
 
-        self._refreshing_leases = False
-
         self.refresh_leases = True
 
         self._registered = None
