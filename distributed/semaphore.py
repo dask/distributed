@@ -6,7 +6,7 @@ from asyncio import TimeoutError
 from collections import defaultdict, deque
 
 import dask
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import PeriodicCallback, IOLoop
 
 from distributed.utils_comm import retry_operation
 from .metrics import time
@@ -362,6 +362,24 @@ class Semaphore:
         self.id = uuid.uuid4().hex
         self._leases = deque()
 
+        self._refreshing_leases = False
+
+        self.refresh_leases = True
+
+        self._registered = None
+        if register:
+            self._registered = self.register()
+
+        self._set_refresh_pc()
+
+    def _set_refresh_pc(self):
+        # Ensure that the PC below takes the correct IOLoop
+        current_loop = IOLoop.current()
+        changed_default_loop = False
+        if not self.client.io_loop.is_current:
+            changed_default_loop = True
+            self.client.io_loop.make_current()
+
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         refresh_leases_interval = (
@@ -371,11 +389,6 @@ class Semaphore:
             )
             / 5
         )
-        self._refreshing_leases = False
-
-        # Ensure that the PC below takes the correct IOLoop
-        if not self.client.io_loop.is_current:
-            self.client.io_loop.make_current()
         pc = PeriodicCallback(
             self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
@@ -384,11 +397,11 @@ class Semaphore:
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
         pc.start()
-        self.refresh_leases = True
 
-        self._registered = None
-        if register:
-            self._registered = self.register()
+        # Reset the thread to the original loop in case we changed it above to
+        # ensure that there are no side effects
+        if changed_default_loop:
+            current_loop.make_current()
 
     def register(self):
         """
