@@ -28,13 +28,9 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     if nbytes_frames <= n:
         return [frame]
 
-    if isinstance(frame, (bytes, bytearray)):
-        frame = memoryview(frame)
-    try:
-        itemsize = frame.itemsize
-    except AttributeError:
-        itemsize = 1
+    frame = memoryview(frame)
 
+    itemsize = frame.itemsize
     nitems = nbytes_frames // itemsize
     items_per_shard = n // itemsize
 
