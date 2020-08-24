@@ -28,9 +28,8 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     if frame.nbytes <= n:
         return [frame]
 
-    itemsize = frame.itemsize
-    nitems = frame.nbytes // itemsize
-    items_per_shard = n // itemsize
+    nitems = frame.nbytes // frame.itemsize
+    items_per_shard = n // frame.itemsize
 
     return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
 
