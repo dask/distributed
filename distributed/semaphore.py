@@ -6,7 +6,7 @@ from asyncio import TimeoutError
 from collections import defaultdict, deque
 
 import dask
-from tornado.ioloop import PeriodicCallback, IOLoop
+from tornado.ioloop import PeriodicCallback
 
 from distributed.utils_comm import retry_operation
 from .metrics import time
@@ -368,16 +368,6 @@ class Semaphore:
         if register:
             self._registered = self.register()
 
-        self._set_refresh_pc()
-
-    def _set_refresh_pc(self):
-        # Ensure that the PC below takes the correct IOLoop
-        current_loop = IOLoop.current()
-        changed_default_loop = False
-        if not self.client.io_loop.is_current:
-            changed_default_loop = True
-            self.client.io_loop.make_current()
-
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         refresh_leases_interval = (
@@ -394,12 +384,10 @@ class Semaphore:
         # Registering the pc to the client here is important for proper cleanup
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
-        pc.start()
 
-        # Reset the thread to the original loop in case we changed it above to
-        # ensure that there are no side effects
-        if changed_default_loop:
-            current_loop.make_current()
+        # Need to start the callback using IOLoop.add_callback to ensure that the
+        # PC uses the correct event lopp.
+        self.client.io_loop.add_callback(pc.start)
 
     def register(self):
         """
