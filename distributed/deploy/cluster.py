@@ -179,7 +179,7 @@ class Cluster:
         Output a message to the user and also store for future retrieval.
 
         For use in subclasses where initialisation may take a while and it would
-        # be beneficial to feed back to the user.
+        be beneficial to feed back to the user.
 
         Examples
         --------
