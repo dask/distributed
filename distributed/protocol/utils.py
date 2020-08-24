@@ -35,9 +35,12 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     except AttributeError:
         itemsize = 1
 
+    nitems = nbytes_frames // itemsize
+    items_per_shard = n // itemsize
+
     return [
-        frame[i : i + n // itemsize]
-        for i in range(0, nbytes_frames // itemsize, n // itemsize)
+        frame[i : i + items_per_shard]
+        for i in range(0, nitems, items_per_shard)
     ]
 
 
