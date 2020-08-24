@@ -23,15 +23,13 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
-    nbytes_frames = nbytes(frame)
-
-    if nbytes_frames <= n:
-        return [frame]
-
     frame = memoryview(frame)
 
+    if frame.nbytes <= n:
+        return [frame]
+
     itemsize = frame.itemsize
-    nitems = nbytes_frames // itemsize
+    nitems = frame.nbytes // itemsize
     items_per_shard = n // itemsize
 
     return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
