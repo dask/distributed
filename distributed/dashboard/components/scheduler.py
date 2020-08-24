@@ -1478,8 +1478,8 @@ class TaskGraph(DashboardComponent):
                 for container in [self.node_source, self.edge_source]:
                     container.data = {col: [] for col in container.column_names}
             else:
-                self.subtitle.text = " "
                 # occasionally reset the column data source to remove old nodes
+                self.subtitle.text = " "
                 if self.invisible_count > len(self.node_source.data["x"]) / 2:
                     self.layout.reset_index()
                     self.invisible_count = 0
