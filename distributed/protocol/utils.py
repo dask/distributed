@@ -26,18 +26,17 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     if nbytes(frame) <= n:
         return [frame]
 
-    if nbytes(frame) > n:
-        if isinstance(frame, (bytes, bytearray)):
-            frame = memoryview(frame)
-        try:
-            itemsize = frame.itemsize
-        except AttributeError:
-            itemsize = 1
+    if isinstance(frame, (bytes, bytearray)):
+        frame = memoryview(frame)
+    try:
+        itemsize = frame.itemsize
+    except AttributeError:
+        itemsize = 1
 
-        return [
-            frame[i : i + n // itemsize]
-            for i in range(0, nbytes(frame) // itemsize, n // itemsize)
-        ]
+    return [
+        frame[i : i + n // itemsize]
+        for i in range(0, nbytes(frame) // itemsize, n // itemsize)
+    ]
 
 
 def merge_frames(header, frames):
