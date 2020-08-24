@@ -23,7 +23,9 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
-    if nbytes(frame) <= n:
+    nbytes_frames = nbytes(frame)
+
+    if nbytes_frames <= n:
         return [frame]
 
     if isinstance(frame, (bytes, bytearray)):
@@ -35,7 +37,7 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
 
     return [
         frame[i : i + n // itemsize]
-        for i in range(0, nbytes(frame) // itemsize, n // itemsize)
+        for i in range(0, nbytes_frames // itemsize, n // itemsize)
     ]
 
 
