@@ -240,6 +240,9 @@ def test_serialize_list_compress():
     y = deserialize_bytelist(L)
     assert (x == y).all()
 
+    y = deserialize_bytes(L)
+    assert (x == y).all()
+
 
 def test_malicious_exception():
     class BadException(Exception):
