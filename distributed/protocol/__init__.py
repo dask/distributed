@@ -18,6 +18,7 @@ from .serialize import (
     serialize_bytes,
     deserialize_bytes,
     serialize_bytelist,
+    deserialize_bytelist,
     register_serialization_family,
     register_generic,
 )
