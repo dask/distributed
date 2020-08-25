@@ -520,18 +520,11 @@ def serialize_bytelist(x, **kwargs):
 
     header = msgpack.dumps(header, use_bin_type=True)
     frames2 = [header, *frames]
-    frames2.insert(0, pack_frames_prelude(frames2))
     return frames2
 
 
-def serialize_bytes(x, **kwargs):
-    L = serialize_bytelist(x, **kwargs)
-    return b"".join(L)
-
-
-def deserialize_bytes(b):
-    frames = unpack_frames(b)
-    header, frames = frames[0], frames[1:]
+def deserialize_bytelist(L):
+    header, frames = L[0], L[1:]
     if header:
         header = msgpack.loads(header, raw=False, use_list=False)
     else:
@@ -539,6 +532,16 @@ def deserialize_bytes(b):
     frames = decompress(header, frames)
     frames = merge_frames(header, frames)
     return deserialize(header, frames)
+
+
+def serialize_bytes(x, **kwargs):
+    L = serialize_bytelist(x, **kwargs)
+    return b"".join([pack_frames_prelude(L), *L])
+
+
+def deserialize_bytes(b):
+    L = unpack_frames(b)
+    return deserialize_bytelist(L)
 
 
 ################################
