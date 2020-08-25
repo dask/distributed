@@ -540,7 +540,12 @@ def serialize_bytes(x, **kwargs):
 
 
 def deserialize_bytes(b):
-    L = unpack_frames(b)
+    try:
+        b = memoryview(b)
+    except TypeError:
+        L = b
+    else:
+        L = unpack_frames(b)
     return deserialize_bytelist(L)
 
 
