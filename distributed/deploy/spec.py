@@ -247,6 +247,7 @@ class SpecCluster(Cluster):
         name=None,
     ):
         self._created = weakref.WeakSet()
+        self._spec_name_to_worker_name = {}
 
         self.scheduler_spec = copy.copy(scheduler)
         self.worker_spec = copy.copy(workers) or {}
@@ -325,13 +326,18 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:
-                    await self.scheduler_comm.retire_workers(workers=list(to_close))
+                    await self.scheduler_comm.retire_workers(
+                        names=[
+                            self._spec_name_to_worker_name[name] for name in to_close
+                        ]
+                    )
                 tasks = [self.workers[w].close() for w in to_close if w in self.workers]
                 await asyncio.wait(tasks)
                 for task in tasks:  # for tornado gen.coroutine support
                     with suppress(RuntimeError):
                         await task
             for name in to_close:
+                self._spec_name_to_worker_name.pop(name, None)
                 if name in self.workers:
                     del self.workers[name]
 
@@ -347,6 +353,7 @@ class SpecCluster(Cluster):
                     cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
+                self._spec_name_to_worker_name[name] = opts["name"]
                 workers.append(worker)
             if workers:
                 await asyncio.wait(workers)
