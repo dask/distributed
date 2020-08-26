@@ -693,7 +693,7 @@ class Client:
         if heartbeat_interval is None:
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
         heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
-
+        self._submitted_graphs = {}
         scheduler_info_interval = parse_timedelta(
             dask.config.get("distributed.client.scheduler-info-interval", default="ms")
         )
@@ -1063,9 +1063,9 @@ class Client:
             self.status = "connecting"
             self.scheduler_comm = None
 
-            for st in self.futures.values():
-                st.cancel()
-            self.futures.clear()
+            # for st in self.futures.values():
+            #     st.cancel()
+            # self.futures.clear()
 
             timeout = self._timeout
             deadline = self.loop.time() + timeout
@@ -1114,6 +1114,7 @@ class Client:
                     "client": self.id,
                     "reply": False,
                     "versions": version_module.get_versions(),
+                    "desired_keys": list(self.futures),
                 }
             )
         except Exception as e:
@@ -1142,11 +1143,19 @@ class Client:
         _set_global_client(self)
         self.status = "running"
 
+        if "resubmit_keys" in msg[0]:
+            self._resubmit_keys(msg[0]["resubmit_keys"])
+
         for msg in self._pending_msg_buffer:
             self._send_to_scheduler(msg)
         del self._pending_msg_buffer[:]
 
         logger.debug("Started scheduling coroutines. Synchronized")
+
+    def _resubmit_keys(self, keys):
+        for k in keys:
+            msg = self._submitted_graphs[k]
+            self._send_to_scheduler(msg)
 
     async def _update_scheduler_info(self):
         if self.status not in ("running", "connecting"):
@@ -1203,6 +1212,7 @@ class Client:
         """ Release key from distributed memory """
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
+        self._submitted_graphs.pop(key, None)
         if st is not None:
             st.cancel()
         if self.status != "closed":
@@ -2603,23 +2613,24 @@ class Client:
                 retries = {k: retries for k in dsk3}
 
             futures = {key: Future(key, self, inform=False) for key in keyset}
-            self._send_to_scheduler(
-                {
-                    "op": "update-graph",
-                    "tasks": valmap(dumps_task, dsk3),
-                    "dependencies": dependencies,
-                    "keys": list(map(tokey, keys)),
-                    "restrictions": restrictions or {},
-                    "loose_restrictions": loose_restrictions,
-                    "priority": priority,
-                    "user_priority": user_priority,
-                    "resources": resources,
-                    "submitting_task": getattr(thread_state, "key", None),
-                    "retries": retries,
-                    "fifo_timeout": fifo_timeout,
-                    "actors": actors,
-                }
-            )
+            msg = {
+                "op": "update-graph",
+                "tasks": valmap(dumps_task, dsk3),
+                "dependencies": dependencies,
+                "keys": list(map(tokey, keys)),
+                "restrictions": restrictions or {},
+                "loose_restrictions": loose_restrictions,
+                "priority": priority,
+                "user_priority": user_priority,
+                "resources": resources,
+                "submitting_task": getattr(thread_state, "key", None),
+                "retries": retries,
+                "fifo_timeout": fifo_timeout,
+                "actors": actors,
+            }
+            for k in keyset:
+                self._submitted_graphs[k] = msg
+            self._send_to_scheduler(msg)
             return futures
 
     def get(

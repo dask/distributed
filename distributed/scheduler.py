@@ -1767,6 +1767,12 @@ class Scheduler(ServerNode):
             if nbytes:
                 for key in nbytes:
                     ts = self.tasks.get(key)
+                    # TODO: timeout
+                    # Wait and see if a client reconnects which is interested in this key
+                    while ts is None:
+                        await asyncio.sleep(0.001)
+                        ts = self.tasks.get(key)
+
                     if ts is not None and ts.state in ("processing", "waiting"):
                         recommendations = self.transition(
                             key,
@@ -2543,7 +2549,7 @@ class Scheduler(ServerNode):
                 if self.status == Status.running:
                     logger.critical("Tried writing to closed comm: %s", msg)
 
-    async def add_client(self, comm, client=None, versions=None):
+    async def add_client(self, comm, client=None, versions=None, desired_keys=None):
         """ Add client to network
 
         We listen to all future messages from this Comm.
@@ -2553,7 +2559,12 @@ class Scheduler(ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client, versions=versions)
-
+        request_resubmission = []
+        if desired_keys:
+            for k in desired_keys:
+                if self.tasks.get(k) is None:
+                    request_resubmission.append(k)
+            self.client_desires_keys(desired_keys, client)
         for plugin in self.plugins[:]:
             try:
                 plugin.add_client(scheduler=self, client=client)
@@ -2563,8 +2574,10 @@ class Scheduler(ServerNode):
         try:
             bcomm = BatchedSend(interval="2ms", loop=self.loop)
             bcomm.start(comm)
-            self.client_comms[client] = bcomm
             msg = {"op": "stream-start"}
+            if request_resubmission:
+                msg.update({"resubmit_keys": request_resubmission})
+            self.client_comms[client] = bcomm
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 {w: ws.versions for w, ws in self.workers.items()},

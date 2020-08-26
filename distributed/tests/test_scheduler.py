@@ -2173,3 +2173,57 @@ async def test_retire_state_change(c, s, a, b):
         step = c.compute(foo)
         c.gather(step)
     await c.retire_workers(workers=[a.address])
+
+
+from distributed.utils import mp_context
+from distributed.utils_test import run_scheduler
+
+
+def test_kill_scheduler_resubmit_keys(cleanup, tmpdir):
+    def calc_only_once(i, dir):
+        filename = f"{dir}/{i}.out"
+        import os
+
+        if os.path.exists(filename):
+            return 1
+
+        with open(filename, "w") as fd:
+            fd.write("foo")
+        return 0
+
+    with cluster(disconnect_timeout=10,) as (scheduler, workers):
+        with Client(scheduler["address"]) as client:
+
+            futs = client.map(calc_only_once, range(10), dir=tmpdir)
+
+            def suicide(dask_scheduler):
+                async def kill_yourself():
+                    await asyncio.sleep(0.1)
+                    import os
+
+                    os.kill(os.getpid(), 15)
+
+                dask_scheduler.loop.add_callback(kill_yourself)
+
+            client.run_on_scheduler(suicide)
+            port = int(scheduler["address"].split(":")[-1])
+            import time
+
+            time.sleep(0.1)
+            # # The scheduler queue will receive the scheduler's address
+            scheduler_q = mp_context.Queue()
+
+            # # Launch scheduler
+            scheduler = mp_context.Process(
+                name="Dask cluster test: Scheduler",
+                target=run_scheduler,
+                args=(scheduler_q, 1, port),
+            )
+            scheduler.daemon = True
+            scheduler.start()
+            scheduler_q.get()
+            import time
+
+            time.sleep(1)
+            res = client.gather(futs)
+            assert sum(res) < 10
