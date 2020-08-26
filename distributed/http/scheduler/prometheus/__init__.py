@@ -12,10 +12,13 @@ class _PrometheusCollector:
     def collect(self):
         from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
+        print("server", self.server)
+        print("clients", self.server.clients)
+
         yield GaugeMetricFamily(
             "dask_scheduler_clients",
             "Number of clients connected.",
-            value=len(self.server.clients),
+            value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
         yield GaugeMetricFamily(
