@@ -223,7 +223,7 @@ class Event:
         timeout = parse_timedelta(timeout)
 
         result = self.client.sync(
-            self.client.scheduler.event_wait, name=self.name, timeout=timeout,
+            self.client.scheduler.event_wait, name=self.name, timeout=timeout
         )
         return result
 
@@ -239,12 +239,12 @@ class Event:
 
         All waiters will now be released.
         """
-        result = self.client.sync(self.client.scheduler.event_set, name=self.name,)
+        result = self.client.sync(self.client.scheduler.event_set, name=self.name)
         return result
 
     def is_set(self):
         """ Check if the event is set """
-        result = self.client.sync(self.client.scheduler.event_is_set, name=self.name,)
+        result = self.client.sync(self.client.scheduler.event_is_set, name=self.name)
         return result
 
     def __reduce__(self):

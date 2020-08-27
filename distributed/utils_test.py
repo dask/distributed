@@ -1137,9 +1137,7 @@ async def assert_can_connect_from_everywhere_4_6(port, protocol="tcp", **kwargs)
     await asyncio.gather(*futures)
 
 
-async def assert_can_connect_from_everywhere_4(
-    port, protocol="tcp", **kwargs,
-):
+async def assert_can_connect_from_everywhere_4(port, protocol="tcp", **kwargs):
     """
     Check that the local *port* is reachable from all IPv4 addresses.
     """

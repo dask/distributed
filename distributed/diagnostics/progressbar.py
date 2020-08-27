@@ -64,7 +64,7 @@ class ProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler, **(self.client().connection_args if self.client else {}),
+            self.scheduler, **(self.client().connection_args if self.client else {})
         )
         logger.debug("Progressbar Connected to scheduler")
 
@@ -113,7 +113,7 @@ class TextProgressBar(ProgressBar):
         loop=None,
         complete=True,
         start=True,
-        **kwargs
+        **kwargs,
     ):
         super(TextProgressBar, self).__init__(keys, scheduler, interval, complete)
         self.width = width
@@ -156,7 +156,7 @@ class ProgressWidget(ProgressBar):
         interval="100ms",
         complete=False,
         loop=None,
-        **kwargs
+        **kwargs,
     ):
         super(ProgressWidget, self).__init__(keys, scheduler, interval, complete)
 
@@ -215,7 +215,7 @@ class MultiProgressBar:
         func=key_split,
         interval="100ms",
         complete=False,
-        **kwargs
+        **kwargs,
     ):
         self.scheduler = get_scheduler(scheduler)
 
@@ -312,7 +312,7 @@ class MultiProgressWidget(MultiProgressBar):
         interval=0.1,
         func=key_split,
         complete=False,
-        **kwargs
+        **kwargs,
     ):
         super(MultiProgressWidget, self).__init__(
             keys, scheduler, func, interval, complete

@@ -1144,7 +1144,7 @@ class Scheduler(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.connection_args["handshake_overrides"] = {  # common denominator
-            "pickle-protocol": 4,
+            "pickle-protocol": 4
         }
 
         self._start_address = addresses_from_user_args(
@@ -1167,7 +1167,7 @@ class Scheduler(ServerNode):
                 missing_bokeh = True
                 http_server_modules.append("distributed.http.scheduler.missing_bokeh")
         routes = get_handlers(
-            server=self, modules=http_server_modules, prefix=http_prefix,
+            server=self, modules=http_server_modules, prefix=http_prefix
         )
         self.start_http_server(routes, dashboard_address, default_port=8787)
         if show_dashboard and not missing_bokeh:
@@ -2257,7 +2257,7 @@ class Scheduler(ServerNode):
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
-                            KilledWorker(task=k, last_worker=ws.clean()), protocol=4,
+                            KilledWorker(task=k, last_worker=ws.clean()), protocol=4
                         )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)

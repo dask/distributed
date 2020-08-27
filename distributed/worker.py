@@ -645,7 +645,7 @@ class Worker(ServerNode):
         pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks["heartbeat"] = pc
         pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000,
+            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
         self.periodic_callbacks["keep-alive"] = pc
 
@@ -657,7 +657,7 @@ class Worker(ServerNode):
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(
-                self.memory_monitor, self.memory_monitor_interval * 1000,
+                self.memory_monitor, self.memory_monitor_interval * 1000
             )
             self.periodic_callbacks["memory"] = pc
 

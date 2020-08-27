@@ -702,7 +702,7 @@ class Client:
 
         self._periodic_callbacks = dict()
         self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
-            self._update_scheduler_info, scheduler_info_interval * 1000,
+            self._update_scheduler_info, scheduler_info_interval * 1000
         )
         self._periodic_callbacks["heartbeat"] = PeriodicCallback(
             self._heartbeat, heartbeat_interval * 1000

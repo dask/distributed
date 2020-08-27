@@ -531,7 +531,7 @@ async def test_broadcast(s, a, b):
     assert result == {a.address: b"pong", b.address: b"pong"}
 
 
-@gen_cluster(security=tls_only_security(),)
+@gen_cluster(security=tls_only_security())
 async def test_broadcast_tls(s, a, b):
     result = await s.broadcast(msg={"op": "ping"})
     assert result == {a.address: b"pong", b.address: b"pong"}
@@ -2044,7 +2044,7 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     s.rpc = await FlakyConnectionPool(failing_connections=4)
 
     with dask.config.set(
-        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3,}
+        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3}
     ):
         with captured_logger(
             logging.getLogger("distributed.scheduler")

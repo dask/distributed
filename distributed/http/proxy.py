@@ -130,6 +130,4 @@ def check_worker_dashboard_exits(scheduler, worker):
     return False
 
 
-routes = [
-    (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {}),
-]
+routes = [(r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {})]
