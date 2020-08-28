@@ -141,7 +141,7 @@ class TextProgressBar(ProgressBar):
 
 
 class ProgressWidget(ProgressBar):
-    """ ProgressBar that uses an IPython ProgressBar widget for the notebook
+    """ProgressBar that uses an IPython ProgressBar widget for the notebook
 
     See Also
     --------
@@ -292,7 +292,7 @@ class MultiProgressBar:
 
 
 class MultiProgressWidget(MultiProgressBar):
-    """ Multiple progress bar Widget suitable for the notebook
+    """Multiple progress bar Widget suitable for the notebook
 
     Displays multiple progress bars for a computation, split on computation
     type.
@@ -399,7 +399,7 @@ class MultiProgressWidget(MultiProgressBar):
 
 
 def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
-    """ Track progress of futures
+    """Track progress of futures
 
     This operates differently in the notebook and the console
 

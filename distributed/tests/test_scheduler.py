@@ -1918,8 +1918,7 @@ async def test_task_group_non_tuple_key(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_unique_groups(c, s, a, b):
-    """ This test ensure that task groups remain unique when using submit
-    """
+    """This test ensure that task groups remain unique when using submit"""
     x = c.submit(sum, [1, 2])
     y = c.submit(len, [1, 2])
     z = c.submit(sum, [3, 4])
