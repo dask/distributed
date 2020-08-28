@@ -247,7 +247,7 @@ def SSHCluster(
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
-    remote_python: str = None,
+    remote_python: Union[str, dict] = None,
     **kwargs,
 ):
     """Deploy a Dask cluster using SSH
