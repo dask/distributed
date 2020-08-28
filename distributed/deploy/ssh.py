@@ -59,7 +59,7 @@ class Worker(Process):
         The python module to run to start the worker.
     connect_options: dict
         kwargs to be passed to asyncssh connections
-    remote_python: str
+    remote_python: str or dict
         Path to Python on remote node to run this worker.
     kwargs: dict
         These will be passed through the dask-worker CLI to the
@@ -108,10 +108,16 @@ class Worker(Process):
                     "Worker failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
                 )
 
+        if not self.remote_python:
+            self.remote_python = sys.executable
+
+        elif type(self.remote_python) == dict:
+            self.remote_python = self.remote_python.get(self.address, sys.executable)
+
         cmd = " ".join(
             [
                 set_env,
-                self.remote_python or sys.executable,
+                self.remote_python,
                 "-m",
                 self.worker_module,
                 self.scheduler,
@@ -146,7 +152,7 @@ class Scheduler(Process):
         The hostname where we should run this worker
     connect_options: dict
         kwargs to be passed to asyncssh connections
-    remote_python: str
+    remote_python: str or dict
         Path to Python on remote node to run this scheduler.
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
@@ -186,10 +192,16 @@ class Scheduler(Process):
                     "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
                 )
 
+        if not self.remote_python:
+            self.remote_python = sys.executable
+
+        elif type(self.remote_python) == dict:
+            self.remote_python = self.remote_python.get(self.address, sys.executable)
+
         cmd = " ".join(
             [
                 set_env,
-                self.remote_python or sys.executable,
+                self.remote_python,
                 "-m",
                 "distributed.cli.dask_scheduler",
             ]
@@ -274,7 +286,7 @@ def SSHCluster(
         Keywords to pass on to scheduler.
     worker_module: str, optional
         Python module to call to start the worker.
-    remote_python: str, optional
+    remote_python: str or dict, optional
         Path to Python on remote nodes.
 
     Examples
