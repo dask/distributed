@@ -58,14 +58,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import (
-    mp_context,
-    sync,
-    tmp_text,
-    tokey,
-    tmpfile,
-    is_valid_xml,
-)
+from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -5860,6 +5853,12 @@ async def test_wait_for_workers(c, s, a, b):
     await future
     assert time() < start + 1
     await w.close()
+
+    with pytest.raises(TimeoutError) as info:
+        await c.wait_for_workers(n_workers=10, timeout="1 ms")
+
+    assert "2/10" in str(info.value).replace(" ", "")
+    assert "1 ms" in str(info.value)
 
 
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")

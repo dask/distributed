@@ -336,7 +336,7 @@ def deserialize(header, frames, deserializers=None):
 
 
 class Serialize:
-    """ Mark an object that should be serialized
+    """Mark an object that should be serialized
 
     Examples
     --------
@@ -408,7 +408,7 @@ def container_copy(c):
 
 
 def extract_serialize(x):
-    """ Pull out Serialize objects from message
+    """Pull out Serialize objects from message
 
     This also remove large bytestrings from the message into a second
     dictionary.
@@ -520,7 +520,8 @@ def serialize_bytelist(x, **kwargs):
 
     header = msgpack.dumps(header, use_bin_type=True)
     frames2 = [header, *frames]
-    return [pack_frames_prelude(frames2)] + frames2
+    frames2.insert(0, pack_frames_prelude(frames2))
+    return frames2
 
 
 def serialize_bytes(x, **kwargs):
@@ -546,7 +547,7 @@ def deserialize_bytes(b):
 
 
 def register_serialization(cls, serialize, deserialize):
-    """ Register a new class for dask-custom serialization
+    """Register a new class for dask-custom serialization
 
     Parameters
     ----------
@@ -751,7 +752,7 @@ def register_generic(
     serialize_func=dask_serialize,
     deserialize_func=dask_deserialize,
 ):
-    """ Register (de)serialize to traverse through __dict__
+    """Register (de)serialize to traverse through __dict__
 
     Normally when registering new classes for Dask's custom serialization you
     need to manage headers and frames, which can be tedious.  If all you want

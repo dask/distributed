@@ -35,7 +35,7 @@ class _Watch:
 
 
 class SemaphoreExtension:
-    """ An extension for the scheduler to manage Semaphores
+    """An extension for the scheduler to manage Semaphores
 
     This adds the following routes to the scheduler
 
@@ -267,7 +267,7 @@ class SemaphoreExtension:
 
 
 class Semaphore:
-    """ Semaphore
+    """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
     will track leases on the scheduler which can be acquired and
@@ -362,6 +362,12 @@ class Semaphore:
         self.id = uuid.uuid4().hex
         self._leases = deque()
 
+        self.refresh_leases = True
+
+        self._registered = None
+        if register:
+            self._registered = self.register()
+
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         refresh_leases_interval = (
@@ -371,7 +377,6 @@ class Semaphore:
             )
             / 5
         )
-        self._refreshing_leases = False
         pc = PeriodicCallback(
             self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
@@ -379,12 +384,10 @@ class Semaphore:
         # Registering the pc to the client here is important for proper cleanup
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
-        pc.start()
-        self.refresh_leases = True
 
-        self._registered = None
-        if register:
-            self._registered = self.register()
+        # Need to start the callback using IOLoop.add_callback to ensure that the
+        # PC uses the correct event lopp.
+        self.client.io_loop.add_callback(pc.start)
 
     def register(self):
         """

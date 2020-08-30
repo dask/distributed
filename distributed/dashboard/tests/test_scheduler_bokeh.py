@@ -507,9 +507,7 @@ async def test_TaskGraph_clear(c, s, a, b):
         assert time() < start + 5
 
 
-@gen_cluster(
-    client=True, config={"distributed.dashboard.graph-max-items": 2,},
-)
+@gen_cluster(client=True, config={"distributed.dashboard.graph-max-items": 2})
 async def test_TaskGraph_limit(c, s, a, b):
     gp = TaskGraph(s)
 
@@ -526,8 +524,9 @@ async def test_TaskGraph_limit(c, s, a, b):
     assert len(gp.node_source.data["x"]) == 2
     f3 = c.submit(func, 3)
     await wait(f3)
+    # Breached task limit, clearing graph
     gp.update()
-    assert len(gp.node_source.data["x"]) == 2
+    assert len(gp.node_source.data["x"]) == 0
 
 
 @gen_cluster(client=True, timeout=30)
@@ -590,9 +589,7 @@ async def test_profile_server(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster(
-    client=True, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_root_redirect(c, s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch("http://localhost:%d/" % s.http_server.port)
