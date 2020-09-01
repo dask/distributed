@@ -243,11 +243,7 @@ def test_nprocs_negative(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=-1"]) as worker:
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
-                start = time()
-                cpus = cpu_count()
-                while len(c.scheduler_info()["workers"]) != cpus:
-                    sleep(0.2)
-                    assert time() < start + 10
+                c.wait_for_workers(cpu_count(), timeout="10 seconds")
 
 
 def test_nprocs_expands_name(loop):
