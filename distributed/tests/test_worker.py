@@ -1653,7 +1653,8 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 async def test_bad_local_directory(cleanup):
     async with await Scheduler() as s:
         try:
-            await Worker(s.address, local_directory="/not/a/valid-directory")
+            async with Worker(s.address, local_directory="/not/a/valid-directory"):
+                pass
         except PermissionError:
             pass
         else:
