@@ -1647,3 +1647,12 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                 else:
                     assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bad_local_directory(cleanup):
+    async with await Scheduler() as s:
+        with pytest.raises(PermissionError):
+            w = await Worker(s.address, local_directory="/not/a/valid-directory")
+
+        assert not any("error" in log for log in s.get_logs())
