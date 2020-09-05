@@ -574,9 +574,11 @@ class Worker(ServerNode):
         self.actor_executor = ThreadPoolExecutor(
             1, thread_name_prefix="Dask-Actor-Threads"
         )
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
+        self.batched_streams = defaultdict(
+            lambda: BatchedSend(interval="2ms", loop=self.loop)
+        )
         self.name = name
-        self.scheduler_delay = 0
+        self.scheduler_delays = defaultdict(float)
         self.stream_comms = dict()
         self.heartbeat_active = False
         self._ipython_kernel = None
@@ -636,18 +638,23 @@ class Worker(ServerNode):
             **kwargs,
         )
 
-        self.scheduler = self.rpc(scheduler_addr)
+        if isinstance(scheduler_addr, str):
+            scheduler_addrs = scheduler_addr.split(",")
+        else:
+            scheduler_addrs = scheduler_addr
+
+        self.schedulers = {addr: self.rpc(addr) for addr in scheduler_addrs}
         self.execution_state = {
-            "scheduler": self.scheduler.address,
+            # "scheduler": self.scheduler.address,
             "ioloop": self.loop,
             "worker": self,
         }
 
         pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks["heartbeat"] = pc
-        pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
-        )
+        # pc = PeriodicCallback(  # TODO
+        #     lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
+        # )
         self.periodic_callbacks["keep-alive"] = pc
 
         self._address = contact_address
@@ -724,6 +731,10 @@ class Worker(ServerNode):
         )
 
     @property
+    def scheduler(self):
+        return first(self.schedulers.values())
+
+    @property
     def logs(self):
         return self._deque_handler.deque
 
@@ -782,6 +793,7 @@ class Worker(ServerNode):
             "type": type(self).__name__,
             "id": self.id,
             "scheduler": self.scheduler.address,
+            "schedulers": list(self.schedulers),
             "nthreads": self.nthreads,
             "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
@@ -791,7 +803,7 @@ class Worker(ServerNode):
     # External Services #
     #####################
 
-    async def _register_with_scheduler(self):
+    async def _register_with_scheduler(self, address):
         self.periodic_callbacks["keep-alive"].stop()
         self.periodic_callbacks["heartbeat"].stop()
         start = time()
@@ -801,7 +813,7 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                comm = await connect(self.scheduler.address, **self.connection_args)
+                comm = await connect(address, **self.connection_args)
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -836,11 +848,11 @@ class Worker(ServerNode):
                 _end = time()
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
-                self.scheduler_delay = response["time"] - middle
+                self.scheduler_delays[address] = response["time"] - middle
                 self.status = Status.running
                 break
             except EnvironmentError:
-                logger.info("Waiting to connect to: %26s", self.scheduler.address)
+                logger.info("Waiting to connect to: %26s", address)
                 await asyncio.sleep(0.1)
             except TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
@@ -854,27 +866,28 @@ class Worker(ServerNode):
                 ]
             )
 
-            logger.info("        Registered to: %26s", self.scheduler.address)
+            logger.info("        Registered to: %26s", address)
             logger.info("-" * 49)
 
-        self.batched_stream.start(comm)
+        self.batched_streams[address].start(comm)
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
-        self.loop.add_callback(self.handle_scheduler, comm, self.scheduler.address)
+        self.loop.add_callback(self.handle_scheduler, comm, address)
 
     def _update_latency(self, latency):
         self.latency = latency * 0.05 + self.latency * 0.95
         if self.digests is not None:
             self.digests["latency"].add(latency)
 
-    async def heartbeat(self):
+    async def heartbeat(self, address=None):
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
+            address = address or self.scheduler.address
             try:
                 start = time()
                 response = await retry_operation(
-                    self.scheduler.heartbeat_worker,
+                    self.schedulers[address].heartbeat_worker,
                     address=self.contact_address,
                     now=time(),
                     metrics=await self.get_metrics(),
@@ -891,22 +904,22 @@ class Worker(ServerNode):
                         else:
                             await asyncio.sleep(0.05)
                     else:
-                        await self._register_with_scheduler()
+                        await self._register_with_scheduler(address)
                     return
-                self.scheduler_delay = response["time"] - middle
+                self.scheduler_delays[address] = response["time"] - middle
                 self.periodic_callbacks["heartbeat"].callback_time = (
                     response["heartbeat-interval"] * 1000
                 )
                 self.bandwidth_workers.clear()
                 self.bandwidth_types.clear()
             except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
+                logger.warning("Heartbeat to scheduler %s failed", address)
                 if not self.reconnect:
-                    await self.close(report=False)
+                    await self.close(report=False, scheduler=address)
             except IOError as e:
                 # Scheduler is gone. Respect distributed.comm.timeouts.connect
                 if "Timed out trying to connect" in str(e):
-                    await self.close(report=False)
+                    await self.close(report=False, scheduler=address)
                 else:
                     raise e
             finally:
@@ -927,7 +940,7 @@ class Worker(ServerNode):
         finally:
             if self.reconnect and self.status == Status.running:
                 logger.info("Connection to scheduler broken.  Reconnecting...")
-                self.loop.add_callback(self.heartbeat)
+                self.loop.add_callback(self.heartbeat, scheduler)
             else:
                 await self.close(report=False)
 
@@ -1080,7 +1093,7 @@ class Worker(ServerNode):
         logger.info("         Listening to: %26s", listening_address)
         for k, v in self.service_ports.items():
             logger.info("  %16s at: %26s" % (k, self.ip + ":" + str(v)))
-        logger.info("Waiting to connect to: %26s", self.scheduler.address)
+        logger.info("Waiting to connect to: %26s", ", ".join(self.schedulers))
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.nthreads)
         if self.memory_limit:
@@ -1094,7 +1107,9 @@ class Worker(ServerNode):
         )
         self._pending_plugins = ()
 
-        await self._register_with_scheduler()
+        await asyncio.gather(
+            *[self._register_with_scheduler(addr) for addr in self.schedulers]
+        )
 
         self.start_periodic_callbacks()
         return self
@@ -1112,6 +1127,7 @@ class Worker(ServerNode):
         safe=False,
         scheduler=None,
     ):
+        scheduler = scheduler or self.scheduler.address
         with log_errors():
             if self.status in (Status.closed, Status.closing):
                 await self.finished()
@@ -1150,26 +1166,27 @@ class Worker(ServerNode):
             with suppress(EnvironmentError, TimeoutError):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
-                        self.scheduler.unregister(
-                            address=self.contact_address, safe=safe
+                        asyncio.gather(
+                            *[
+                                s.unregister(address=self.contact_address, safe=safe)
+                                for s in self.schedulers.values()
+                            ]
                         ),
                         timeout,
                     )
-            await self.scheduler.close_rpc()
+            await asyncio.gather(*[s.close_rpc() for s in self.schedulers.values()])
+
+            for bs in self.batched_streams.values():
+                if bs and bs.comm and not bs.comm.closed():
+                    bs.send({"op": "close-stream"})
+
+                if bs:
+                    with suppress(TimeoutError):
+                        await bs.close(timedelta(seconds=timeout))
+
             self._workdir.release()
 
             self.stop_services()
-
-            if (
-                self.batched_stream
-                and self.batched_stream.comm
-                and not self.batched_stream.comm.closed()
-            ):
-                self.batched_stream.send({"op": "close-stream"})
-
-            if self.batched_stream:
-                with suppress(TimeoutError):
-                    await self.batched_stream.close(timedelta(seconds=timeout))
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
@@ -1202,7 +1219,12 @@ class Worker(ServerNode):
 
         logger.info("Closing worker gracefully: %s", self.address)
         self.status = Status.closing_gracefully
-        await self.scheduler.retire_workers(workers=[self.address], remove=False)
+        await asyncio.gather(
+            *[
+                s.retire_workers(workers=[self.address], remove=False)
+                for s in self.schedulers.values()
+            ]
+        )
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
     async def terminate(self, comm=None, report=True, **kwargs):
@@ -1311,8 +1333,8 @@ class Worker(ServerNode):
         duration = (stop - start) or 0.5  # windows
         self.outgoing_transfer_log.append(
             {
-                "start": start + self.scheduler_delay,
-                "stop": stop + self.scheduler_delay,
+                "start": start,
+                "stop": stop,
                 "middle": (start + stop) / 2,
                 "duration": duration,
                 "who": who,
@@ -1347,7 +1369,8 @@ class Worker(ServerNode):
             self.log.append((key, "receive-from-scatter"))
 
         if report:
-            self.batched_stream.send({"op": "add-keys", "keys": list(data)})
+            for bs in self.batched_streams.values():
+                bs.send({"op": "add-keys", "keys": list(data)})
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
@@ -1372,10 +1395,15 @@ class Worker(ServerNode):
                 self.available_resources[r] = quantity
             self.total_resources[r] = quantity
 
-        await retry_operation(
-            self.scheduler.set_resources,
-            resources=self.total_resources,
-            worker=self.contact_address,
+        await asyncio.gather(
+            *[
+                retry_operation(
+                    s.set_resources,
+                    resources=self.total_resources,
+                    worker=self.contact_address,
+                )
+                for s in self.schedulers.values()
+            ]
         )
 
     ###################
@@ -1568,7 +1596,8 @@ class Worker(ServerNode):
             if self.dependents[dep]:
                 self.dep_state[dep] = "memory"
                 self.put_key_in_memory(dep, value)
-                self.batched_stream.send({"op": "add-keys", "keys": [dep]})
+                for bs in self.batched_streams.values():
+                    bs.send({"op": "add-keys", "keys": [dep]})
             else:
                 self.release_dep(dep)
 
@@ -1721,7 +1750,7 @@ class Worker(ServerNode):
                 if key in self.dep_state:
                     self.transition_dep(key, "memory")
 
-            if report and self.batched_stream and self.status == Status.running:
+            if report and self.batched_streams and self.status == Status.running:
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -1745,9 +1774,14 @@ class Worker(ServerNode):
 
             self.executing.remove(key)
             self.long_running.add(key)
-            self.batched_stream.send(
-                {"op": "long-running", "key": key, "compute_duration": compute_duration}
-            )
+            for bs in self.batched_streams.values():
+                bs.send(
+                    {
+                        "op": "long-running",
+                        "key": key,
+                        "compute_duration": compute_duration,
+                    }
+                )
 
             self.ensure_computing()
         except Exception as e:
@@ -1921,7 +1955,8 @@ class Worker(ServerNode):
 
         if key in self.startstops:
             d["startstops"] = self.startstops[key]
-        self.batched_stream.send(d)
+        for bs in self.batched_streams.values():
+            bs.send(d)
 
     def put_key_in_memory(self, key, value, transition=True):
         if key in self.data:
@@ -2006,8 +2041,8 @@ class Worker(ServerNode):
                     self.startstops[cause].append(
                         {
                             "action": "transfer",
-                            "start": start + self.scheduler_delay,
-                            "stop": stop + self.scheduler_delay,
+                            "start": start + first(self.scheduler_delays.values()),
+                            "stop": stop + first(self.scheduler_delays.values()),
                             "source": worker,
                         }
                     )
@@ -2017,9 +2052,9 @@ class Worker(ServerNode):
                 bandwidth = total_bytes / duration
                 self.incoming_transfer_log.append(
                     {
-                        "start": start + self.scheduler_delay,
-                        "stop": stop + self.scheduler_delay,
-                        "middle": (start + stop) / 2.0 + self.scheduler_delay,
+                        "start": start,
+                        "stop": stop,
+                        "middle": (start + stop) / 2.0,
                         "duration": duration,
                         "keys": {
                             dep: self.nbytes.get(dep, None) for dep in response["data"]
@@ -2057,7 +2092,7 @@ class Worker(ServerNode):
 
             except Exception as e:
                 logger.exception(e)
-                if self.batched_stream and LOG_PDB:
+                if any(self.batched_stream.values()) and LOG_PDB:
                     import pdb
 
                     pdb.set_trace()
@@ -2077,9 +2112,14 @@ class Worker(ServerNode):
 
                     if not busy and d not in data and d in self.dependents:
                         self.log.append(("missing-dep", d))
-                        self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
-                        )
+                        for bs in self.batched_streams.values():
+                            bs.send(
+                                {
+                                    "op": "missing-data",
+                                    "errant_worker": worker,
+                                    "key": d,
+                                }
+                            )
 
                 if self.validate:
                     self.validate_state()
@@ -2192,7 +2232,7 @@ class Worker(ServerNode):
         state = self.task_state.get(key, None)
 
         response = {"op": "steal-response", "key": key, "state": state}
-        self.batched_stream.send(response)
+        self.batched_streams[scheduler].send(response)
 
         if state in ("ready", "waiting", "constrained"):
             self.release_key(key)
@@ -2260,7 +2300,8 @@ class Worker(ServerNode):
                 del self.resource_restrictions[key]
 
             if report and state in PROCESSING:  # not finished
-                self.batched_stream.send({"op": "release", "key": key, "cause": cause})
+                for bs in self.batched_streams.values():
+                    bs.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, state, cause, reason, report)
         except CommClosedError:
@@ -2305,7 +2346,8 @@ class Worker(ServerNode):
                     self.release_key(key, cause=dep)
 
             if report and state == "memory":
-                self.batched_stream.send({"op": "release-worker-data", "keys": [dep]})
+                for bs in self.batched_streams.values():
+                    bs.send({"op": "release-worker-data", "keys": [dep]})
 
             self._notify_plugins("release_dep", dep, state, report)
         except Exception as e:
@@ -2475,7 +2517,8 @@ class Worker(ServerNode):
             emsg = error_message(e)
             emsg["key"] = key
             emsg["op"] = "task-erred"
-            self.batched_stream.send(emsg)
+            for bs in self.batched_streams.values():
+                bs.send(emsg)
             self.log.append((key, "deserialize-error"))
             raise
 
@@ -2562,7 +2605,7 @@ class Worker(ServerNode):
                         key,
                         self.active_threads,
                         self.active_threads_lock,
-                        self.scheduler_delay,
+                        self.scheduler_delays[first(self.who_wants[key])],
                     ),
                 )
             except RuntimeError as e:
@@ -2587,7 +2630,8 @@ class Worker(ServerNode):
                     self.digests["task-duration"].add(result["stop"] - result["start"])
             else:
                 if isinstance(result.pop("actual-exception"), Reschedule):
-                    self.batched_stream.send({"op": "reschedule", "key": key})
+                    for s in self.who_wants[key]:
+                        self.batched_streams[s].send({"op": "reschedule", "key": key})
                     self.transition(key, "rescheduled", report=False)
                     self.release_key(key, report=False)
                 else:
@@ -2732,7 +2776,7 @@ class Worker(ServerNode):
         return total
 
     def cycle_profile(self):
-        now = time() + self.scheduler_delay
+        now = time()
         prof, self.profile_recent = self.profile_recent, profile.create()
         self.profile_history.append((now, prof))
 
@@ -2775,7 +2819,7 @@ class Worker(ServerNode):
     async def get_profile(
         self, comm=None, start=None, stop=None, key=None, server=False
     ):
-        now = time() + self.scheduler_delay
+        now = time()
         if server:
             history = self.io_loop.profile
         elif key is None:
@@ -2818,7 +2862,7 @@ class Worker(ServerNode):
     async def get_profile_metadata(self, comm=None, start=0, stop=None):
         if stop is None:
             add_recent = True
-        now = time() + self.scheduler_delay
+        now = time()
         stop = stop or now
         start = start or 0
         result = {
