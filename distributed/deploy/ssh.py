@@ -275,18 +275,59 @@ def SSHCluster(
     worker_module: str, optional
         Python module to call to start the worker.
     remote_python: str, optional
-        Path to Python on remote nodes.
+        Path to Python on remote nodes. This can specified to use the
+        Python executable of a conda environment.
 
     Examples
     --------
+    The most relevant example is with a remote cluser you have SSH
+    access to as user ``foo``. Best practice is to generate a key-pair
+    following the `SSH keygen tutorial`_:
+
+    .. code:: bash
+
+       $ # Generate a key pair
+       $ ssh-keygen -t rsa -b 4096 -f ~/.ssh/dask-ssh -P ""
+       $ # Copy to remote machine
+       $ ssh-copy-id -i ~/.ssh/dask-ssh foo@machine
+
+    Now it's possible to login to ``machine`` without entering a
+    password via ``ssh -i ~/.ssh-dask-ssh foo@machine``.  Let's
+    create an ``SSHCluster``:
+
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
-    ...     ["localhost", "localhost", "localhost", "localhost"],
-    ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2},
-    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
-    ... )
+    ...     ["machine1", "machine1"],
+    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
+    ...     connect_options={"username": "foo", "client_keys": "~/.ssh/dask-ssh"})
     >>> client = Client(cluster)
+
+    This depends on a successful connection between the your machine
+    and the Dask scheduler. Firewalls can complicate this, which results in a
+    timeout because a connection can't be made. An alternative approach to
+    circumvent this issue is to start the Dask scheduler and it's workers on
+    the cluster, then port-forward the Dask scheduler and dashboard to your
+    local machine:
+
+    .. code:: bash
+
+       $ # Remote setup: Dask cluster with dask-scheduler and dask-worker
+       $ # (by default, scheduler uses port 8786 and dashboard at 8787
+       $
+       $ # On local machine, SSH & port forward into remote machine
+       $ ssh -L 8796:localhost:8786 -L 8797:localhost:8787 foo@machine
+       $
+       $ # In a separate shell (or https://stackoverflow.com/q/2241063)
+       $ python
+       >>> from distributed import Client
+       >>> client = Client("localhost:8796")
+       >>> # Perform simple computation on remote machine:
+       >>> client.submit(sum, [1, 2])
+
+    Now, all computation submitted to Dask scheduler will happen on the remote
+    cluster but development will take place on your local machine. The
+    dashboard will be available from the local machine at
+    ``http://localhost:8796`` to track the computation.
 
     An example using a different worker module, in particular the
     ``dask-cuda-worker`` command from the ``dask-cuda`` project.
@@ -304,6 +345,8 @@ def SSHCluster(
     dask.distributed.Scheduler
     dask.distributed.Worker
     asyncssh.connect
+
+    .. _SSH keygen tutorial: https://www.ssh.com/ssh/keygen/
     """
     if set(kwargs) & old_cluster_kwargs:
         from .old_ssh import SSHCluster as OldSSHCluster
