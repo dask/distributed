@@ -341,6 +341,7 @@ class Worker(ServerNode):
         self.dependents = dict()
         self.waiting_for_data = dict()
         self.who_has = dict()
+        self.who_wants = defaultdict(set)
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
@@ -1103,8 +1104,13 @@ class Worker(ServerNode):
         return self.close(*args, **kwargs)
 
     async def close(
-        self, report=True, timeout=10, nanny=True, executor_wait=True,
-        safe=False, scheduler=None,
+        self,
+        report=True,
+        timeout=10,
+        nanny=True,
+        executor_wait=True,
+        safe=False,
+        scheduler=None,
     ):
         with log_errors():
             if self.status in (Status.closed, Status.closing):
@@ -1350,10 +1356,10 @@ class Worker(ServerNode):
             for key in list(keys):
                 self.log.append((key, "delete"))
                 if key in self.task_state:
-                    self.release_key(key)
+                    self.release_key(key, scheduler=scheduler)
 
                 if key in self.dep_state:
-                    self.release_dep(key)
+                    self.release_dep(key, scheduler=scheduler)
 
             logger.debug("Deleted %d keys", len(keys))
         return "OK"
@@ -1393,6 +1399,7 @@ class Worker(ServerNode):
         **kwargs2,
     ):
         try:
+            self.who_wants[key].add(scheduler)
             if key in self.tasks:
                 state = self.task_state[key]
                 if state == "memory":
@@ -2194,6 +2201,12 @@ class Worker(ServerNode):
         try:
             if key not in self.task_state:
                 return
+            s = self.who_wants[key]
+            s.discard(scheduler)
+            if s:
+                return
+
+            del self.who_wants[key]
             state = self.task_state.pop(key)
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
@@ -2260,7 +2273,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def release_dep(self, dep, report=False):
+    def release_dep(self, dep, report=False, scheduler=None):
         try:
             if dep not in self.dep_state:
                 return

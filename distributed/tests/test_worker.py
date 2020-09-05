@@ -1647,3 +1647,15 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                 else:
                     assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_who_wants(c, s, w):
+    x = c.submit(inc, 1)
+    await x
+    assert w.who_wants[x.key] == {s.address}
+    del x
+    while w.tasks:
+        await asyncio.sleep(0.01)
+
+    assert not w.who_wants
