@@ -706,17 +706,20 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-            self.__class__.__name__,
-            self.address,
-            self.name,
-            self.status,
-            len(self.data),
-            len(self.executing),
-            self.nthreads,
-            len(self.ready),
-            len(self.in_flight_tasks),
-            len(self.waiting_for_data),
+        return (
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            % (
+                self.__class__.__name__,
+                self.address,
+                self.name,
+                self.status,
+                len(self.data),
+                len(self.executing),
+                self.nthreads,
+                len(self.ready),
+                len(self.in_flight_tasks),
+                len(self.waiting_for_data),
+            )
         )
 
     @property
@@ -856,7 +859,7 @@ class Worker(ServerNode):
         self.batched_stream.start(comm)
         self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
-        self.loop.add_callback(self.handle_scheduler, comm)
+        self.loop.add_callback(self.handle_scheduler, comm, self.scheduler.address)
 
     def _update_latency(self, latency):
         self.latency = latency * 0.05 + self.latency * 0.95
@@ -910,10 +913,12 @@ class Worker(ServerNode):
         else:
             logger.debug("Heartbeat skipped: channel busy")
 
-    async def handle_scheduler(self, comm):
+    async def handle_scheduler(self, comm, scheduler):
         try:
             await self.handle_stream(
-                comm, every_cycle=[self.ensure_communicating, self.ensure_computing]
+                comm,
+                every_cycle=[self.ensure_communicating, self.ensure_computing],
+                extra={"scheduler": scheduler},
             )
         except Exception as e:
             logger.exception(e)
@@ -1098,7 +1103,8 @@ class Worker(ServerNode):
         return self.close(*args, **kwargs)
 
     async def close(
-        self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
+        self, report=True, timeout=10, nanny=True, executor_wait=True,
+        safe=False, scheduler=None,
     ):
         with log_errors():
             if self.status in (Status.closed, Status.closing):
@@ -1339,7 +1345,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    def delete_data(self, comm=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True, scheduler=None):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1383,6 +1389,7 @@ class Worker(ServerNode):
         duration=None,
         resource_restrictions=None,
         actor=False,
+        scheduler=None,
         **kwargs2,
     ):
         try:
@@ -2174,7 +2181,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def steal_request(self, key):
+    def steal_request(self, key, scheduler=None):
         state = self.task_state.get(key, None)
 
         response = {"op": "steal-response", "key": key, "state": state}
@@ -2183,7 +2190,7 @@ class Worker(ServerNode):
         if state in ("ready", "waiting", "constrained"):
             self.release_key(key)
 
-    def release_key(self, key, cause=None, reason=None, report=True):
+    def release_key(self, key, cause=None, reason=None, report=True, scheduler=None):
         try:
             if key not in self.task_state:
                 return
