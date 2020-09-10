@@ -1341,14 +1341,15 @@ class Worker(ServerNode):
 
     def update_data(self, comm=None, data=None, report=True, serializers=None):
         for key, value in data.items():
-            if key in self.task_state:
+            ts = self.tasks[key]
+            if ts.state is not None:
                 self.transition(key, "memory", value=value)
             else:
                 self.put_key_in_memory(key, value)
-                self.task_state[key] = "memory"
-                self.tasks[key] = None
-                self.priorities[key] = None
-                self.durations[key] = None
+                ts.state = "memory"
+                # self.tasks[key] = None
+                ts.priority = None
+                ts.duration = None
                 self.dependencies[key] = set()
 
             if key in self.dep_state:
@@ -1365,7 +1366,7 @@ class Worker(ServerNode):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
-                if key in self.task_state:
+                if key in self.tasks:
                     self.release_key(key)
 
                 if key in self.dep_state:
@@ -2509,6 +2510,7 @@ class Worker(ServerNode):
                     break
             while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
+                ts = self.tasks[key]
                 if ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
@@ -2905,14 +2907,14 @@ class Worker(ServerNode):
 
     def validate_key(self, key):
         try:
-            state = self.task_state[key]
-            if state == "memory":
+            ts = self.tasks[key]
+            if ts.state == "memory":
                 self.validate_key_memory(key)
-            elif state == "waiting":
+            elif ts.state == "waiting":
                 self.validate_key_waiting(key)
-            elif state == "ready":
+            elif ts.state == "ready":
                 self.validate_key_ready(key)
-            elif state == "executing":
+            elif ts.state == "executing":
                 self.validate_key_executing(key)
         except Exception as e:
             logger.exception(e)
@@ -2939,8 +2941,8 @@ class Worker(ServerNode):
         assert dep in self.data or dep in self.actors
         assert dep in self.nbytes
         assert dep in self.types
-        if dep in self.task_state:
-            assert self.task_state[dep] == "memory"
+        if dep in self.tasks:
+            assert self.tasks[dep].state == "memory"
 
     def validate_dep(self, dep):
         try:
@@ -2973,7 +2975,7 @@ class Worker(ServerNode):
                 for k in keys:
                     assert worker in self.who_has[k]
 
-            for key in self.task_state:
+            for key in self.tasks:
                 self.validate_key(key)
 
             for dep in self.dep_state:
@@ -2988,11 +2990,11 @@ class Worker(ServerNode):
                             or self.who_has[dep].issubset(self.in_flight_workers)
                         )
 
-            for key in self.tasks:
-                if self.task_state[key] == "memory":
-                    assert isinstance(self.nbytes[key], int)
-                    assert key not in self.waiting_for_data
-                    assert key in self.data or key in self.actors
+            for ts in self.tasks.values():
+                if ts.state == "memory":
+                    assert isinstance(self.nbytes[ts.key], int)
+                    assert ts.key not in self.waiting_for_data
+                    assert ts.key in self.data or ts.key in self.actors
 
         except Exception as e:
             logger.exception(e)
