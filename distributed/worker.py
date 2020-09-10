@@ -90,6 +90,23 @@ DEFAULT_STARTUP_INFORMATION = {}
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
+class TaskState:
+    def __init__(self, key, run_spec):
+        self.key = key
+        #self.dependencies = ()
+        #self.dependents = ()
+        self.duration = None
+        self.priority = None
+        self.state = None
+        #self.dep_state = None
+        #self.who_has = None
+        #self.nbytes = None
+        self.resource_restrictions = None
+        #self.actor = None
+        self.exception = None
+        self.traceback = None
+        #self.type = None
+
 
 class Worker(ServerNode):
     """Worker node in a Dask distributed cluster
@@ -335,7 +352,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
-        self.task_state = dict()
+        #self.task_state = dict()
         self.dep_state = dict()
         self.dependencies = dict()
         self.dependents = dict()
@@ -364,8 +381,8 @@ class Worker(ServerNode):
         self.nbytes = dict()
         self.types = dict()
         self.threads = dict()
-        self.exceptions = dict()
-        self.tracebacks = dict()
+        #self.exceptions = dict()
+        #self.tracebacks = dict()
 
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
@@ -374,11 +391,11 @@ class Worker(ServerNode):
         self.profile_recent = profile.create()
         self.profile_history = deque(maxlen=3600)
 
-        self.priorities = dict()
+        #self.priorities = dict()
         self.generation = 0
-        self.durations = dict()
+        #self.durations = dict()
         self.startstops = defaultdict(list)
-        self.resource_restrictions = dict()
+        #self.resource_restrictions = dict()
 
         self.ready = list()
         self.constrained = deque()
@@ -1393,7 +1410,7 @@ class Worker(ServerNode):
                     logger.debug(
                         "Asked to compute pre-existing result: %s: %s", key, state
                     )
-                    self.send_task_state_to_scheduler(key)
+                    self.send_task_state_to_scheduler(ts)
                     return
                 if state in IN_PLAY:
                     return
@@ -1407,7 +1424,7 @@ class Worker(ServerNode):
 
             if self.dep_state.get(key) == "memory":
                 self.task_state[key] = "memory"
-                self.send_task_state_to_scheduler(key)
+                self.send_task_state_to_scheduler(ts)
                 self.tasks[key] = None
                 self.log.append((key, "new-task-already-in-memory"))
                 self.priorities[key] = priority
@@ -1584,37 +1601,38 @@ class Worker(ServerNode):
             self.put_key_in_memory(dep, value, transition=False)
 
     def transition(self, key, finish, **kwargs):
-        start = self.task_state[key]
+        ts = self.tasks[key]
+        start = ts.state
         if start == finish:
             return
         func = self._transitions[start, finish]
-        state = func(key, **kwargs)
+        state = func(ts, **kwargs)
         self.log.append((key, start, state or finish))
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
         self._notify_plugins("transition", key, start, state or finish, **kwargs)
 
-    def transition_waiting_ready(self, key):
+    def transition_waiting_ready(self, ts):
         try:
             if self.validate:
-                assert self.task_state[key] == "waiting"
-                assert key in self.waiting_for_data
-                assert not self.waiting_for_data[key]
+                assert ts.state == "waiting"
+                assert ts.key in self.waiting_for_data
+                assert not self.waiting_for_data[ts.key]
                 assert all(
                     dep in self.data or dep in self.actors
-                    for dep in self.dependencies[key]
+                    for dep in self.dependencies[ts.key]
                 )
-                assert key not in self.executing
-                assert key not in self.ready
+                assert ts.key not in self.executing
+                assert ts.key not in self.ready
 
-            self.waiting_for_data.pop(key, None)
+            self.waiting_for_data.pop(ts.key, None)
 
-            if key in self.resource_restrictions:
-                self.constrained.append(key)
+            if ts.resource_restrictions is not None:
+                self.constrained.append(ts.key)
                 return "constrained"
             else:
-                heapq.heappush(self.ready, (self.priorities[key], key))
+                heapq.heappush(self.ready, (ts.priority, ts.key))
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1623,16 +1641,16 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_waiting_done(self, key, value=None):
+    def transition_waiting_done(self, ts, value=None):
         try:
             if self.validate:
-                assert self.task_state[key] == "waiting"
-                assert key in self.waiting_for_data
-                assert key not in self.executing
-                assert key not in self.ready
+                assert ts.state == "waiting"
+                assert ts.key in self.waiting_for_data
+                assert ts.key not in self.executing
+                assert ts.key not in self.ready
 
-            del self.waiting_for_data[key]
-            self.send_task_state_to_scheduler(key)
+            del self.waiting_for_data[ts.key]
+            self.send_task_state_to_scheduler(ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1641,20 +1659,20 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_ready_executing(self, key):
+    def transition_ready_executing(self, ts):
         try:
             if self.validate:
-                assert key not in self.waiting_for_data
+                assert ts.key not in self.waiting_for_data
                 # assert key not in self.data
-                assert self.task_state[key] in READY
-                assert key not in self.ready
+                assert ts.state in READY
+                assert ts.key not in self.ready
                 assert all(
                     dep in self.data or dep in self.actors
-                    for dep in self.dependencies[key]
+                    for dep in self.dependencies[ts.key]
                 )
 
-            self.executing.add(key)
-            self.loop.add_callback(self.execute, key)
+            self.executing.add(ts.key)
+            self.loop.add_callback(self.execute, ts.key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1663,52 +1681,52 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_ready_memory(self, key, value=None):
-        self.send_task_state_to_scheduler(key)
+    def transition_ready_memory(self, ts, value=None):
+        self.send_task_state_to_scheduler(ts)
 
-    def transition_constrained_executing(self, key):
-        self.transition_ready_executing(key)
-        for resource, quantity in self.resource_restrictions[key].items():
+    def transition_constrained_executing(self, ts):
+        self.transition_ready_executing(ts)
+        for resource, quantity in ts.resource_restrictions.items():
             self.available_resources[resource] -= quantity
 
         if self.validate:
             assert all(v >= 0 for v in self.available_resources.values())
 
-    def transition_executing_done(self, key, value=no_value, report=True):
+    def transition_executing_done(self, ts, value=no_value, report=True):
         try:
             if self.validate:
-                assert key in self.executing or key in self.long_running
-                assert key not in self.waiting_for_data
-                assert key not in self.ready
+                assert ts.key in self.executing or ts.key in self.long_running
+                assert ts.key not in self.waiting_for_data
+                assert ts.key not in self.ready
 
             out = None
-            if key in self.resource_restrictions:
-                for resource, quantity in self.resource_restrictions[key].items():
+            if ts.resource_restrictions is not None:
+                for resource, quantity in ts.resource_restrictions.items():
                     self.available_resources[resource] += quantity
 
-            if self.task_state[key] == "executing":
-                self.executing.remove(key)
+            if ts.state == "executing":
+                self.executing.remove(ts.key)
                 self.executed_count += 1
-            elif self.task_state[key] == "long-running":
-                self.long_running.remove(key)
+            elif ts.state == "long-running":
+                self.long_running.remove(ts.key)
 
             if value is not no_value:
                 try:
-                    self.task_state[key] = "memory"
-                    self.put_key_in_memory(key, value, transition=False)
+                    ts.state = "memory"
+                    self.put_key_in_memory(ts.key, value, transition=False)
                 except Exception as e:
                     logger.info("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
-                    self.exceptions[key] = msg["exception"]
-                    self.tracebacks[key] = msg["traceback"]
-                    self.task_state[key] = "error"
+                    ts.exception = msg["exception"]
+                    ts.traceback = msg["traceback"]
+                    ts.state = "error"
                     out = "error"
 
-                if key in self.dep_state:
-                    self.transition_dep(key, "memory")
+                if ts.key in self.dep_state:
+                    self.transition_dep(ts.key, "memory")
 
             if report and self.batched_stream and self.status == Status.running:
-                self.send_task_state_to_scheduler(key)
+                self.send_task_state_to_scheduler(ts)
             else:
                 raise CommClosedError
 
@@ -1724,15 +1742,15 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_executing_long_running(self, key, compute_duration=None):
+    def transition_executing_long_running(self, ts, compute_duration=None):
         try:
             if self.validate:
-                assert key in self.executing
+                assert ts.key in self.executing
 
-            self.executing.remove(key)
-            self.long_running.add(key)
+            self.executing.remove(ts.key)
+            self.long_running.add(ts.key)
             self.batched_stream.send(
-                {"op": "long-running", "key": key, "compute_duration": compute_duration}
+                {"op": "long-running", "key": ts.key, "compute_duration": compute_duration}
             )
 
             self.ensure_computing()
@@ -1744,9 +1762,9 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def maybe_transition_long_running(self, key, compute_duration=None):
-        if self.task_state.get(key) == "executing":
-            self.transition(key, "long-running", compute_duration=compute_duration)
+    def maybe_transition_long_running(self, ts.key, compute_duration=None):
+        if ts.state == "executing":
+            self.transition(ts.key, "long-running", compute_duration=compute_duration)
 
     def stateof(self, key):
         return {
@@ -1792,7 +1810,8 @@ class Worker(ServerNode):
                     changed = True
                     continue
 
-                if self.task_state.get(key) != "waiting":
+                ts = self.tasks[key]
+                if ts.state != "waiting":
                     self.log.append((key, "communication pass"))
                     self.data_needed.popleft()
                     changed = True
@@ -1863,17 +1882,17 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def send_task_state_to_scheduler(self, key):
-        if key in self.data or self.actors.get(key):
-            nbytes = self.nbytes.get(key)
-            typ = self.types.get(key)
+    def send_task_state_to_scheduler(self, ts):
+        if ts.key in self.data or self.actors.get(ts.key):
+            nbytes = self.nbytes.get(ts.key)
+            typ = self.types.get(ts.key)
             if nbytes is None or typ is None:
                 try:
-                    value = self.data[key]
+                    value = self.data[ts.key]
                 except KeyError:
-                    value = self.actors[key]
-                nbytes = self.nbytes[key] = sizeof(value)
-                typ = self.types[key] = type(value)
+                    value = self.actors[ts.key]
+                nbytes = self.nbytes[ts.key] = sizeof(value)
+                typ = self.types[ts.key] = type(value)
                 del value
             try:
                 typ_serialized = dumps_function(typ)
@@ -1884,29 +1903,29 @@ class Worker(ServerNode):
             d = {
                 "op": "task-finished",
                 "status": "OK",
-                "key": key,
+                "key": ts.key,
                 "nbytes": nbytes,
-                "thread": self.threads.get(key),
+                "thread": self.threads.get(ts.key),
                 "type": typ_serialized,
                 "typename": typename(typ),
             }
-        elif key in self.exceptions:
+        elif ts.key in self.exceptions:
             d = {
                 "op": "task-erred",
                 "status": "error",
-                "key": key,
-                "thread": self.threads.get(key),
-                "exception": self.exceptions[key],
-                "traceback": self.tracebacks[key],
+                "key": ts.key,
+                "thread": self.threads.get(ts.key),
+                "exception": ts.exception,
+                "traceback": ts.traceback,
             }
         else:
             logger.error(
-                "Key not ready to send to worker, %s: %s", key, self.task_state[key]
+                "Key not ready to send to worker, %s: %s", ts.key, ts.state
             )
             return
 
-        if key in self.startstops:
-            d["startstops"] = self.startstops[key]
+        if ts.key in self.startstops:
+            d["startstops"] = self.startstops[ts.key]
         self.batched_stream.send(d)
 
     def put_key_in_memory(self, key, value, transition=True):
