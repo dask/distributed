@@ -569,12 +569,9 @@ async def test_clean(c, s, a, b):
 
     collections = [
         a.tasks,
-        a.task_state,
         a.startstops,
         a.data,
         a.nbytes,
-        a.durations,
-        a.priorities,
         a.types,
         a.threads,
     ]
@@ -584,7 +581,7 @@ async def test_clean(c, s, a, b):
     x.release()
     y.release()
 
-    while x.key in a.task_state:
+    while x.key in a.tasks:
         await asyncio.sleep(0.01)
 
     for c in collections:
@@ -639,16 +636,22 @@ async def test_system_monitor(s, a, b):
     client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}}), ("127.0.0.1", 1)]
 )
 async def test_restrictions(c, s, a, b):
+    # Worker has resource available
+    assert a.available_resources == {"A": 1}
     # Resource restrictions
     x = c.submit(inc, 1, resources={"A": 1})
     await x
-    assert a.resource_restrictions == {x.key: {"A": 1}}
+    ts = a.tasks[x.key]
+    assert ts.resource_restrictions == {"A": 1}
     await c._cancel(x)
 
-    while x.key in a.task_state:
+    while ts.state != "memory":
+        # Resource should be unavailable while task isn't finished
+        assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
 
-    assert a.resource_restrictions == {}
+    # Resource restored after task is in memory
+    assert a.available_resources["A"] == 1
 
 
 @pytest.mark.xfail

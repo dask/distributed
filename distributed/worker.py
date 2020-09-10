@@ -725,20 +725,17 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return (
-            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
-            % (
-                self.__class__.__name__,
-                self.address,
-                self.name,
-                self.status,
-                len(self.data),
-                len(self.executing),
-                self.nthreads,
-                len(self.ready),
-                len(self.in_flight_tasks),
-                len(self.waiting_for_data),
-            )
+        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
+            self.__class__.__name__,
+            self.address,
+            self.name,
+            self.status,
+            len(self.data),
+            len(self.executing),
+            self.nthreads,
+            len(self.ready),
+            len(self.in_flight_tasks),
+            len(self.waiting_for_data),
         )
 
     @property
@@ -1922,7 +1919,7 @@ class Worker(ServerNode):
                 "type": typ_serialized,
                 "typename": typename(typ),
             }
-        elif ts.key in self.exceptions:
+        elif ts.exception is not None:
             d = {
                 "op": "task-erred",
                 "status": "error",
@@ -2118,8 +2115,9 @@ class Worker(ServerNode):
         exc = ValueError("Could not find dependent %s.  Check worker logs" % str(dep))
         for key in self.dependents[dep]:
             msg = error_message(exc)
-            self.exceptions[key] = msg["exception"]
-            self.tracebacks[key] = msg["traceback"]
+            ts = self.tasks[key]
+            ts.exception = msg["exception"]
+            ts.traceback = msg["traceback"]
             self.transition(key, "error")
         self.release_dep(dep)
 
@@ -2457,9 +2455,10 @@ class Worker(ServerNode):
         return {"status": "OK", "result": to_serialize(value)}
 
     def meets_resource_constraints(self, key):
-        if key not in self.resource_restrictions:
+        ts = self.tasks[key]
+        if not ts.resource_restrictions:
             return True
-        for resource, needed in self.resource_restrictions[key].items():
+        for resource, needed in ts.resource_restrictions.items():
             if self.available_resources[resource] < needed:
                 return False
 
@@ -2510,8 +2509,8 @@ class Worker(ServerNode):
                     break
             while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
-                ts = self.tasks[key]
-                if ts.state in READY:
+                ts = self.tasks.get(key)
+                if getattr(ts, "state", None) in READY:
                     try:
                         # Ensure task is deserialized prior to execution
                         ts.runspec = self._maybe_deserialize_task(ts)
