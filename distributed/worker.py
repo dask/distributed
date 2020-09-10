@@ -90,22 +90,24 @@ DEFAULT_STARTUP_INFORMATION = {}
 
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
+
 class TaskState:
-    def __init__(self, key, run_spec):
+    def __init__(self, key, runspec=None):
         self.key = key
-        #self.dependencies = ()
-        #self.dependents = ()
+        self.runspec = runspec
+        # self.dependencies = ()
+        # self.dependents = ()
         self.duration = None
         self.priority = None
         self.state = None
-        #self.dep_state = None
-        #self.who_has = None
-        #self.nbytes = None
+        # self.dep_state = None
+        # self.who_has = None
+        # self.nbytes = None
         self.resource_restrictions = None
-        #self.actor = None
+        # self.actor = None
         self.exception = None
         self.traceback = None
-        #self.type = None
+        # self.type = None
 
 
 class Worker(ServerNode):
@@ -352,7 +354,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
-        #self.task_state = dict()
+        # self.task_state = dict()
         self.dep_state = dict()
         self.dependencies = dict()
         self.dependents = dict()
@@ -381,8 +383,8 @@ class Worker(ServerNode):
         self.nbytes = dict()
         self.types = dict()
         self.threads = dict()
-        #self.exceptions = dict()
-        #self.tracebacks = dict()
+        # self.exceptions = dict()
+        # self.tracebacks = dict()
 
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
@@ -391,11 +393,11 @@ class Worker(ServerNode):
         self.profile_recent = profile.create()
         self.profile_history = deque(maxlen=3600)
 
-        #self.priorities = dict()
+        # self.priorities = dict()
         self.generation = 0
-        #self.durations = dict()
+        # self.durations = dict()
         self.startstops = defaultdict(list)
-        #self.resource_restrictions = dict()
+        # self.resource_restrictions = dict()
 
         self.ready = list()
         self.constrained = deque()
@@ -723,17 +725,20 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-            self.__class__.__name__,
-            self.address,
-            self.name,
-            self.status,
-            len(self.data),
-            len(self.executing),
-            self.nthreads,
-            len(self.ready),
-            len(self.in_flight_tasks),
-            len(self.waiting_for_data),
+        return (
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            % (
+                self.__class__.__name__,
+                self.address,
+                self.name,
+                self.status,
+                len(self.data),
+                len(self.executing),
+                self.nthreads,
+                len(self.ready),
+                len(self.in_flight_tasks),
+                len(self.waiting_for_data),
+            )
         )
 
     @property
@@ -1404,58 +1409,61 @@ class Worker(ServerNode):
     ):
         try:
             if key in self.tasks:
-                state = self.task_state[key]
-                if state == "memory":
+                ts = self.tasks[key]
+                if ts.state == "memory":
                     assert key in self.data or key in self.actors
                     logger.debug(
-                        "Asked to compute pre-existing result: %s: %s", key, state
+                        "Asked to compute pre-existing result: %s: %s", key, ts.state
                     )
                     self.send_task_state_to_scheduler(ts)
                     return
-                if state in IN_PLAY:
+                if ts.state in IN_PLAY:
                     return
-                if state == "erred":
-                    del self.exceptions[key]
-                    del self.tracebacks[key]
+                if ts.state == "erred":
+                    ts.exception = None
+                    ts.traceback = None
+            else:
+                self.log.append((key, "new"))
+                self.tasks[key] = ts = TaskState(
+                    key=key, runspec=SerializedTask(function, args, kwargs, task)
+                )
 
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
                 self.generation -= 1
 
-            if self.dep_state.get(key) == "memory":
-                self.task_state[key] = "memory"
+            if self.dep_state.get(ts.key) == "memory":
+                ts.state = "memory"
                 self.send_task_state_to_scheduler(ts)
-                self.tasks[key] = None
-                self.log.append((key, "new-task-already-in-memory"))
-                self.priorities[key] = priority
-                self.durations[key] = duration
+                self.tasks[ts.key] = None
+                self.log.append((ts.key, "new-task-already-in-memory"))
+                ts.priority = priority
+                ts.duration = duration
                 return
 
-            self.log.append((key, "new"))
-            self.tasks[key] = SerializedTask(function, args, kwargs, task)
             if actor:
-                self.actors[key] = None
+                self.actors[ts.key] = None
 
-            self.priorities[key] = priority
-            self.durations[key] = duration
+            ts.priority = priority
+            ts.duration = duration
             if resource_restrictions:
-                self.resource_restrictions[key] = resource_restrictions
-            self.task_state[key] = "waiting"
+                ts.resource_restrictions = resource_restrictions
+            ts.state = "waiting"
 
             if nbytes is not None:
                 self.nbytes.update(nbytes)
 
             who_has = who_has or {}
-            self.dependencies[key] = set(who_has)
-            self.waiting_for_data[key] = set()
+            self.dependencies[ts.key] = set(who_has)
+            self.waiting_for_data[ts.key] = set()
 
             for dep in who_has:
                 if dep not in self.dependents:
                     self.dependents[dep] = set()
-                self.dependents[dep].add(key)
+                self.dependents[dep].add(ts.key)
 
                 if dep not in self.dep_state:
-                    if self.task_state.get(dep) == "memory":
+                    if getattr(self.tasks.get(dep), "state", None) == "memory":
                         state = "memory"
                     else:
                         state = "waiting"
@@ -1463,7 +1471,7 @@ class Worker(ServerNode):
                     self.log.append((dep, "new-dep", state))
 
                 if self.dep_state[dep] != "memory":
-                    self.waiting_for_data[key].add(dep)
+                    self.waiting_for_data[ts.key].add(dep)
 
             for dep, workers in who_has.items():
                 assert workers
@@ -1476,17 +1484,17 @@ class Worker(ServerNode):
                     if self.dep_state[dep] != "memory":
                         self.pending_data_per_worker[worker].append(dep)
 
-            if self.waiting_for_data[key]:
-                self.data_needed.append(key)
+            if self.waiting_for_data[ts.key]:
+                self.data_needed.append(ts.key)
             else:
-                self.transition(key, "ready")
+                self.transition(ts.key, "ready")
             if self.validate:
                 if who_has:
                     assert all(dep in self.dep_state for dep in who_has)
                     assert all(dep in self.nbytes for dep in who_has)
                     for dep in who_has:
                         self.validate_dep(dep)
-                    self.validate_key(key)
+                    self.validate_key(ts.key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1546,7 +1554,7 @@ class Worker(ServerNode):
                     self._missing_dep_flight.add(dep)
                     self.loop.add_callback(self.handle_missing_dep, dep)
             for key in self.dependents.get(dep, ()):
-                if self.task_state[key] == "waiting":
+                if self.tasks[key].state == "waiting":
                     if remove:  # try a new worker immediately
                         self.data_needed.appendleft(key)
                     else:  # worker was probably busy, wait a while
@@ -1589,7 +1597,7 @@ class Worker(ServerNode):
                 assert dep in self.data
                 assert dep in self.nbytes
                 assert dep in self.types
-                assert self.task_state[dep] == "memory"
+                assert self.tasks[dep].state == "memory"
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1608,7 +1616,7 @@ class Worker(ServerNode):
         func = self._transitions[start, finish]
         state = func(ts, **kwargs)
         self.log.append((key, start, state or finish))
-        self.task_state[key] = state or finish
+        ts.state = state or finish
         if self.validate:
             self.validate_key(key)
         self._notify_plugins("transition", key, start, state or finish, **kwargs)
@@ -1750,7 +1758,11 @@ class Worker(ServerNode):
             self.executing.remove(ts.key)
             self.long_running.add(ts.key)
             self.batched_stream.send(
-                {"op": "long-running", "key": ts.key, "compute_duration": compute_duration}
+                {
+                    "op": "long-running",
+                    "key": ts.key,
+                    "compute_duration": compute_duration,
+                }
             )
 
             self.ensure_computing()
@@ -1762,7 +1774,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def maybe_transition_long_running(self, ts.key, compute_duration=None):
+    def maybe_transition_long_running(self, ts, compute_duration=None):
         if ts.state == "executing":
             self.transition(ts.key, "long-running", compute_duration=compute_duration)
 
@@ -1919,9 +1931,7 @@ class Worker(ServerNode):
                 "traceback": ts.traceback,
             }
         else:
-            logger.error(
-                "Key not ready to send to worker, %s: %s", ts.key, ts.state
-            )
+            logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
             return
 
         if ts.key in self.startstops:
@@ -1956,7 +1966,7 @@ class Worker(ServerNode):
                 if not self.waiting_for_data[dep]:
                     self.transition(dep, "ready")
 
-        if transition and key in self.task_state:
+        if transition and key in self.tasks:
             self.transition(key, "memory")
 
         self.log.append((key, "put-in-memory"))
@@ -2194,7 +2204,7 @@ class Worker(ServerNode):
             raise
 
     def steal_request(self, key):
-        state = self.task_state.get(key, None)
+        state = getattr(self.tasks.get(key, None), "state", None)
 
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
@@ -2204,14 +2214,13 @@ class Worker(ServerNode):
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
-            if key not in self.task_state:
+            if key not in self.tasks:
                 return
-            state = self.task_state.pop(key)
+            ts = self.tasks.pop(key)
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
                 self.log.append((key, "release-key"))
-            del self.tasks[key]
             if key in self.data and key not in self.dep_state:
                 try:
                     del self.data[key]
@@ -2238,13 +2247,13 @@ class Worker(ServerNode):
 
             if key in self.threads:
                 del self.threads[key]
-            del self.priorities[key]
-            del self.durations[key]
+            # del self.priorities[key]
+            # del self.durations[key]
 
-            if key in self.exceptions:
-                del self.exceptions[key]
-            if key in self.tracebacks:
-                del self.tracebacks[key]
+            # if key in self.exceptions:
+            #    del self.exceptions[key]
+            # if key in self.tracebacks:
+            #    del self.tracebacks[key]
 
             if key in self.startstops:
                 del self.startstops[key]
@@ -2252,16 +2261,16 @@ class Worker(ServerNode):
             if key in self.executing:
                 self.executing.remove(key)
 
-            if key in self.resource_restrictions:
-                if state == "executing":
-                    for resource, quantity in self.resource_restrictions[key].items():
+            if ts.resource_restrictions is not None:
+                if ts.state == "executing":
+                    for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
-                del self.resource_restrictions[key]
+                # del self.resource_restrictions[key]
 
-            if report and state in PROCESSING:  # not finished
+            if report and ts.state in PROCESSING:  # not finished
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
-            self._notify_plugins("release_key", key, state, cause, reason, report)
+            self._notify_plugins("release_key", key, ts.state, cause, reason, report)
         except CommClosedError:
             pass
         except Exception as e:
@@ -2286,7 +2295,7 @@ class Worker(ServerNode):
                 for worker in self.who_has.pop(dep):
                     self.has_what[worker].remove(dep)
 
-            if dep not in self.task_state:
+            if dep not in self.tasks:
                 if dep in self.data:
                     del self.data[dep]
                     del self.types[dep]
@@ -2300,7 +2309,7 @@ class Worker(ServerNode):
                 self.in_flight_workers[worker].remove(dep)
 
             for key in self.dependents.pop(dep, ()):
-                if self.task_state[key] != "memory":
+                if self.tasks[key].state != "memory":
                     self.release_key(key, cause=dep)
 
             if report and state == "memory":
@@ -2317,9 +2326,8 @@ class Worker(ServerNode):
 
     def rescind_key(self, key):
         try:
-            if self.task_state.get(key) not in PENDING:
+            if self.tasks[key].state not in PENDING:
                 return
-            del self.task_state[key]
             del self.tasks[key]
             if key in self.waiting_for_data:
                 del self.waiting_for_data[key]
@@ -2329,13 +2337,13 @@ class Worker(ServerNode):
                 if not self.dependents[dep]:
                     del self.dependents[dep]
 
-            if key not in self.dependents:
-                # if key in self.nbytes:
-                #     del self.nbytes[key]
-                if key in self.priorities:
-                    del self.priorities[key]
-                if key in self.durations:
-                    del self.durations[key]
+            # if key not in self.dependents:
+            #    # if key in self.nbytes:
+            #    #     del self.nbytes[key]
+            #    if key in self.priorities:
+            #        del self.priorities[key]
+            #    if key in self.durations:
+            #        del self.durations[key]
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2456,26 +2464,27 @@ class Worker(ServerNode):
 
         return True
 
-    def _maybe_deserialize_task(self, key):
-        if not isinstance(self.tasks[key], SerializedTask):
-            return self.tasks[key]
+    def _maybe_deserialize_task(self, ts):
+        # TODO: Finish this
+        if not isinstance(ts.runspec, SerializedTask):
+            return ts.runspec
         try:
             start = time()
-            function, args, kwargs = _deserialize(*self.tasks[key])
+            function, args, kwargs = _deserialize(*ts.runspec)
             stop = time()
 
             if stop - start > 0.010:
-                self.startstops[key].append(
+                self.startstops[ts.key].append(
                     {"action": "deserialize", "start": start, "stop": stop}
                 )
             return function, args, kwargs
         except Exception as e:
             logger.warning("Could not deserialize task", exc_info=True)
             emsg = error_message(e)
-            emsg["key"] = key
+            emsg["key"] = ts.key
             emsg["op"] = "task-erred"
             self.batched_stream.send(emsg)
-            self.log.append((key, "deserialize-error"))
+            self.log.append((ts.key, "deserialize-error"))
             raise
 
     def ensure_computing(self):
@@ -2484,14 +2493,15 @@ class Worker(ServerNode):
         try:
             while self.constrained and len(self.executing) < self.nthreads:
                 key = self.constrained[0]
-                if self.task_state.get(key) != "constrained":
+                ts = self.tasks[key]
+                if ts.state != "constrained":
                     self.constrained.popleft()
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
                     try:
                         # Ensure task is deserialized prior to execution
-                        self.tasks[key] = self._maybe_deserialize_task(key)
+                        ts.runspec = self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(key, "executing")
@@ -2499,10 +2509,10 @@ class Worker(ServerNode):
                     break
             while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
-                if self.task_state.get(key) in READY:
+                if ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
-                        self.tasks[key] = self._maybe_deserialize_task(key)
+                        ts.runspec = self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(key, "executing")
@@ -2519,17 +2529,18 @@ class Worker(ServerNode):
         if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
             return
         try:
-            if key not in self.executing or key not in self.task_state:
+            if key not in self.executing or key not in self.tasks:
                 return
+            ts = self.tasks[key]
             if self.validate:
-                assert key not in self.waiting_for_data
-                assert self.task_state[key] == "executing"
+                assert ts.key not in self.waiting_for_data
+                assert ts.state == "executing"
 
-            function, args, kwargs = self.tasks[key]
+            function, args, kwargs = ts.runspec
 
             start = time()
             data = {}
-            for k in self.dependencies[key]:
+            for k in self.dependencies[ts.key]:
                 try:
                     data[k] = self.data[k]
                 except KeyError:
@@ -2547,7 +2558,7 @@ class Worker(ServerNode):
                     self.digests["disk-load-duration"].add(stop - start)
 
             logger.debug(
-                "Execute key: %s worker: %s", key, self.address
+                "Execute key: %s worker: %s", ts.key, self.address
             )  # TODO: comment out?
             try:
                 result = await self.executor_submit(
@@ -2568,30 +2579,30 @@ class Worker(ServerNode):
                 executor_error = e
                 raise
 
-            if self.task_state.get(key) not in ("executing", "long-running"):
+            if ts.state not in ("executing", "long-running"):
                 return
 
-            result["key"] = key
+            result["key"] = ts.key
             value = result.pop("result", None)
             self.startstops[key].append(
                 {"action": "compute", "start": result["start"], "stop": result["stop"]}
             )
-            self.threads[key] = result["thread"]
+            self.threads[ts.key] = result["thread"]
 
             if result["op"] == "task-finished":
-                self.nbytes[key] = result["nbytes"]
-                self.types[key] = result["type"]
+                self.nbytes[ts.key] = result["nbytes"]
+                self.types[ts.key] = result["type"]
                 self.transition(key, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
             else:
                 if isinstance(result.pop("actual-exception"), Reschedule):
-                    self.batched_stream.send({"op": "reschedule", "key": key})
-                    self.transition(key, "rescheduled", report=False)
-                    self.release_key(key, report=False)
+                    self.batched_stream.send({"op": "reschedule", "key": ts.key})
+                    self.transition(ts.key, "rescheduled", report=False)
+                    self.release_key(ts.key, report=False)
                 else:
-                    self.exceptions[key] = result["exception"]
-                    self.tracebacks[key] = result["traceback"]
+                    ts.exception = result["exception"]
+                    ts.traceback = result["traceback"]
                     logger.warning(
                         " Compute Failed\n"
                         "Function:  %s\n"
@@ -2603,13 +2614,13 @@ class Worker(ServerNode):
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
                     )
-                    self.transition(key, "error")
+                    self.transition(ts.key, "error")
 
-            logger.debug("Send compute response to scheduler: %s, %s", key, result)
+            logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
             if self.validate:
-                assert key not in self.executing
-                assert key not in self.waiting_for_data
+                assert ts.key not in self.executing
+                assert ts.key not in self.waiting_for_data
 
             self.ensure_computing()
             self.ensure_communicating()
@@ -2624,8 +2635,8 @@ class Worker(ServerNode):
                     pdb.set_trace()
                 raise
         finally:
-            if key in self.executing:
-                self.executing.remove(key)
+            if ts.key in self.executing:
+                self.executing.remove(ts.key)
 
     ##################
     # Administrative #
