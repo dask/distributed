@@ -1,6 +1,6 @@
 import pytest
 
-from distributed import Client, LocalCluster, Worker, WorkerPlugin
+from distributed import Worker, WorkerPlugin
 from distributed.utils_test import async_wait_for, gen_cluster, inc
 
 
@@ -136,8 +136,8 @@ async def test_release_dep_called(c, s, w):
     await async_wait_for(lambda: not (w.task_state or w.dep_state), timeout=10)
 
 
-@pytest.mark.asyncio
-async def test_registering_with_name_arg():
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_registering_with_name_arg(c, s, w):
     class FooWorkerPlugin:
         def setup(self, worker):
             if hasattr(worker, "foo"):
@@ -145,20 +145,10 @@ async def test_registering_with_name_arg():
 
             worker.foo = True
 
-    async with LocalCluster(
-        1,
-        scheduler_port=0,
-        processes=False,
-        silence_logs=False,
-        dashboard_address=None,
-        asynchronous=True,
-    ) as cluster, Client(cluster, asynchronous=True) as c:
-        responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-        assert list(responses.values()) == [{"status": "OK"}]
+    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
+    assert list(responses.values()) == [{"status": "OK"}]
 
-        cluster.scale(2)
-        await cluster
-
+    async with Worker(s.address, loop=s.loop):
         responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
         assert list(responses.values()) == [{"status": "repeat"}] * 2
 
