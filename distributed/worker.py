@@ -14,7 +14,6 @@ from pickle import PicklingError
 import random
 import threading
 import sys
-import uuid
 import warnings
 import weakref
 
@@ -46,6 +45,7 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     get_ip,
+    get_plugin_name,
     typename,
     has_arg,
     _maybe_complex,
@@ -845,8 +845,8 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(plugin=plugin)
-                    for plugin in response["worker-plugins"]
+                    self.plugin_add(plugin=plugin, name=name)
+                    for name, plugin in response["worker-plugins"].items()
                 ]
             )
 
@@ -2369,13 +2369,8 @@ class Worker(ServerNode):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
-            if not name:
-                if hasattr(plugin, "name"):
-                    name = plugin.name
-                else:
-                    name = funcname(plugin) + "-" + str(uuid.uuid4())
-
-            assert name
+            if name is None:
+                name = get_plugin_name(plugin)
 
             if name in self.plugins:
                 return {"status": "repeat"}

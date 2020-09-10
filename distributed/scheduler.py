@@ -57,6 +57,7 @@ from .security import Security
 from .utils import (
     All,
     get_fileno_limit,
+    get_plugin_name,
     log_errors,
     key_split,
     validate_key,
@@ -1291,7 +1292,7 @@ class Scheduler(ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
-        self.worker_plugins = []
+        self.worker_plugins = {}
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3844,7 +3845,10 @@ class Scheduler(ServerNode):
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
-        self.worker_plugins.append(plugin)
+        if name is None:
+            name = get_plugin_name(plugin)
+
+        self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
