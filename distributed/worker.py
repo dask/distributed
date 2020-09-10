@@ -1341,11 +1341,11 @@ class Worker(ServerNode):
 
     def update_data(self, comm=None, data=None, report=True, serializers=None):
         for key, value in data.items():
-            ts = self.tasks[key]
-            if ts.state is not None:
+            if key in self.tasks:
                 self.transition(key, "memory", value=value)
             else:
                 self.put_key_in_memory(key, value)
+                self.tasks[key] = ts = TaskState(key)
                 ts.state = "memory"
                 # self.tasks[key] = None
                 ts.priority = None
