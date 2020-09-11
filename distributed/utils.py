@@ -22,7 +22,6 @@ import inspect
 import sys
 import tempfile
 import threading
-import uuid
 import warnings
 import weakref
 import pkgutil
@@ -1608,9 +1607,3 @@ def clean_dashboard_address(addr, default_listen_ip=""):
         port = addr
 
     return {"address": host, "port": port}
-
-
-def get_plugin_name(plugin):
-    if hasattr(plugin, "name"):
-        return plugin.name
-    return funcname(plugin) + "-" + str(uuid.uuid4())
