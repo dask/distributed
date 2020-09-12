@@ -1,6 +1,36 @@
 Changelog
 =========
 
+2.26.0 - 2020-09-11
+-------------------
+
+- Add logging for adaptive start and stop (:pr:`4101`) `Matthew Rocklin`_
+- Don't close a nannied worker if it hasn't yet started (:pr:`4093`) `Matthew Rocklin`_
+- Respect timeouts when closing clients synchronously (:pr:`4096`) `Matthew Rocklin`_
+- Log when downloading a preload script (:pr:`4094`) `Matthew Rocklin`_
+- ``dask-worker --nprocs`` accepts negative values (:pr:`4089`) `Dror Speiser`_
+- Support zero-worker clients (:pr:`4090`) `Matthew Rocklin`_
+- Exclude ``fire-and-forget`` client from metrics (:pr:`4078`) `Tom Augspurger`_
+- Drop ``Serialized.deserialize()`` method (:pr:`4073`) `jakirkham`_
+- Add ``timeout=`` keyword to ``Client.wait_for_workers`` method (:pr:`4087`) `Matthew Rocklin`_
+
+
+2.25.0 - 2020-08-28
+-------------------
+
+- Update for black (:pr:`4081`) `Tom Augspurger`_
+- Provide informative error when connecting an older version of Dask (:pr:`4076`) `Matthew Rocklin`_
+- Simplify ``pack_frames`` (:pr:`4068`) `jakirkham`_
+- Simplify ``frame_split_size`` (:pr:`4067`) `jakirkham`_
+- Use ``list.insert`` to add prelude up front (:pr:`4066`) `jakirkham`_
+- Graph helper text (:pr:`4064`) `Julia Signell`_
+- Graph dashboard: Reset container data if task number is too large (:pr:`4056`) `Florian Jetter`_
+- Ensure semaphore picks correct ``IOLoop`` for threadpool workers (:pr:`4060`) `Florian Jetter`_
+- Add cluster log method (:pr:`4051`) `Jacob Tomlinson`_
+- Cleanup more exception tracebacks (:pr:`4054`) `Krishan Bhasin`_
+- Improve documentation of ``scheduler.locks`` options (:pr:`4062`) `Florian Jetter`_
+
+
 2.24.0 - 2020-08-22
 -------------------
 
@@ -1923,3 +1953,4 @@ significantly without many new features.
 .. _`Jack Xiaosong Xu`: https://github.com/jackxxu
 .. _`Willi Rath`: https://github.com/willirath
 .. _`Roberto Panai`: https://github.com/rpanai
+.. _`Dror Speiser`: https://github.com/drorspei

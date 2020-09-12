@@ -1028,13 +1028,6 @@ class Client:
                     **self._startup_kwargs,
                 )
 
-            # Wait for all workers to be ready
-            # XXX should be a LocalCluster method instead
-            while not self.cluster.workers or len(self.cluster.scheduler.workers) < len(
-                self.cluster.workers
-            ):
-                await asyncio.sleep(0.01)
-
             address = self.cluster.scheduler_address
 
         self._gather_semaphore = asyncio.Semaphore(5)
@@ -1157,15 +1150,24 @@ class Client:
         except EnvironmentError:
             logger.debug("Not able to query scheduler for identity")
 
-    async def _wait_for_workers(self, n_workers=0):
+    async def _wait_for_workers(self, n_workers=0, timeout=None):
         info = await self.scheduler.identity()
+        if timeout:
+            deadline = time() + parse_timedelta(timeout)
+        else:
+            deadline = None
         while n_workers and len(info["workers"]) < n_workers:
+            if deadline and time() > deadline:
+                raise TimeoutError(
+                    "Only %d/%d workers arrived after %s"
+                    % (len(info["workers"]), n_workers, timeout)
+                )
             await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
 
-    def wait_for_workers(self, n_workers=0):
+    def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing"""
-        return self.sync(self._wait_for_workers, n_workers)
+        return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
         if self.scheduler_comm:
@@ -1427,7 +1429,7 @@ class Client:
 
                     self.sync(_)
 
-        sync(self.loop, self._close, fast=True)
+        sync(self.loop, self._close, fast=True, callback_timeout=timeout)
 
         assert self.status == "closed"
 
@@ -4815,7 +4817,8 @@ def _close_global_client():
     c = _get_global_client()
     if c is not None:
         c._should_close_loop = False
-        c.close(timeout=2)
+        with suppress(TimeoutError):
+            c.close(timeout=2)
 
 
 atexit.register(_close_global_client)
