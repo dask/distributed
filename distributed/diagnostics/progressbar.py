@@ -314,9 +314,7 @@ class MultiProgressWidget(MultiProgressBar):
         complete=False,
         **kwargs,
     ):
-        super().__init__(
-            keys, scheduler, func, interval, complete
-        )
+        super().__init__(keys, scheduler, func, interval, complete)
         from ipywidgets import VBox
 
         self.widget = VBox([])
