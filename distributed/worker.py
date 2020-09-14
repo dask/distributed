@@ -93,6 +93,7 @@ SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "ta
 
 class TaskState:
     def __init__(self, key, runspec=None):
+        assert key is not None
         self.key = key
         self.runspec = runspec
         self.dependencies = set()
@@ -100,7 +101,7 @@ class TaskState:
         self.duration = None
         self.priority = None
         self.state = None
-        self.who_has = dict()
+        self.who_has = set()
         # self.nbytes = None
         self.resource_restrictions = None
         # self.actor = None
@@ -1340,8 +1341,8 @@ class Worker(ServerNode):
             if key in self.tasks:
                 self.transition(key, "memory", value=value)
             else:
-                self.put_key_in_memory(key, value)
                 self.tasks[key] = ts = TaskState(key)
+                self.put_key_in_memory(key, value)
                 ts.state = "memory"
                 ts.priority = None
                 ts.duration = None
@@ -1439,26 +1440,27 @@ class Worker(ServerNode):
             #    msg["who_has"] = {
             #        dep.key: [ws.address for ws in dep.who_has] for dep in deps
             #    }
-            for dep, workers in who_has.items():
+            # dep -> dependency (parent)
+            for parent, workers in who_has.items():
                 assert workers
-                if dep not in self.tasks:
-                    self.tasks[dep] = dep_ts = TaskState(key=dep)
+                if parent not in self.tasks:
+                    self.tasks[parent] = dep_ts = TaskState(key=parent)
                     dep_ts.state = "waiting"
 
-                dep_ts = self.tasks[dep]
-                self.log.append((dep, "new-dep", dep_ts.state))
+                dep_ts = self.tasks[parent]
+                self.log.append((parent, "new-dep", dep_ts.state))
 
                 if dep_ts.state != "memory":
-                    self.waiting_for_data[ts.key].add(dep)
+                    self.waiting_for_data[ts.key].add(parent)
 
-                dep_ts.who_has.update({dep:workers})
+                dep_ts.who_has.update(workers)
 
                 ts.dependencies.add(dep_ts)
 
                 for worker in workers:
-                    self.has_what[worker].add(dep)
+                    self.has_what[worker].add(parent)
                     if dep_ts.state != "memory":
-                        self.pending_data_per_worker[worker].append(dep)
+                        self.pending_data_per_worker[worker].append(parent)
 
             if self.waiting_for_data[ts.key]:
                 self.data_needed.append(ts.key)
@@ -1466,7 +1468,7 @@ class Worker(ServerNode):
                 self.transition(ts.key, "ready")
             if self.validate:
                 if who_has:
-                    assert all(dep in ts.dependencies for dep in who_has)
+                    assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
                     assert all(dep in self.nbytes for dep in who_has)
                     for dep_ts in ts.dependencies:
                         self.validate_dep(dep_ts)
@@ -1481,7 +1483,8 @@ class Worker(ServerNode):
 
     def transition_dep(self, dep, finish, **kwargs):
         try:
-            start = self.tasks[dep].state
+            ts = self.tasks[dep]
+            start = ts.state
         except KeyError:
             return
         if start == finish:
@@ -1490,9 +1493,9 @@ class Worker(ServerNode):
         state = func(dep, **kwargs)
         self.log.append(("dep", dep, start, state or finish))
         if dep in self.tasks:
-            self.tasks[dep].state = state or finish
+            ts.state = state or finish
             if self.validate:
-                self.validate_dep(dep)
+                self.validate_dep(ts)
 
     def transition_dep_waiting_flight(self, dep, worker=None):
         try:
@@ -1853,7 +1856,7 @@ class Worker(ServerNode):
                         worker = random.choice(local)
                     else:
                         worker = random.choice(list(workers))
-                    to_gather, total_nbytes = self.select_keys_for_gather(worker, dep)
+                    to_gather, total_nbytes = self.select_keys_for_gather(worker, dep.key)
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
@@ -1950,7 +1953,7 @@ class Worker(ServerNode):
                 if not self.waiting_for_data[dep.key]:
                     self.transition(dep.key, "ready")
 
-        if transition and key in self.tasks:
+        if transition and ts.state is not None:
             self.transition(key, "memory")
 
         self.log.append((key, "put-in-memory"))
@@ -1963,7 +1966,7 @@ class Worker(ServerNode):
 
         while L:
             d = L.popleft()
-            if self.tasks[d].state != "waiting":
+            if getattr(self.tasks.get(d), "state", None) != "waiting":
                 continue
             if total_bytes + self.nbytes[d] > self.target_message_size:
                 break
@@ -2075,15 +2078,14 @@ class Worker(ServerNode):
                 data = response.get("data", {})
 
                 for d in self.in_flight_workers.pop(worker):
-                    ts = self.tasks[d]
                     if not busy and d in data:
                         self.transition_dep(d, "memory", value=data[d])
-                    elif ts.state != "memory":
+                    elif getattr(self.tasks.get(d), "state", None) != "memory":
                         self.transition_dep(
                             d, "waiting", worker=worker, remove=not busy
                         )
 
-                    if not busy and d not in data and ts.dependents:
+                    if not busy and d not in data and getattr(self.tasks.get(d), "dependents", None):
                         self.log.append(("missing-dep", d))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
@@ -2103,7 +2105,7 @@ class Worker(ServerNode):
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
                     # See if anyone new has the data
-                    await self.query_who_has(dep)
+                    await self.query_who_has(dep.key)
                     self.ensure_communicating()
 
     def bad_dep(self, dep):
