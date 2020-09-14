@@ -3194,7 +3194,7 @@ def secede():
     duration = time() - thread_state.start_time
     worker.loop.add_callback(
         worker.maybe_transition_long_running,
-        thread_state.key,
+        worker.tasks[thread_state.key],
         compute_duration=duration,
     )
 

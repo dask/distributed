@@ -384,7 +384,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     await wait(futures)
 
     result = await c.submit(sum, futures, workers=a.address)
-    for dep in set(a.dep_state) - set(a.task_state):
+    for dep in set(a.dep_state) - set(a.tasks):
         a.release_dep(dep, report=True)
 
     n_worker_address = n.worker_address
