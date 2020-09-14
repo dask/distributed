@@ -100,8 +100,7 @@ class TaskState:
         self.duration = None
         self.priority = None
         self.state = None
-        # self.dep_state = None
-        # self.who_has = None
+        self.who_has = dict()
         # self.nbytes = None
         self.resource_restrictions = None
         # self.actor = None
@@ -355,11 +354,11 @@ class Worker(ServerNode):
     ):
         self.tasks = dict()
         # self.task_state = dict()
-        self.dep_state = dict()
-        self.dependencies = dict()
-        self.dependents = dict()
+        #self.dep_state = dict()
+        #self.dependencies = dict()
+        #self.dependents = dict()
         self.waiting_for_data = dict()
-        self.who_has = dict()
+        #self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
@@ -1452,7 +1451,7 @@ class Worker(ServerNode):
                 if dep_ts.state != "memory":
                     self.waiting_for_data[ts.key].add(dep)
 
-                dep_ts.who_has.update(workers)
+                dep_ts.who_has.update({dep:workers})
 
                 ts.dependencies.add(dep_ts)
 
