@@ -180,6 +180,20 @@ async def test_remote_python_as_dict():
         asynchronous=True,
         scheduler_options={"port": 0, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
-        remote_python={"127.0.0.1": sys.executable},
+        remote_python=[sys.executable] * 3,
     ) as cluster:
         assert cluster.workers[0].remote_python == sys.executable
+
+
+@pytest.mark.asyncio
+async def test_list_of_remote_python_raises():
+    with pytest.raises(RuntimeError):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_options=[dict(known_hosts=None)] * 3,
+            asynchronous=True,
+            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            worker_options={"death_timeout": "5s"},
+            remote_python=[sys.executable] * 4,  # Mismatch in length 4 != 3
+        ) as _:
+            pass
