@@ -346,9 +346,9 @@ def SSHCluster(
             if isinstance(connect_options, dict)
             else connect_options[0],
             "kwargs": scheduler_options,
-            "remote_python": remote_python
-            if isinstance(remote_python, str)
-            else remote_python[0],
+            "remote_python": remote_python[0]
+            if isinstance(remote_python, list)
+            else remote_python,
         },
     }
     workers = {
@@ -361,9 +361,9 @@ def SSHCluster(
                 else connect_options[i + 1],
                 "kwargs": worker_options,
                 "worker_module": worker_module,
-                "remote_python": remote_python
-                if isinstance(remote_python, str)
-                else remote_python[i + 1],
+                "remote_python": remote_python[i + 1]
+                if isinstance(remote_python, list)
+                else remote_python,
             },
         }
         for i, host in enumerate(hosts[1:])
