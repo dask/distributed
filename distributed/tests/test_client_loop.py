@@ -13,7 +13,7 @@ def run_client(loop):
 
 
 # Test if Client correctly tears down LoopRunner on close.
-@pytest.mark.parametrize('with_own_loop', [True, False])
+@pytest.mark.parametrize("with_own_loop", [True, False])
 def test_close_loop_sync(with_own_loop):
     loop_runner = loop = None
 
