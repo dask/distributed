@@ -1547,6 +1547,7 @@ async def test_protocol_from_scheduler_address(Worker):
                 assert info["address"].startswith("ucx://")
 
 
+@pytest.mark.skip(reason="broken on Arch")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_worker_listens_on_same_interface_by_default(Worker):
