@@ -13,9 +13,6 @@ env:
 matrix:
   fast_finish: true
   include:
-  - os: linux
-    language: python
-    python: 3.6
   - os: osx
     env: PYTHON=3.7 TESTS=true PACKAGES="python-snappy python-blosc" TORNADO=6
     if: type != pull_request OR commit_message =~ test-osx  # Skip on PRs unless the commit message contains "test-osx"
