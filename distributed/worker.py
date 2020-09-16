@@ -1482,6 +1482,7 @@ class Worker(ServerNode):
             raise
 
     def transition_dep(self, dep, finish, **kwargs):
+        assert isinstance(dep, str)
         try:
             ts = self.tasks[dep]
             start = ts.state
@@ -1610,7 +1611,7 @@ class Worker(ServerNode):
                 assert ts.key in self.waiting_for_data
                 assert not self.waiting_for_data[ts.key]
                 assert all(
-                    dep in self.data or dep in self.actors for dep in ts.dependencies
+                    dep.key in self.data or dep.key in self.actors for dep in ts.dependencies
                 )
                 assert ts.key not in self.executing
                 assert ts.key not in self.ready
@@ -1656,7 +1657,7 @@ class Worker(ServerNode):
                 assert ts.state in READY
                 assert ts.key not in self.ready
                 assert all(
-                    dep in self.data or dep in self.actors for dep in ts.dependencies
+                    dep.key in self.data or dep.key in self.actors for dep in ts.dependencies
                 )
 
             self.executing.add(ts.key)
