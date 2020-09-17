@@ -1563,13 +1563,14 @@ class Worker(ServerNode):
         # -> this leads to put_key_in_memory
         # -> this goes to transition with (flight, memory)
         # back where we started
+        # so mark task state as "memory" after value is assigned to "data"
         #
         #
 
     def transition_dep_flight_memory(self, dep, value=None):
         try:
             if self.validate:
-                pass#assert dep in self.in_flight_tasks
+                assert dep in self.in_flight_tasks
 
             del self.in_flight_tasks[dep]
             dep_ts = self.tasks[dep]
@@ -2130,9 +2131,6 @@ class Worker(ServerNode):
                         )
 
                 if self.validate:
-                    # IT's the second pass when this fails
-                    # because we aren't popping the keys out of
-                    # waiting_for_data
                     self.validate_state()
 
                 self.ensure_computing()
