@@ -1610,11 +1610,11 @@ class Worker(ServerNode):
         try:
             if self.validate:
                 assert ts.state == "waiting"
-                assert ts.waiting_for_data
-                #assert not self.waiting_for_data[ts.key]
+                assert not ts.waiting_for_data
                 assert all(
                     dep.key in self.data or dep.key in self.actors for dep in ts.dependencies
                 )
+                assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
@@ -1654,7 +1654,7 @@ class Worker(ServerNode):
         try:
             if self.validate:
                 assert not ts.waiting_for_data
-                # assert key not in self.data
+                assert ts.key not in self.data
                 assert ts.state in READY
                 assert ts.key not in self.ready
                 assert all(
@@ -1995,21 +1995,21 @@ class Worker(ServerNode):
 
                 # dep states may have changed before gather_dep runs
                 # if a dep is no longer in-flight then don't fetch it
-                deps = [self.tasks[key] for key in deps]
-                deps = tuple(ts for ts in deps if ts.state == "flight")
+                deps_ts = [self.tasks[key] for key in deps]
+                deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
 
-                self.log.append(("request-dep", dep, worker, deps))
+                self.log.append(("request-dep", dep.key, worker, deps))
                 logger.debug("Request %d keys", len(deps))
 
                 start = time()
                 response = await get_data_from_worker(
-                    self.rpc, [ts.key for ts in deps], worker, who=self.address
+                    self.rpc, [ts.key for ts in deps_ts], worker, who=self.address
                 )
                 stop = time()
 
                 if response["status"] == "busy":
                     self.log.append(("busy-gather", worker, deps))
-                    for ts in deps:
+                    for ts in deps_ts:
                         if ts.state == "flight":
                             self.transition_dep(ts.key, "waiting")
                     return
@@ -2085,13 +2085,13 @@ class Worker(ServerNode):
                     if d not in self.tasks:
                         self.tasks[d] = TaskState(key=d)
                     ts = self.tasks[d]
-                    if cause:
-                        # TODO: check that this isn't insane
-                        # make sure deps are added as dependencies to task
-                        # and task to deps as dependents
-                        child = self.tasks[cause]
-                        child.dependencies.add(ts)
-                        ts.dependents.add(child)
+              #      if cause:
+              #          # TODO: check that this isn't insane
+              #          # make sure deps are added as dependencies to task
+              #          # and task to deps as dependents
+              #          child = self.tasks[cause]
+              #          child.dependencies.add(ts)
+              #          ts.dependents.add(child)
 
                     if not busy and d in data:
                         ts.state = "flight"
@@ -2327,7 +2327,6 @@ class Worker(ServerNode):
                 del self.actors[dep.key]
                 del self.types[dep.key]
             del self.nbytes[dep.key]
-            breakpoint()
 
             if dep.key in self.in_flight_tasks:
                 worker = self.in_flight_tasks.pop(dep.key)
@@ -2534,7 +2533,7 @@ class Worker(ServerNode):
             while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
                 ts = self.tasks.get(key)
-                if getattr(ts, "state", None) in READY:
+                if ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
                         ts.runspec = self._maybe_deserialize_task(ts)
@@ -2991,7 +2990,6 @@ class Worker(ServerNode):
         if self.status != Status.running:
             return
         try:
-            breakpoint()
             for ts in self.tasks.values():
                 for worker in ts.who_has:
                     assert ts.key in self.has_what[worker]
