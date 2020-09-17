@@ -1577,8 +1577,7 @@ class Worker(ServerNode):
             if dep_ts.dependents:
                 self.put_key_in_memory(dep, value)
                 for dependent in dep_ts.dependents:
-                    if dep_ts.key in dependent.waiting_for_data:
-                        dependent.waiting_for_data.remove(dep_ts.key)
+                    dependent.waiting_for_data.discard(dep_ts.key)
 
                 self.batched_stream.send({"op": "add-keys", "keys": [dep]})
             else:
@@ -1967,8 +1966,7 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             # TODO: fix this up so it isn't always `dep.key`
-            if ts.key in dep.waiting_for_data:
-                dep.waiting_for_data.remove(ts.key)
+            dep.waiting_for_data.discard(ts.key)
 
             if not dep.waiting_for_data:
                 self.transition(dep.key, "ready")
