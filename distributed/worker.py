@@ -110,6 +110,10 @@ class TaskState:
         self.traceback = None
         # self.type = None
 
+    def __repr__(self):
+        return "<Task %r %s>" % (self.key, self.state)
+
+
 
 class Worker(ServerNode):
     """Worker node in a Dask distributed cluster
@@ -430,6 +434,7 @@ class Worker(ServerNode):
             ("long-running", "error"): self.transition_executing_done,
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
+            ("flight", "memory"): self.transition_dep_flight_memory,
         }
 
         self._dep_transitions = {
@@ -1550,15 +1555,26 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
+
+        # NOTES
+        #
+        # I've combined deps and tasks and it's leading to this horrible loop
+        # key goes to transition_dep_fligth_memory
+        # -> this leads to put_key_in_memory
+        # -> this goes to transition with (flight, memory)
+        # back where we started
+        #
+        #
+
     def transition_dep_flight_memory(self, dep, value=None):
+        breakpoint()
         try:
             if self.validate:
-                assert dep in self.in_flight_tasks
+                pass#assert dep in self.in_flight_tasks
 
             del self.in_flight_tasks[dep]
             dep_ts = self.tasks[dep]
             if dep_ts.dependents:
-                dep_ts.state = "memory"
                 self.put_key_in_memory(dep, value)
                 for dependent in dep_ts.dependents:
                     if dep_ts.key in dependent.waiting_for_data:
@@ -1596,6 +1612,7 @@ class Worker(ServerNode):
     def transition(self, key, finish, **kwargs):
         ts = self.tasks[key]
         start = ts.state
+        breakpoint()
         if start == finish:
             return
         func = self._transitions[start, finish]
@@ -1936,6 +1953,8 @@ class Worker(ServerNode):
         else:
             start = time()
             self.data[key] = value
+            # this stops the infinite loop with deps -> memory
+            ts.state = "memory"
             stop = time()
             if stop - start > 0.020:
                 self.startstops[key].append(
@@ -2006,6 +2025,7 @@ class Worker(ServerNode):
                     self.rpc, [ts.key for ts in deps_ts], worker, who=self.address
                 )
                 stop = time()
+
 
                 if response["status"] == "busy":
                     self.log.append(("busy-gather", worker, deps))
@@ -2086,17 +2106,19 @@ class Worker(ServerNode):
                         self.tasks[d] = TaskState(key=d)
                     ts = self.tasks[d]
               #      if cause:
-              #          # TODO: check that this isn't insane
-              #          # make sure deps are added as dependencies to task
-              #          # and task to deps as dependents
+                        # TODO: check that this is necessary / not harmful
+                        # make sure deps are added as dependencies to task
+                        # and task to deps as dependents
+                        # I don't think that it is -- by the time we get here they're already
+                        # catalogued
               #          child = self.tasks[cause]
               #          child.dependencies.add(ts)
               #          ts.dependents.add(child)
 
                     if not busy and d in data:
-                        ts.state = "flight"
-                        self.data[d] = dat = data[d]
-                        self.types[d] = type(dat)
+                        #ts.state = "flight"
+                        #self.data[d] = dat = data[d]
+                        #self.types[d] = type(dat)
                         self.transition_dep(d, "memory", value=data[d])
                     elif self.tasks[d].state != "memory":
                         self.transition_dep(
@@ -2161,7 +2183,7 @@ class Worker(ServerNode):
             for dep in deps:
                 logger.info(
                     "Dependent not found: %s %s .  Asking scheduler",
-                    dep,
+                    dep.key,
                     self.suspicious_deps[dep.key],
                 )
 
@@ -2172,11 +2194,11 @@ class Worker(ServerNode):
             # TODO: fixup `update_who_has`
             self.update_who_has(who_has)
             for dep in deps:
-                self.suspicious_deps[dep] += 1
+                self.suspicious_deps[dep.key] += 1
 
                 if not who_has.get(dep.key):
-                    self.log.append((dep, "no workers found", dep.dependents))
-                    self.release_dep(dep.key)
+                    self.log.append((dep.key, "no workers found", dep.dependents))
+                    self.release_dep(dep)
                 else:
                     self.log.append((dep.key, "new workers found"))
                     for depdep in dep.dependents:
