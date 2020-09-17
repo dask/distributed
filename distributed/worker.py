@@ -1567,7 +1567,6 @@ class Worker(ServerNode):
         #
 
     def transition_dep_flight_memory(self, dep, value=None):
-        breakpoint()
         try:
             if self.validate:
                 pass#assert dep in self.in_flight_tasks
@@ -1612,7 +1611,6 @@ class Worker(ServerNode):
     def transition(self, key, finish, **kwargs):
         ts = self.tasks[key]
         start = ts.state
-        breakpoint()
         if start == finish:
             return
         func = self._transitions[start, finish]
