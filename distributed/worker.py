@@ -1441,17 +1441,17 @@ class Worker(ServerNode):
             #        dep.key: [ws.address for ws in dep.who_has] for dep in deps
             #    }
             # dep -> dependency (parent)
-            for parent, workers in who_has.items():
+            for dependency, workers in who_has.items():
                 assert workers
-                if parent not in self.tasks:
-                    self.tasks[parent] = dep_ts = TaskState(key=parent)
+                if dependency not in self.tasks:
+                    self.tasks[dependency] = dep_ts = TaskState(key=dependency)
                     dep_ts.state = "waiting"
 
-                dep_ts = self.tasks[parent]
-                self.log.append((parent, "new-dep", dep_ts.state))
+                dep_ts = self.tasks[dependency]
+                self.log.append((dependency, "new-dep", dep_ts.state))
 
                 if dep_ts.state != "memory":
-                    self.waiting_for_data[ts.key].add(parent)
+                    self.waiting_for_data[ts.key].add(dependency)
 
                 dep_ts.who_has.update(workers)
 
@@ -1459,9 +1459,9 @@ class Worker(ServerNode):
                 dep_ts.dependents.add(ts)
 
                 for worker in workers:
-                    self.has_what[worker].add(parent)
+                    self.has_what[worker].add(dependency)
                     if dep_ts.state != "memory":
-                        self.pending_data_per_worker[worker].append(parent)
+                        self.pending_data_per_worker[worker].append(dependency)
 
             if self.waiting_for_data[ts.key]:
                 self.data_needed.append(ts.key)
@@ -1839,7 +1839,6 @@ class Worker(ServerNode):
                     len(self.in_flight_workers) < self.total_out_connections
                     or self.comm_nbytes < self.total_comm_nbytes
                 ):
-                    breakpoint()
                     dep = deps.pop()
                     if dep.state != "waiting":
                         continue
@@ -1991,8 +1990,7 @@ class Worker(ServerNode):
             response = {}
             try:
                 if self.validate:
-                    breakpoint()
-                 #   self.validate_state()
+                    self.validate_state()
 
                 # dep states may have changed before gather_dep runs
                 # if a dep is no longer in-flight then don't fetch it
@@ -2202,7 +2200,6 @@ class Worker(ServerNode):
     async def query_who_has(self, *deps):
         with log_errors():
             response = await retry_operation(self.scheduler.who_has, keys=deps)
-            breakpoint()
             self.update_who_has(response)
             return response
 
@@ -2994,6 +2991,7 @@ class Worker(ServerNode):
                     assert ts.key in self.has_what[worker]
                 for dep in ts.dependencies:
                     assert dep.key in self.tasks
+                    self.validate_dep(dep)
 
             for worker, keys in self.has_what.items():
                 for k in keys:
@@ -3002,10 +3000,8 @@ class Worker(ServerNode):
             for key in self.tasks:
                 self.validate_key(key)
 
-#            for dep in self.dep_state:
-#                self.validate_dep(dep)
-
             for key, deps in self.waiting_for_data.items():
+                breakpoint()
                 if key not in self.data_needed:
                     for dep in deps:
                         assert (
