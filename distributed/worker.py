@@ -2275,9 +2275,6 @@ class Worker(ServerNode):
                 del self.nbytes[key]
                 del self.types[key]
 
-#            if key in self.waiting_for_data:
-#                del self.waiting_for_data[key]
-
             # release any dependencies if they are waiting or in-flight
             for dep in ts.dependencies:
                 if dep.state in (
@@ -2289,13 +2286,6 @@ class Worker(ServerNode):
 
             if key in self.threads:
                 del self.threads[key]
-            # del self.priorities[key]
-            # del self.durations[key]
-
-            # if key in self.exceptions:
-            #    del self.exceptions[key]
-            # if key in self.tracebacks:
-            #    del self.tracebacks[key]
 
             if key in self.startstops:
                 del self.startstops[key]
@@ -2367,19 +2357,17 @@ class Worker(ServerNode):
         try:
             if self.tasks[key].state not in PENDING:
                 return
-#            if key in self.waiting_for_data:
-#                del self.waiting_for_data[key]
 
             ts = self.tasks.pop(key)
 
             # Task has been rescinded
             # For every task that it required
-            for parent in ts.dependencies:
+            for dependency in ts.dependencies:
                 # Remove it as a dependent
-                parent.dependents.remove(key)
+                dependency.dependents.remove(key)
                 # If the dependent is now without purpose (no dependencies), remove it
-                if not parent.dependents:
-                    self.release_key(parent.key, reason="Child keys rescinded")
+                if not dependency.dependents:
+                    self.release_key(dependency.key, reason="All dependent keys rescinded")
 
         except Exception as e:
             logger.exception(e)
