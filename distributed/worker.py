@@ -1348,7 +1348,6 @@ class Worker(ServerNode):
             else:
                 self.tasks[key] = ts = TaskState(key)
                 self.put_key_in_memory(key, value)
-                ts.state = "memory"
                 ts.priority = None
                 ts.duration = None
 
@@ -1716,7 +1715,6 @@ class Worker(ServerNode):
 
             if value is not no_value:
                 try:
-                    ts.state = "memory"
                     self.put_key_in_memory(ts.key, value, transition=False)
                 except Exception as e:
                     logger.info("Failed to put key in memory", exc_info=True)
@@ -1726,10 +1724,12 @@ class Worker(ServerNode):
                     ts.state = "error"
                     out = "error"
 
-                if ts.dependencies:
-                    # TODO: does this work?
-                    # if ts.key in self.dep_state:
-                    self.transition_dep(ts.key, "memory")
+                    # TODO: should this be here
+                    # or do we handle it in release_key
+        #        for dependency in ts.dependencies:
+        #            dependency.dependents.discard(ts)
+        #            if not dependency.dependents:
+        #                self.release_key(dependency.key)
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
@@ -1964,7 +1964,6 @@ class Worker(ServerNode):
         self.types[key] = type(value)
 
         for dep in ts.dependents:
-            # TODO: fix this up so it isn't always `dep.key`
             dep.waiting_for_data.discard(ts.key)
 
             if not dep.waiting_for_data:
@@ -2101,15 +2100,15 @@ class Worker(ServerNode):
                     if d not in self.tasks:
                         self.tasks[d] = TaskState(key=d)
                     ts = self.tasks[d]
-              #      if cause:
+                    if self.validate and cause:
                         # TODO: check that this is necessary / not harmful
                         # make sure deps are added as dependencies to task
                         # and task to deps as dependents
                         # I don't think that it is -- by the time we get here they're already
                         # catalogued
-              #          child = self.tasks[cause]
-              #          child.dependencies.add(ts)
-              #          ts.dependents.add(child)
+                        dependent = self.tasks[cause]
+                        assert ts in dependent.dependencies
+                        assert dependent in ts.dependents
 
                     if not busy and d in data:
                         #ts.state = "flight"
@@ -2263,7 +2262,7 @@ class Worker(ServerNode):
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
                 self.log.append((key, "release-key"))
-            if key in self.data and not ts.dependents:
+            if key in self.data and not ts.dependents and not ts.dependencies:
                 try:
                     del self.data[key]
                 except FileNotFoundError:
@@ -2275,14 +2274,17 @@ class Worker(ServerNode):
                 del self.nbytes[key]
                 del self.types[key]
 
-            # release any dependencies if they are waiting or in-flight
-            for dep in ts.dependencies:
-                if dep.state in (
-                    "waiting",
-                    "flight",
-                ):
-                    # TODO: maybe need to pass in dependent task state here
-                    self.release_dep(dep)
+            # for any dependencies of key we are releasing
+            for dependency in ts.dependencies:
+                # remove task as dependent
+                dependency.dependents.discard(ts)
+                if not dependency.dependents and dependency.state in ("waiting", "flight"):
+                    self.release_key(dependency.key)
+
+            # TODO: update who_has?
+            # but this is also done in one of the dep_transition methods
+            for worker in ts.who_has:
+                self.has_what[worker].discard(ts.key)
 
             if key in self.threads:
                 del self.threads[key]
@@ -2297,9 +2299,10 @@ class Worker(ServerNode):
                 if ts.state == "executing":
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
-                # del self.resource_restrictions[key]
 
             if report and ts.state in PROCESSING:  # not finished
+                # If not finished, restore TaskState to tasks dict
+                #self.tasks[key] = ts
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)

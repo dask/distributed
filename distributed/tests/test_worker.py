@@ -588,6 +588,7 @@ async def test_clean(c, s, a, b):
         assert not c
 
 
+@pytest.mark.xfail
 @gen_cluster(client=True)
 async def test_message_breakup(c, s, a, b):
     n = 100000
