@@ -731,7 +731,7 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
+        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d>" % (
             self.__class__.__name__,
             self.address,
             self.name,
@@ -741,7 +741,6 @@ class Worker(ServerNode):
             self.nthreads,
             len(self.ready),
             len(self.in_flight_tasks),
-            #len(self.waiting_for_data),
         )
 
     @property
@@ -1367,7 +1366,7 @@ class Worker(ServerNode):
                 if key in self.tasks:
                     self.release_key(key)
 
-            logger.debug("Deleted %d keys", len(keys))
+            logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
         return "OK"
 
     async def set_resources(self, **resources):
