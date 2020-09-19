@@ -1965,7 +1965,6 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts.key)
-
             if not dep.waiting_for_data:
                 self.transition(dep.key, "ready")
 
@@ -2933,8 +2932,8 @@ class Worker(ServerNode):
 
     def validate_key_waiting(self, key):
         assert key not in self.data
-        #assert not all(dep.key in self.data for dep in self.tasks.get(key).dependencies)
-        #assert any(dep.state != "memory" for dep in self.tasks.get(key).dependencies)
+        if self.tasks[key].dependencies:
+            assert not all(dep.key in self.data for dep in self.tasks[key].dependencies)
 
     def validate_key(self, key):
         try:
@@ -3019,12 +3018,6 @@ class Worker(ServerNode):
 
             for key in self.tasks:
                 self.validate_key(key)
-
-            # I'm not handling dependencies correctly
-            # It's the transition from waiting -> memory
-            # and keeping `waiting_for_data`, `in_flight_tasks` and `data_needed` in order
-            # It is probably simpler to add `waiting_for_data` to `TaskState`
-            # which should make it easier to track
 
         except Exception as e:
             logger.exception(e)
