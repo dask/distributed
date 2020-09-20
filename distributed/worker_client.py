@@ -1,12 +1,14 @@
 from contextlib import contextmanager
 import warnings
 
+import dask
 from .threadpoolexecutor import secede, rejoin
 from .worker import thread_state, get_client, get_worker
+from .utils import parse_timedelta
 
 
 @contextmanager
-def worker_client(timeout=3, separate_thread=True):
+def worker_client(timeout=None, separate_thread=True):
     """Get client for this thread
 
     This context manager is intended to be called within functions that we run
@@ -38,6 +40,14 @@ def worker_client(timeout=3, separate_thread=True):
     get_client
     secede
     """
+
+    # Get timeout value from dash config if not passed
+    # Defaults to 3s if the config is not set
+    if timeout is None:
+        timeout = parse_timedelta(
+            dask.config.get("distributed.comm.timeouts.connect", "3s"), "s"
+        )
+
     worker = get_worker()
     client = get_client(timeout=timeout)
     if separate_thread:
