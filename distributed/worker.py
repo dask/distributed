@@ -2268,6 +2268,9 @@ class Worker(ServerNode):
                 if not dependency.dependents and dependency.state in ("waiting", "flight"):
                     self.release_key(dependency.key)
 
+            if ts.key in self.suspicious_deps:
+                del self.suspicious_deps[ts.key]
+
             # TODO: update who_has?
             # but this is also done in one of the dep_transition methods
             for worker in ts.who_has:
