@@ -114,7 +114,6 @@ class TaskState:
         return "<Task %r %s>" % (self.key, self.state)
 
 
-
 class Worker(ServerNode):
     """Worker node in a Dask distributed cluster
 
@@ -360,11 +359,11 @@ class Worker(ServerNode):
     ):
         self.tasks = dict()
         # self.task_state = dict()
-        #self.dep_state = dict()
-        #self.dependencies = dict()
-        #self.dependents = dict()
-        #self.waiting_for_data = dict()
-        #self.who_has = dict()
+        # self.dep_state = dict()
+        # self.dependencies = dict()
+        # self.dependents = dict()
+        # self.waiting_for_data = dict()
+        # self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
@@ -1364,7 +1363,7 @@ class Worker(ServerNode):
             for key in list(keys):
                 self.log.append((key, "delete"))
                 # TODO: make sure this doesn't blow anything up but I think this check is redundant
-                #if key in self.tasks:
+                # if key in self.tasks:
                 self.release_key(key)
 
             logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
@@ -1554,7 +1553,6 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-
         # NOTES
         #
         # I've combined deps and tasks and it's leading to this horrible loop
@@ -1626,7 +1624,8 @@ class Worker(ServerNode):
                 assert ts.state == "waiting"
                 assert not ts.waiting_for_data
                 assert all(
-                    dep.key in self.data or dep.key in self.actors for dep in ts.dependencies
+                    dep.key in self.data or dep.key in self.actors
+                    for dep in ts.dependencies
                 )
                 assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.executing
@@ -1672,7 +1671,8 @@ class Worker(ServerNode):
                 assert ts.state in READY
                 assert ts.key not in self.ready
                 assert all(
-                    dep.key in self.data or dep.key in self.actors for dep in ts.dependencies
+                    dep.key in self.data or dep.key in self.actors
+                    for dep in ts.dependencies
                 )
 
             self.executing.add(ts.key)
@@ -1873,7 +1873,9 @@ class Worker(ServerNode):
                         worker = random.choice(local)
                     else:
                         worker = random.choice(list(workers))
-                    to_gather, total_nbytes = self.select_keys_for_gather(worker, dep.key)
+                    to_gather, total_nbytes = self.select_keys_for_gather(
+                        worker, dep.key
+                    )
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
@@ -2020,7 +2022,6 @@ class Worker(ServerNode):
                 )
                 stop = time()
 
-
                 if response["status"] == "busy":
                     self.log.append(("busy-gather", worker, deps))
                     for ts in deps_ts:
@@ -2038,9 +2039,7 @@ class Worker(ServerNode):
                         }
                     )
 
-                total_bytes = sum(
-                    self.nbytes.get(key, 0) for key in response["data"]
-                )
+                total_bytes = sum(self.nbytes.get(key, 0) for key in response["data"])
                 duration = (stop - start) or 0.010
                 bandwidth = total_bytes / duration
                 self.incoming_transfer_log.append(
@@ -2050,8 +2049,7 @@ class Worker(ServerNode):
                         "middle": (start + stop) / 2.0 + self.scheduler_delay,
                         "duration": duration,
                         "keys": {
-                            key: self.nbytes.get(key, None)
-                            for key in response["data"]
+                            key: self.nbytes.get(key, None) for key in response["data"]
                         },
                         "total": total_bytes,
                         "bandwidth": bandwidth,
@@ -2102,9 +2100,7 @@ class Worker(ServerNode):
                     if not busy and d in data:
                         self.transition(d, "memory", value=data[d])
                     elif self.tasks[d].state != "memory":
-                        self.transition(
-                            d, "waiting", worker=worker, remove=not busy
-                        )
+                        self.transition(d, "waiting", worker=worker, remove=not busy)
 
                     if not busy and d not in data and self.tasks[d].dependents:
                         self.log.append(("missing-dep", d))
@@ -2128,7 +2124,6 @@ class Worker(ServerNode):
                     # See if anyone new has the data
                     await self.query_who_has(dep.key)
                     self.ensure_communicating()
-
 
     def bad_dep(self, dep):
         exc = ValueError("Could not find dependent %s.  Check worker logs" % str(dep))
@@ -2264,7 +2259,10 @@ class Worker(ServerNode):
             for dependency in ts.dependencies:
                 # remove task as dependent
                 dependency.dependents.discard(ts)
-                if not dependency.dependents and dependency.state in ("waiting", "flight"):
+                if not dependency.dependents and dependency.state in (
+                    "waiting",
+                    "flight",
+                ):
                     self.release_key(dependency.key)
 
             if ts.key in self.suspicious_deps:
@@ -2292,7 +2290,7 @@ class Worker(ServerNode):
             if report and ts.state in PROCESSING:  # not finished
                 # If not finished, restore TaskState to tasks dict
                 # TODO: need this?
-                #self.tasks[key] = ts
+                # self.tasks[key] = ts
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
@@ -2335,7 +2333,9 @@ class Worker(ServerNode):
                     self.release_key(deptask.key, cause=dep.key)
 
             if report and dep.state == "memory":
-                self.batched_stream.send({"op": "release-worker-data", "keys": [dep.key]})
+                self.batched_stream.send(
+                    {"op": "release-worker-data", "keys": [dep.key]}
+                )
 
             self._notify_plugins("release_dep", dep.key, dep.state, report)
         except Exception as e:
@@ -2360,7 +2360,9 @@ class Worker(ServerNode):
                 dependency.dependents.remove(key)
                 # If the dependent is now without purpose (no dependencies), remove it
                 if not dependency.dependents:
-                    self.release_key(dependency.key, reason="All dependent keys rescinded")
+                    self.release_key(
+                        dependency.key, reason="All dependent keys rescinded"
+                    )
 
         except Exception as e:
             logger.exception(e)
@@ -3005,7 +3007,7 @@ class Worker(ServerNode):
                     # Might need better bookkeeping
                     assert dep.state == "memory" or dep.key in self.tasks
                     self.validate_key(dep.key)
-                #for depkey in ts.waiting_for_data:
+                # for depkey in ts.waiting_for_data:
                 #    assert (
                 #        depkey in self.in_flight_tasks
                 #        or depkey in self._missing_dep_flight
