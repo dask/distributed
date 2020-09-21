@@ -2483,10 +2483,13 @@ class Worker(ServerNode):
                 # stop_doing_unnecessary work: Client.map -> kill future
                 # test_stastical_profiling: also a Client.map
                 # Ok, I'm pretty sure it is map operations
+                # TODO: should this be sent to `add_task` instead?
                 if ts is None:
                     self.tasks[key] = ts = TaskState(key=key)
                     ts.priority = priority
-                    ts.state = "ready"
+                    # If this is "ready" (despite the heap name) it is possible
+                    # for tasks with no data and no runspec to hit "execute"
+                    ts.state = "waiting"
                 if ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
@@ -2514,6 +2517,8 @@ class Worker(ServerNode):
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
 
+            if ts.runspec is None:
+                breakpoint()
             function, args, kwargs = ts.runspec
 
             start = time()
