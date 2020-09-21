@@ -2249,7 +2249,7 @@ class Worker(ServerNode):
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
                 self.log.append((key, "release-key"))
-            if key in self.data and not ts.dependents and not ts.dependencies:
+            if key in self.data and not ts.dependents:
                 try:
                     del self.data[key]
                 except FileNotFoundError:
