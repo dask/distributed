@@ -423,6 +423,7 @@ class Worker(ServerNode):
             ("waiting", "ready"): self.transition_waiting_ready,
             ("waiting", "memory"): self.transition_waiting_done,
             ("waiting", "error"): self.transition_waiting_done,
+            ("waiting", "flight"): self.transition_waiting_flight,
             ("ready", "executing"): self.transition_ready_executing,
             ("ready", "memory"): self.transition_ready_memory,
             ("constrained", "executing"): self.transition_constrained_executing,
@@ -433,15 +434,8 @@ class Worker(ServerNode):
             ("long-running", "error"): self.transition_executing_done,
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
-            ("flight", "memory"): self.transition_dep_flight_memory,
-            ("waiting", "flight"): self.transition_dep_waiting_flight,
-            ("flight", "waiting"): self.transition_dep_flight_waiting,
-        }
-
-        self._dep_transitions = {
-            ("waiting", "flight"): self.transition_dep_waiting_flight,
-            ("waiting", "memory"): self.transition_dep_waiting_memory,
-            ("flight", "memory"): self.transition_dep_flight_memory,
+            ("flight", "memory"): self.transition_flight_memory,
+            ("flight", "waiting"): self.transition_flight_waiting,
         }
 
         self.incoming_transfer_log = deque(maxlen=100000)
@@ -1487,24 +1481,20 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_dep(self, dep, finish, **kwargs):
-        assert isinstance(dep, str)
-        try:
-            ts = self.tasks[dep]
-            start = ts.state
-        except KeyError:
-            return
+    def transition(self, key, finish, **kwargs):
+        ts = self.tasks[key]
+        start = ts.state
         if start == finish:
             return
-        func = self._dep_transitions[start, finish]
-        state = func(dep, **kwargs)
-        self.log.append(("dep", dep, start, state or finish))
-        if dep in self.tasks:
-            ts.state = state or finish
-            if self.validate:
-                self.validate_dep(ts)
+        func = self._transitions[start, finish]
+        state = func(ts, **kwargs)
+        self.log.append((key, start, state or finish))
+        ts.state = state or finish
+        if self.validate:
+            self.validate_key(key)
+        self._notify_plugins("transition", key, start, state or finish, **kwargs)
 
-    def transition_dep_waiting_flight(self, ts, worker=None):
+    def transition_waiting_flight(self, ts, worker=None):
         try:
             if self.validate:
                 assert ts.key not in self.in_flight_tasks
@@ -1519,7 +1509,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_dep_flight_waiting(self, ts, worker=None, remove=True):
+    def transition_flight_waiting(self, ts, worker=None, remove=True):
         try:
             if self.validate:
                 assert ts.key in self.in_flight_tasks
@@ -1553,18 +1543,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-        # NOTES
-        #
-        # I've combined deps and tasks and it's leading to this horrible loop
-        # key goes to transition_dep_fligth_memory
-        # -> this leads to put_key_in_memory
-        # -> this goes to transition with (flight, memory)
-        # back where we started
-        # so mark task state as "memory" after value is assigned to "data"
-        #
-        #
-
-    def transition_dep_flight_memory(self, ts, value=None):
+    def transition_flight_memory(self, ts, value=None):
         try:
             if self.validate:
                 assert ts.key in self.in_flight_tasks
@@ -1587,36 +1566,6 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
             raise
-
-    def transition_dep_waiting_memory(self, dep, value=None):
-        try:
-            if self.validate:
-                assert dep in self.data
-                assert dep in self.nbytes
-                assert dep in self.types
-                assert self.tasks[dep].state == "memory"
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-        if value is not no_value and dep not in self.data:
-            self.put_key_in_memory(dep, value, transition=False)
-
-    def transition(self, key, finish, **kwargs):
-        ts = self.tasks[key]
-        start = ts.state
-        if start == finish:
-            return
-        func = self._transitions[start, finish]
-        state = func(ts, **kwargs)
-        self.log.append((key, start, state or finish))
-        ts.state = state or finish
-        if self.validate:
-            self.validate_key(key)
-        self._notify_plugins("transition", key, start, state or finish, **kwargs)
 
     def transition_waiting_ready(self, ts):
         try:
@@ -2268,8 +2217,6 @@ class Worker(ServerNode):
             if ts.key in self.suspicious_deps:
                 del self.suspicious_deps[ts.key]
 
-            # TODO: update who_has?
-            # but this is also done in one of the dep_transition methods
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
 
@@ -2947,43 +2894,6 @@ class Worker(ServerNode):
                 self.validate_key_ready(key)
             elif ts.state == "executing":
                 self.validate_key_executing(key)
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def validate_dep_waiting(self, dep_ts):
-        assert dep_ts.key not in self.data
-        assert dep_ts.key in self.nbytes
-        assert self.tasks[dep_ts.key]
-        assert not any(ts.key in self.ready for ts in dep_ts.dependents)
-
-    def validate_dep_flight(self, dep_ts):
-        assert dep_ts.key not in self.data
-        assert dep_ts.key in self.nbytes
-        assert not any(ts.key in self.ready for ts in dep_ts.dependents)
-        peer = self.in_flight_tasks[dep_ts.key]
-        assert dep_ts.key in self.in_flight_workers[peer]
-
-    def validate_dep_memory(self, dep_ts):
-        assert dep_ts.key in self.data or dep_ts.key in self.actors
-        assert dep_ts.key in self.nbytes
-        assert dep_ts.key in self.types
-        assert dep_ts.state == "memory"
-
-    def validate_dep(self, dep_ts):
-        try:
-            if dep_ts.state == "waiting":
-                self.validate_dep_waiting(dep_ts)
-            elif dep_ts.state == "flight":
-                self.validate_dep_flight(dep_ts)
-            elif dep_ts.state == "memory":
-                self.validate_dep_memory(dep_ts)
-            else:
-                raise ValueError("Unknown dependent state", dep_ts.state)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
