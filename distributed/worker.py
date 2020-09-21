@@ -1363,8 +1363,9 @@ class Worker(ServerNode):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
-                if key in self.tasks:
-                    self.release_key(key)
+                # TODO: make sure this doesn't blow anything up but I think this check is redundant
+                #if key in self.tasks:
+                self.release_key(key)
 
             logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
         return "OK"
@@ -1449,9 +1450,7 @@ class Worker(ServerNode):
                 assert workers
                 if dependency not in self.tasks:
                     self.tasks[dependency] = dep_ts = TaskState(key=dependency)
-                    # What state should be set here?
                     dep_ts.state = "waiting"
-                    #self.send_task_state_to_scheduler(dep_ts)
 
                 dep_ts = self.tasks[dependency]
                 self.log.append((dependency, "new-dep", dep_ts.state))
@@ -2292,7 +2291,8 @@ class Worker(ServerNode):
 
             if report and ts.state in PROCESSING:  # not finished
                 # If not finished, restore TaskState to tasks dict
-                self.tasks[key] = ts
+                # TODO: need this?
+                #self.tasks[key] = ts
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
@@ -2484,7 +2484,6 @@ class Worker(ServerNode):
         return True
 
     def _maybe_deserialize_task(self, ts):
-        # TODO: Finish this
         if not isinstance(ts.runspec, SerializedTask):
             return ts.runspec
         try:
@@ -2530,6 +2529,10 @@ class Worker(ServerNode):
                 priority, key = heapq.heappop(self.ready)
                 ts = self.tasks.get(key)
                 # TODO: find out what puts a task in to `self.ready` without creating TaskState
+                # so far:
+                # stop_doing_unnecessary work: Client.map -> kill future
+                # test_stastical_profiling: also a Client.map
+                # Ok, I'm pretty sure it is map operations
                 if ts is None:
                     self.tasks[key] = ts = TaskState(key=key)
                     ts.priority = priority
