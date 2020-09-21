@@ -654,7 +654,6 @@ async def test_restrictions(c, s, a, b):
     assert a.available_resources["A"] == 1
 
 
-@pytest.mark.xfail
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
