@@ -1457,7 +1457,7 @@ class Worker(ServerNode):
                 self.log.append((dependency, "new-dep", dep_ts.state))
 
                 if dep_ts.state != "memory":
-                    ts.waiting_for_data.add(dependency)
+                    ts.waiting_for_data.add(dep_ts.key)
 
                 dep_ts.who_has.update(workers)
 
@@ -1465,9 +1465,9 @@ class Worker(ServerNode):
                 dep_ts.dependents.add(ts)
 
                 for worker in workers:
-                    self.has_what[worker].add(dependency)
+                    self.has_what[worker].add(dep_ts.key)
                     if dep_ts.state != "memory":
-                        self.pending_data_per_worker[worker].append(dependency)
+                        self.pending_data_per_worker[worker].append(dep_ts.key)
 
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
