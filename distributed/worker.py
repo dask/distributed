@@ -1477,8 +1477,9 @@ class Worker(ServerNode):
                 if who_has:
                     assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
                     assert all(dep in self.nbytes for dep in who_has)
-                    for dep_ts in ts.dependencies:
-                        self.validate_dep(dep_ts)
+                    assert all(self.tasks[dep.key] for dep in ts.dependencies)
+                    for dependency in ts.dependencies:
+                        self.validate_key(dependency.key)
                     self.validate_key(ts.key)
         except Exception as e:
             logger.exception(e)
@@ -1545,7 +1546,7 @@ class Worker(ServerNode):
                         self.data_needed.append(dependent.key)
 
             if not ts.dependents:
-                self.release_dep(ts.key)
+                self.release_key(ts.key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1580,7 +1581,7 @@ class Worker(ServerNode):
 
                 self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
             else:
-                self.release_dep(ts.key)
+                self.release_key(ts.key)
 
         except Exception as e:
             logger.exception(e)
@@ -2025,7 +2026,7 @@ class Worker(ServerNode):
                     self.log.append(("busy-gather", worker, deps))
                     for ts in deps_ts:
                         if ts.state == "flight":
-                            self.transition_dep(ts.key, "waiting")
+                            self.transition(ts.key, "waiting")
                     return
 
                 if cause:
@@ -2138,7 +2139,7 @@ class Worker(ServerNode):
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
             self.transition(key, "error")
-        self.release_dep(dep)
+        self.release_key(dep.key)
 
     async def handle_missing_dep(self, *deps, **kwargs):
         original_deps = list(deps)
@@ -2176,7 +2177,7 @@ class Worker(ServerNode):
 
                 if not who_has.get(dep.key):
                     self.log.append((dep.key, "no workers found", dep.dependents))
-                    self.release_dep(dep)
+                    self.release_key(dep.key)
                 else:
                     self.log.append((dep.key, "new workers found"))
                     for depdep in dep.dependents:
@@ -2994,8 +2995,13 @@ class Worker(ServerNode):
                 for worker in ts.who_has:
                     assert ts.key in self.has_what[worker]
                 for dep in ts.dependencies:
-                    assert dep.key in self.tasks
-                    self.validate_dep(dep)
+                    # self.tasks was just a dict of tasks
+                    # and this check was originally that the key was in `task_state`
+                    # so we may have popped the key out of `self.tasks` but the
+                    # dependency can still be in `memory` before GC grabs it...?
+                    # Might need better bookkeeping
+                    assert dep.state == "memory" or dep.key in self.tasks
+                    self.validate_key(dep.key)
                 #for depkey in ts.waiting_for_data:
                 #    assert (
                 #        depkey in self.in_flight_tasks
