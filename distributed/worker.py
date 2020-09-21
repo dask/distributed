@@ -1725,12 +1725,10 @@ class Worker(ServerNode):
                     ts.state = "error"
                     out = "error"
 
-                    # TODO: should this be here
-                    # or do we handle it in release_key
-        #        for dependency in ts.dependencies:
-        #            dependency.dependents.discard(ts)
-        #            if not dependency.dependents:
-        #                self.release_key(dependency.key)
+                # TODO: should this be here
+                # Don't release the dependency keys, but do remove them from `dependents`
+                for dependency in ts.dependencies:
+                    dependency.dependents.discard(ts)
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
