@@ -435,6 +435,7 @@ class Worker(ServerNode):
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
             ("flight", "memory"): self.transition_flight_memory,
+            ("flight", "ready"): self.transition_flight_memory,
             ("flight", "waiting"): self.transition_flight_waiting,
         }
 
