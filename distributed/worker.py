@@ -1729,6 +1729,7 @@ class Worker(ServerNode):
                 # Don't release the dependency keys, but do remove them from `dependents`
                 for dependency in ts.dependencies:
                     dependency.dependents.discard(ts)
+                ts.dependencies = set()
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
