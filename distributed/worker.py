@@ -2917,25 +2917,27 @@ class Worker(ServerNode):
             return
         try:
             for ts in self.tasks.values():
+                assert ts.state is not None
+                # check that worker has task
                 for worker in ts.who_has:
                     assert ts.key in self.has_what[worker]
+                # check that deps have a set state and that dependency<->dependent links are there
                 for dep in ts.dependencies:
                     # self.tasks was just a dict of tasks
                     # and this check was originally that the key was in `task_state`
                     # so we may have popped the key out of `self.tasks` but the
                     # dependency can still be in `memory` before GC grabs it...?
                     # Might need better bookkeeping
-                    assert dep.key in self.tasks
                     assert dep.state is not None
-                    self.validate_key(dep.key)
-                for depkey in ts.waiting_for_data:
+                    assert ts in dep.dependents
+                for key in ts.waiting_for_data:
                     assert (
-                        depkey in self.in_flight_tasks
-                        or depkey in self._missing_dep_flight
-                        or self.tasks[depkey].who_has.issubset(self.in_flight_workers)
+                        key in self.in_flight_tasks
+                        or key in self._missing_dep_flight
+                        or self.tasks[key].who_has.issubset(self.in_flight_workers)
                         # TODO: this prevents other test failures and seems like a
                         # legitimate check -- a dependency might itself be waiting
-                        or self.tasks[depkey].state == "waiting"
+                        or self.tasks[key].state == "waiting"
                     )
                 if ts.state == "memory":
                     assert isinstance(self.nbytes[ts.key], int)
