@@ -256,8 +256,7 @@ class MultiProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler,
-            **(self.client().connection_args if self.client else {})
+            self.scheduler, **(self.client().connection_args if self.client else {})
         )
         logger.debug("Progressbar Connected to scheduler")
 
