@@ -125,7 +125,9 @@ async def test_release_dep_called(c, s, w):
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
         {"key": "dep", "state": "memory"},
-        {"dep": "dep", "state": "memory"},
+        # There is no more release_dep
+        # Need to think about how to rework this test.
+        #{"dep": "dep", "state": "memory"},
         {"key": "task", "state": "memory"},
     ]
 
@@ -133,7 +135,7 @@ async def test_release_dep_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not (w.tasks or w.dep_state), timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
