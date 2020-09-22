@@ -2166,15 +2166,10 @@ class Worker(ServerNode):
     def update_who_has(self, who_has):
         try:
             for dep, workers in who_has.items():
-                assert isinstance(dep, str)
                 if not workers:
                     continue
 
-                if dep in self.tasks:
-                    self.tasks[dep].who_has.update(workers)
-                else:
-                    self.tasks[dep] = ts = TaskState(key=dep)
-                    ts.who_has = set(workers)
+                self.tasks[dep].who_has.update(workers)
 
                 for worker in workers:
                     self.has_what[worker].add(dep)
@@ -2187,7 +2182,7 @@ class Worker(ServerNode):
             raise
 
     def steal_request(self, key):
-        state = getattr(self.tasks.get(key, None), "state", None)
+        state = self.tasks[key].state
 
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
