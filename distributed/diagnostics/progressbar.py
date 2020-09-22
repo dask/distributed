@@ -115,7 +115,7 @@ class TextProgressBar(ProgressBar):
         start=True,
         **kwargs,
     ):
-        super(TextProgressBar, self).__init__(keys, scheduler, interval, complete)
+        super().__init__(keys, scheduler, interval, complete)
         self.width = width
         self.loop = loop or IOLoop()
 
@@ -158,7 +158,7 @@ class ProgressWidget(ProgressBar):
         loop=None,
         **kwargs,
     ):
-        super(ProgressWidget, self).__init__(keys, scheduler, interval, complete)
+        super().__init__(keys, scheduler, interval, complete)
 
         from ipywidgets import FloatProgress, HBox, VBox, HTML
 
@@ -256,8 +256,7 @@ class MultiProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
+            self.scheduler, **(self.client().connection_args if self.client else {})
         )
         logger.debug("Progressbar Connected to scheduler")
 
@@ -314,9 +313,7 @@ class MultiProgressWidget(MultiProgressBar):
         complete=False,
         **kwargs,
     ):
-        super(MultiProgressWidget, self).__init__(
-            keys, scheduler, func, interval, complete
-        )
+        super().__init__(keys, scheduler, func, interval, complete)
         from ipywidgets import VBox
 
         self.widget = VBox([])

@@ -647,7 +647,7 @@ class Worker(ServerNode):
             "steal-request": self.steal_request,
         }
 
-        super(Worker, self).__init__(
+        super().__init__(
             handlers=handlers,
             stream_handlers=stream_handlers,
             io_loop=self.loop,
@@ -864,8 +864,8 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(plugin=plugin)
-                    for plugin in response["worker-plugins"]
+                    self.plugin_add(**plugin_kwargs)
+                    for plugin_kwargs in response["worker-plugins"]
                 ]
             )
 

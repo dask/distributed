@@ -1,6 +1,30 @@
 Changelog
 =========
 
+2.27.0 - 2020-09-18
+-------------------
+
+- Fix registering a worker plugin with ``name`` arg (:pr:`4105`) `Nick Evans`_
+- Support different ``remote_python`` paths on cluster nodes (:pr:`4085`) `Abdulelah Bin Mahfoodh`_
+- Allow ``RuntimeError`` s when closing global clients (:pr:`4115`) `Matthew Rocklin`_
+- Match ``pre-commit`` in dask (:pr:`4049`) `Julia Signell`_
+- Update ``super`` usage (:pr:`4110`) `Poruri Sai Rahul`_
+
+
+2.26.0 - 2020-09-11
+-------------------
+
+- Add logging for adaptive start and stop (:pr:`4101`) `Matthew Rocklin`_
+- Don't close a nannied worker if it hasn't yet started (:pr:`4093`) `Matthew Rocklin`_
+- Respect timeouts when closing clients synchronously (:pr:`4096`) `Matthew Rocklin`_
+- Log when downloading a preload script (:pr:`4094`) `Matthew Rocklin`_
+- ``dask-worker --nprocs`` accepts negative values (:pr:`4089`) `Dror Speiser`_
+- Support zero-worker clients (:pr:`4090`) `Matthew Rocklin`_
+- Exclude ``fire-and-forget`` client from metrics (:pr:`4078`) `Tom Augspurger`_
+- Drop ``Serialized.deserialize()`` method (:pr:`4073`) `jakirkham`_
+- Add ``timeout=`` keyword to ``Client.wait_for_workers`` method (:pr:`4087`) `Matthew Rocklin`_
+
+
 2.25.0 - 2020-08-28
 -------------------
 
@@ -1939,3 +1963,5 @@ significantly without many new features.
 .. _`Jack Xiaosong Xu`: https://github.com/jackxxu
 .. _`Willi Rath`: https://github.com/willirath
 .. _`Roberto Panai`: https://github.com/rpanai
+.. _`Dror Speiser`: https://github.com/drorspei
+.. _`Poruri Sai Rahul`: https://github.com/rahulporuri
