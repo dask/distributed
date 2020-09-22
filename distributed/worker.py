@@ -1503,7 +1503,7 @@ class Worker(ServerNode):
                 # TODO: This needs to be commented out for
                 # test_failed_workers.py::test_broken_worker_during_computation
                 # to pass.  Need to sort that out.
-                #assert ts.key not in self.in_flight_tasks
+                # assert ts.key not in self.in_flight_tasks
                 assert self.tasks[ts.key].dependents
 
             self.in_flight_tasks[ts.key] = worker
@@ -2930,14 +2930,18 @@ class Worker(ServerNode):
                     # so we may have popped the key out of `self.tasks` but the
                     # dependency can still be in `memory` before GC grabs it...?
                     # Might need better bookkeeping
-                    assert dep.state == "memory" or dep.key in self.tasks
+                    assert dep.key in self.tasks
+                    assert dep.state is not None
                     self.validate_key(dep.key)
-                # for depkey in ts.waiting_for_data:
-                #    assert (
-                #        depkey in self.in_flight_tasks
-                #        or depkey in self._missing_dep_flight
-                #        or self.tasks[depkey].who_has.issubset(self.in_flight_workers)
-                #        )
+                for depkey in ts.waiting_for_data:
+                    assert (
+                        depkey in self.in_flight_tasks
+                        or depkey in self._missing_dep_flight
+                        or self.tasks[depkey].who_has.issubset(self.in_flight_workers)
+                        # TODO: this prevents other test failures and seems like a
+                        # legitimate check -- a dependency might itself be waiting
+                        or self.tasks[depkey].state == "waiting"
+                    )
                 if ts.state == "memory":
                     assert isinstance(self.nbytes[ts.key], int)
                     assert not ts.waiting_for_data
