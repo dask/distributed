@@ -127,7 +127,7 @@ async def test_release_dep_called(c, s, w):
         {"key": "dep", "state": "memory"},
         # There is no more release_dep
         # Need to think about how to rework this test.
-        #{"dep": "dep", "state": "memory"},
+        # {"dep": "dep", "state": "memory"},
         {"key": "task", "state": "memory"},
     ]
 
