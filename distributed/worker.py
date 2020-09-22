@@ -2248,6 +2248,7 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
+            del ts
         except CommClosedError:
             pass
         except Exception as e:
