@@ -1430,6 +1430,7 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
+            ts.state = "waiting"
 
             if nbytes is not None:
                 self.nbytes.update(nbytes)
@@ -1897,7 +1898,10 @@ class Worker(ServerNode):
         if key in self.data:
             return
 
-        ts = self.tasks[key]
+        ts = self.tasks.get(key)
+        if ts is None:
+            # If `put_key_in_memory` is called directly...
+            self.tasks[key] = ts = TaskState(key=key)
 
         if key in self.actors:
             self.actors[key] = value
