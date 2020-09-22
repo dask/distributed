@@ -2521,8 +2521,6 @@ class Worker(ServerNode):
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
 
-            if ts.runspec is None:
-                breakpoint()
             function, args, kwargs = ts.runspec
 
             start = time()
