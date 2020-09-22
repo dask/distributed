@@ -362,7 +362,7 @@ class Worker(ServerNode):
         # self.dep_state = dict()
         # self.dependencies = dict()
         # self.dependents = dict()
-        # self.waiting_for_data = dict()
+        self.waiting_for_data = 0
         # self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -1451,6 +1451,7 @@ class Worker(ServerNode):
 
                 if dep_ts.state != "memory":
                     ts.waiting_for_data.add(dep_ts.key)
+                    self.waiting_for_data += 1
 
                 dep_ts.who_has.update(workers)
 
@@ -1555,6 +1556,7 @@ class Worker(ServerNode):
                 assert ts.key in self.data
                 for dependent in ts.dependents:
                     dependent.waiting_for_data.discard(ts.key)
+                    self.waiting_for_data -= 1
 
                 self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
             else:
@@ -1603,6 +1605,7 @@ class Worker(ServerNode):
                 assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
+            self.waiting_for_data -= len(ts.waiting_for_data)
             ts.waiting_for_data = set()
             self.send_task_state_to_scheduler(ts)
         except Exception as e:
@@ -1917,6 +1920,7 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts.key)
+            self.waiting_for_data -= 1
             if not dep.waiting_for_data:
                 self.transition(dep.key, "ready")
 

@@ -74,7 +74,7 @@ class StateTable(DashboardComponent):
                 "Stored": [len(w.data)],
                 "Executing": ["%d / %d" % (len(w.executing), w.nthreads)],
                 "Ready": [len(w.ready)],
-                "Waiting": [len(w.waiting_for_data)],
+                "Waiting": [w.waiting_for_data],
                 "Connections": [len(w.in_flight_workers)],
                 "Serving": [len(w._comms)],
             }
