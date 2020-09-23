@@ -2482,18 +2482,11 @@ class Worker(ServerNode):
             while self.ready and len(self.executing) < self.nthreads:
                 priority, key = heapq.heappop(self.ready)
                 ts = self.tasks.get(key)
-                # TODO: find out what puts a task in to `self.ready` without creating TaskState
-                # so far:
-                # stop_doing_unnecessary work: Client.map -> kill future
-                # test_stastical_profiling: also a Client.map
-                # Ok, I'm pretty sure it is map operations
-                # TODO: should this be sent to `add_task` instead?
                 if ts is None:
-                    self.tasks[key] = ts = TaskState(key=key)
-                    ts.priority = priority
-                    # If this is "ready" (despite the heap name) it is possible
-                    # for tasks with no data and no runspec to hit "execute"
-                    ts.state = "waiting"
+                    # It is possible for tasks to be released while still remaining on `ready`
+                    # The scheduler might have re-routed to a new worker and told this worker
+                    # to release.  If the task has "disappeared" just continue through the heap
+                    continue
                 if ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
