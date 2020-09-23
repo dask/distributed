@@ -1901,10 +1901,7 @@ class Worker(ServerNode):
         if key in self.data:
             return
 
-        ts = self.tasks.get(key)
-        if ts is None:
-            # If `put_key_in_memory` is called directly...
-            self.tasks[key] = ts = TaskState(key=key)
+        ts = self.tasks[key]
 
         if key in self.actors:
             self.actors[key] = value

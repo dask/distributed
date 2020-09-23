@@ -965,7 +965,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1017,7 +1017,7 @@ async def test_no_workers_to_memory(c, s):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1047,7 +1047,7 @@ async def test_no_worker_to_memory_restrictions(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1, name="alice")
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
