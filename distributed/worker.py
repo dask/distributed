@@ -420,6 +420,7 @@ class Worker(ServerNode):
         self.validate = validate
 
         self._transitions = {
+            ("ready", "waiting"): self.transition_ready_waiting,
             ("waiting", "ready"): self.transition_waiting_ready,
             ("waiting", "memory"): self.transition_waiting_done,
             ("waiting", "error"): self.transition_waiting_done,
@@ -1597,6 +1598,25 @@ class Worker(ServerNode):
                 return "constrained"
             else:
                 heapq.heappush(self.ready, (ts.priority, ts.key))
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_ready_waiting(self, ts, worker):
+        # TODO: do we actually want this?  or is this a bandaid for
+        # bad bookkeeping elsewhere?
+        try:
+            if self.validate:
+                assert ts.state == "ready"
+                assert ts.waiting_for_data
+                assert ts.key in self.ready
+
+            self.ready.pop(ts.key)
+            ts.state = "waiting"
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
