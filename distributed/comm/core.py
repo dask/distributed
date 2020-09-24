@@ -145,7 +145,7 @@ class Comm(ABC):
                 "Your Dask versions may not be in sync. "
                 "Please ensure that you have the same version of dask "
                 "and distributed on your client, scheduler, and worker machines"
-            ) from e 
+            ) from e
 
         if local["compression"] == remote["compression"]:
             out["compression"] = local["compression"]
