@@ -1485,7 +1485,10 @@ class Worker(ServerNode):
             raise
 
     def transition(self, key, finish, **kwargs):
-        ts = self.tasks[key]
+        ts = self.tasks.get(key)
+        #TODO: check if this is needed
+        if ts is None:
+            return
         start = ts.state
         if start == finish:
             return
@@ -1611,6 +1614,8 @@ class Worker(ServerNode):
 
             self.waiting_for_data -= len(ts.waiting_for_data)
             ts.waiting_for_data = set()
+            if value is not None:
+                self.put_key_in_memory(ts.key, value)
             self.send_task_state_to_scheduler(ts)
         except Exception as e:
             logger.exception(e)
@@ -1656,7 +1661,8 @@ class Worker(ServerNode):
     def transition_executing_done(self, ts, value=no_value, report=True):
         try:
             if self.validate:
-                assert ts.key in self.executing or ts.key in self.long_running
+                # TODO: restore this (maybe?)
+                #assert ts.key in self.executing or ts.key in self.long_running
                 assert not ts.waiting_for_data
                 assert ts.key not in self.ready
 
@@ -1970,13 +1976,14 @@ class Worker(ServerNode):
                 # if a dep is no longer in-flight then don't fetch it
                 deps_ts = [self.tasks[key] for key in deps]
                 deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
+                deps = [d.key for d in deps_ts]
 
                 self.log.append(("request-dep", dep.key, worker, deps))
                 logger.debug("Request %d keys", len(deps))
 
                 start = time()
                 response = await get_data_from_worker(
-                    self.rpc, [ts.key for ts in deps_ts], worker, who=self.address
+                    self.rpc, deps, worker, who=self.address
                 )
                 stop = time()
 
@@ -2036,8 +2043,9 @@ class Worker(ServerNode):
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
                 for d in self.has_what.pop(worker):
-                    # d is a dep key
                     self.tasks[d].who_has.remove(worker)
+                # If the worker has died, `return` here so we don't hit `finally`
+                return
 
             except Exception as e:
                 logger.exception(e)
@@ -2056,9 +2064,11 @@ class Worker(ServerNode):
                     ts = self.tasks[d]
 
                     if not busy and d in data:
-                        self.transition(d, "memory", value=data[d])
-                    elif self.tasks[d].state != "memory":
-                        self.transition(d, "waiting", worker=worker, remove=not busy)
+                        self.transition(ts.key, "memory", value=data[d])
+                    elif ts.state == "executing":
+                        self.release_key(ts.key)
+                    elif ts.state != "memory":
+                        self.transition(ts.key, "waiting", worker=worker, remove=not busy)
 
                     if not busy and d not in data and self.tasks[d].dependents:
                         self.log.append(("missing-dep", d))
@@ -2095,7 +2105,8 @@ class Worker(ServerNode):
 
     async def handle_missing_dep(self, *deps, **kwargs):
         original_deps = list(deps)
-        deps = [self.tasks[dep] for dep in deps]
+        deps = [self.tasks.get(dep) for dep in deps]
+        deps = [dep for dep in deps if dep is not None]
         self.log.append(("handle-missing", deps))
         try:
             deps = {dep for dep in deps if dep.dependents}
@@ -2510,6 +2521,8 @@ class Worker(ServerNode):
             if key not in self.executing or key not in self.tasks:
                 return
             ts = self.tasks[key]
+            if ts.runspec is None:
+                return
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
@@ -2615,8 +2628,10 @@ class Worker(ServerNode):
                     pdb.set_trace()
                 raise
         finally:
-            if ts.key in self.executing:
-                self.executing.remove(ts.key)
+            # very possible this key has already been released due to errors here
+            # so don't check `ts.key`
+            if key in self.executing:
+                self.executing.remove(key)
 
     ##################
     # Administrative #
