@@ -2530,7 +2530,7 @@ class Worker(ServerNode):
             kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
-                self.startstops[key].append(
+                self.startstops[ts.key].append(
                     {"action": "disk-read", "start": start, "stop": stop}
                 )
                 if self.digests is not None:
@@ -2539,16 +2539,17 @@ class Worker(ServerNode):
             logger.debug(
                 "Execute key: %s worker: %s", ts.key, self.address
             )  # TODO: comment out?
+            assert key == ts.key
             try:
                 result = await self.executor_submit(
-                    key,
+                    ts.key,
                     apply_function,
                     args=(
                         function,
                         args2,
                         kwargs2,
                         self.execution_state,
-                        key,
+                        ts.key,
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
@@ -2571,7 +2572,7 @@ class Worker(ServerNode):
             if result["op"] == "task-finished":
                 self.nbytes[ts.key] = result["nbytes"]
                 self.types[ts.key] = result["type"]
-                self.transition(key, "memory", value=value)
+                self.transition(ts.key, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
             else:
