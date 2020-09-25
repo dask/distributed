@@ -1508,7 +1508,7 @@ class Worker(ServerNode):
                 # test_failed_workers.py::test_broken_worker_during_computation
                 # to pass.  Need to sort that out.
                 # assert ts.key not in self.in_flight_tasks
-                assert self.tasks[ts.key].dependents
+                assert ts.dependents
 
             self.in_flight_tasks[ts.key] = worker
         except Exception as e:
@@ -1536,7 +1536,7 @@ class Worker(ServerNode):
                 if ts.key not in self._missing_dep_flight:
                     self.loop.add_callback(self.handle_missing_dep, ts)
             for dependent in ts.dependents:
-                if self.tasks[dependent.key].state == "waiting":
+                if dependent.state == "waiting":
                     if remove:  # try a new worker immediately
                         self.data_needed.appendleft(dependent.key)
                     else:  # worker was probably busy, wait a while
@@ -2068,7 +2068,7 @@ class Worker(ServerNode):
                     elif ts.state not in ("ready", "memory"):
                         self.transition(ts, "waiting", worker=worker, remove=not busy)
 
-                    if not busy and d not in data and self.tasks[d].dependents:
+                    if not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
