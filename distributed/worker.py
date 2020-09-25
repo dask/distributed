@@ -1465,6 +1465,9 @@ class Worker(ServerNode):
 
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
+            elif ts.key in self.data:
+                # This seems like it shouldn't happen, and yet...
+                self.transition(ts, "memory")
             else:
                 self.transition(ts, "ready")
             if self.validate:
@@ -1531,8 +1534,7 @@ class Worker(ServerNode):
 
             if not ts.who_has:
                 if ts.key not in self._missing_dep_flight:
-                    self._missing_dep_flight.add(ts.key)
-                    self.loop.add_callback(self.handle_missing_dep, ts.key)
+                    self.loop.add_callback(self.handle_missing_dep, ts)
             for dependent in ts.dependents:
                 if self.tasks[dependent.key].state == "waiting":
                     if remove:  # try a new worker immediately
@@ -1794,20 +1796,19 @@ class Worker(ServerNode):
 
                 deps = [dep for dep in deps if dep.state == "waiting"]
 
-                missing_deps = {dep.key for dep in deps if not dep.who_has}
+                missing_deps = {dep for dep in deps if not dep.who_has}
                 if missing_deps:
                     logger.info("Can't find dependencies for key %s", key)
                     missing_deps2 = {
                         dep
                         for dep in missing_deps
-                        if dep not in self._missing_dep_flight
+                        if dep.key not in self._missing_dep_flight
                     }
                     for dep in missing_deps2:
-                        assert isinstance(dep, str)
-                        self._missing_dep_flight.add(dep)
+                        self._missing_dep_flight.add(dep.key)
                     self.loop.add_callback(self.handle_missing_dep, *missing_deps2)
 
-                    deps = [dep for dep in deps if dep not in missing_deps]
+                    deps = [dep for dep in deps if dep.key not in missing_deps]
 
                 self.log.append(("gather-dependencies", key, deps))
 
@@ -2102,9 +2103,6 @@ class Worker(ServerNode):
         self.release_key(dep.key)
 
     async def handle_missing_dep(self, *deps, **kwargs):
-        original_deps = list(deps)
-        deps = [self.tasks.get(dep) for dep in deps]
-        deps = [dep for dep in deps if dep is not None]
         self.log.append(("handle-missing", deps))
         try:
             deps = {dep for dep in deps if dep.dependents}
@@ -2148,7 +2146,6 @@ class Worker(ServerNode):
         except Exception:
             logger.error("Handle missing dep failed, retrying", exc_info=True)
             retries = kwargs.get("retries", 5)
-            deps = [dep.key for dep in deps]
             self.log.append(("handle-missing-failed", retries, deps))
             if retries > 0:
                 await self.handle_missing_dep(self, *deps, retries=retries - 1)
@@ -2156,8 +2153,8 @@ class Worker(ServerNode):
                 raise
         finally:
             try:
-                for dep in original_deps:
-                    self._missing_dep_flight.remove(dep)
+                for dep in deps:
+                    self._missing_dep_flight.remove(dep.key)
             except KeyError:
                 pass
 
