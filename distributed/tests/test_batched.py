@@ -253,3 +253,20 @@ async def test_serializers():
 
         with pytest.raises(TimeoutError):
             msg = await asyncio.wait_for(comm.read(), 0.1)
+
+
+@pytest.mark.asyncio
+async def test_missed_deadline():
+    async with EchoServer() as e:
+        comm = await connect(e.address)
+        b = BatchedSend(interval=10)
+        b.start(comm)
+
+        await asyncio.sleep(0.020)
+        # We've missed the deadline.
+        b.next_deadline = b.loop.time() - b.interval
+        b.send("hello")
+        b.send("world")
+        await asyncio.sleep(0.020)
+        assert len(b.buffer) == 0
+        await b.close()

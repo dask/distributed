@@ -119,7 +119,7 @@ class BatchedSend:
         self.message_count += 1
         self.buffer.append(msg)
         # Avoid spurious wakeups if possible
-        if self.next_deadline is None:
+        if self.next_deadline is None or self.next_deadline < self.loop.time():
             self.waker.set()
 
     @gen.coroutine
