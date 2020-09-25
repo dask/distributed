@@ -1466,7 +1466,10 @@ class Worker(ServerNode):
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
             elif ts.key in self.data:
-                # This seems like it shouldn't happen, and yet...
+                # This seems like it shouldn't happen, but during worker failures
+                # it is possible for the data to not be in `self.data` when the task
+                # is received from the scheduler (as a repeat) and then land
+                # in `self.data` before we get here.
                 self.transition(ts, "memory")
             else:
                 self.transition(ts, "ready")
