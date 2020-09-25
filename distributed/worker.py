@@ -1932,8 +1932,8 @@ class Worker(ServerNode):
             if not dep.waiting_for_data:
                 self.transition(dep, "ready")
 
-        if transition and ts.state is not None:
-            self.transition(ts, "memory")
+        #if transition and ts.state is not None:
+        #    self.transition(ts, "memory")
 
         self.log.append((ts.key, "put-in-memory"))
 
@@ -2065,6 +2065,7 @@ class Worker(ServerNode):
                         self.transition(ts, "memory", value=data[d])
                     elif ts is None or ts.state == "executing":
                         self.release_key(d)
+                        continue
                     elif ts.state not in ("ready", "memory"):
                         self.transition(ts, "waiting", worker=worker, remove=not busy)
 
@@ -2497,7 +2498,9 @@ class Worker(ServerNode):
                     # The scheduler might have re-routed to a new worker and told this worker
                     # to release.  If the task has "disappeared" just continue through the heap
                     continue
-                if ts.state in READY:
+                elif ts.key in self.data:
+                    self.transition(ts, "memory")
+                elif ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
                         ts.runspec = self._maybe_deserialize_task(ts)
