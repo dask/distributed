@@ -1343,7 +1343,7 @@ class Worker(ServerNode):
                 self.transition(ts, "memory", value=value)
             else:
                 self.tasks[key] = ts = TaskState(key)
-                self.put_key_in_memory(key, value)
+                self.put_key_in_memory(ts, value)
                 ts.priority = None
                 ts.duration = None
 
@@ -1559,7 +1559,7 @@ class Worker(ServerNode):
 
             del self.in_flight_tasks[ts.key]
             if ts.dependents:
-                self.put_key_in_memory(ts.key, value)
+                self.put_key_in_memory(ts, value)
                 assert ts.key in self.data
                 for dependent in ts.dependents:
                     dependent.waiting_for_data.discard(ts.key)
@@ -1615,7 +1615,7 @@ class Worker(ServerNode):
             self.waiting_for_data -= len(ts.waiting_for_data)
             ts.waiting_for_data = set()
             if value is not None:
-                self.put_key_in_memory(ts.key, value)
+                self.put_key_in_memory(ts, value)
             self.send_task_state_to_scheduler(ts)
         except Exception as e:
             logger.exception(e)
@@ -1679,7 +1679,7 @@ class Worker(ServerNode):
 
             if value is not no_value:
                 try:
-                    self.put_key_in_memory(ts.key, value, transition=False)
+                    self.put_key_in_memory(ts, value, transition=False)
                 except Exception as e:
                     logger.info("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
@@ -1903,30 +1903,28 @@ class Worker(ServerNode):
             d["startstops"] = self.startstops[ts.key]
         self.batched_stream.send(d)
 
-    def put_key_in_memory(self, key, value, transition=True):
-        if key in self.data:
+    def put_key_in_memory(self, ts, value, transition=True):
+        if ts.key in self.data:
             return
 
-        ts = self.tasks[key]
-
-        if key in self.actors:
-            self.actors[key] = value
+        if ts.key in self.actors:
+            self.actors[ts.key] = value
 
         else:
             start = time()
-            self.data[key] = value
+            self.data[ts.key] = value
             # this stops the infinite loop with deps -> memory
             ts.state = "memory"
             stop = time()
             if stop - start > 0.020:
-                self.startstops[key].append(
+                self.startstops[ts.key].append(
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
 
-        if key not in self.nbytes:
-            self.nbytes[key] = sizeof(value)
+        if ts.key not in self.nbytes:
+            self.nbytes[ts.key] = sizeof(value)
 
-        self.types[key] = type(value)
+        self.types[ts.key] = type(value)
 
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts.key)
@@ -1937,7 +1935,7 @@ class Worker(ServerNode):
         if transition and ts.state is not None:
             self.transition(ts, "memory")
 
-        self.log.append((key, "put-in-memory"))
+        self.log.append((ts.key, "put-in-memory"))
 
     def select_keys_for_gather(self, worker, dep):
         assert isinstance(dep, str)
