@@ -1358,8 +1358,6 @@ class Worker(ServerNode):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
-                # TODO: make sure this doesn't blow anything up but I think this check is redundant
-                # if key in self.tasks:
                 self.release_key(key)
 
             logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
@@ -1932,7 +1930,7 @@ class Worker(ServerNode):
             if not dep.waiting_for_data:
                 self.transition(dep, "ready")
 
-        #if transition and ts.state is not None:
+        # if transition and ts.state is not None:
         #    self.transition(ts, "memory")
 
         self.log.append((ts.key, "put-in-memory"))
