@@ -2569,6 +2569,13 @@ class Client:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
 
+            if restrictions:
+                restrictions = keymap(tokey, restrictions)
+                restrictions = valmap(list, restrictions)
+
+            if loose_restrictions is not None:
+                loose_restrictions = list(map(tokey, loose_restrictions))
+
             keyset = set(keys)
 
             values = {
@@ -2580,21 +2587,13 @@ class Client:
                 dsk = subs_multiple(dsk, values)
 
             d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-            extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
-            extra_keys = {tokey(future.key) for future in extra_futures}
-            dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
-            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
-            for future in extra_futures:
+            for future in set.union(*[v[1] for v in d.values()]) if d else set():
                 if future.client is not self:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
 
-            if restrictions:
-                restrictions = keymap(tokey, restrictions)
-                restrictions = valmap(list, restrictions)
-
-            if loose_restrictions is not None:
-                loose_restrictions = list(map(tokey, loose_restrictions))
+            dsk2 = str_graph({k: v[0] for k, v in d.items()})
+            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
 
             future_dependencies = {
                 tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
