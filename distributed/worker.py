@@ -420,7 +420,6 @@ class Worker(ServerNode):
         self.validate = validate
 
         self._transitions = {
-            ("ready", "waiting"): self.transition_ready_waiting,
             ("waiting", "ready"): self.transition_waiting_ready,
             ("waiting", "memory"): self.transition_waiting_done,
             ("waiting", "error"): self.transition_waiting_done,
@@ -1606,25 +1605,6 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_ready_waiting(self, ts, worker, **kwargs):
-        # TODO: do we actually want this?  or is this a bandaid for
-        # bad bookkeeping elsewhere?
-        try:
-            if self.validate:
-                assert ts.state == "ready"
-                assert ts.waiting_for_data
-                assert ts.key in self.ready
-
-            self.ready.pop(ts.key)
-            ts.state = "waiting"
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
     def transition_waiting_done(self, ts, value=None):
         try:
             if self.validate:
@@ -2087,7 +2067,7 @@ class Worker(ServerNode):
                         self.transition(ts, "memory", value=data[d])
                     elif ts is None or ts.state == "executing":
                         self.release_key(d)
-                    elif ts.state != "memory":
+                    elif ts.state not in ("ready", "memory"):
                         self.transition(ts, "waiting", worker=worker, remove=not busy)
 
                     if not busy and d not in data and self.tasks[d].dependents:
