@@ -2593,7 +2593,9 @@ class Client:
                     raise ValueError(msg)
 
             future_dependencies = {
-                tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
+                tokey(k): {tokey(f.key) for f in v[1]}
+                for k, v in d.items()
+                if len(v[1])
             }
 
             for s in future_dependencies.values():
