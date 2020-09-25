@@ -2592,9 +2592,6 @@ class Client:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
 
-            dsk2 = str_graph({k: v[0] for k, v in d.items()})
-            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
-
             future_dependencies = {
                 tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
             }
@@ -2619,14 +2616,19 @@ class Client:
                 if deps:
                     dependencies[k] = list(set(dependencies.get(k, ())) | deps)
 
-            if isinstance(retries, Number) and retries > 0:
-                retries = {k: retries for k in dsk3}
+            # We send the graph where all WrappedKey has been unpacked
+            dsk = {k: v[0] for k, v in d.items() if k is not v[0]}
 
-            futures = {key: Future(key, self, inform=False) for key in keyset}
+            # The scheduler expect all keys to be strings
+            dsk = str_graph(dsk)
+
+            if isinstance(retries, Number) and retries > 0:
+                retries = {k: retries for k in dsk}
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "tasks": valmap(dumps_task, dsk3),
+                    "tasks": valmap(dumps_task, dsk),
                     "dependencies": dependencies,
                     "keys": list(map(tokey, keys)),
                     "restrictions": restrictions or {},
@@ -2640,7 +2642,7 @@ class Client:
                     "actors": actors,
                 }
             )
-            return futures
+            return {key: Future(key, self, inform=False) for key in keyset}
 
     def get(
         self,
