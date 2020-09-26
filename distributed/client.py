@@ -2627,6 +2627,8 @@ class Client:
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
 
+            # Create futures before sending graph (helps avoid contention)
+            futures = {key: Future(key, self, inform=False) for key in keyset}
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
@@ -2644,7 +2646,7 @@ class Client:
                     "actors": actors,
                 }
             )
-            return {key: Future(key, self, inform=False) for key in keyset}
+            return futures
 
     def get(
         self,
