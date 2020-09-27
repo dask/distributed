@@ -214,8 +214,11 @@ class Listener(ABC):
     async def on_connection(self, comm: Comm, handshake_overrides=None):
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
         try:
+            logger.info('On connection')
             write = await asyncio.wait_for(comm.write(local_info), 1)
+            logger.info('Write')
             handshake = await asyncio.wait_for(comm.read(), 1)
+            logger.info('handshake')
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
