@@ -286,6 +286,7 @@ async def connect(
             while deadline - time() > 0:
 
                 async def _():
+                    logger.info('Connect start')
                     comm = await connector.connect(
                         loc, deserialize=deserialize, **connection_args
                     )
@@ -293,9 +294,12 @@ async def connect(
                         **comm.handshake_info(),
                         **(handshake_overrides or {}),
                     }
+                    logger.info('Connect done')
                     try:
                         handshake = await asyncio.wait_for(comm.read(), 1)
+                        logger.info(f"Handshake: {handshake}")
                         write = await asyncio.wait_for(comm.write(local_info), 1)
+                        logger.info(f"Write: {write}")
                         # This would be better, but connections leak if worker is closed quickly
                         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
                     except Exception as e:
@@ -314,8 +318,9 @@ async def connect(
                     return comm
 
                 with suppress(TimeoutError):
+                    timeout_ = min(deadline - time(), retry_timeout_backoff)
                     comm = await asyncio.wait_for(
-                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
+                        _(), timeout=timeout_
                     )
                     break
             if not comm:
