@@ -286,7 +286,7 @@ async def connect(
             while deadline - time() > 0:
 
                 async def _():
-                    logger.info('Connect start')
+                    logger.info(f'Connect start: {loc}')
                     comm = await connector.connect(
                         loc, deserialize=deserialize, **connection_args
                     )
