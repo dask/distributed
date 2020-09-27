@@ -32,7 +32,7 @@ from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
-from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
+from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address, ConnectionPool
 from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
@@ -635,7 +635,11 @@ class Worker(ServerNode):
             **kwargs,
         )
 
-        self.scheduler = self.rpc(scheduler_addr)
+        self.scheduler_rpc = ConnectionPool(
+            limit=8,
+            server=self,
+        )
+        self.scheduler =  self.scheduler_rpc(scheduler_addr)
         self.execution_state = {
             "scheduler": self.scheduler.address,
             "ioloop": self.loop,
@@ -1002,6 +1006,7 @@ class Worker(ServerNode):
         assert self.status is Status.undefined, self.status
 
         await super().start()
+        await self.scheduler_rpc.start()
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
