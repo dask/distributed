@@ -2586,31 +2586,42 @@ class Client:
             if values:
                 dsk = subs_multiple(dsk, values)
 
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
-            if priority is None:
-                priority = dask.order.order(dsk, dependencies=dependencies)
-                priority = keymap(tokey, priority)
-
-            # Let's unpack remote data in `dsk`, which are "WrappedKeys" that are
+            # Unpack remote data in `dsk`, which are "WrappedKeys" that are
             # unknown to `dsk` but known to the scheduler.
-            d = {k: unpack_remotedata(v) for k, v in dsk.items()}
-            unpacked_futures = set.union(*[v[1] for v in d.values()]) if d else set()
+            dsk = {k: unpack_remotedata(v) for k, v in dsk.items()}
+            unpacked_futures = (
+                set.union(*[v[1] for v in dsk.values()]) if dsk else set()
+            )
             for future in unpacked_futures:
                 if future.client is not self:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
                 if tokey(future.key) not in self.futures:
                     raise CancelledError(tokey(future.key))
-
-            # Append the dependencies of unpacked futures
-            for k, v in d.items():
+            unpacked_futures_deps = {}
+            for k, v in dsk.items():
                 if len(v[1]):
-                    dependencies[k] = set(dependencies.get(k, ())) | {
-                        f.key for f in v[1]
-                    }
+                    unpacked_futures_deps[k] = {f.key for f in v[1]}
+            dsk = {k: v[0] for k, v in dsk.items()}
 
-            # We send the graph where all WrappedKey has been unpacked
-            dsk = {k: v[0] for k, v in d.items() if k is not v[0]}
+            # Find dependencies for the scheduler,
+            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
+
+            if priority is None:
+                # Removing all unpacked futures before calling order()
+                unpacked_keys = {future.key for future in unpacked_futures}
+                stripped_dsk = {k: v for k, v in dsk.items() if k not in unpacked_keys}
+                stripped_deps = {
+                    k: v - unpacked_keys
+                    for k, v in dependencies.items()
+                    if k not in unpacked_keys
+                }
+                priority = dask.order.order(stripped_dsk, dependencies=stripped_deps)
+                priority = keymap(tokey, priority)
+
+            # Append the dependencies of unpacked futures.
+            for k, v in unpacked_futures_deps.items():
+                dependencies[k] = set(dependencies.get(k, ())) | v
 
             # The scheduler expect all keys to be strings
             dependencies = {
