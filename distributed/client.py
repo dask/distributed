@@ -2586,43 +2586,39 @@ class Client:
             if values:
                 dsk = subs_multiple(dsk, values)
 
-            d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-            for future in set.union(*[v[1] for v in d.values()]) if d else set():
-                if future.client is not self:
-                    msg = "Inputs contain futures that were created by another client."
-                    raise ValueError(msg)
-
-            future_dependencies = {
-                tokey(k): {tokey(f.key) for f in v[1]}
-                for k, v in d.items()
-                if len(v[1])
-            }
-
-            for s in future_dependencies.values():
-                for v in s:
-                    if v not in self.futures:
-                        raise CancelledError(v)
-
             dependencies = {k: get_dependencies(dsk, k) for k in dsk}
-
             if priority is None:
                 priority = dask.order.order(dsk, dependencies=dependencies)
                 priority = keymap(tokey, priority)
 
-            dependencies = {
-                tokey(k): [tokey(dep) for dep in deps]
-                for k, deps in dependencies.items()
-                if deps
-            }
-            for k, deps in future_dependencies.items():
-                if deps:
-                    dependencies[k] = list(set(dependencies.get(k, ())) | deps)
+            # Let's unpack remote data in `dsk`, which are "WrappedKeys" that are
+            # unknown to `dsk` but known to the scheduler.
+            d = {k: unpack_remotedata(v) for k, v in dsk.items()}
+            unpacked_futures = set.union(*[v[1] for v in d.values()]) if d else set()
+            for future in unpacked_futures:
+                if future.client is not self:
+                    msg = "Inputs contain futures that were created by another client."
+                    raise ValueError(msg)
+                if tokey(future.key) not in self.futures:
+                    raise CancelledError(tokey(future.key))
+
+            # Append the dependencies of unpacked futures
+            for k, v in d.items():
+                if len(v[1]):
+                    dependencies[k] = set(dependencies.get(k, ())) | {
+                        f.key for f in v[1]
+                    }
 
             # We send the graph where all WrappedKey has been unpacked
             dsk = {k: v[0] for k, v in d.items() if k is not v[0]}
 
             # The scheduler expect all keys to be strings
-            dsk = str_graph(dsk)
+            dependencies = {
+                tokey(k): [tokey(dep) for dep in deps]
+                for k, deps in dependencies.items()
+                if deps
+            }
+            dsk = str_graph(dsk, extra_values={f.key for f in unpacked_futures})
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
