@@ -92,6 +92,44 @@ SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "ta
 
 
 class TaskState:
+    """Holds volatile state relating to an individual Dask task
+
+
+    * **dependencies**: ``set(TaskState instances)``
+        The data needed by this key to run
+    * **dependents**: ``set(TaskState instances)``
+        The keys that use this dependency
+    * **duration**: ``float``
+        Expected duration the a task
+    * **priority**: ``tuple``
+        The priority this task given by the scheduler.  Determines run order.
+    * **state**: ``str``
+        The current state of the task. One of ["waiting", "ready", "executing",
+        "memory", "flight", "executing", "error", "long-running",
+        "rescheduled", "error"]
+    * **who_has**: ``set(worker)``
+        Workers that we believe have this data
+    * **waiting_for_data**: ``set(keys of dependencies)``
+        A dynamic verion of dependencies.  All dependencies that we still don't
+        have for a particular key.
+    * **resource_restrictions**: ``{str: number}``
+        Abstract resources required to run a task
+    * **exception**: ``str``
+        The exception caused by running a task if it erred
+    * **traceback**: ``str``
+        The exception caused by running a task if it erred
+
+    Parameters
+    ----------
+    key: str
+    runspec: SerializedTask
+        A named tuple containing the ``function``, ``args``, ``kwargs`` and
+        ``task`` associated with this `TaskState` instance. This defaults to
+        ``None`` and can remain empty if it is a dependency that this worker
+        will receive from another worker.
+
+    """
+
     def __init__(self, key, runspec=None):
         assert key is not None
         self.key = key
@@ -172,6 +210,8 @@ class Worker(ServerNode):
     we want to compute and ``dep`` is the name of a piece of dependent data
     that we want to collect from others.
 
+    * **tasks**: ``{key: dict}``
+        The function, args, kwargs of a task.  We run this when appropriate
     * **data:** ``{key: object}``:
         Prefer using the **host** attribute instead of this, unless
         memory_limit and at least one of memory_target_fraction or
@@ -183,20 +223,8 @@ class Worker(ServerNode):
     * **data.disk:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
-    * **task_state**: ``{key: string}``:
-        The state of all tasks that the scheduler has asked us to compute.
-        Valid states include waiting, constrained, executing, memory, erred
-    * **tasks**: ``{key: dict}``
-        The function, args, kwargs of a task.  We run this when appropriate
-    * **dependencies**: ``{key: {deps}}``
-        The data needed by this key to run
-    * **dependents**: ``{dep: {keys}}``
-        The keys that use this dependency
     * **data_needed**: deque(keys)
         The keys whose data we still lack, arranged in a deque
-    * **waiting_for_data**: ``{kep: {deps}}``
-        A dynamic verion of dependencies.  All dependencies that we still don't
-        have for a particular key.
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
     * **constrained**: [keys]
@@ -210,11 +238,6 @@ class Worker(ServerNode):
         A set of keys of tasks that are running and have started their own
         long-running clients.
 
-    * **dep_state**: ``{dep: string}``:
-        The state of all dependencies required by our tasks
-        Valid states include waiting, flight, and memory
-    * **who_has**: ``{dep: {worker}}``
-        Workers that we believe have this data
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
     * **pending_data_per_worker**: ``{worker: [dep]}``
@@ -238,19 +261,9 @@ class Worker(ServerNode):
         The ID of the thread on which the task ran
     * **active_threads**: ``{int: key}``
         The keys currently running on active threads
-    * **exceptions**: ``{key: exception}``
-        The exception caused by running a task if it erred
-    * **tracebacks**: ``{key: traceback}``
-        The exception caused by running a task if it erred
     * **startstops**: ``{key: [{startstop}]}``
         Log of transfer, load, and compute times for a task
 
-    * **priorities**: ``{key: tuple}``
-        The priority of a key given by the scheduler.  Determines run order.
-    * **durations**: ``{key: float}``
-        Expected duration of a task
-    * **resource_restrictions**: ``{key: {str: number}}``
-        Abstract resources required to run a task
 
     Parameters
     ----------
