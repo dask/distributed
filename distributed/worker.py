@@ -1493,10 +1493,6 @@ class Worker(ServerNode):
     def transition_waiting_flight(self, ts, worker=None):
         try:
             if self.validate:
-                # TODO: This needs to be commented out for
-                # test_failed_workers.py::test_broken_worker_during_computation
-                # to pass.  Need to sort that out.
-                # assert ts.key not in self.in_flight_tasks
                 assert ts.dependents
 
             self.in_flight_tasks[ts.key] = worker
@@ -1650,8 +1646,6 @@ class Worker(ServerNode):
     def transition_executing_done(self, ts, value=no_value, report=True):
         try:
             if self.validate:
-                # TODO: restore this (maybe?)
-                # assert ts.key in self.executing or ts.key in self.long_running
                 assert not ts.waiting_for_data
                 assert ts.key not in self.ready
 
@@ -1677,7 +1671,6 @@ class Worker(ServerNode):
                     ts.state = "error"
                     out = "error"
 
-                # TODO: should this be here
                 # Don't release the dependency keys, but do remove them from `dependents`
                 for dependency in ts.dependencies:
                     dependency.dependents.discard(ts)
@@ -2113,7 +2106,6 @@ class Worker(ServerNode):
                 self.scheduler.who_has, keys=list(dep.key for dep in deps)
             )
             who_has = {k: v for k, v in who_has.items() if v}
-            # TODO: fixup `update_who_has`
             self.update_who_has(who_has)
             for dep in deps:
                 dep.suspicious_count += 1
@@ -2194,9 +2186,8 @@ class Worker(ServerNode):
                 del self.actors[key]
                 del self.nbytes[key]
 
-            # for any dependencies of key we are releasing
+            # for any dependencies of key we are releasing remove task as dependent
             for dependency in ts.dependencies:
-                # remove task as dependent
                 dependency.dependents.discard(ts)
                 if not dependency.dependents and dependency.state in (
                     "waiting",
