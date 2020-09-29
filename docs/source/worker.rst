@@ -246,4 +246,5 @@ process.
 API Documentation
 -----------------
 
+.. autoclass:: distributed.worker.TaskState
 .. autoclass:: distributed.worker.Worker

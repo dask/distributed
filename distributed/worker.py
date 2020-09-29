@@ -211,13 +211,13 @@ class Worker(ServerNode):
 
     **Volatile State**
 
-    This attributes track the progress of tasks that this worker is trying to
+    These attributes track the progress of tasks that this worker is trying to
     complete.  In the descriptions below a ``key`` is the name of a task that
     we want to compute and ``dep`` is the name of a piece of dependent data
     that we want to collect from others.
 
-    * **tasks**: ``{key: dict}``
-        The function, args, kwargs of a task.  We run this when appropriate
+    * **tasks**: ``{key: TaskState}``
+        The tasks currently executing on this worker (and any dependencies of those tasks)
     * **data:** ``{key: object}``:
         Prefer using the **host** attribute instead of this, unless
         memory_limit and at least one of memory_target_fraction or
