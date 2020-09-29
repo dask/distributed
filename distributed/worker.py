@@ -2858,8 +2858,6 @@ class Worker(ServerNode):
                         key in self.in_flight_tasks
                         or key in self._missing_dep_flight
                         or self.tasks[key].who_has.issubset(self.in_flight_workers)
-                        # TODO: this prevents other test failures and seems like a
-                        # legitimate check -- a dependency might itself be waiting
                         or self.tasks[key].state == "waiting"
                     )
                 if ts.state == "memory":
