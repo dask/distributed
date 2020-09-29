@@ -33,17 +33,17 @@ logger = logging.getLogger(__name__)
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
-def set_tcp_timeout(stream):
+def set_tcp_timeout(comm):
     """
     Set kernel-level TCP timeout on the stream.
     """
-    if stream.closed():
+    if comm.closed():
         return
 
     timeout = dask.config.get("distributed.comm.timeouts.tcp")
     timeout = int(parse_timedelta(timeout, default="seconds"))
 
-    sock = stream.socket
+    sock = comm.socket
 
     # Default (unsettable) value on Windows
     # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
@@ -92,15 +92,15 @@ def set_tcp_timeout(stream):
         logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
-def get_stream_address(stream):
+def get_stream_address(comm):
     """
     Get a stream's local address.
     """
-    if stream.closed():
+    if comm.closed():
         return "<closed>"
 
     try:
-        return unparse_host_port(*stream.socket.getsockname()[:2])
+        return unparse_host_port(*comm.socket.getsockname()[:2])
     except EnvironmentError:
         # Probably EBADF
         return "<closed>"
@@ -118,9 +118,11 @@ def convert_stream_closed_error(obj, exc):
                 raise FatalCommClosedError(
                     "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
                 )
-        raise CommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc))
+        raise CommClosedError(
+            "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
+        ) from exc
     else:
-        raise CommClosedError("in %s: %s" % (obj, exc))
+        raise CommClosedError("in %s: %s" % (obj, exc)) from exc
 
 
 def _do_nothing():
@@ -200,7 +202,10 @@ class TCP(Comm):
         else:
             try:
                 msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers
+                    frames,
+                    deserialize=self.deserialize,
+                    deserializers=deserializers,
+                    allow_offload=self.allow_offload,
                 )
             except EOFError:
                 # Frames possibly garbled or truncated by communication error
@@ -216,9 +221,14 @@ class TCP(Comm):
 
         frames = await to_frames(
             msg,
+            allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
-            context={"sender": self._local_addr, "recipient": self._peer_addr},
+            context={
+                "sender": self.local_info,
+                "recipient": self.remote_info,
+                **self.handshake_options,
+            },
         )
 
         try:
@@ -352,9 +362,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             convert_stream_closed_error(self, e)
 
         local_address = self.prefix + get_stream_address(stream)
-        return self.comm_class(
+        comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
         )
+
+        return comm
 
 
 class TCPConnector(BaseTCPConnector):
@@ -378,12 +390,19 @@ class TLSConnector(BaseTCPConnector):
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):
     def __init__(
-        self, address, comm_handler, deserialize=True, default_port=0, **connection_args
+        self,
+        address,
+        comm_handler,
+        deserialize=True,
+        allow_offload=True,
+        default_port=0,
+        **connection_args
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
+        self.allow_offload = allow_offload
         self.server_args = self._get_server_args(**connection_args)
         self.tcp_server = None
         self.bound_address = None
@@ -432,6 +451,13 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         logger.debug("Incoming connection from %r to %r", address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
+        comm.allow_offload = self.allow_offload
+
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.info("Connection closed before handshake completed")
+
         await self.comm_handler(comm)
 
     def get_host_port(self):

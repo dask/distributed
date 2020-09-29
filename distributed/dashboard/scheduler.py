@@ -32,8 +32,11 @@ from .components.scheduler import (
     individual_bandwidth_types_doc,
     individual_bandwidth_workers_doc,
     individual_memory_by_key_doc,
+    individual_compute_time_per_key_doc,
+    individual_aggregate_time_per_action_doc,
 )
 from .worker import counters_doc
+from .components.nvml import gpu_memory_doc, gpu_utilization_doc  # noqa: 1708
 
 
 template_variables = {
@@ -83,14 +86,8 @@ applications = {
     "/individual-bandwidth-types": individual_bandwidth_types_doc,
     "/individual-bandwidth-workers": individual_bandwidth_workers_doc,
     "/individual-memory-by-key": individual_memory_by_key_doc,
+    "/individual-compute-time-per-key": individual_compute_time_per_key_doc,
+    "/individual-aggregate-time-per-action": individual_aggregate_time_per_action_doc,
+    "/individual-gpu-memory": gpu_memory_doc,
+    "/individual-gpu-utilization": gpu_utilization_doc,
 }
-
-try:
-    import pynvml  # noqa: 1708
-except ImportError:
-    pass
-else:
-    from .components.nvml import gpu_memory_doc, gpu_utilization_doc  # noqa: 1708
-
-    applications["/individual-gpu-memory"] = gpu_memory_doc
-    applications["/individual-gpu-utilization"] = gpu_utilization_doc

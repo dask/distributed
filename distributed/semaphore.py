@@ -1,15 +1,17 @@
-import uuid
-from collections import defaultdict, deque
 import asyncio
-import dask
+import logging
+import uuid
+import warnings
 from asyncio import TimeoutError
+from collections import defaultdict, deque
+
+import dask
 from tornado.ioloop import PeriodicCallback
+
+from distributed.utils_comm import retry_operation
+from .metrics import time
 from .utils import log_errors, parse_timedelta
 from .worker import get_client
-from .metrics import time
-import warnings
-import logging
-from distributed.utils_comm import retry_operation
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class _Watch:
 
 
 class SemaphoreExtension:
-    """ An extension for the scheduler to manage Semaphores
+    """An extension for the scheduler to manage Semaphores
 
     This adds the following routes to the scheduler
 
@@ -67,16 +69,24 @@ class SemaphoreExtension:
 
         self.scheduler.extensions["semaphores"] = self
 
+        # {metric_name: {semaphore_name: metric}}
+        self.metrics = {
+            "acquire_total": defaultdict(int),  # counter
+            "release_total": defaultdict(int),  # counter
+            "average_pending_lease_time": defaultdict(float),  # gauge
+            "pending": defaultdict(int),  # gauge
+        }
+
         validation_callback_time = parse_timedelta(
             dask.config.get("distributed.scheduler.locks.lease-validation-interval"),
             default="s",
         )
         self._pc_lease_timeout = PeriodicCallback(
-            self._check_lease_timeout, validation_callback_time * 1000,
+            self._check_lease_timeout, validation_callback_time * 1000
         )
         self._pc_lease_timeout.start()
         self.lease_timeout = parse_timedelta(
-            dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s",
+            dask.config.get("distributed.scheduler.locks.lease-timeout"), default="s"
         )
 
     async def get_value(self, comm=None, name=None):
@@ -122,6 +132,7 @@ class SemaphoreExtension:
             now = time()
             logger.info("Acquire lease %s for %s at %s", lease_id, name, now)
             self.leases[name][lease_id] = now
+            self.metrics["acquire_total"][name] += 1
         else:
             result = False
         return result
@@ -141,6 +152,7 @@ class SemaphoreExtension:
             w = _Watch(timeout)
             w.start()
 
+            self.metrics["pending"][name] += 1
             while True:
                 logger.info(
                     "Trying to acquire %s for %s with %ss left.",
@@ -172,6 +184,12 @@ class SemaphoreExtension:
                     result,
                     w.elapsed(),
                 )
+                # We're about to return, so the lease is no longer "pending"
+                self.metrics["average_pending_lease_time"][name] = (
+                    self.metrics["average_pending_lease_time"][name] + w.elapsed()
+                ) / 2
+                self.metrics["pending"][name] -= 1
+
                 return result
 
     def release(self, comm=None, name=None, lease_id=None):
@@ -196,6 +214,7 @@ class SemaphoreExtension:
         # Everything needs to be atomic here.
         del self.leases[name][lease_id]
         self.events[name].set()
+        self.metrics["release_total"][name] += 1
 
     def _check_lease_timeout(self):
         now = time()
@@ -235,10 +254,20 @@ class SemaphoreExtension:
                         RuntimeWarning,
                     )
                 del self.leases[name]
+            if name in self.metrics["pending"]:
+                if self.metrics["pending"][name]:
+                    warnings.warn(
+                        f"Closing semaphore {name} but there remain pending leases",
+                        RuntimeWarning,
+                    )
+            # Clean-up state of semaphore metrics
+            for _, metric_dict in self.metrics.items():
+                if name in metric_dict:
+                    del metric_dict[name]
 
 
 class Semaphore:
-    """ Semaphore
+    """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
     will track leases on the scheduler which can be acquired and
@@ -295,18 +324,18 @@ class Semaphore:
     Examples
     --------
     >>> from distributed import Semaphore
-    >>> sem = Semaphore(max_leases=2, name='my_database')
-    >>>
-    >>> def access_resource(s, sem):
-    >>>     # This automatically acquires a lease from the semaphore (if available) which will be
-    >>>     # released when leaving the context manager.
-    >>>     with sem:
-    >>>         pass
-    >>>
-    >>> futures = client.map(access_resource, range(10), sem=sem)
-    >>> client.gather(futures)
-    >>> # Once done, close the semaphore to clean up the state on scheduler side.
-    >>> sem.close()
+    ... sem = Semaphore(max_leases=2, name='my_database')
+    ...
+    ... def access_resource(s, sem):
+    ...     # This automatically acquires a lease from the semaphore (if available) which will be
+    ...     # released when leaving the context manager.
+    ...     with sem:
+    ...         pass
+    ...
+    ... futures = client.map(access_resource, range(10), sem=sem)
+    ... client.gather(futures)
+    ... # Once done, close the semaphore to clean up the state on scheduler side.
+    ... sem.close()
 
     Notes
     -----
@@ -333,6 +362,12 @@ class Semaphore:
         self.id = uuid.uuid4().hex
         self._leases = deque()
 
+        self.refresh_leases = True
+
+        self._registered = None
+        if register:
+            self._registered = self.register()
+
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         refresh_leases_interval = (
@@ -342,7 +377,6 @@ class Semaphore:
             )
             / 5
         )
-        self._refreshing_leases = False
         pc = PeriodicCallback(
             self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
@@ -350,12 +384,10 @@ class Semaphore:
         # Registering the pc to the client here is important for proper cleanup
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
-        pc.start()
-        self.refresh_leases = True
 
-        self._registered = None
-        if register:
-            self._registered = self.register()
+        # Need to start the callback using IOLoop.add_callback to ensure that the
+        # PC uses the correct event lopp.
+        self.client.io_loop.add_callback(pc.start)
 
     def register(self):
         """
@@ -394,7 +426,7 @@ class Semaphore:
     async def _acquire(self, timeout=None):
         lease_id = uuid.uuid4().hex
         logger.info(
-            "%s requests lease for %s with ID %s", self.client.id, self.name, lease_id,
+            "%s requests lease for %s with ID %s", self.client.id, self.name, lease_id
         )
 
         # Using a unique lease id generated here allows us to retry since the
@@ -416,7 +448,16 @@ class Semaphore:
 
         If the internal counter is greater than zero, decrement it by one and return True immediately.
         If it is zero, wait until a release() is called and return True.
+
+        Parameters
+        ----------
+        timeout : number or string or timedelta, optional
+            Seconds to wait on acquiring the semaphore.  This does not
+            include local coroutine time, network transfer time, etc..
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
         """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._acquire, timeout=timeout)
 
     def release(self):
@@ -433,7 +474,7 @@ class Semaphore:
         lease_id = self._leases.popleft()
         logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
         return self.client.sync(
-            self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id,
+            self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id
         )
 
     def get_value(self):

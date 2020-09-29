@@ -6,12 +6,13 @@ import uuid
 from .client import Future, Client
 from .utils import tokey, sync, thread_state
 from .worker import get_client
+from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
 
 class QueueExtension:
-    """ An extension for the scheduler to manage queues
+    """An extension for the scheduler to manage queues
 
     This adds the following routes to the scheduler
 
@@ -43,7 +44,7 @@ class QueueExtension:
 
         self.scheduler.extensions["queues"] = self
 
-    def create(self, stream=None, name=None, client=None, maxsize=0):
+    def create(self, comm=None, name=None, client=None, maxsize=0):
         logger.debug("Queue name: {}".format(name))
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
@@ -51,7 +52,7 @@ class QueueExtension:
         else:
             self.client_refcount[name] += 1
 
-    def release(self, stream=None, name=None, client=None):
+    def release(self, comm=None, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -65,7 +66,7 @@ class QueueExtension:
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
     async def put(
-        self, stream=None, name=None, key=None, data=None, client=None, timeout=None
+        self, comm=None, name=None, key=None, data=None, client=None, timeout=None
     ):
         if key is not None:
             record = {"type": "Future", "value": key}
@@ -81,7 +82,7 @@ class QueueExtension:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
             del self.future_refcount[name, key]
 
-    async def get(self, stream=None, name=None, client=None, timeout=None, batch=False):
+    async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """ Add task status if known """
             if record["type"] == "Future":
@@ -121,12 +122,12 @@ class QueueExtension:
             record = process(record)
             return record
 
-    def qsize(self, stream=None, name=None, client=None):
+    def qsize(self, comm=None, name=None, client=None):
         return self.queues[name].qsize()
 
 
 class Queue:
-    """ Distributed Queue
+    """Distributed Queue
 
     This allows multiple clients to share futures or small bits of data between
     each other with a multi-producer/multi-consumer queue.  All metadata is
@@ -208,21 +209,33 @@ class Queue:
             )
 
     def put(self, value, timeout=None, **kwargs):
-        """ Put data into the queue """
-        return self.client.sync(self._put, value, timeout=timeout, **kwargs)
-
-    def get(self, timeout=None, batch=False, **kwargs):
-        """ Get data from the queue
+        """Put data into the queue
 
         Parameters
         ----------
-        timeout: Number (optional)
-            Time in seconds to wait before timing out
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
+        """
+        timeout = parse_timedelta(timeout)
+        return self.client.sync(self._put, value, timeout=timeout, **kwargs)
+
+    def get(self, timeout=None, batch=False, **kwargs):
+        """Get data from the queue
+
+        Parameters
+        ----------
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
         batch: boolean, int (optional)
             If True then return all elements currently waiting in the queue.
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time
-         """
+        """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):

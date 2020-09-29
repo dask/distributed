@@ -1,9 +1,11 @@
 import asyncio
 import re
 from time import sleep
+import warnings
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
+from distributed.core import Status
 from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import close_clusters, ProcessInterface, run_spec
 from distributed.metrics import time
@@ -236,7 +238,7 @@ def test_spec_close_clusters(loop):
     cluster = SpecCluster(workers=workers, scheduler=scheduler, loop=loop)
     assert cluster in SpecCluster._instances
     close_clusters()
-    assert cluster.status == "closed"
+    assert cluster.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -266,11 +268,11 @@ async def test_nanny_port():
 @pytest.mark.asyncio
 async def test_spec_process():
     proc = ProcessInterface()
-    assert proc.status == "created"
+    assert proc.status == Status.created
     await proc
-    assert proc.status == "running"
+    assert proc.status == Status.running
     await proc.close()
-    assert proc.status == "closed"
+    assert proc.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -290,17 +292,20 @@ async def test_logs(cleanup):
 
         assert "Registered" in str(logs)
 
-        logs = await cluster.get_logs(scheduler=True, workers=False)
+        logs = await cluster.get_logs(cluster=True, scheduler=False, workers=False)
+        assert list(logs) == ["Cluster"]
+
+        logs = await cluster.get_logs(cluster=False, scheduler=True, workers=False)
         assert list(logs) == ["Scheduler"]
 
-        logs = await cluster.get_logs(scheduler=False, workers=False)
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=False)
         assert list(logs) == []
 
-        logs = await cluster.get_logs(scheduler=False, workers=True)
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=True)
         assert set(logs) == set(cluster.scheduler.workers)
 
         w = toolz.first(cluster.scheduler.workers)
-        logs = await cluster.get_logs(scheduler=False, workers=[w])
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=[w])
         assert set(logs) == {w}
 
 
@@ -481,3 +486,41 @@ async def test_run_spec(cleanup):
             assert not s.workers
 
             await asyncio.gather(*[w.finished() for w in workers.values()])
+
+
+@pytest.mark.asyncio
+async def test_run_spec_cluster_worker_names(cleanup):
+    worker = {"cls": Worker, "options": {"nthreads": 1}}
+
+    class MyCluster(SpecCluster):
+        def _new_worker_name(self, worker_number):
+            return f"prefix-{self._name }-{worker_number}-suffix"
+
+    async with SpecCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker
+    ) as cluster:
+        cluster.scale(2)
+        await cluster
+        worker_names = [0, 1]
+        assert list(cluster.worker_spec) == worker_names
+        assert sorted(list(cluster.workers)) == worker_names
+
+    async with MyCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker, name="test-name"
+    ) as cluster:
+        worker_names = ["prefix-test-name-0-suffix", "prefix-test-name-1-suffix"]
+        cluster.scale(2)
+        await cluster
+        assert list(cluster.worker_spec) == worker_names
+        assert sorted(list(cluster.workers)) == worker_names
+
+
+@pytest.mark.asyncio
+async def test_bad_close(cleanup):
+    with warnings.catch_warnings(record=True) as record:
+        cluster = SpecCluster(
+            workers=worker_spec, scheduler=scheduler, asynchronous=True
+        )
+        await cluster.close()
+
+    assert not record

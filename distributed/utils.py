@@ -4,7 +4,7 @@ import atexit
 import click
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import functools
 from hashlib import md5
 import html
@@ -192,18 +192,10 @@ def get_ip_interface(ifname):
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
 
 
-@contextmanager
-def ignoring(*exceptions):
-    try:
-        yield
-    except exceptions as e:
-        pass
-
-
 # FIXME: this breaks if changed to async def...
 @gen.coroutine
 def ignore_exceptions(coroutines, *exceptions):
-    """ Process list of coroutines, ignoring certain exceptions
+    """Process list of coroutines, ignoring certain exceptions
 
     >>> coroutines = [cor(...) for ...]  # doctest: +SKIP
     >>> x = yield ignore_exceptions(coroutines, TypeError)  # doctest: +SKIP
@@ -211,14 +203,14 @@ def ignore_exceptions(coroutines, *exceptions):
     wait_iterator = gen.WaitIterator(*coroutines)
     results = []
     while not wait_iterator.done():
-        with ignoring(*exceptions):
+        with suppress(*exceptions):
             result = yield wait_iterator.next()
             results.append(result)
     raise gen.Return(results)
 
 
 async def All(args, quiet_exceptions=()):
-    """ Wait on many tasks at the same time
+    """Wait on many tasks at the same time
 
     Err once any of the tasks err.
 
@@ -239,7 +231,7 @@ async def All(args, quiet_exceptions=()):
 
             @gen.coroutine
             def quiet():
-                """ Watch unfinished tasks
+                """Watch unfinished tasks
 
                 Otherwise if they err they get logged in a way that is hard to
                 control.  They need some other task to watch them so that they
@@ -258,7 +250,7 @@ async def All(args, quiet_exceptions=()):
 
 
 async def Any(args, quiet_exceptions=()):
-    """ Wait on many tasks at the same time and return when any is finished
+    """Wait on many tasks at the same time and return when any is finished
 
     Err once any of the tasks err.
 
@@ -277,7 +269,7 @@ async def Any(args, quiet_exceptions=()):
 
             @gen.coroutine
             def quiet():
-                """ Watch unfinished tasks
+                """Watch unfinished tasks
 
                 Otherwise if they err they get logged in a way that is hard to
                 control.  They need some other task to watch them so that they
@@ -379,10 +371,8 @@ class LoopRunner:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
-            self._should_close_loop = True
         else:
             self._loop = loop
-            self._should_close_loop = False
         self._asynchronous = asynchronous
         self._loop_thread = None
         self._started = False
@@ -481,7 +471,7 @@ class LoopRunner:
             try:
                 self._loop.add_callback(self._loop.stop)
                 self._loop_thread.join(timeout=timeout)
-                with ignoring(KeyError):  # IOLoop can be missing
+                with suppress(KeyError):  # IOLoop can be missing
                     self._loop.close()
             finally:
                 self._loop_thread = None
@@ -552,7 +542,7 @@ def clear_queue(q):
 
 
 def is_kernel():
-    """ Determine if we're running within an IPython kernel
+    """Determine if we're running within an IPython kernel
 
     >>> is_kernel()
     False
@@ -695,7 +685,7 @@ def silence_logging(level, root="distributed"):
 
 @toolz.memoize
 def ensure_ip(hostname):
-    """ Ensure that address is an IP address
+    """Ensure that address is an IP address
 
     Examples
     --------
@@ -749,7 +739,7 @@ def truncate_exception(e, n=10000):
 
 
 def tokey(o):
-    """ Convert an object to a string.
+    """Convert an object to a string.
 
     Examples
     --------
@@ -769,8 +759,7 @@ def tokey(o):
 
 
 def validate_key(k):
-    """Validate a key as received on a stream.
-    """
+    """Validate a key as received on a stream."""
     typ = type(k)
     if typ is not str and typ is not bytes:
         raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
@@ -807,7 +796,7 @@ def str_graph(dsk, extra_values=()):
 
 
 def seek_delimiter(file, delimiter, blocksize):
-    """ Seek current file to next byte after a delimiter bytestring
+    """Seek current file to next byte after a delimiter bytestring
 
     This seeks the file to the next byte following the delimiter.  It does
     not return anything.  Use ``file.tell()`` to see location afterwards.
@@ -840,7 +829,7 @@ def seek_delimiter(file, delimiter, blocksize):
 
 
 def read_block(f, offset, length, delimiter=None):
-    """ Read a block of bytes from a file
+    """Read a block of bytes from a file
 
     Parameters
     ----------
@@ -939,7 +928,9 @@ def ensure_bytes(s):
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if hasattr(s, "encode"):
+    if isinstance(s, bytes):
+        return s
+    elif hasattr(s, "encode"):
         return s.encode()
     else:
         try:
@@ -1006,7 +997,7 @@ shutting_down.__doc__ = """
 
 
 def open_port(host=""):
-    """ Return a probably-open port
+    """Return a probably-open port
 
     There is a chance that this port will be taken by the operating system soon
     after returning from this function.
@@ -1033,7 +1024,7 @@ def import_file(path):
         names_to_import.append(name)
     if ext == ".py":  # Ensure that no pyc file will be reused
         cache_file = cache_from_source(path)
-        with ignoring(OSError):
+        with suppress(OSError):
             os.remove(cache_file)
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
@@ -1113,6 +1104,19 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
+def is_writeable(frame):
+    """
+    Check whether frame is writeable
+
+    Will return ``True`` if writeable, ``False`` if readonly, and
+    ``None`` if undetermined.
+    """
+    try:
+        return not memoryview(frame).readonly
+    except TypeError:
+        return None
+
+
 @contextmanager
 def time_warn(duration, text):
     start = time()
@@ -1144,7 +1148,7 @@ class DequeHandler(logging.Handler):
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
-        super(DequeHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._instances.add(self)
 
     def emit(self, record):
@@ -1166,7 +1170,7 @@ class DequeHandler(logging.Handler):
 
 
 def reset_logger_locks():
-    """ Python 2's logger's locks don't survive a fork event
+    """Python 2's logger's locks don't survive a fork event
 
     https://github.com/dask/distributed/issues/1491
     """
@@ -1294,7 +1298,7 @@ def warn_on_duration(duration, msg):
 
 
 def typename(typ):
-    """ Return name of type
+    """Return name of type
 
     Examples
     --------
@@ -1320,7 +1324,7 @@ def format_dashboard_link(host, port):
 
 
 def parse_ports(port):
-    """ Parse input port information into list of ports
+    """Parse input port information into list of ports
 
     Parameters
     ----------
@@ -1405,7 +1409,7 @@ class Logs(dict):
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
-    """ Convert a kwargs dictionary into a list of CLI keywords
+    """Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
     ----------
@@ -1474,7 +1478,7 @@ weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def import_term(name: str):
-    """ Return the fully qualified term
+    """Return the fully qualified term
 
     Examples
     --------
@@ -1496,7 +1500,7 @@ async def offload(fn, *args, **kwargs):
 
 
 def serialize_for_cli(data):
-    """ Serialize data into a string that can be passthrough cli
+    """Serialize data into a string that can be passthrough cli
 
     Parameters
     ----------
@@ -1511,7 +1515,7 @@ def serialize_for_cli(data):
 
 
 def deserialize_for_cli(data):
-    """ De-serialize data into the original object
+    """De-serialize data into the original object
 
     Parameters
     ----------
@@ -1543,8 +1547,7 @@ empty_context = EmptyContext()
 
 
 class LRU(UserDict):
-    """ Limited size mapping, evicting the least recently looked-up key when full
-    """
+    """Limited size mapping, evicting the least recently looked-up key when full"""
 
     def __init__(self, maxsize):
         super().__init__()

@@ -195,7 +195,7 @@ async def test_min_max():
 
 @pytest.mark.asyncio
 async def test_avoid_churn(cleanup):
-    """ We want to avoid creating and deleting workers frequently
+    """We want to avoid creating and deleting workers frequently
 
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
@@ -220,7 +220,7 @@ async def test_avoid_churn(cleanup):
 
 @pytest.mark.asyncio
 async def test_adapt_quickly():
-    """ We want to avoid creating and deleting workers frequently
+    """We want to avoid creating and deleting workers frequently
 
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
@@ -298,7 +298,7 @@ async def test_adapt_down():
             start = time()
             while len(cluster.scheduler.workers) != 2:
                 await asyncio.sleep(0.1)
-                assert time() < start + 1
+                assert time() < start + 3
 
 
 @gen_test(timeout=30)
@@ -430,3 +430,22 @@ def test_adaptive_config():
         assert adapt.maximum == math.inf
         assert adapt.interval == 5
         assert adapt.wait_count == 8
+
+
+@pytest.mark.asyncio
+async def test_update_adaptive(cleanup):
+    async with LocalCluster(
+        0,
+        threads_per_worker=2,
+        memory_limit="3 GB",
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        first = cluster.adapt(maxmimum=1)
+        second = cluster.adapt(maxmimum=2)
+        await asyncio.sleep(0.2)
+        assert first.periodic_callback is None
+        assert second.periodic_callback.is_running()

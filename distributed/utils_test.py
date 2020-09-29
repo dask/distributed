@@ -1,7 +1,7 @@
 import asyncio
 import collections
 import gc
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import copy
 import functools
 from glob import glob
@@ -41,14 +41,13 @@ from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
 from .config import initialize_logging
-from .core import connect, rpc, CommClosedError
+from .core import connect, rpc, CommClosedError, Status
 from .deploy import SpecCluster
 from .metrics import time
 from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
-    ignoring,
     log_errors,
     mp_context,
     get_ip,
@@ -704,12 +703,12 @@ def cluster(
             for proc in [w["proc"] for w in workers]:
                 proc.join(timeout=2)
 
-            with ignoring(UnboundLocalError):
+            with suppress(UnboundLocalError):
                 del worker, w, proc
             del workers[:]
 
             for fn in glob("_test_worker-*"):
-                with ignoring(OSError):
+                with suppress(OSError):
                     shutil.rmtree(fn)
 
         try:
@@ -730,7 +729,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
-        with ignoring(EnvironmentError, CommClosedError):
+        with suppress(EnvironmentError, CommClosedError):
             with rpc(addr, **rpc_kwargs) as w:
                 await w.terminate(close=True)
 
@@ -742,7 +741,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 
 
 def gen_test(timeout=10):
-    """ Coroutine test
+    """Coroutine test
 
     @gen_test(timeout=5)
     async def test_foo():
@@ -818,7 +817,7 @@ async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
     async def end_worker(w):
-        with ignoring(TimeoutError, CommClosedError, EnvironmentError):
+        with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
     await asyncio.gather(*[end_worker(w) for w in workers])
@@ -915,7 +914,7 @@ def gen_cluster(
                                 s.validate_state()
                         finally:
                             if client and c.status not in ("closing", "closed"):
-                                await c._close(fast=s.status == "closed")
+                                await c._close(fast=s.status == Status.closed)
                             await end_cluster(s, workers)
                             await asyncio.wait_for(cleanup_global_workers(), 1)
 
@@ -990,7 +989,7 @@ def terminate_process(proc):
             proc.wait(10)
         finally:
             # Make sure we don't leave the process lingering around
-            with ignoring(OSError):
+            with suppress(OSError):
                 proc.kill()
 
 
@@ -1138,9 +1137,7 @@ async def assert_can_connect_from_everywhere_4_6(port, protocol="tcp", **kwargs)
     await asyncio.gather(*futures)
 
 
-async def assert_can_connect_from_everywhere_4(
-    port, protocol="tcp", **kwargs,
-):
+async def assert_can_connect_from_everywhere_4(port, protocol="tcp", **kwargs):
     """
     Check that the local *port* is reachable from all IPv4 addresses.
     """
@@ -1206,8 +1203,7 @@ async def assert_can_connect_locally_6(port, **kwargs):
 
 @contextmanager
 def captured_logger(logger, level=logging.INFO, propagate=None):
-    """Capture output from the given Logger.
-    """
+    """Capture output from the given Logger."""
     if isinstance(logger, str):
         logger = logging.getLogger(logger)
     orig_level = logger.level
@@ -1229,8 +1225,7 @@ def captured_logger(logger, level=logging.INFO, propagate=None):
 
 @contextmanager
 def captured_handler(handler):
-    """Capture output from the given logging.StreamHandler.
-    """
+    """Capture output from the given logging.StreamHandler."""
     assert isinstance(handler, logging.StreamHandler)
     orig_stream = handler.stream
     handler.stream = io.StringIO()
@@ -1448,7 +1443,7 @@ def check_process_leak(check=True):
     yield
 
     if check:
-        for i in range(100):
+        for i in range(200):
             if not set(mp_context.active_children()):
                 break
             else:
@@ -1484,9 +1479,9 @@ def check_instances():
     _global_clients.clear()
 
     for w in Worker._instances:
-        with ignoring(RuntimeError):  # closed IOLoop
+        with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == "running":
+            if w.status == Status.running:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1501,12 +1496,12 @@ def check_instances():
         print("Unclosed Comms", L)
         # raise ValueError("Unclosed Comms", L)
 
-    assert all(n.status == "closed" or n.status == "init" for n in Nanny._instances), {
-        n: n.status for n in Nanny._instances
-    }
+    assert all(
+        n.status == Status.closed or n.status == Status.init for n in Nanny._instances
+    ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO
-    assert all(c.status == "closed" for c in SpecCluster._instances), list(
+    assert all(c.status == Status.closed for c in SpecCluster._instances), list(
         SpecCluster._instances
     )
     SpecCluster._instances.clear()
@@ -1536,7 +1531,7 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
 
                         yield loop
 
-                        with ignoring(AttributeError):
+                        with suppress(AttributeError):
                             del thread_state.on_event_loop_thread
 
 

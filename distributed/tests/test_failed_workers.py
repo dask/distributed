@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import os
 import random
 from time import sleep
@@ -11,7 +12,7 @@ from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
 from distributed.client import wait
 from distributed.metrics import time
-from distributed.utils import sync, ignoring, CancelledError
+from distributed.utils import sync, CancelledError
 from distributed.utils_test import (
     gen_cluster,
     cluster,
@@ -103,7 +104,7 @@ async def test_failed_worker_without_warning(c, s, a, b):
     await wait(L)
 
     original_pid = a.pid
-    with ignoring(CommClosedError):
+    with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[a.worker_address])
     start = time()
     while a.pid == original_pid:
@@ -334,14 +335,14 @@ async def test_broken_worker_during_computation(c, s, a, b):
         )
 
     await asyncio.sleep(random.random() / 20)
-    with ignoring(CommClosedError):  # comm will be closed abrupty
+    with suppress(CommClosedError):  # comm will be closed abrupty
         await c._run(os._exit, 1, workers=[n.worker_address])
 
     await asyncio.sleep(random.random() / 20)
     while len(s.workers) < 3:
         await asyncio.sleep(0.01)
 
-    with ignoring(
+    with suppress(
         CommClosedError, EnvironmentError
     ):  # perhaps new worker can't be contacted yet
         await c._run(os._exit, 1, workers=[n.worker_address])
@@ -387,7 +388,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         a.release_dep(dep, report=True)
 
     n_worker_address = n.worker_address
-    with ignoring(CommClosedError):
+    with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
     while len(s.workers) > 2:
@@ -414,16 +415,22 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     assert "timeout" not in text.lower()
 
 
+@pytest.mark.slow
 @gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
 async def test_worker_time_to_live(c, s, a, b):
+    from distributed.scheduler import heartbeat_interval
+
+    # worker removal is also controlled by 10 * heartbeat
     assert set(s.workers) == {a.address, b.address}
+    interval = 10 * heartbeat_interval(len(s.workers)) + 0.5
+
     a.periodic_callbacks["heartbeat"].stop()
     await asyncio.sleep(0.010)
     assert set(s.workers) == {a.address, b.address}
 
     start = time()
     while set(s.workers) == {a.address, b.address}:
-        await asyncio.sleep(0.050)
-        assert time() < start + 2
+        await asyncio.sleep(interval)
+        assert time() < start + interval + 0.1
 
     set(s.workers) == {b.address}

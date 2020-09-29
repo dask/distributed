@@ -1,15 +1,14 @@
 import math
 import numpy as np
 
-from .utils import frame_split_size, merge_frames
 from .serialize import dask_serialize, dask_deserialize
 from . import pickle
 
-from ..utils import log_errors
+from ..utils import log_errors, nbytes
 
 
 def itemsize(dt):
-    """ Itemsize of dtype
+    """Itemsize of dtype
 
     Try to return the itemsize of the base element, return 8 as a fallback
     """
@@ -20,10 +19,17 @@ def itemsize(dt):
 
 
 @dask_serialize.register(np.ndarray)
-def serialize_numpy_ndarray(x):
+def serialize_numpy_ndarray(x, context=None):
     if x.dtype.hasobject:
         header = {"pickle": True}
-        frames = [pickle.dumps(x)]
+        frames = [None]
+        buffer_callback = lambda f: frames.append(memoryview(f))
+        frames[0] = pickle.dumps(
+            x,
+            buffer_callback=buffer_callback,
+            protocol=(context or {}).get("pickle-protocol", None),
+        )
+        header["lengths"] = tuple(map(nbytes, frames))
         return header, frames
 
     # We cannot blindly pickle the dtype as some may fail pickling,
@@ -33,7 +39,12 @@ def serialize_numpy_ndarray(x):
         try:
             # Only use stdlib pickle as cloudpickle is slow when failing
             # (microseconds instead of nanoseconds)
-            dt = (1, pickle.pickle.dumps(x.dtype))
+            dt = (
+                1,
+                pickle.pickle.dumps(
+                    x.dtype, protocol=(context or {}).get("pickle-protocol", None)
+                ),
+            )
             pickle.loads(dt[1])  # does it unpickle fine?
         except Exception:
             # dtype fails pickling => fall back on the descr if reasonable.
@@ -87,10 +98,7 @@ def serialize_numpy_ndarray(x):
     if broadcast_to is not None:
         header["broadcast_to"] = broadcast_to
 
-    if x.nbytes > 1e5:
-        frames = frame_split_size(data)
-    else:
-        frames = [data]
+    frames = [data]
 
     header["lengths"] = [x.nbytes]
 
@@ -100,11 +108,10 @@ def serialize_numpy_ndarray(x):
 @dask_deserialize.register(np.ndarray)
 def deserialize_numpy_ndarray(header, frames):
     with log_errors():
-        if len(frames) > 1:
-            frames = merge_frames(header, frames)
-
         if header.get("pickle"):
-            return pickle.loads(frames[0])
+            return pickle.loads(frames[0], buffers=frames[1:])
+
+        (frame,) = frames
 
         is_custom, dt = header["dtype"]
         if is_custom:
@@ -117,7 +124,7 @@ def deserialize_numpy_ndarray(header, frames):
         else:
             shape = header["shape"]
 
-        x = np.ndarray(shape, dtype=dt, buffer=frames[0], strides=header["strides"])
+        x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
 
         return x
 
@@ -133,7 +140,7 @@ def deserialize_numpy_ma_masked(header, frames):
 
 
 @dask_serialize.register(np.ma.core.MaskedArray)
-def serialize_numpy_maskedarray(x):
+def serialize_numpy_maskedarray(x, context=None):
     data_header, frames = serialize_numpy_ndarray(x.data)
     header = {"data-header": data_header, "nframes": len(frames)}
 
@@ -147,7 +154,12 @@ def serialize_numpy_maskedarray(x):
     if isinstance(x.fill_value, (np.integer, np.floating, np.bool_)):
         serialized_fill_value = (False, x.fill_value.item())
     else:
-        serialized_fill_value = (True, pickle.dumps(x.fill_value))
+        serialized_fill_value = (
+            True,
+            pickle.dumps(
+                x.fill_value, protocol=(context or {}).get("pickle-protocol", None)
+            ),
+        )
     header["fill-value"] = serialized_fill_value
 
     return header, frames

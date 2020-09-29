@@ -2,7 +2,7 @@ from .plugin import SchedulerPlugin
 
 
 class GraphLayout(SchedulerPlugin):
-    """ Dynamic graph layout during computation
+    """Dynamic graph layout during computation
 
     This assigns (x, y) locations to all tasks quickly and dynamically as new
     tasks are added.  This scales to a few thousand nodes.
@@ -36,16 +36,21 @@ class GraphLayout(SchedulerPlugin):
             }
             priority = {k: ts.priority for k, ts in scheduler.tasks.items()}
             self.update_graph(
-                self.scheduler, dependencies=dependencies, priority=priority
+                self.scheduler,
+                tasks=self.scheduler.tasks,
+                dependencies=dependencies,
+                priority=priority,
             )
 
-    def update_graph(self, scheduler, dependencies=None, priority=None, **kwargs):
-        stack = sorted(dependencies, key=lambda k: priority.get(k, 0), reverse=True)
+    def update_graph(
+        self, scheduler, dependencies=None, priority=None, tasks=None, **kwargs
+    ):
+        stack = sorted(tasks, key=lambda k: priority.get(k, 0), reverse=True)
         while stack:
             key = stack.pop()
             if key in self.x or key not in scheduler.tasks:
                 continue
-            deps = dependencies[key]
+            deps = dependencies.get(key, ())
             if deps:
                 if not all(dep in self.y for dep in deps):
                     stack.append(key)
@@ -111,7 +116,7 @@ class GraphLayout(SchedulerPlugin):
                 del collection[key]
 
     def reset_index(self):
-        """ Reset the index and refill new and new_edges
+        """Reset the index and refill new and new_edges
 
         From time to time TaskGraph wants to remove invisible nodes and reset
         all of its indices.  This helps.

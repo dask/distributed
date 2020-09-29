@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import suppress
 import gc
 import logging
 import os
@@ -15,10 +16,10 @@ from tornado.ioloop import IOLoop
 import dask
 from distributed.diagnostics import SchedulerPlugin
 from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
-from distributed.core import CommClosedError
+from distributed.core import CommClosedError, Status
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import ignoring, tmpfile, TimeoutError, parse_ports
+from distributed.utils import tmpfile, TimeoutError, parse_ports
 from distributed.utils_test import (  # noqa: F401
     gen_cluster,
     gen_test,
@@ -88,7 +89,7 @@ async def test_nanny_process_failure(c, s):
     await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
     pid = n.pid
     assert pid is not None
-    with ignoring(CommClosedError):
+    with suppress(CommClosedError):
         await c.run(os._exit, 0, workers=[n.worker_address])
 
     start = time()
@@ -139,8 +140,8 @@ async def test_no_hang_when_scheduler_closes(s, a, b):
     with captured_logger("tornado.application", logging.ERROR) as logger:
         await s.close()
         await asyncio.sleep(1.2)
-        assert a.status == "closed"
-        assert b.status == "closed"
+        assert a.status == Status.closed
+        assert b.status == Status.closed
 
     out = logger.getvalue()
     assert "Timed out trying to connect" not in out
@@ -154,7 +155,7 @@ async def test_close_on_disconnect(s, w):
     await s.close()
 
     start = time()
-    while w.status != "closed":
+    while w.status != Status.closed:
         await asyncio.sleep(0.05)
         assert time() < start + 9
 
@@ -186,7 +187,7 @@ async def test_nanny_death_timeout(s):
     with pytest.raises(TimeoutError):
         await w
 
-    assert w.status == "closed"
+    assert w.status == Status.closed
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -488,11 +489,11 @@ async def test_nanny_closes_cleanly(cleanup):
                 with client.rpc(n.worker_address) as w:
                     IOLoop.current().add_callback(w.terminate)
                     start = time()
-                    while n.status != "closed":
+                    while n.status != Status.closed:
                         await asyncio.sleep(0.01)
                         assert time() < start + 5
 
-                    assert n.status == "closed"
+                    assert n.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -556,3 +557,20 @@ async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
             await n.process.stopped.wait()
             # Check that the scheduler has been notified about the closed worker
             assert len(s.workers) == 0
+
+
+class StartException(Exception):
+    pass
+
+
+class BrokenWorker(worker.Worker):
+    async def start(self):
+        raise StartException("broken")
+
+
+@pytest.mark.asyncio
+async def test_worker_start_exception(cleanup):
+    # make sure this raises the right Exception:
+    with pytest.raises(StartException):
+        async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
+            await n.start()

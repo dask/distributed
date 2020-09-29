@@ -1,12 +1,13 @@
 import asyncio
 from collections import defaultdict, deque
+from contextlib import suppress
 import logging
 import threading
 import weakref
 
 from .core import CommClosedError
 from .metrics import time
-from .utils import sync, TimeoutError, ignoring
+from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ class PubSubClientExtension:
 
 
 class Pub:
-    """ Publish data with Publish-Subscribe pattern
+    """Publish data with Publish-Subscribe pattern
 
     This allows clients and workers to directly communicate data between each
     other with a typical Publish-Subscribe pattern.  This involves two
@@ -354,7 +355,7 @@ class Pub:
 
 
 class Sub:
-    """ Subscribe to a Publish/Subscribe topic
+    """Subscribe to a Publish/Subscribe topic
 
     See Also
     --------
@@ -420,7 +421,7 @@ class Sub:
             try:
                 await asyncio.wait_for(_(), timeout2)
             finally:
-                with ignoring(RuntimeError):  # Python 3.6 fails here sometimes
+                with suppress(RuntimeError):  # Python 3.6 fails here sometimes
                     self.condition.release()
 
         return self.buffer.popleft()
@@ -428,7 +429,16 @@ class Sub:
     __anext__ = _get
 
     def get(self, timeout=None):
-        """ Get a single message """
+        """Get a single message
+
+        Parameters
+        ----------
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
+        """
+        timeout = parse_timedelta(timeout)
         if self.client:
             return self.client.sync(self._get, timeout=timeout)
         elif self.worker.thread_id == threading.get_ident():

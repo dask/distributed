@@ -6,12 +6,13 @@ import uuid
 from .client import Client
 from .utils import log_errors, TimeoutError
 from .worker import get_worker
+from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
 
 class LockExtension:
-    """ An extension for the scheduler to manage Locks
+    """An extension for the scheduler to manage Locks
 
     This adds the following routes to the scheduler
 
@@ -30,7 +31,7 @@ class LockExtension:
 
         self.scheduler.extensions["locks"] = self
 
-    async def acquire(self, stream=None, name=None, id=None, timeout=None):
+    async def acquire(self, comm=None, name=None, id=None, timeout=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
@@ -58,7 +59,7 @@ class LockExtension:
                 self.ids[name] = id
             return result
 
-    def release(self, stream=None, name=None, id=None):
+    def release(self, comm=None, name=None, id=None):
         with log_errors():
             if isinstance(name, list):
                 name = tuple(name)
@@ -72,7 +73,7 @@ class LockExtension:
 
 
 class Lock:
-    """ Distributed Centralized Lock
+    """Distributed Centralized Lock
 
     Parameters
     ----------
@@ -103,26 +104,30 @@ class Lock:
         self._locked = False
 
     def acquire(self, blocking=True, timeout=None):
-        """ Acquire the lock
+        """Acquire the lock
 
         Parameters
         ----------
         blocking : bool, optional
             If false, don't wait on the lock in the scheduler at all.
-        timeout : number, optional
+        timeout : string or number or timedelta, optional
             Seconds to wait on the lock in the scheduler.  This does not
             include local coroutine time, network transfer time, etc..
             It is forbidden to specify a timeout when blocking is false.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
 
         Examples
         --------
         >>> lock = Lock('x')  # doctest: +SKIP
-        >>> lock.acquire(timeout=1)  # doctest: +SKIP
+        >>> lock.acquire(timeout="1s")  # doctest: +SKIP
 
         Returns
         -------
         True or False whether or not it sucessfully acquired the lock
         """
+        timeout = parse_timedelta(timeout)
+
         if not blocking:
             if timeout is not None:
                 raise ValueError("can't specify a timeout for a non-blocking call")

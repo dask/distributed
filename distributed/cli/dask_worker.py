@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+from contextlib import suppress
 import logging
 import gc
 import os
@@ -9,9 +10,8 @@ import warnings
 
 import click
 import dask
-from dask.utils import ignoring
 from dask.system import CPU_COUNT
-from distributed import Nanny, Security
+from distributed import Nanny
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.preloading import validate_preload_argv
@@ -127,7 +127,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=int,
     default=1,
     show_default=True,
-    help="Number of worker processes to launch.",
+    help="Number of worker processes to launch. "
+    "If negative, then (CPU_COUNT + 1 + nprocs) is used.",
 )
 @click.option(
     "--name",
@@ -278,17 +279,24 @@ def main(
         )
         dashboard = bokeh
 
-    sec = Security(
-        **{
-            k: v
-            for k, v in [
-                ("tls_ca_file", tls_ca_file),
-                ("tls_worker_cert", tls_cert),
-                ("tls_worker_key", tls_key),
-            ]
-            if v is not None
-        }
-    )
+    sec = {
+        k: v
+        for k, v in [
+            ("tls_ca_file", tls_ca_file),
+            ("tls_worker_cert", tls_cert),
+            ("tls_worker_key", tls_key),
+        ]
+        if v is not None
+    }
+
+    if nprocs < 0:
+        nprocs = CPU_COUNT + 1 + nprocs
+
+    if nprocs <= 0:
+        logger.error(
+            "Failed to launch worker. Must specify --nprocs so that there's at least one process."
+        )
+        sys.exit(1)
 
     if nprocs > 1 and not nanny:
         logger.error(
@@ -381,7 +389,7 @@ def main(
             "dask-worker SCHEDULER_ADDRESS:8786"
         )
 
-    with ignoring(TypeError, ValueError):
+    with suppress(TypeError, ValueError):
         name = int(name)
 
     if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:

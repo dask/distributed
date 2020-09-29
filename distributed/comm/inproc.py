@@ -36,7 +36,10 @@ class Manager:
             # Avoid immediate warning for unreachable network
             # (will still warn for other get_ip() calls when actually used)
             warnings.simplefilter("ignore")
-            self.ip = get_ip()
+            try:
+                self.ip = get_ip()
+            except OSError:
+                self.ip = "127.0.0.1"
         self.lock = threading.Lock()
 
     def add_listener(self, addr, listener):
@@ -260,6 +263,11 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
+            try:
+                await self.on_connection(comm)
+            except CommClosedError:
+                logger.debug("Connection closed before handshake completed")
+                return
             IOLoop.current().add_callback(self.comm_handler, comm)
 
     def connect_threadsafe(self, conn_req):

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalCluster(SpecCluster):
-    """ Create local Scheduler and Workers
+    """Create local Scheduler and Workers
 
     This creates a "cluster" of a scheduler and workers running on the local
     machine.
@@ -44,6 +44,10 @@ class LocalCluster(SpecCluster):
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
         Set to ``None`` to disable the dashboard.
+        Use ':0' for a random port.
+    worker_dashboard_address: str
+        Address on which to listen for the Bokeh worker diagnostics server like
+        'localhost:8787' or '0.0.0.0:8787'.  Defaults to None which disables the dashboard.
         Use ':0' for a random port.
     diagnostics_port: int
         Deprecated.  See dashboard_address.
@@ -125,6 +129,20 @@ class LocalCluster(SpecCluster):
                 "Please use `dashboard_address=` instead"
             )
             dashboard_address = diagnostics_port
+
+        if threads_per_worker == 0:
+            warnings.warn(
+                "Setting `threads_per_worker` to 0 is discouraged. "
+                "Please set to None or to a specific int to get best behavior."
+            )
+            threads_per_worker = None
+
+        if "dashboard" in worker_kwargs:
+            warnings.warn(
+                "Setting `dashboard` is discouraged. "
+                "Please set `dashboard_address` to affect the scheduler (more common) "
+                "and `worker_dashboard_address` for the worker (less common)."
+            )
 
         self.status = None
         self.processes = processes
@@ -208,7 +226,7 @@ class LocalCluster(SpecCluster):
 
         workers = {i: worker for i in range(n_workers)}
 
-        super(LocalCluster, self).__init__(
+        super().__init__(
             scheduler=scheduler,
             workers=workers,
             worker=worker,
