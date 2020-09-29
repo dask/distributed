@@ -30,6 +30,7 @@ from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes, funcname
+from dask.highlevelgraph import HighLevelGraph
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
 
@@ -2578,13 +2579,24 @@ class Client:
 
             keyset = set(keys)
 
-            values = {
-                k: v
-                for k, v in dsk.items()
-                if isinstance(v, Future) and k not in keyset
-            }
-            if values:
-                dsk = subs_multiple(dsk, values)
+            # Make sure `dsk` is a high level graph
+            if not isinstance(dsk, HighLevelGraph):
+                dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
+
+            def substitute_future_aliases(dsk):
+                # Find aliases not in `keyset`
+                values = {
+                    k: v
+                    for k, v in dsk.items()
+                    if isinstance(v, Future) and k not in keyset
+                }
+                # And substitute all matching keys with its Future
+                if values:
+                    dsk = subs_multiple(dsk, values)
+                return dsk
+
+            # Notice, we only have to do the substitution on already materialized layers
+            dsk = dsk.map_basic_layers(substitute_future_aliases)
 
             # Unpack remote data in `dsk`, which are "WrappedKeys" that are
             # unknown to `dsk` but known to the scheduler.
