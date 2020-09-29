@@ -606,15 +606,16 @@ async def test_message_breakup(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_types(c, s, a, b):
-    assert not a.types
-    assert not b.types
+    assert all(ts.type_ is None for ts in a.tasks.values())
+    assert all(ts.type_ is None for ts in b.tasks.values())
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
-    assert a.types[x.key] == int
+    assert a.tasks[x.key].type_ == int
 
     y = c.submit(inc, x, workers=b.address)
     await wait(y)
-    assert b.types == {x.key: int, y.key: int}
+    assert b.tasks[x.key].type_ == int
+    assert b.tasks[y.key].type_ == int
 
     await c._cancel(y)
 
@@ -623,7 +624,7 @@ async def test_types(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    assert y.key not in b.types
+    assert y.key not in b.tasks
 
 
 @gen_cluster()

@@ -118,6 +118,8 @@ class TaskState:
         The exception caused by running a task if it erred
     * **traceback**: ``str``
         The exception caused by running a task if it erred
+    * **type_**: ``type``
+        The type of a particular piece of data
 
     Parameters
     ----------
@@ -141,12 +143,10 @@ class TaskState:
         self.state = None
         self.who_has = set()
         self.waiting_for_data = set()
-        # self.nbytes = None
         self.resource_restrictions = None
-        # self.actor = None
         self.exception = None
         self.traceback = None
-        # self.type = None
+        self.type_ = None
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -252,11 +252,8 @@ class Worker(ServerNode):
         The total number of bytes in flight
     * **suspicious_deps**: ``{dep: int}``
         The number of times a dependency has not been where we expected it
-
     * **nbytes**: ``{key: int}``
         The size of a particular piece of data
-    * **types**: ``{key: type}``
-        The type of a particular piece of data
     * **threads**: ``{key: int}``
         The ID of the thread on which the task ran
     * **active_threads**: ``{int: key}``
@@ -371,12 +368,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
-        # self.task_state = dict()
-        # self.dep_state = dict()
-        # self.dependencies = dict()
-        # self.dependents = dict()
         self.waiting_for_data = 0
-        # self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
@@ -398,10 +390,7 @@ class Worker(ServerNode):
         self._missing_dep_flight = set()
 
         self.nbytes = dict()
-        self.types = dict()
         self.threads = dict()
-        # self.exceptions = dict()
-        # self.tracebacks = dict()
 
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
@@ -410,11 +399,8 @@ class Worker(ServerNode):
         self.profile_recent = profile.create()
         self.profile_history = deque(maxlen=3600)
 
-        # self.priorities = dict()
         self.generation = 0
-        # self.durations = dict()
         self.startstops = defaultdict(list)
-        # self.resource_restrictions = dict()
 
         self.ready = list()
         self.constrained = deque()
@@ -1449,10 +1435,6 @@ class Worker(ServerNode):
 
             who_has = who_has or {}
 
-            #    msg["who_has"] = {
-            #        dep.key: [ws.address for ws in dep.who_has] for dep in deps
-            #    }
-            # dep -> dependency (parent)
             for dependency, workers in who_has.items():
                 assert workers
                 if dependency not in self.tasks:
@@ -1871,14 +1853,14 @@ class Worker(ServerNode):
     def send_task_state_to_scheduler(self, ts):
         if ts.key in self.data or self.actors.get(ts.key):
             nbytes = self.nbytes.get(ts.key)
-            typ = self.types.get(ts.key)
+            typ = ts.type_
             if nbytes is None or typ is None:
                 try:
                     value = self.data[ts.key]
                 except KeyError:
                     value = self.actors[ts.key]
                 nbytes = self.nbytes[ts.key] = sizeof(value)
-                typ = self.types[ts.key] = type(value)
+                typ = ts.type_ = type(value)
                 del value
             try:
                 typ_serialized = dumps_function(typ)
@@ -1923,7 +1905,6 @@ class Worker(ServerNode):
         else:
             start = time()
             self.data[ts.key] = value
-            # this stops the infinite loop with deps -> memory
             ts.state = "memory"
             stop = time()
             if stop - start > 0.020:
@@ -1934,16 +1915,13 @@ class Worker(ServerNode):
         if ts.key not in self.nbytes:
             self.nbytes[ts.key] = sizeof(value)
 
-        self.types[ts.key] = type(value)
+        ts.type_ = type(value)
 
         for dep in ts.dependents:
             dep.waiting_for_data.discard(ts.key)
             self.waiting_for_data -= 1
             if not dep.waiting_for_data:
                 self.transition(dep, "ready")
-
-        # if transition and ts.state is not None:
-        #    self.transition(ts, "memory")
 
         self.log.append((ts.key, "put-in-memory"))
 
@@ -2217,11 +2195,9 @@ class Worker(ServerNode):
                 except FileNotFoundError:
                     logger.error("Tried to delete %s but no file found", exc_info=True)
                 del self.nbytes[key]
-                del self.types[key]
             if key in self.actors and not ts.dependents:
                 del self.actors[key]
                 del self.nbytes[key]
-                del self.types[key]
 
             # for any dependencies of key we are releasing
             for dependency in ts.dependencies:
@@ -2265,48 +2241,6 @@ class Worker(ServerNode):
             del ts
         except CommClosedError:
             pass
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def release_dep(self, dep, report=False):
-        try:
-            if dep.key not in self.tasks:
-                return
-            self.log.append((dep, "release-dep"))
-
-            if dep.key in self.suspicious_deps:
-                del self.suspicious_deps[dep.key]
-
-            for worker in dep.who_has:
-                self.has_what[worker].remove(dep.key)
-
-            if dep.key in self.data:
-                del self.data[dep.key]
-                del self.types[dep.key]
-            if dep.key in self.actors:
-                del self.actors[dep.key]
-                del self.types[dep.key]
-            del self.nbytes[dep.key]
-
-            if dep.key in self.in_flight_tasks:
-                worker = self.in_flight_tasks.pop(dep.key)
-                self.in_flight_workers[worker].remove(dep.key)
-
-            for deptask in dep.dependents:
-                if deptask.state != "memory":
-                    self.release_key(deptask.key, cause=dep.key)
-
-            if report and dep.state == "memory":
-                self.batched_stream.send(
-                    {"op": "release-worker-data", "keys": [dep.key]}
-                )
-
-            self._notify_plugins("release_dep", dep.key, dep.state, report)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2592,7 +2526,7 @@ class Worker(ServerNode):
 
             if result["op"] == "task-finished":
                 self.nbytes[ts.key] = result["nbytes"]
-                self.types[ts.key] = result["type"]
+                ts.type_ = result["type"]
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
