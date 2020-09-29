@@ -1479,6 +1479,8 @@ class Worker(ServerNode):
             raise
 
     def transition(self, ts, finish, **kwargs):
+        if ts is None:
+            return
         start = ts.state
         if start == finish:
             return
@@ -1971,7 +1973,8 @@ class Worker(ServerNode):
                     return
 
                 if cause:
-                    self.tasks[cause].startstops.append(
+                    cause_ts = self.tasks.get(cause, TaskState(key=cause))
+                    cause_ts.startstops.append(
                         {
                             "action": "transfer",
                             "start": start + self.scheduler_delay,
