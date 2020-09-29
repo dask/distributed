@@ -120,6 +120,8 @@ class TaskState:
         The exception caused by running a task if it erred
     * **type_**: ``type``
         The type of a particular piece of data
+    * **suspicious_count**: ``int``
+        The number of times a dependency has not been where we expected it
 
     Parameters
     ----------
@@ -147,6 +149,7 @@ class TaskState:
         self.exception = None
         self.traceback = None
         self.type_ = None
+        self.suspicious_count = 0
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -250,8 +253,6 @@ class Worker(ServerNode):
         dependencies we expect from those connections
     * **comm_bytes**: ``int``
         The total number of bytes in flight
-    * **suspicious_deps**: ``{dep: int}``
-        The number of times a dependency has not been where we expected it
     * **nbytes**: ``{key: int}``
         The size of a particular piece of data
     * **threads**: ``{key: int}``
@@ -386,7 +387,6 @@ class Worker(ServerNode):
         )
         self.total_comm_nbytes = 10e6
         self.comm_nbytes = 0
-        self.suspicious_deps = defaultdict(lambda: 0)
         self._missing_dep_flight = set()
 
         self.nbytes = dict()
@@ -2099,9 +2099,7 @@ class Worker(ServerNode):
                 return
 
             for dep in deps:
-                # TODO: Add suspicious count to TaskState
-                suspicious = self.suspicious_deps[dep.key]
-                if suspicious > 5:
+                if dep.suspicious_count > 5:
                     deps.remove(dep)
                     self.bad_dep(dep)
             if not deps:
@@ -2111,7 +2109,7 @@ class Worker(ServerNode):
                 logger.info(
                     "Dependent not found: %s %s .  Asking scheduler",
                     dep.key,
-                    self.suspicious_deps[dep.key],
+                    dep.suspicious_count,
                 )
 
             who_has = await retry_operation(
@@ -2121,7 +2119,7 @@ class Worker(ServerNode):
             # TODO: fixup `update_who_has`
             self.update_who_has(who_has)
             for dep in deps:
-                self.suspicious_deps[dep.key] += 1
+                dep.suspicious_count += 1
 
                 if not who_has.get(dep.key):
                     self.log.append((dep.key, "no workers found", dep.dependents))
@@ -2208,9 +2206,6 @@ class Worker(ServerNode):
                     "flight",
                 ):
                     self.release_key(dependency.key)
-
-            if ts.key in self.suspicious_deps:
-                del self.suspicious_deps[ts.key]
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
