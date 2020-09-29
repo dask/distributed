@@ -1478,12 +1478,6 @@ class Worker(ServerNode):
 
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
-            elif ts.key in self.data:
-                # This seems like it shouldn't happen, but during worker failures
-                # it is possible for the data to not be in `self.data` when the task
-                # is received from the scheduler (as a repeat) and then land
-                # in `self.data` before we get here.
-                self.transition(ts, "memory")
             else:
                 self.transition(ts, "ready")
             if self.validate:
@@ -1920,6 +1914,7 @@ class Worker(ServerNode):
 
     def put_key_in_memory(self, ts, value, transition=True):
         if ts.key in self.data:
+            ts.state = "memory"
             return
 
         if ts.key in self.actors:
@@ -2211,9 +2206,7 @@ class Worker(ServerNode):
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
-            if key not in self.tasks:
-                return
-            ts = self.tasks.pop(key)
+            ts = self.tasks.get(key, TaskState(key=key))
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
@@ -2267,6 +2260,8 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
+            if key in self.tasks:
+                self.tasks.pop(key)
             del ts
         except CommClosedError:
             pass
