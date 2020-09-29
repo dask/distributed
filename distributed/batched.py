@@ -123,6 +123,10 @@ class BatchedSend:
                     break
             finally:
                 payload = None  # lose ref
+        else:
+            # nobreak. We've been gracefully closed.
+            self.stopped.set()
+            return
 
         # If we've reached here, it means our comm is known to be closed or
         # we've repeatedly failed to send a message. We can't close gracefully
@@ -130,6 +134,7 @@ class BatchedSend:
         # This means that any messages in our buffer our lost.
         # To propagate exceptions, we rely on subsequent `BatchedSend.send`
         # calls to raise CommClosedErrors.
+        self.stopped.set()
         self.abort()
 
     def send(self, msg):
