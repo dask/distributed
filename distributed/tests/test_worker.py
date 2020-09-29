@@ -572,7 +572,6 @@ async def test_clean(c, s, a, b):
         a.startstops,
         a.data,
         a.nbytes,
-        a.types,
         a.threads,
     ]
     for c in collections:

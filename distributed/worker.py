@@ -1479,9 +1479,6 @@ class Worker(ServerNode):
             raise
 
     def transition(self, ts, finish, **kwargs):
-        # TODO: check if this is needed
-        if ts is None:
-            return
         start = ts.state
         if start == finish:
             return
@@ -2225,9 +2222,6 @@ class Worker(ServerNode):
                         self.available_resources[resource] += quantity
 
             if report and ts.state in PROCESSING:  # not finished
-                # If not finished, restore TaskState to tasks dict
-                # TODO: need this?
-                # self.tasks[key] = ts
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
