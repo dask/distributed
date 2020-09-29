@@ -569,7 +569,6 @@ async def test_clean(c, s, a, b):
 
     collections = [
         a.tasks,
-        a.startstops,
         a.data,
         a.nbytes,
         a.threads,
@@ -697,7 +696,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
     await wait(z)
 
-    r = w3.startstops[z.key]
+    r = w3.tasks[z.key].startstops
     transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 

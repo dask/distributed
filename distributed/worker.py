@@ -122,6 +122,8 @@ class TaskState:
         The type of a particular piece of data
     * **suspicious_count**: ``int``
         The number of times a dependency has not been where we expected it
+    * **startstops**: ``[{startstop}]``
+        Log of transfer, load, and compute times for a task
 
     Parameters
     ----------
@@ -150,6 +152,7 @@ class TaskState:
         self.traceback = None
         self.type_ = None
         self.suspicious_count = 0
+        self.startstops = list()
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -259,8 +262,6 @@ class Worker(ServerNode):
         The ID of the thread on which the task ran
     * **active_threads**: ``{int: key}``
         The keys currently running on active threads
-    * **startstops**: ``{key: [{startstop}]}``
-        Log of transfer, load, and compute times for a task
 
 
     Parameters
@@ -400,7 +401,6 @@ class Worker(ServerNode):
         self.profile_history = deque(maxlen=3600)
 
         self.generation = 0
-        self.startstops = defaultdict(list)
 
         self.ready = list()
         self.constrained = deque()
@@ -1887,8 +1887,8 @@ class Worker(ServerNode):
             logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
             return
 
-        if ts.key in self.startstops:
-            d["startstops"] = self.startstops[ts.key]
+        if ts.startstops:
+            d["startstops"] = ts.startstops
         self.batched_stream.send(d)
 
     def put_key_in_memory(self, ts, value, transition=True):
@@ -1905,7 +1905,7 @@ class Worker(ServerNode):
             ts.state = "memory"
             stop = time()
             if stop - start > 0.020:
-                self.startstops[ts.key].append(
+                ts.startstops.append(
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
 
@@ -1978,7 +1978,7 @@ class Worker(ServerNode):
                     return
 
                 if cause:
-                    self.startstops[cause].append(
+                    self.tasks[cause].startstops.append(
                         {
                             "action": "transfer",
                             "start": start + self.scheduler_delay,
@@ -2210,9 +2210,6 @@ class Worker(ServerNode):
             if key in self.threads:
                 del self.threads[key]
 
-            if key in self.startstops:
-                del self.startstops[key]
-
             if key in self.executing:
                 self.executing.remove(key)
 
@@ -2386,7 +2383,7 @@ class Worker(ServerNode):
             stop = time()
 
             if stop - start > 0.010:
-                self.startstops[ts.key].append(
+                ts.startstops.append(
                     {"action": "deserialize", "start": start, "stop": stop}
                 )
             return function, args, kwargs
@@ -2474,7 +2471,7 @@ class Worker(ServerNode):
             kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
-                self.startstops[ts.key].append(
+                ts.startstops.append(
                     {"action": "disk-read", "start": start, "stop": stop}
                 )
                 if self.digests is not None:
@@ -2508,7 +2505,7 @@ class Worker(ServerNode):
 
             result["key"] = ts.key
             value = result.pop("result", None)
-            self.startstops[key].append(
+            ts.startstops.append(
                 {"action": "compute", "start": result["start"], "stop": result["stop"]}
             )
             self.threads[ts.key] = result["thread"]
