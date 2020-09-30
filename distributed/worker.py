@@ -2126,9 +2126,9 @@ class Worker(ServerNode):
                     self.release_key(dep.key)
                 else:
                     self.log.append((dep.key, "new workers found"))
-                    for depdep in dep.dependents:
-                        if depdep.key in dep.waiting_for_data:
-                            self.data_needed.append(depdep.key)
+                    for dependent in dep.dependents:
+                        if dependent.key in dep.waiting_for_data:
+                            self.data_needed.append(dependent.key)
 
         except Exception:
             logger.error("Handle missing dep failed, retrying", exc_info=True)
