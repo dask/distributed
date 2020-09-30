@@ -1648,6 +1648,7 @@ class Worker(ServerNode):
     def transition_executing_done(self, ts, value=no_value, report=True):
         try:
             if self.validate:
+                assert ts.key in self.executing or ts.key in self.long_running
                 assert not ts.waiting_for_data
                 assert ts.key not in self.ready
 
@@ -2490,6 +2491,9 @@ class Worker(ServerNode):
                         self.scheduler_delay,
                     ),
                 )
+                # TODO: it seems insane that this needs to be here
+                # but it is occasionally cleared by something in executor_submit
+                self.executing.add(ts.key)
             except RuntimeError as e:
                 executor_error = e
                 raise
