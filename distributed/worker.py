@@ -1825,7 +1825,7 @@ class Worker(ServerNode):
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
-                        self.transition(self.tasks.get(d), "flight", worker=worker)
+                        self.transition(self.tasks[d], "flight", worker=worker)
                     self.loop.add_callback(
                         self.gather_dep, worker, dep, to_gather, total_nbytes, cause=key
                     )
@@ -1926,7 +1926,8 @@ class Worker(ServerNode):
 
         while L:
             d = L.popleft()
-            if getattr(self.tasks.get(d), "state", None) != "waiting":
+            ts = self.tasks.get(d)
+            if ts is None or ts.state != "waiting":
                 continue
             if total_bytes + self.nbytes[d] > self.target_message_size:
                 break
