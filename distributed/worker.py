@@ -1937,11 +1937,18 @@ class Worker(ServerNode):
         return deps, total_bytes
 
     async def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
-        """
-        worker: str
-        dep: TaskState object
-        deps: list of keys of dependencies to gather
+        """Gather dependencies for a task from a worker who has them
 
+        Parameters
+        ----------
+        worker : str
+            address of worker to gather dependency from
+        dep : TaskState
+            task we want to gather dependencies for
+        deps : list
+            keys of dependencies to gather from worker -- this is not
+            necessarily equivalent to the full list of dependencies of ``dep``
+            as some dependencies may already be present on this worker.
         """
         if self.status != Status.running:
             return
