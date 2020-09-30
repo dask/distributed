@@ -1776,7 +1776,7 @@ class Worker(ServerNode):
 
                 deps = ts.dependencies
                 if self.validate:
-                    assert all(hasattr(dep, "state") for dep in deps)
+                    assert all(dep.key in self.tasks for dep in deps)
 
                 deps = [dep for dep in deps if dep.state == "waiting"]
 
@@ -2030,8 +2030,6 @@ class Worker(ServerNode):
                 self.log.append(("receive-dep-failed", worker))
                 for d in self.has_what.pop(worker):
                     self.tasks[d].who_has.remove(worker)
-                # If the worker has died, `return` here so we don't hit `finally`
-                return
 
             except Exception as e:
                 logger.exception(e)
