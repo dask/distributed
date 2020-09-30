@@ -26,7 +26,7 @@ import weakref
 
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
-from dask.core import flatten, get_dependencies
+from dask.core import flatten
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes, funcname
@@ -2598,26 +2598,33 @@ class Client:
             # Notice, we only have to do the substitution on already materialized layers
             dsk = dsk.map_basic_layers(substitute_future_aliases)
 
+            # We need to track all futures unpack_remotedata() unpacks
+            unpacked_futures = set()
+
             # Unpack remote data in `dsk`, which are "WrappedKeys" that are
-            # unknown to `dsk` but known to the scheduler.
-            dsk = {k: unpack_remotedata(v) for k, v in dsk.items()}
-            unpacked_futures = (
-                set.union(*[v[1] for v in dsk.values()]) if dsk else set()
-            )
+            # unknown to `dsk` but known to the scheduler
+            def unpack_remote_data(tasks):
+                tasks, futures = unpack_remotedata(tasks)
+                unpacked_futures.update(futures)
+                return tasks
+
+            dsk = dsk.map_tasks(unpack_remote_data)
+
             for future in unpacked_futures:
                 if future.client is not self:
                     msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
                 if tokey(future.key) not in self.futures:
                     raise CancelledError(tokey(future.key))
-            unpacked_futures_deps = {}
-            for k, v in dsk.items():
-                if len(v[1]):
-                    unpacked_futures_deps[k] = {f.key for f in v[1]}
-            dsk = {k: v[0] for k, v in dsk.items()}
 
-            # Find dependencies for the scheduler,
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
+            # HACK: currently when submitting work to the scheduler, the client need to
+            # send all key dependencies along with the task graph. Since `dsk` doesn't
+            # know about the unpacked futures, we add them manually to `dsk` before
+            # calculating dependencies. This hack shouldn't be necessary when the
+            # scheduler accepts high level graphs.
+            dsk.keyset()
+            dsk._keys.update({f.key for f in unpacked_futures})
+            dependencies = dsk.get_dependencies()
 
             if priority is None:
                 # Removing all unpacked futures before calling order()
@@ -2630,10 +2637,6 @@ class Client:
                 }
                 priority = dask.order.order(stripped_dsk, dependencies=stripped_deps)
                 priority = keymap(tokey, priority)
-
-            # Append the dependencies of unpacked futures.
-            for k, v in unpacked_futures_deps.items():
-                dependencies[k] = set(dependencies.get(k, ())) | v
 
             # The scheduler expect all keys to be strings
             dependencies = {
