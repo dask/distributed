@@ -2829,6 +2829,12 @@ class Worker(ServerNode):
         if ts.dependencies:
             assert not all(dep.key in self.data for dep in ts.dependencies)
 
+    def validate_task_flight(self, ts):
+        assert ts.key not in self.data
+        assert not any(dep.key in self.ready for dep in ts.dependents)
+        peer = self.in_flight_tasks[ts.key]
+        assert ts.key in self.in_flight_workers[peer]
+
     def validate_task(self, ts):
         try:
             if ts.state == "memory":
@@ -2839,6 +2845,8 @@ class Worker(ServerNode):
                 self.validate_task_ready(ts)
             elif ts.state == "executing":
                 self.validate_task_executing(ts)
+            elif ts.state == "flight":
+                self.validate_task_flight(ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
