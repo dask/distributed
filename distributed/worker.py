@@ -1547,7 +1547,6 @@ class Worker(ServerNode):
             del self.in_flight_tasks[ts.key]
             if ts.dependents:
                 self.put_key_in_memory(ts, value)
-                assert ts.key in self.data
                 for dependent in ts.dependents:
                     dependent.waiting_for_data.discard(ts.key)
                     self.waiting_for_data -= 1
