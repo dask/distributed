@@ -1548,8 +1548,11 @@ class Worker(ServerNode):
             if ts.dependents:
                 self.put_key_in_memory(ts, value)
                 for dependent in ts.dependents:
-                    dependent.waiting_for_data.discard(ts.key)
-                    self.waiting_for_data -= 1
+                    try:
+                        dependent.waiting_for_data.remove(ts.key)
+                        self.waiting_for_data -= 1
+                    except KeyError:
+                        pass
 
                 self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
             else:
@@ -1599,7 +1602,7 @@ class Worker(ServerNode):
                 assert ts.key not in self.ready
 
             self.waiting_for_data -= len(ts.waiting_for_data)
-            ts.waiting_for_data = set()
+            ts.waiting_for_data.clear()
             if value is not None:
                 self.put_key_in_memory(ts, value)
             self.send_task_state_to_scheduler(ts)
@@ -1910,8 +1913,11 @@ class Worker(ServerNode):
         ts.type_ = type(value)
 
         for dep in ts.dependents:
-            dep.waiting_for_data.discard(ts.key)
-            self.waiting_for_data -= 1
+            try:
+                dep.waiting_for_data.remove(ts.key)
+                self.waiting_for_data -= 1
+            except KeyError:
+                pass
             if not dep.waiting_for_data:
                 self.transition(dep, "ready")
 
