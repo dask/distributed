@@ -1,3 +1,4 @@
+import asyncio
 from collections import deque, namedtuple
 import itertools
 import logging
@@ -6,7 +7,6 @@ import threading
 import weakref
 import warnings
 
-from tornado import locks
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
@@ -24,7 +24,7 @@ ConnectionRequest = namedtuple(
 )
 
 
-class Manager(object):
+class Manager:
     """
     An object coordinating listeners and their addresses.
     """
@@ -36,7 +36,10 @@ class Manager(object):
             # Avoid immediate warning for unreachable network
             # (will still warn for other get_ip() calls when actually used)
             warnings.simplefilter("ignore")
-            self.ip = get_ip()
+            try:
+                self.ip = get_ip()
+            except OSError:
+                self.ip = "127.0.0.1"
         self.lock = threading.Lock()
 
     def add_listener(self, addr, listener):
@@ -86,7 +89,7 @@ class QueueEmpty(Exception):
     pass
 
 
-class Queue(object):
+class Queue:
     """
     A single-reader, single-writer, non-threadsafe, peekable queue.
     """
@@ -260,14 +263,19 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
+            try:
+                await self.on_connection(comm)
+            except CommClosedError:
+                logger.debug("Connection closed before handshake completed")
+                return
             IOLoop.current().add_callback(self.comm_handler, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)
 
-    def start(self):
+    async def start(self):
         self.loop = IOLoop.current()
-        self.loop.add_callback(self._listen)
+        self._listen_future = asyncio.ensure_future(self._listen())
         self.manager.add_listener(self.address, self)
 
     def stop(self):
@@ -297,7 +305,7 @@ class InProcConnector(Connector):
             s2c_q=Queue(),
             c_loop=IOLoop.current(),
             c_addr=self.manager.new_address(),
-            conn_event=locks.Event(),
+            conn_event=asyncio.Event(),
         )
         listener.connect_threadsafe(conn_req)
         # Wait for connection acknowledgement

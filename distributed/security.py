@@ -13,7 +13,7 @@ import dask
 __all__ = ("Security",)
 
 
-class Security(object):
+class Security:
     """Security configuration for a Dask cluster.
 
     Default values are loaded from Dask's configuration files, and can be
@@ -60,13 +60,15 @@ class Security(object):
         "tls_worker_cert",
     )
 
-    def __init__(self, **kwargs):
+    def __init__(self, require_encryption=None, **kwargs):
         extra = set(kwargs).difference(self.__slots__)
         if extra:
             raise TypeError("Unknown parameters: %r" % sorted(extra))
-        self._set_field(
-            kwargs, "require_encryption", "distributed.comm.require-encryption"
-        )
+        if require_encryption is None:
+            require_encryption = dask.config.get("distributed.comm.require-encryption")
+        if require_encryption is None:
+            require_encryption = not not kwargs
+        self.require_encryption = require_encryption
         self._set_field(kwargs, "tls_ciphers", "distributed.comm.tls.ciphers")
         self._set_field(kwargs, "tls_ca_file", "distributed.comm.tls.ca-file")
         self._set_field(kwargs, "tls_client_key", "distributed.comm.tls.client.key")

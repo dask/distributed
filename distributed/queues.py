@@ -1,20 +1,18 @@
+import asyncio
 from collections import defaultdict
-import datetime
 import logging
 import uuid
 
-import tornado.queues
-from tornado.locks import Event
-
-from .client import Future, _get_global_client, Client
+from .client import Future, Client
 from .utils import tokey, sync, thread_state
 from .worker import get_client
+from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
 
-class QueueExtension(object):
-    """ An extension for the scheduler to manage queues
+class QueueExtension:
+    """An extension for the scheduler to manage queues
 
     This adds the following routes to the scheduler
 
@@ -46,15 +44,15 @@ class QueueExtension(object):
 
         self.scheduler.extensions["queues"] = self
 
-    def create(self, stream=None, name=None, client=None, maxsize=0):
+    def create(self, comm=None, name=None, client=None, maxsize=0):
         logger.debug("Queue name: {}".format(name))
         if name not in self.queues:
-            self.queues[name] = tornado.queues.Queue(maxsize=maxsize)
+            self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
         else:
             self.client_refcount[name] += 1
 
-    def release(self, stream=None, name=None, client=None):
+    def release(self, comm=None, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -68,7 +66,7 @@ class QueueExtension(object):
                 self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
     async def put(
-        self, stream=None, name=None, key=None, data=None, client=None, timeout=None
+        self, comm=None, name=None, key=None, data=None, client=None, timeout=None
     ):
         if key is not None:
             record = {"type": "Future", "value": key}
@@ -76,9 +74,7 @@ class QueueExtension(object):
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        if timeout is not None:
-            timeout = datetime.timedelta(seconds=timeout)
-        await self.queues[name].put(record, timeout=timeout)
+        await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):
         self.future_refcount[name, key] -= 1
@@ -86,7 +82,7 @@ class QueueExtension(object):
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)
             del self.future_refcount[name, key]
 
-    async def get(self, stream=None, name=None, client=None, timeout=None, batch=False):
+    async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
         def process(record):
             """ Add task status if known """
             if record["type"] == "Future":
@@ -122,18 +118,16 @@ class QueueExtension(object):
             out = [process(o) for o in out]
             return out
         else:
-            if timeout is not None:
-                timeout = datetime.timedelta(seconds=timeout)
-            record = await self.queues[name].get(timeout=timeout)
+            record = await asyncio.wait_for(self.queues[name].get(), timeout=timeout)
             record = process(record)
             return record
 
-    def qsize(self, stream=None, name=None, client=None):
+    def qsize(self, comm=None, name=None, client=None):
         return self.queues[name].qsize()
 
 
-class Queue(object):
-    """ Distributed Queue
+class Queue:
+    """Distributed Queue
 
     This allows multiple clients to share futures or small bits of data between
     each other with a multi-producer/multi-consumer queue.  All metadata is
@@ -147,6 +141,18 @@ class Queue(object):
     .. warning::
 
        This object is experimental and has known issues in Python 2
+
+    Parameters
+    ----------
+    name: string (optional)
+        Name used by other clients and the scheduler to identify the queue. If
+        not given, a random name will be generated.
+    client: Client (optional)
+        Client used for communication with the scheduler. Defaults to the
+        value of ``Client.current()``.
+    maxsize: int (optional)
+        Number of items allowed in the queue. If 0 (the default), the queue
+        size is unbounded.
 
     Examples
     --------
@@ -162,9 +168,9 @@ class Queue(object):
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or _get_global_client()
+        self.client = client or Client.current()
         self.name = name or "queue-" + uuid.uuid4().hex
-        self._event_started = Event()
+        self._event_started = asyncio.Event()
         if self.client.asynchronous or getattr(
             thread_state, "on_event_loop_thread", False
         ):
@@ -203,21 +209,33 @@ class Queue(object):
             )
 
     def put(self, value, timeout=None, **kwargs):
-        """ Put data into the queue """
-        return self.client.sync(self._put, value, timeout=timeout, **kwargs)
-
-    def get(self, timeout=None, batch=False, **kwargs):
-        """ Get data from the queue
+        """Put data into the queue
 
         Parameters
         ----------
-        timeout: Number (optional)
-            Time in seconds to wait before timing out
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
+        """
+        timeout = parse_timedelta(timeout)
+        return self.client.sync(self._put, value, timeout=timeout, **kwargs)
+
+    def get(self, timeout=None, batch=False, **kwargs):
+        """Get data from the queue
+
+        Parameters
+        ----------
+        timeout: number or string or timedelta, optional
+            Time in seconds to wait before timing out.
+            Instead of number of seconds, it is also possible to specify
+            a timedelta in string format, e.g. "200ms".
         batch: boolean, int (optional)
             If True then return all elements currently waiting in the queue.
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time
-         """
+        """
+        timeout = parse_timedelta(timeout)
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):

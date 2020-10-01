@@ -1,8 +1,6 @@
 from collections import defaultdict
 
-from tornado.ioloop import IOLoop
-
-from .utils import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 
 try:
@@ -11,7 +9,7 @@ except ImportError:
     pass
 else:
 
-    class Digest(object):
+    class Digest:
         def __init__(self, loop=None, intervals=(5, 60, 3600)):
             self.intervals = intervals
             self.components = [TDigest() for i in self.intervals]
@@ -39,7 +37,7 @@ else:
             return sum(d.size() for d in self.components)
 
 
-class Counter(object):
+class Counter:
     def __init__(self, loop=None, intervals=(5, 60, 3600)):
         self.intervals = intervals
         self.components = [defaultdict(lambda: 0) for i in self.intervals]

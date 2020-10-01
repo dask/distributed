@@ -5,8 +5,9 @@ import warnings
 import weakref
 
 from dask.utils import factors
+from dask.system import CPU_COUNT
+import toolz
 
-from .. import system
 from .spec import SpecCluster
 from ..nanny import Nanny
 from ..scheduler import Scheduler
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalCluster(SpecCluster):
-    """ Create local Scheduler and Workers
+    """Create local Scheduler and Workers
 
     This creates a "cluster" of a scheduler and workers running on the local
     machine.
@@ -44,13 +45,15 @@ class LocalCluster(SpecCluster):
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
         Set to ``None`` to disable the dashboard.
         Use ':0' for a random port.
+    worker_dashboard_address: str
+        Address on which to listen for the Bokeh worker diagnostics server like
+        'localhost:8787' or '0.0.0.0:8787'.  Defaults to None which disables the dashboard.
+        Use ':0' for a random port.
     diagnostics_port: int
         Deprecated.  See dashboard_address.
     asynchronous: bool (False by default)
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
-    worker_kwargs: dict
-        Extra worker arguments, will be passed to the Worker constructor.
     blocked_handlers: List[str]
         A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
         like ``['feed', 'run_function']``
@@ -68,6 +71,9 @@ class LocalCluster(SpecCluster):
         Network interface to use.  Defaults to lo/localhost
     worker_class: Worker
         Worker class used to instantiate workers from.
+    **worker_kwargs:
+        Extra worker arguments. Any additional keyword arguments will be passed
+        to the ``Worker`` class constructor.
 
     Examples
     --------
@@ -109,6 +115,7 @@ class LocalCluster(SpecCluster):
         blocked_handlers=None,
         interface=None,
         worker_class=None,
+        scheduler_kwargs=None,
         **worker_kwargs
     ):
         if ip is not None:
@@ -122,6 +129,20 @@ class LocalCluster(SpecCluster):
                 "Please use `dashboard_address=` instead"
             )
             dashboard_address = diagnostics_port
+
+        if threads_per_worker == 0:
+            warnings.warn(
+                "Setting `threads_per_worker` to 0 is discouraged. "
+                "Please set to None or to a specific int to get best behavior."
+            )
+            threads_per_worker = None
+
+        if "dashboard" in worker_kwargs:
+            warnings.warn(
+                "Setting `dashboard` is discouraged. "
+                "Please set `dashboard_address` to affect the scheduler (more common) "
+                "and `worker_dashboard_address` for the worker (less common)."
+            )
 
         self.status = None
         self.processes = processes
@@ -157,12 +178,12 @@ class LocalCluster(SpecCluster):
                 n_workers, threads_per_worker = nprocesses_nthreads()
             else:
                 n_workers = 1
-                threads_per_worker = system.CPU_COUNT
+                threads_per_worker = CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, system.CPU_COUNT // threads_per_worker)
+            n_workers = max(1, CPU_COUNT // threads_per_worker)
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
-            threads_per_worker = max(1, int(math.ceil(system.CPU_COUNT / n_workers)))
+            threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
         if n_workers and "memory_limit" not in worker_kwargs:
             worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
 
@@ -171,6 +192,7 @@ class LocalCluster(SpecCluster):
                 "nthreads": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
+                "dashboard": worker_dashboard_address is not None,
                 "interface": interface,
                 "protocol": protocol,
                 "security": security,
@@ -180,16 +202,20 @@ class LocalCluster(SpecCluster):
 
         scheduler = {
             "cls": Scheduler,
-            "options": dict(
-                host=host,
-                services=services,
-                service_kwargs=service_kwargs,
-                security=security,
-                port=scheduler_port,
-                interface=interface,
-                protocol=protocol,
-                dashboard_address=dashboard_address,
-                blocked_handlers=blocked_handlers,
+            "options": toolz.merge(
+                dict(
+                    host=host,
+                    services=services,
+                    service_kwargs=service_kwargs,
+                    security=security,
+                    port=scheduler_port,
+                    interface=interface,
+                    protocol=protocol,
+                    dashboard=dashboard_address is not None,
+                    dashboard_address=dashboard_address,
+                    blocked_handlers=blocked_handlers,
+                ),
+                scheduler_kwargs or {},
             ),
         }
 
@@ -200,7 +226,7 @@ class LocalCluster(SpecCluster):
 
         workers = {i: worker for i in range(n_workers)}
 
-        super(LocalCluster, self).__init__(
+        super().__init__(
             scheduler=scheduler,
             workers=workers,
             worker=worker,
@@ -217,7 +243,7 @@ class LocalCluster(SpecCluster):
         )
 
 
-def nprocesses_nthreads(n=system.CPU_COUNT):
+def nprocesses_nthreads(n=CPU_COUNT):
     """
     The default breakdown of processes and threads for a given number of cores
 

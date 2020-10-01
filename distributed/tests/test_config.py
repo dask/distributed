@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import os
+import yaml
 
 import pytest
 
@@ -106,6 +107,45 @@ def test_logging_default():
 def test_logging_empty_simple():
     with new_config({}):
         test_logging_default()
+
+
+def test_logging_simple_under_distributed():
+    """
+    Test simple ("old-style") logging configuration under the distributed key.
+    """
+    c = {
+        "distributed": {
+            "logging": {"distributed.foo": "info", "distributed.foo.bar": "error"}
+        }
+    }
+    # Must test using a subprocess to avoid wrecking pre-existing configuration
+    with new_config_file(c):
+        code = """if 1:
+            import logging
+            import dask
+
+            from distributed.utils_test import captured_handler
+
+            d = logging.getLogger('distributed')
+            assert len(d.handlers) == 1
+            assert isinstance(d.handlers[0], logging.StreamHandler)
+            df = logging.getLogger('distributed.foo')
+            dfb = logging.getLogger('distributed.foo.bar')
+
+            with captured_handler(d.handlers[0]) as distributed_log:
+                df.info("1: info")
+                dfb.warning("2: warning")
+                dfb.error("3: error")
+
+            distributed_log = distributed_log.getvalue().splitlines()
+
+            assert distributed_log == [
+                "distributed.foo - INFO - 1: info",
+                "distributed.foo.bar - ERROR - 3: error",
+                ], (dask.config.config, distributed_log)
+            """
+
+        subprocess.check_call([sys.executable, "-c", code])
 
 
 def test_logging_simple():
@@ -265,3 +305,50 @@ qualname=foo.bar
             """
         subprocess.check_call([sys.executable, "-c", code])
     os.remove(logging_config.name)
+
+
+def test_schema():
+    jsonschema = pytest.importorskip("jsonschema")
+    config_fn = os.path.join(os.path.dirname(__file__), "..", "distributed.yaml")
+    schema_fn = os.path.join(os.path.dirname(__file__), "..", "distributed-schema.yaml")
+
+    with open(config_fn) as f:
+        config = yaml.safe_load(f)
+
+    with open(schema_fn) as f:
+        schema = yaml.safe_load(f)
+
+    jsonschema.validate(config, schema)
+
+
+def test_schema_is_complete():
+    config_fn = os.path.join(os.path.dirname(__file__), "..", "distributed.yaml")
+    schema_fn = os.path.join(os.path.dirname(__file__), "..", "distributed-schema.yaml")
+
+    with open(config_fn) as f:
+        config = yaml.safe_load(f)
+
+    with open(schema_fn) as f:
+        schema = yaml.safe_load(f)
+
+    skip = {"default-task-durations", "bokeh-application"}
+
+    def test_matches(c, s):
+        if set(c) != set(s["properties"]):
+            raise ValueError(
+                "\nThe distributed.yaml and distributed-schema.yaml files are not in sync.\n"
+                "This usually happens when we add a new configuration value,\n"
+                "but don't add the schema of that value to the distributed-schema.yaml file\n"
+                "Please modify these files to include the missing values: \n\n"
+                "    distributed.yaml:        {}\n"
+                "    distributed-schema.yaml: {}\n\n"
+                "Examples in these files should be a good start, \n"
+                "even if you are not familiar with the jsonschema spec".format(
+                    sorted(c), sorted(s["properties"])
+                )
+            )
+        for k, v in c.items():
+            if isinstance(v, dict) and k not in skip:
+                test_matches(c[k], s["properties"][k])
+
+    test_matches(config, schema)

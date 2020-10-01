@@ -1,5 +1,4 @@
 import asyncio
-from tornado import gen
 import functools
 import threading
 from queue import Queue
@@ -12,7 +11,7 @@ from .worker import get_worker
 
 
 class Actor(WrappedKey):
-    """ Controls an object on a remote worker
+    """Controls an object on a remote worker
 
     An actor allows remote control of a stateful object living on a remote
     worker.  Method calls on this object trigger operations on the remote
@@ -169,7 +168,6 @@ class Actor(WrappedKey):
                     attribute=key, actor=self.key
                 )
                 return x["result"]
-                raise gen.Return(x["result"])
 
             return self._sync(get_actor_attribute_from_worker)
 
@@ -178,7 +176,7 @@ class Actor(WrappedKey):
         return self._future.client
 
 
-class ProxyRPC(object):
+class ProxyRPC:
     """
     An rpc-like object that uses the scheduler's rpc to connect to a worker
     """
@@ -196,8 +194,8 @@ class ProxyRPC(object):
         return func
 
 
-class ActorFuture(object):
-    """ Future to an actor's method call
+class ActorFuture:
+    """Future to an actor's method call
 
     Whenever you call a method on an Actor you get an ActorFuture immediately
     while the computation happens in the background.  You can call ``.result``

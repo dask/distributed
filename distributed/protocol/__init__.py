@@ -1,3 +1,4 @@
+from contextlib import suppress
 from functools import partial
 from distutils.version import LooseVersion
 
@@ -21,13 +22,17 @@ from .serialize import (
     register_generic,
 )
 
-from ..utils import ignoring
-
 
 @dask_serialize.register_lazy("numpy")
 @dask_deserialize.register_lazy("numpy")
 def _register_numpy():
     from . import numpy
+
+
+@dask_serialize.register_lazy("scipy")
+@dask_deserialize.register_lazy("scipy")
+def _register_scipy():
+    from . import scipy
 
 
 @dask_serialize.register_lazy("h5py")
@@ -70,22 +75,48 @@ def _register_torch():
 
 @cuda_serialize.register_lazy("cupy")
 @cuda_deserialize.register_lazy("cupy")
+@dask_serialize.register_lazy("cupy")
+@dask_deserialize.register_lazy("cupy")
+@cuda_serialize.register_lazy("cupyx")
+@cuda_deserialize.register_lazy("cupyx")
+@dask_serialize.register_lazy("cupyx")
+@dask_deserialize.register_lazy("cupyx")
 def _register_cupy():
     from . import cupy
 
 
 @cuda_serialize.register_lazy("numba")
 @cuda_deserialize.register_lazy("numba")
+@dask_serialize.register_lazy("numba")
+@dask_deserialize.register_lazy("numba")
 def _register_numba():
     from . import numba
 
 
+@cuda_serialize.register_lazy("rmm")
+@cuda_deserialize.register_lazy("rmm")
+@dask_serialize.register_lazy("rmm")
+@dask_deserialize.register_lazy("rmm")
+def _register_rmm():
+    from . import rmm
+
+
 @cuda_serialize.register_lazy("cudf")
 @cuda_deserialize.register_lazy("cudf")
+@dask_serialize.register_lazy("cudf")
+@dask_deserialize.register_lazy("cudf")
+@cuda_serialize.register_lazy("dask_cudf")
+@cuda_deserialize.register_lazy("dask_cudf")
+@dask_serialize.register_lazy("dask_cudf")
+@dask_deserialize.register_lazy("dask_cudf")
 def _register_cudf():
-    import cudf
+    from cudf.comm import serialize
 
-    if LooseVersion(cudf.__version__) > "0.9":
-        from cudf.comm import serialize
-    else:
-        from . import cudf
+
+@cuda_serialize.register_lazy("cuml")
+@cuda_deserialize.register_lazy("cuml")
+@dask_serialize.register_lazy("cuml")
+@dask_deserialize.register_lazy("cuml")
+def _register_cuml():
+    with suppress(ImportError):
+        from cuml.comm import serialize

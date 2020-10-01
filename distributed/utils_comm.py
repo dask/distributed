@@ -1,11 +1,14 @@
 import asyncio
 from collections import defaultdict
+from functools import partial
 from itertools import cycle
 import logging
 import random
 
 from dask.optimization import SubgraphCallable
-from toolz import merge, concat, groupby, drop
+import dask.config
+from dask.utils import parse_timedelta
+from tlz import merge, concat, groupby, drop
 
 from .core import rpc
 from .utils import All, tokey
@@ -14,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
-    """ Gather data directly from peers
+    """Gather data directly from peers
 
     Parameters
     ----------
@@ -93,8 +96,8 @@ async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=No
     return (results, bad_keys, list(missing_workers))
 
 
-class WrappedKey(object):
-    """ Interface for a key in a dask graph.
+class WrappedKey:
+    """Interface for a key in a dask graph.
 
     Subclasses must have .key attribute that refers to a key in a dask graph.
 
@@ -115,7 +118,7 @@ _round_robin_counter = [0]
 
 
 async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
-    """ Scatter data directly to workers
+    """Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
     how many cores they have.  nthreads should be a dictionary mapping worker
@@ -161,7 +164,7 @@ collection_types = (tuple, list, set, frozenset)
 
 
 def unpack_remotedata(o, byte_keys=False, myset=None):
-    """ Unpack WrappedKey objects from collection
+    """Unpack WrappedKey objects from collection
 
     Returns original collection and set of all found WrappedKey objects
 
@@ -243,7 +246,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
 
 
 def pack_data(o, d, key_types=object):
-    """ Merge known data into tuple or dict
+    """Merge known data into tuple or dict
 
     Parameters
     ----------
@@ -275,3 +278,114 @@ def pack_data(o, d, key_types=object):
         return {k: pack_data(v, d, key_types=key_types) for k, v in o.items()}
     else:
         return o
+
+
+def subs_multiple(o, d):
+    """Perform substitutions on a tasks
+
+    Parameters
+    ----------
+    o:
+        Core data structures containing literals and keys
+    d: dict
+        Mapping of keys to values
+
+    Examples
+    --------
+    >>> dsk = {"a": (sum, ["x", 2])}
+    >>> data = {"x": 1}
+    >>> subs_multiple(dsk, data)  # doctest: +SKIP
+    {'a': (sum, [1, 2])}
+
+    """
+    typ = type(o)
+    if typ is tuple and o and callable(o[0]):  # istask(o)
+        return (o[0],) + tuple(subs_multiple(i, d) for i in o[1:])
+    elif typ is list:
+        return [subs_multiple(i, d) for i in o]
+    elif typ is dict:
+        return {k: subs_multiple(v, d) for (k, v) in o.items()}
+    else:
+        try:
+            return d.get(o, o)
+        except TypeError:
+            return o
+
+
+async def retry(
+    coro,
+    count,
+    delay_min,
+    delay_max,
+    jitter_fraction=0.1,
+    retry_on_exceptions=(EnvironmentError, IOError),
+    operation=None,
+):
+    """
+    Return the result of ``await coro()``, re-trying in case of exceptions
+
+    The delay between attempts is ``delay_min * (2 ** i - 1)`` where ``i`` enumerates the attempt that just failed
+    (starting at 0), but never larger than ``delay_max``.
+    This yields no delay between the first and second attempt, then ``delay_min``, ``3 * delay_min``, etc.
+    (The reason to re-try with no delay is that in most cases this is sufficient and will thus recover faster
+    from a communication failure).
+
+    Parameters
+    ----------
+    coro
+        The coroutine function to call and await
+    count
+        The maximum number of re-tries before giving up. 0 means no re-try; must be >= 0.
+    delay_min
+        The base factor for the delay (in seconds); this is the first non-zero delay between re-tries.
+    delay_max
+        The maximum delay (in seconds) between consecutive re-tries (without jitter)
+    jitter_fraction
+        The maximum jitter to add to the delay, as fraction of the total delay. No jitter is added if this
+        value is <= 0.
+        Using a non-zero value here avoids "herd effects" of many operations re-tried at the same time
+    retry_on_exceptions
+        A tuple of exception classes to retry. Other exceptions are not caught and re-tried, but propagate immediately.
+    operation
+        A human-readable description of the operation attempted; used only for logging failures
+
+    Returns
+    -------
+    Any
+        Whatever `await `coro()` returned
+    """
+    # this loop is a no-op in case max_retries<=0
+    for i_try in range(count):
+        try:
+            return await coro()
+        except retry_on_exceptions as ex:
+            operation = operation or str(coro)
+            logger.info(
+                f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
+            )
+            delay = min(delay_min * (2 ** i_try - 1), delay_max)
+            if jitter_fraction > 0:
+                delay *= 1 + random.random() * jitter_fraction
+            await asyncio.sleep(delay)
+    return await coro()
+
+
+async def retry_operation(coro, *args, operation=None, **kwargs):
+    """
+    Retry an operation using the configuration values for the retry parameters
+    """
+
+    retry_count = dask.config.get("distributed.comm.retry.count")
+    retry_delay_min = parse_timedelta(
+        dask.config.get("distributed.comm.retry.delay.min"), default="s"
+    )
+    retry_delay_max = parse_timedelta(
+        dask.config.get("distributed.comm.retry.delay.max"), default="s"
+    )
+    return await retry(
+        partial(coro, *args, **kwargs),
+        count=retry_count,
+        delay_min=retry_delay_min,
+        delay_max=retry_delay_max,
+        operation=operation,
+    )

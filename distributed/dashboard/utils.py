@@ -1,11 +1,10 @@
 from distutils.version import LooseVersion
-import os
 from numbers import Number
 
 import bokeh
 from bokeh.io import curdoc
-from tornado import web
-from toolz import partition
+from tlz import partition
+from tlz.curried import first
 
 try:
     import numpy as np
@@ -13,13 +12,7 @@ except ImportError:
     np = False
 
 
-try:
-    from cytoolz.curried import first
-except ImportError:
-    from toolz.curried import first
-
 BOKEH_VERSION = LooseVersion(bokeh.__version__)
-dirname = os.path.dirname(__file__)
 
 
 PROFILING = False
@@ -49,26 +42,9 @@ def transpose(lod):
     return {k: [d[k] for d in lod] for k in keys}
 
 
-class RequestHandler(web.RequestHandler):
-    def initialize(self, server=None, extra=None):
-        self.server = server
-        self.extra = extra or {}
-
-    def get_template_path(self):
-        return os.path.join(dirname, "templates")
-
-
-def redirect(path):
-    class Redirect(RequestHandler):
-        def get(self):
-            self.redirect(path)
-
-    return Redirect
-
-
 @without_property_validation
 def update(source, data):
-    """ Update source with data
+    """Update source with data
 
     This checks a few things first
 

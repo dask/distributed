@@ -1,45 +1,21 @@
-import asyncio
+from contextlib import suppress
 import logging
 import warnings
 import weakref
 
-from tornado.ioloop import IOLoop
-from tornado import gen
+from tornado.httpserver import HTTPServer
+import tlz
 import dask
 
-from .core import Server, ConnectionPool
+from .comm import get_tcp_server_address
+from .comm import get_address_host
+from .core import Server
+from .http.routing import RoutingApplication
 from .versions import get_versions
-from .utils import DequeHandler
+from .utils import DequeHandler, clean_dashboard_address
 
 
-class Node(object):
-    """
-    Base class for nodes in a distributed cluster.
-    """
-
-    def __init__(
-        self,
-        connection_limit=512,
-        deserialize=True,
-        connection_args=None,
-        io_loop=None,
-        serializers=None,
-        deserializers=None,
-        timeout=None,
-    ):
-        self.io_loop = io_loop or IOLoop.current()
-        self.rpc = ConnectionPool(
-            limit=connection_limit,
-            deserialize=deserialize,
-            serializers=serializers,
-            deserializers=deserializers,
-            connection_args=connection_args,
-            timeout=timeout,
-            server=self,
-        )
-
-
-class ServerNode(Node, Server):
+class ServerNode(Server):
     """
     Base class for server nodes in a distributed cluster.
     """
@@ -48,39 +24,6 @@ class ServerNode(Node, Server):
 
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...
-
-    def __init__(
-        self,
-        handlers=None,
-        blocked_handlers=None,
-        stream_handlers=None,
-        connection_limit=512,
-        deserialize=True,
-        connection_args=None,
-        io_loop=None,
-        serializers=None,
-        deserializers=None,
-        timeout=None,
-    ):
-        Node.__init__(
-            self,
-            deserialize=deserialize,
-            connection_limit=connection_limit,
-            connection_args=connection_args,
-            io_loop=io_loop,
-            serializers=serializers,
-            deserializers=deserializers,
-            timeout=timeout,
-        )
-        Server.__init__(
-            self,
-            handlers=handlers,
-            blocked_handlers=blocked_handlers,
-            stream_handlers=stream_handlers,
-            connection_limit=connection_limit,
-            deserialize=deserialize,
-            io_loop=self.io_loop,
-        )
 
     def versions(self, comm=None, packages=None):
         return get_versions(packages=packages)
@@ -153,34 +96,62 @@ class ServerNode(Node, Server):
             L = [L[-i] for i in range(min(n, len(L)))]
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
 
-    async def __aenter__(self):
-        await self
-        return self
+    def start_http_server(
+        self, routes, dashboard_address, default_port=0, ssl_options=None
+    ):
+        """ This creates an HTTP Server running on this node """
 
-    async def __aexit__(self, typ, value, traceback):
-        await self.close()
+        self.http_application = RoutingApplication(routes)
 
-    def __await__(self):
-        if self.status == "running":
-            return gen.sleep(0).__await__()
-        else:
-            future = self.start()
-            timeout = getattr(self, "death_timeout", 0)
-            if timeout:
+        # TLS configuration
+        tls_key = dask.config.get("distributed.scheduler.dashboard.tls.key")
+        tls_cert = dask.config.get("distributed.scheduler.dashboard.tls.cert")
+        tls_ca_file = dask.config.get("distributed.scheduler.dashboard.tls.ca-file")
+        if tls_cert:
+            import ssl
 
-                async def wait_for(future, timeout=None):
-                    try:
-                        await asyncio.wait_for(future, timeout=timeout)
-                    except Exception:
-                        await self.close(timeout=1)
-                        raise gen.TimeoutError(
-                            "{} failed to start in {} seconds".format(
-                                type(self).__name__, timeout
-                            )
-                        )
+            ssl_options = ssl.create_default_context(
+                cafile=tls_ca_file, purpose=ssl.Purpose.SERVER_AUTH
+            )
+            ssl_options.load_cert_chain(tls_cert, keyfile=tls_key)
+            # We don't care about auth here, just encryption
+            ssl_options.check_hostname = False
+            ssl_options.verify_mode = ssl.CERT_NONE
 
-                future = wait_for(future, timeout=timeout)
-            return future.__await__()
+        self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
+        http_address = clean_dashboard_address(dashboard_address or default_port)
 
-    async def start(self):  # subclasses should implement this
-        return self
+        if http_address["address"] is None:
+            address = self._start_address
+            if isinstance(address, (list, tuple)):
+                address = address[0]
+            if address:
+                with suppress(ValueError):
+                    http_address["address"] = get_address_host(address)
+
+        change_port = False
+        retries_left = 3
+        while True:
+            try:
+                if not change_port:
+                    self.http_server.listen(**http_address)
+                else:
+                    self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
+                break
+            except Exception:
+                change_port = True
+                retries_left = retries_left - 1
+                if retries_left < 1:
+                    raise
+
+        self.http_server.port = get_tcp_server_address(self.http_server)[1]
+        self.services["dashboard"] = self.http_server
+
+        if change_port and dashboard_address:
+            warnings.warn(
+                "Port {} is already in use.\n"
+                "Perhaps you already have a cluster running?\n"
+                "Hosting the HTTP server on port {} instead".format(
+                    http_address["port"], self.http_server.port
+                )
+            )

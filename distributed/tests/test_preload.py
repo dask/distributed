@@ -5,9 +5,11 @@ import sys
 import tempfile
 import pytest
 
+from tornado import web
+
 import dask
 from distributed import Client, Scheduler, Worker, Nanny
-from distributed.utils_test import cluster
+from distributed.utils_test import cluster, captured_logger
 from distributed.utils_test import loop, cleanup  # noqa F401
 
 
@@ -62,13 +64,20 @@ async def test_worker_preload_config(cleanup):
     text = """
 def dask_setup(worker):
     worker.foo = 'setup'
+
+def dask_teardown(worker):
+    worker.foo = 'teardown'
 """
-    with dask.config.set({"distributed.worker.preload": text}):
+    with dask.config.set(
+        {"distributed.worker.preload": text, "distributed.nanny.preload": text}
+    ):
         async with Scheduler(port=0) as s:
             async with Nanny(s.address) as w:
+                assert w.foo == "setup"
                 async with Client(s.address, asynchronous=True) as c:
                     d = await c.run(lambda dask_worker: dask_worker.foo)
                     assert d == {w.worker_address: "setup"}
+            assert w.foo == "teardown"
 
 
 def test_worker_preload_module(loop):
@@ -95,3 +104,44 @@ def test_worker_preload_module(loop):
     finally:
         sys.path.remove(tmpdir)
         shutil.rmtree(tmpdir)
+
+
+@pytest.mark.asyncio
+async def test_preload_import_time(cleanup):
+    text = """
+from distributed.comm.registry import backends
+from distributed.comm.tcp import TCPBackend
+
+backends["foo"] = TCPBackend()
+""".strip()
+    try:
+        async with Scheduler(port=0, preload=text, protocol="foo") as s:
+            async with Nanny(s.address, preload=text, protocol="foo") as n:
+                async with Client(s.address, asynchronous=True) as c:
+                    await c.wait_for_workers(1)
+    finally:
+        from distributed.comm.registry import backends
+
+        del backends["foo"]
+
+
+@pytest.mark.asyncio
+async def test_web_preload(cleanup):
+    class MyHandler(web.RequestHandler):
+        def get(self):
+            self.write(
+                """
+def dask_setup(dask_server):
+    dask_server.foo = 1
+""".strip()
+            )
+
+    app = web.Application([(r"/preload", MyHandler)])
+    server = app.listen(12345)
+    try:
+        with captured_logger("distributed.preloading") as log:
+            async with Scheduler(preload=["http://localhost:12345/preload"]) as s:
+                assert s.foo == 1
+        assert "12345/preload" in log.getvalue()
+    finally:
+        server.stop()

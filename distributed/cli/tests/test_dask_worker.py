@@ -8,11 +8,12 @@ import requests
 import sys
 import os
 from time import sleep
+from multiprocessing import cpu_count
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
 from distributed.metrics import time
-from distributed.utils import sync, tmpfile
+from distributed.utils import sync, tmpfile, parse_ports
 from distributed.utils_test import popen, terminate_process, wait_for_port
 from distributed.utils_test import loop, cleanup  # noqa: F401
 
@@ -45,6 +46,66 @@ def test_nanny_worker_ports(loop):
                     d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
                     == "tcp://127.0.0.1:5273"
                 )
+
+
+def test_nanny_worker_port_range(loop):
+    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
+        nprocs = 3
+        worker_port = "9684:9686"
+        nanny_port = "9688:9690"
+        with popen(
+            [
+                "dask-worker",
+                "127.0.0.1:9359",
+                "--nprocs",
+                f"{nprocs}",
+                "--host",
+                "127.0.0.1",
+                "--worker-port",
+                worker_port,
+                "--nanny-port",
+                nanny_port,
+                "--no-dashboard",
+            ]
+        ) as worker:
+            with Client("127.0.0.1:9359", loop=loop) as c:
+                start = time()
+                while len(c.scheduler_info()["workers"]) < nprocs:
+                    sleep(0.1)
+                    assert time() - start < 5
+
+                def get_port(dask_worker):
+                    return dask_worker.port
+
+                expected_worker_ports = set(parse_ports(worker_port))
+                worker_ports = c.run(get_port)
+                assert set(worker_ports.values()) == expected_worker_ports
+
+                expected_nanny_ports = set(parse_ports(nanny_port))
+                nanny_ports = c.run(get_port, nanny=True)
+                assert set(nanny_ports.values()) == expected_nanny_ports
+
+
+def test_nanny_worker_port_range_too_many_workers_raises(loop):
+    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
+        with popen(
+            [
+                "dask-worker",
+                "127.0.0.1:9359",
+                "--nprocs",
+                "3",
+                "--host",
+                "127.0.0.1",
+                "--worker-port",
+                "9684:9685",
+                "--nanny-port",
+                "9686:9687",
+                "--no-dashboard",
+            ]
+        ) as worker:
+            assert any(
+                b"Could not start" in worker.stderr.readline() for _ in range(100)
+            )
 
 
 def test_memory_limit(loop):
@@ -176,6 +237,13 @@ def test_nprocs_requires_nanny(loop):
                 b"Failed to launch worker" in worker.stderr.readline()
                 for i in range(15)
             )
+
+
+def test_nprocs_negative(loop):
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
+        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=-1"]) as worker:
+            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(cpu_count(), timeout="10 seconds")
 
 
 def test_nprocs_expands_name(loop):
@@ -340,3 +408,46 @@ async def test_integer_names(cleanup):
                 await asyncio.sleep(0.01)
             [ws] = s.workers.values()
             assert ws.name == 123
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+async def test_worker_class(cleanup, tmp_path, nanny):
+    # Create module with custom worker class
+    WORKER_CLASS_TEXT = """
+from distributed.worker import Worker
+
+class MyWorker(Worker):
+    pass
+"""
+    tmpdir = str(tmp_path)
+    tmpfile = str(tmp_path / "myworker.py")
+    with open(tmpfile, "w") as f:
+        f.write(WORKER_CLASS_TEXT)
+
+    # Put module on PYTHONPATH
+    env = os.environ.copy()
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = tmpdir + ":" + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = tmpdir
+
+    async with Scheduler(port=0) as s:
+        async with Client(s.address, asynchronous=True) as c:
+            with popen(
+                [
+                    "dask-worker",
+                    s.address,
+                    nanny,
+                    "--worker-class",
+                    "myworker.MyWorker",
+                ],
+                env=env,
+            ) as worker:
+                await c.wait_for_workers(1)
+
+                def worker_type(dask_worker):
+                    return type(dask_worker).__name__
+
+                worker_types = await c.run(worker_type)
+                assert all(name == "MyWorker" for name in worker_types.values())

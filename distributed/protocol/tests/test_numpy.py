@@ -1,4 +1,3 @@
-import sys
 from zlib import crc32
 
 import numpy as np
@@ -15,9 +14,10 @@ from distributed.protocol import (
 )
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.protocol.numpy import itemsize
+from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.compression import maybe_compress
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import tmpfile, nbytes
+from distributed.utils import ensure_bytes, tmpfile, nbytes
 from distributed.utils_test import gen_cluster
 
 
@@ -58,6 +58,7 @@ def test_serialize():
         np.array(["abc"], dtype="S3"),
         np.array(["abc"], dtype="U3"),
         np.array(["abc"], dtype=object),
+        np.array([np.arange(3), np.arange(4, 6)], dtype=object),
         np.ones(shape=(5,), dtype=("f8", 32)),
         np.ones(shape=(5,), dtype=[("x", "f8", 32)]),
         np.ones(shape=(5,), dtype=np.dtype([("a", "i1"), ("b", "f8")], align=False)),
@@ -71,20 +72,44 @@ def test_serialize():
         np.zeros((1, 1000, 1000)),
         np.arange(12)[::2],  # non-contiguous array
         np.ones(shape=(5, 6)).astype(dtype=[("total", "<f8"), ("n", "<f8")]),
+        np.broadcast_to(np.arange(3), shape=(10, 3)),  # zero-strided array
     ],
 )
 def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
     if "compression" in header:
         frames = decompress(header, frames)
-    buffer_interface = memoryview
     for frame in frames:
-        assert isinstance(frame, (bytes, buffer_interface))
+        assert isinstance(frame, (bytes, memoryview))
+    if x.dtype.char == "O" and any(isinstance(e, np.ndarray) for e in x.flat):
+        if HIGHEST_PROTOCOL >= 5:
+            assert len(frames) > 1
+        else:
+            assert len(frames) == 1
     y = deserialize(header, frames)
 
-    np.testing.assert_equal(x, y)
+    assert x.shape == y.shape
+    assert x.dtype == y.dtype
     if x.flags.c_contiguous or x.flags.f_contiguous:
         assert x.strides == y.strides
+
+    if x.dtype.char == "O":
+        for e_x, e_y in zip(x.flat, y.flat):
+            np.testing.assert_equal(e_x, e_y)
+    else:
+        np.testing.assert_equal(x, y)
+
+
+@pytest.mark.parametrize("writeable", [True, False])
+def test_dumps_numpy_writable(writeable):
+    a1 = np.arange(1000)
+    a1.flags.writeable = writeable
+    fs = dumps([to_serialize(a1)])
+    # Make all frames read-only
+    fs = list(map(ensure_bytes, fs))
+    (a2,) = loads(fs)
+    assert (a1 == a2).all()
+    assert a2.flags.writeable == a1.flags.writeable
 
 
 @pytest.mark.parametrize(
@@ -188,14 +213,13 @@ def test_itemsize(dt, size):
     assert itemsize(np.dtype(dt)) == size
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="numpy doesnt use memoryviews")
 def test_compress_numpy():
     pytest.importorskip("lz4")
     x = np.ones(10000000, dtype="i4")
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes
 
-    header = msgpack.loads(frames[2], raw=False, use_list=False)
+    header = msgpack.loads(frames[2], raw=False, use_list=False, strict_map_key=False)
     try:
         import blosc  # noqa: F401
     except ImportError:
@@ -232,12 +256,11 @@ def test_dont_compress_uncompressable_data():
 
 
 @gen_cluster(client=True, timeout=60)
-def test_dumps_large_blosc(c, s, a, b):
+async def test_dumps_large_blosc(c, s, a, b):
     x = c.submit(np.ones, BIG_BYTES_SHARD_SIZE * 2, dtype="u1")
-    result = yield x
+    await x
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="numpy doesnt use memoryviews")
 def test_compression_takes_advantage_of_itemsize():
     pytest.importorskip("lz4")
     blosc = pytest.importorskip("blosc")
@@ -259,3 +282,51 @@ def test_large_numpy_array():
     x = np.ones((100000000,), dtype="u4")
     header, frames = serialize(x)
     assert sum(header["lengths"]) == sum(map(nbytes, frames))
+
+
+@pytest.mark.parametrize(
+    "x",
+    [
+        np.broadcast_to(np.arange(10), (20, 10)),  # Some strides are 0
+        np.broadcast_to(1, (3, 4, 2)),  # All strides are 0
+        np.broadcast_to(np.arange(100)[:1], 5),  # x.base is larger than x
+        np.broadcast_to(np.arange(5), (4, 5))[:, ::-1],
+    ],
+)
+@pytest.mark.parametrize("writeable", [True, False])
+def test_zero_strided_numpy_array(x, writeable):
+    assert 0 in x.strides
+    x.setflags(write=writeable)
+    header, frames = serialize(x)
+    y = deserialize(header, frames)
+    np.testing.assert_equal(x, y)
+    # Ensure we transmit fewer bytes than the full array
+    assert sum(map(nbytes, frames)) < x.nbytes
+    # Ensure both x and y are have same write flag
+    assert x.flags.writeable == y.flags.writeable
+
+
+def test_non_zero_strided_array():
+    x = np.arange(10)
+    header, frames = serialize(x)
+    assert "broadcast_to" not in header
+    assert sum(map(nbytes, frames)) == x.nbytes
+
+
+def test_serialize_writeable_array_readonly_base_object():
+    # Regression test for https://github.com/dask/distributed/issues/3252
+
+    x = np.arange(3)
+    # Create array which doesn't own it's own memory
+    y = np.broadcast_to(x, (3, 3))
+
+    # Make y writeable and it's base object (x) read-only
+    y.setflags(write=True)
+    x.setflags(write=False)
+
+    # Serialize / deserialize y
+    z = deserialize(*serialize(y))
+    np.testing.assert_equal(z, y)
+
+    # Ensure z and y have the same flags (including WRITEABLE)
+    assert z.flags == y.flags

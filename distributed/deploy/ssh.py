@@ -1,12 +1,13 @@
 import logging
 import sys
-from typing import List
+from typing import List, Union
 import warnings
 import weakref
 
 import dask
 
 from .spec import SpecCluster, ProcessInterface
+from ..core import Status
 from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
 from ..worker import Worker as _Worker
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class Process(ProcessInterface):
-    """ A superclass for SSH Workers and Nannies
+    """A superclass for SSH Workers and Nannies
 
     See Also
     --------
@@ -46,7 +47,7 @@ class Process(ProcessInterface):
 
 
 class Worker(Process):
-    """ A Remote Dask Worker controled by SSH
+    """A Remote Dask Worker controled by SSH
 
     Parameters
     ----------
@@ -58,6 +59,8 @@ class Worker(Process):
         The python module to run to start the worker.
     connect_options: dict
         kwargs to be passed to asyncssh connections
+    remote_python: str
+        Path to Python on remote node to run this worker.
     kwargs: dict
         These will be passed through the dask-worker CLI to the
         dask.distributed.Worker class
@@ -70,37 +73,58 @@ class Worker(Process):
         connect_options: dict,
         kwargs: dict,
         worker_module="distributed.cli.dask_worker",
+        remote_python=None,
         loop=None,
         name=None,
     ):
+        super().__init__()
+
         self.address = address
         self.scheduler = scheduler
         self.worker_module = worker_module
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.name = name
-
-        super().__init__()
+        self.remote_python = remote_python
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
-        self.proc = await self.connection.create_process(
-            " ".join(
-                [
-                    'DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
-                    "-m",
-                    self.worker_module,
-                    self.scheduler,
-                    "--name",
-                    str(self.name),
-                ]
-                + cli_keywords(self.kwargs, cls=_Worker)
+
+        result = await self.connection.run("uname")
+        if result.exit_status == 0:
+            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+                serialize_for_cli(dask.config.global_config)
             )
+        else:
+            result = await self.connection.run("cmd /c ver")
+            if result.exit_status == 0:
+                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                    serialize_for_cli(dask.config.global_config)
+                )
+            else:
+                raise Exception(
+                    "Worker failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
+                )
+
+        if not self.remote_python:
+            self.remote_python = sys.executable
+
+        cmd = " ".join(
+            [
+                set_env,
+                self.remote_python,
+                "-m",
+                self.worker_module,
+                self.scheduler,
+                "--name",
+                str(self.name),
+            ]
+            + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
+
+        self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
         while True:
@@ -110,14 +134,14 @@ class Worker(Process):
             logger.info(line.strip())
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
-                self.status = "running"
+                self.status = Status.running
                 break
         logger.debug("%s", line)
         await super().start()
 
 
 class Scheduler(Process):
-    """ A Remote Dask Scheduler controlled by SSH
+    """A Remote Dask Scheduler controlled by SSH
 
     Parameters
     ----------
@@ -125,17 +149,22 @@ class Scheduler(Process):
         The hostname where we should run this worker
     connect_options: dict
         kwargs to be passed to asyncssh connections
+    remote_python: str
+        Path to Python on remote node to run this scheduler.
     kwargs: dict
         These will be passed through the dask-scheduler CLI to the
         dask.distributed.Scheduler class
     """
 
-    def __init__(self, address: str, connect_options: dict, kwargs: dict):
+    def __init__(
+        self, address: str, connect_options: dict, kwargs: dict, remote_python=None
+    ):
+        super().__init__()
+
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
-
-        super().__init__()
+        self.remote_python = remote_python
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -144,18 +173,35 @@ class Scheduler(Process):
 
         self.connection = await asyncssh.connect(self.address, **self.connect_options)
 
-        self.proc = await self.connection.create_process(
-            " ".join(
-                [
-                    'DASK_INTERNAL_INHERIT_CONFIG="%s"'
-                    % serialize_for_cli(dask.config.global_config),
-                    sys.executable,
-                    "-m",
-                    "distributed.cli.dask_scheduler",
-                ]
-                + cli_keywords(self.kwargs, cls=_Scheduler)
+        result = await self.connection.run("uname")
+        if result.exit_status == 0:
+            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+                serialize_for_cli(dask.config.global_config)
             )
+        else:
+            result = await self.connection.run("cmd /c ver")
+            if result.exit_status == 0:
+                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                    serialize_for_cli(dask.config.global_config)
+                )
+            else:
+                raise Exception(
+                    "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
+                )
+
+        if not self.remote_python:
+            self.remote_python = sys.executable
+
+        cmd = " ".join(
+            [
+                set_env,
+                self.remote_python,
+                "-m",
+                "distributed.cli.dask_scheduler",
+            ]
+            + cli_keywords(self.kwargs, cls=_Scheduler)
         )
+        self.proc = await self.connection.create_process(cmd)
 
         # We watch stderr in order to get the address, then we return
         while True:
@@ -191,13 +237,14 @@ old_cluster_kwargs = {
 
 def SSHCluster(
     hosts: List[str] = None,
-    connect_options: dict = {},
+    connect_options: Union[List[dict], dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
-    **kwargs
+    remote_python: Union[str, List[str]] = None,
+    **kwargs,
 ):
-    """ Deploy a Dask cluster using SSH
+    """Deploy a Dask cluster using SSH
 
     The SSHCluster function deploys a Dask Scheduler and Workers for you on a
     set of machine addresses that you provide.  The first address will be used
@@ -219,21 +266,22 @@ def SSHCluster(
     Parameters
     ----------
     hosts: List[str]
-        List of hostnames or addresses on which to launch our cluster
-        The first will be used for the scheduler and the rest for workers
-    connect_options:
-        Keywords to pass through to asyncssh.connect
-        known_hosts: List[str] or None
-            The list of keys which will be used to validate the server host
-            key presented during the SSH handshake.  If this is not specified,
-            the keys will be looked up in the file .ssh/known_hosts.  If this
-            is explicitly set to None, server host key validation will be disabled.
-    worker_options:
-        Keywords to pass on to dask-worker
-    scheduler_options:
-        Keywords to pass on to dask-scheduler
-    worker_module:
-        Python module to call to start the worker
+        List of hostnames or addresses on which to launch our cluster.
+        The first will be used for the scheduler and the rest for workers.
+    connect_options: dict or list of dict, optional
+        Keywords to pass through to :func:`asyncssh.connect`.
+        This could include things such as ``port``, ``username``, ``password``
+        or ``known_hosts``. See docs for :func:`asyncssh.connect` and
+        :class:`asyncssh.SSHClientConnectionOptions` for full information.
+        If a list it must have the same length as ``hosts``.
+    worker_options: dict, optional
+        Keywords to pass on to workers.
+    scheduler_options: dict, optional
+        Keywords to pass on to scheduler.
+    worker_module: str, optional
+        Python module to call to start the worker.
+    remote_python: str or list of str, optional
+        Path to Python on remote nodes.
 
     Examples
     --------
@@ -274,12 +322,33 @@ def SSHCluster(
         kwargs.setdefault("worker_addrs", hosts)
         return OldSSHCluster(**kwargs)
 
+    if not hosts:
+        raise ValueError(
+            f"`hosts` must be a non empty list, value {repr(hosts)!r} found."
+        )
+    if isinstance(connect_options, list) and len(connect_options) != len(hosts):
+        raise RuntimeError(
+            "When specifying a list of connect_options you must provide a "
+            "dictionary for each address."
+        )
+
+    if isinstance(remote_python, list) and len(remote_python) != len(hosts):
+        raise RuntimeError(
+            "When specifying a list of remote_python you must provide a "
+            "path for each address."
+        )
+
     scheduler = {
         "cls": Scheduler,
         "options": {
             "address": hosts[0],
-            "connect_options": connect_options,
+            "connect_options": connect_options
+            if isinstance(connect_options, dict)
+            else connect_options[0],
             "kwargs": scheduler_options,
+            "remote_python": remote_python[0]
+            if isinstance(remote_python, list)
+            else remote_python,
         },
     }
     workers = {
@@ -287,9 +356,14 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "connect_options": connect_options,
+                "connect_options": connect_options
+                if isinstance(connect_options, dict)
+                else connect_options[i + 1],
                 "kwargs": worker_options,
                 "worker_module": worker_module,
+                "remote_python": remote_python[i + 1]
+                if isinstance(remote_python, list)
+                else remote_python,
             },
         }
         for i, host in enumerate(hosts[1:])

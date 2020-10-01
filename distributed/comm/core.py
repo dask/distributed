@@ -1,15 +1,20 @@
 from abc import ABC, abstractmethod, abstractproperty
-from datetime import timedelta
+import asyncio
+from contextlib import suppress
+import inspect
 import logging
+import random
+import sys
 import weakref
 
 import dask
-from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta, ignoring
+from ..utils import parse_timedelta, TimeoutError
 from . import registry
 from .addressing import parse_address
+from ..protocol.compression import get_default_compression
+from ..protocol import pickle
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +44,11 @@ class Comm(ABC):
 
     def __init__(self):
         self._instances.add(self)
+        self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
+        self.local_info = {}
+        self.remote_info = {}
+        self.handshake_options = {}
 
     # XXX add set_close_callback()?
 
@@ -58,7 +67,7 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, on_error=None):
+    def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
@@ -115,6 +124,36 @@ class Comm(ABC):
         """
         return {}
 
+    @staticmethod
+    def handshake_info():
+        return {
+            "compression": get_default_compression(),
+            "python": tuple(sys.version_info)[:3],
+            "pickle-protocol": pickle.HIGHEST_PROTOCOL,
+        }
+
+    @staticmethod
+    def handshake_configuration(local, remote):
+        try:
+            out = {
+                "pickle-protocol": min(
+                    local["pickle-protocol"], remote["pickle-protocol"]
+                )
+            }
+        except KeyError as e:
+            raise ValueError(
+                "Your Dask versions may not be in sync. "
+                "Please ensure that you have the same version of dask "
+                "and distributed on your client, scheduler, and worker machines"
+            ) from e
+
+        if local["compression"] == remote["compression"]:
+            out["compression"] = local["compression"]
+        else:
+            out["compression"] = None
+
+        return out
+
     def __repr__(self):
         clsname = self.__class__.__name__
         if self.closed():
@@ -130,7 +169,7 @@ class Comm(ABC):
 
 class Listener(ABC):
     @abstractmethod
-    def start(self):
+    async def start(self):
         """
         Start listening for incoming connections.
         """
@@ -156,12 +195,42 @@ class Listener(ABC):
         address such as 'tcp://0.0.0.0:123'.
         """
 
-    def __enter__(self):
-        self.start()
+    async def __aenter__(self):
+        await self.start()
         return self
 
-    def __exit__(self, *exc):
-        self.stop()
+    async def __aexit__(self, *exc):
+        future = self.stop()
+        if inspect.isawaitable(future):
+            await future
+
+    def __await__(self):
+        async def _():
+            await self.start()
+            return self
+
+        return _().__await__()
+
+    async def on_connection(self, comm: Comm, handshake_overrides=None):
+        local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
+        try:
+            write = await asyncio.wait_for(comm.write(local_info), 1)
+            handshake = await asyncio.wait_for(comm.read(), 1)
+            # This would be better, but connections leak if worker is closed quickly
+            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        except Exception as e:
+            with suppress(Exception):
+                await comm.close()
+            raise CommClosedError() from e
+
+        comm.remote_info = handshake
+        comm.remote_info["address"] = comm._peer_addr
+        comm.local_info = local_info
+        comm.local_info["address"] = comm._local_addr
+
+        comm.handshake_options = comm.handshake_configuration(
+            comm.local_info, comm.remote_info
+        )
 
 
 class Connector(ABC):
@@ -175,7 +244,9 @@ class Connector(ABC):
         """
 
 
-async def connect(addr, timeout=None, deserialize=True, connection_args=None):
+async def connect(
+    addr, timeout=None, deserialize=True, handshake_overrides=None, **connection_args
+):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -203,18 +274,48 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         )
         raise IOError(msg)
 
+    backoff = 0.01
+    if timeout and timeout / 20 < backoff:
+        backoff = timeout / 20
+
+    retry_timeout_backoff = random.randrange(140, 160) / 100
+
     # This starts a thread
     while True:
         try:
             while deadline - time() > 0:
-                future = connector.connect(
-                    loc, deserialize=deserialize, **(connection_args or {})
-                )
-                with ignoring(gen.TimeoutError):
-                    comm = await gen.with_timeout(
-                        timedelta(seconds=min(deadline - time(), 1)),
-                        future,
-                        quiet_exceptions=EnvironmentError,
+
+                async def _():
+                    comm = await connector.connect(
+                        loc, deserialize=deserialize, **connection_args
+                    )
+                    local_info = {
+                        **comm.handshake_info(),
+                        **(handshake_overrides or {}),
+                    }
+                    try:
+                        handshake = await asyncio.wait_for(comm.read(), 1)
+                        write = await asyncio.wait_for(comm.write(local_info), 1)
+                        # This would be better, but connections leak if worker is closed quickly
+                        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+                    except Exception as e:
+                        with suppress(Exception):
+                            await comm.close()
+                        raise CommClosedError() from e
+
+                    comm.remote_info = handshake
+                    comm.remote_info["address"] = comm._peer_addr
+                    comm.local_info = local_info
+                    comm.local_info["address"] = comm._local_addr
+
+                    comm.handshake_options = comm.handshake_configuration(
+                        comm.local_info, comm.remote_info
+                    )
+                    return comm
+
+                with suppress(TimeoutError):
+                    comm = await asyncio.wait_for(
+                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
                     )
                     break
             if not comm:
@@ -224,8 +325,11 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await gen.sleep(0.01)
-                logger.debug("sleeping on connect")
+                logger.debug("Could not connect, waiting before retrying")
+                await asyncio.sleep(backoff)
+                backoff *= random.randrange(140, 160) / 100
+                retry_timeout_backoff *= random.randrange(140, 160) / 100
+                backoff = min(backoff, 1)  # wait at most one second
             else:
                 _raise(error)
         else:
@@ -234,7 +338,7 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
     return comm
 
 
-def listen(addr, handle_comm, deserialize=True, connection_args=None):
+def listen(addr, handle_comm, deserialize=True, **kwargs):
     """
     Create a listener object with the given parameters.  When its ``start()``
     method is called, the listener will listen on the given address
@@ -246,7 +350,7 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
     try:
         scheme, loc = parse_address(addr, strict=True)
     except ValueError:
-        if connection_args and connection_args.get("ssl_context"):
+        if kwargs.get("ssl_context"):
             addr = "tls://" + addr
         else:
             addr = "tcp://" + addr
@@ -254,6 +358,4 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
 
     backend = registry.get_backend(scheme)
 
-    return backend.get_listener(
-        loc, handle_comm, deserialize, **(connection_args or {})
-    )
+    return backend.get_listener(loc, handle_comm, deserialize, **kwargs)

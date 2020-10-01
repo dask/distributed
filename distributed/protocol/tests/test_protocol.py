@@ -1,6 +1,3 @@
-import sys
-
-import dask
 import pytest
 
 from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
@@ -68,16 +65,15 @@ def test_maybe_compress(lib, compression):
 
     try_converters = [bytes, memoryview]
 
-    with dask.config.set({"distributed.comm.compression": compression}):
-        for f in try_converters:
-            payload = b"123"
-            assert maybe_compress(f(payload)) == (None, payload)
+    for f in try_converters:
+        payload = b"123"
+        assert maybe_compress(f(payload), compression=compression) == (None, payload)
 
-            payload = b"0" * 10000
-            rc, rd = maybe_compress(f(payload))
-            # For some reason compressing memoryviews can force blosc...
-            assert rc in (compression, "blosc")
-            assert compressions[rc]["decompress"](rd) == payload
+        payload = b"0" * 10000
+        rc, rd = maybe_compress(f(payload), compression=compression)
+        # For some reason compressing memoryviews can force blosc...
+        assert rc in (compression, "blosc")
+        assert compressions[rc]["decompress"](rd) == payload
 
 
 def test_maybe_compress_sample():
@@ -166,7 +162,9 @@ def test_loads_without_deserialization_avoids_compression():
 
 def eq_frames(a, b):
     if b"headers" in a:
-        return msgpack.loads(a, use_list=False) == msgpack.loads(b, use_list=False)
+        return msgpack.loads(a, use_list=False, strict_map_key=False) == msgpack.loads(
+            b, use_list=False, strict_map_key=False
+        )
     else:
         return a == b
 
@@ -207,7 +205,6 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3, reason="NumPy doesnt use memoryviews")
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip("numpy")
     pytest.importorskip("lz4")

@@ -1,12 +1,15 @@
-import atexit
+import inspect
 import logging
 import os
 import shutil
 import sys
+from typing import List
+from types import ModuleType
 import filecmp
 from importlib import import_module
 
 import click
+from tornado.httpclient import AsyncHTTPClient
 
 from dask.utils import tmpfile
 
@@ -31,12 +34,16 @@ def validate_preload_argv(ctx, param, value):
             % ("s" if len(value) > 1 else "", " ".join(value))
         )
 
-    preload_modules = {name: _import_module(name) for name in ctx.params.get("preload")}
+    preload_modules = {
+        name: _import_module(name)
+        for name in ctx.params.get("preload")
+        if not is_webaddress(name)
+    }
 
     preload_commands = [
-        m["dask_setup"]
+        getattr(m, "dask_setup", None)
         for m in preload_modules.values()
-        if isinstance(m["dask_setup"], click.Command)
+        if isinstance(getattr(m, "dask_setup", None), click.Command)
     ]
 
     if len(preload_commands) > 1:
@@ -60,8 +67,12 @@ def validate_preload_argv(ctx, param, value):
     return value
 
 
-def _import_module(name, file_dir=None):
-    """ Imports module and extract preload interface functions.
+def is_webaddress(s: str) -> bool:
+    return any(s.startswith(prefix) for prefix in ("http://", "https://"))
+
+
+def _import_module(name, file_dir=None) -> ModuleType:
+    """Imports module and extract preload interface functions.
 
     Import modules specified by name and extract 'dask_setup'
     and 'dask_teardown' if present.
@@ -105,44 +116,82 @@ def _import_module(name, file_dir=None):
             return _import_module(fn, file_dir=file_dir)
 
     logger.info("Import preload module: %s", name)
-    return {
-        attrname: getattr(module, attrname, None)
-        for attrname in ("dask_setup", "dask_teardown")
-    }
+    return module
 
 
-def preload_modules(names, parameter=None, file_dir=None, argv=None):
-    """ Imports modules, handles `dask_setup` and `dask_teardown`.
+async def _download_module(url: str) -> ModuleType:
+    logger.info("Downloading preload at %s", url)
+    assert is_webaddress(url)
+
+    client = AsyncHTTPClient()
+    response = await client.fetch(url)
+    source = response.body.decode()
+
+    compiled = compile(source, url, "exec")
+    module = ModuleType(url)
+    exec(compiled, module.__dict__)
+    return module
+
+
+class Preload:
+    """
+    Manage state for setup/teardown of a preload module
 
     Parameters
     ----------
-    names: list of strings
-        Module names or file paths
-    parameter: object
-        Parameter passed to `dask_setup` and `dask_teardown`
+    dask_server: dask.distributed.Server
+        The Worker or Scheduler
+    name: str
+        module name, file name, or web address to load
     argv: [string]
         List of string arguments passed to click-configurable `dask_setup`.
     file_dir: string
         Path of a directory where files should be copied
     """
-    if isinstance(names, str):
-        names = [names]
 
-    for name in names:
-        interface = _import_module(name, file_dir=file_dir)
+    def __init__(self, dask_server, name: str, argv: List[str], file_dir: str):
+        self.dask_server = dask_server
+        self.name = name
+        self.argv = argv
+        self.file_dir = file_dir
 
-        dask_setup = interface.get("dask_setup", None)
-        dask_teardown = interface.get("dask_teardown", None)
+        if not is_webaddress(name):
+            self.module = _import_module(name, file_dir)
+        else:
+            self.module = None
+
+    async def start(self):
+        """ Run when the server finishes its start method """
+        if is_webaddress(self.name):
+            self.module = await _download_module(self.name)
+
+        dask_setup = getattr(self.module, "dask_setup", None)
 
         if dask_setup:
             if isinstance(dask_setup, click.Command):
                 context = dask_setup.make_context(
-                    "dask_setup", list(argv), allow_extra_args=False
+                    "dask_setup", list(self.argv), allow_extra_args=False
                 )
-                dask_setup.callback(parameter, *context.args, **context.params)
+                dask_setup.callback(self.dask_server, *context.args, **context.params)
             else:
-                dask_setup(parameter)
-                logger.info("Run preload setup function: %s", name)
+                future = dask_setup(self.dask_server)
+                if inspect.isawaitable(future):
+                    await future
+                logger.info("Run preload setup function: %s", self.name)
 
+    async def teardown(self):
+        """ Run when the server starts its close method """
+        dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
-            atexit.register(interface["dask_teardown"], parameter)
+            future = dask_teardown(self.dask_server)
+            if inspect.isawaitable(future):
+                await future
+
+
+def process_preloads(
+    dask_server, preload: List[str], preload_argv: List[List], file_dir: str = None
+) -> List[Preload]:
+    if isinstance(preload, str):
+        preload = [preload]
+
+    return [Preload(dask_server, p, preload_argv, file_dir) for p in preload]

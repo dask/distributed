@@ -1,3 +1,4 @@
+import asyncio
 import array
 import datetime
 from functools import partial
@@ -11,7 +12,6 @@ import traceback
 
 import numpy as np
 import pytest
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -40,36 +40,35 @@ from distributed.utils import (
     LoopRunner,
     parse_bytes,
     parse_timedelta,
+    parse_ports,
     warn_on_duration,
     format_dashboard_link,
+    LRU,
+    offload,
+    TimeoutError,
 )
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
 
 
 def test_All(loop):
-    @gen.coroutine
-    def throws():
+    async def throws():
         1 / 0
 
-    @gen.coroutine
-    def slow():
-        yield gen.sleep(10)
+    async def slow():
+        await asyncio.sleep(10)
 
-    @gen.coroutine
-    def inc(x):
-        raise gen.Return(x + 1)
+    async def inc(x):
+        return x + 1
 
-    @gen.coroutine
-    def f():
-
-        results = yield All([inc(i) for i in range(10)])
+    async def f():
+        results = await All([inc(i) for i in range(10)])
         assert results == list(range(1, 11))
 
         start = time()
         for tasks in [[throws(), slow()], [slow(), throws()]]:
             try:
-                yield All(tasks)
+                await All(tasks)
                 assert False
             except ZeroDivisionError:
                 pass
@@ -108,8 +107,8 @@ def test_sync_error(loop_in_thread):
 
 def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
-    with pytest.raises(gen.TimeoutError):
-        sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
+    with pytest.raises(TimeoutError):
+        sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
 
 
 def test_sync_closed_loop():
@@ -481,17 +480,17 @@ def test_two_loop_runners(loop_in_thread):
 
 
 @gen_test()
-def test_loop_runner_gen():
+async def test_loop_runner_gen():
     runner = LoopRunner(asynchronous=True)
     assert runner.loop is IOLoop.current()
     assert not runner.is_started()
-    yield gen.sleep(0.01)
+    await asyncio.sleep(0.01)
     runner.start()
     assert runner.is_started()
-    yield gen.sleep(0.01)
+    await asyncio.sleep(0.01)
     runner.stop()
     assert not runner.is_started()
-    yield gen.sleep(0.01)
+    await asyncio.sleep(0.01)
 
 
 def test_parse_bytes():
@@ -534,21 +533,20 @@ def test_parse_timedelta():
 
 
 @gen_test()
-def test_all_exceptions_logging():
-    @gen.coroutine
-    def throws():
+async def test_all_exceptions_logging():
+    async def throws():
         raise Exception("foo1234")
 
     with captured_logger("") as sio:
         try:
-            yield All([throws() for _ in range(5)], quiet_exceptions=Exception)
+            await All([throws() for _ in range(5)], quiet_exceptions=Exception)
         except Exception:
             pass
 
         import gc
 
         gc.collect()
-        yield gen.sleep(0.1)
+        await asyncio.sleep(0.1)
 
     assert "foo1234" not in sio.getvalue()
 
@@ -598,3 +596,37 @@ def test_format_dashboard_link():
         assert "hello" not in format_dashboard_link("host", 1234)
     finally:
         del os.environ["host"]
+
+
+def test_parse_ports():
+    assert parse_ports(None) == [None]
+    assert parse_ports(23) == [23]
+    assert parse_ports("45") == [45]
+    assert parse_ports("100:103") == [100, 101, 102, 103]
+
+    with pytest.raises(ValueError, match="port_stop must be greater than port_start"):
+        parse_ports("103:100")
+
+
+def test_lru():
+
+    l = LRU(maxsize=3)
+    l["a"] = 1
+    l["b"] = 2
+    l["c"] = 3
+    assert list(l.keys()) == ["a", "b", "c"]
+
+    # Use "a" and ensure it becomes the most recently used item
+    l["a"]
+    assert list(l.keys()) == ["b", "c", "a"]
+
+    # Ensure maxsize is respected
+    l["d"] = 4
+    assert len(l) == 3
+    assert list(l.keys()) == ["c", "a", "d"]
+
+
+@pytest.mark.asyncio
+async def test_offload():
+    assert (await offload(inc, 1)) == 2
+    assert (await offload(lambda x, y: x + y, 1, y=2)) == 3

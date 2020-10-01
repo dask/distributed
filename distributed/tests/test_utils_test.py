@@ -1,6 +1,6 @@
+import asyncio
 from contextlib import contextmanager
 import socket
-import sys
 import threading
 from time import sleep
 
@@ -44,12 +44,34 @@ def test_cluster(loop):
 
 
 @gen_cluster(client=True)
-def test_gen_cluster(c, s, a, b):
+async def test_gen_cluster(c, s, a, b):
     assert isinstance(c, Client)
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert await c.submit(lambda: 123) == 123
+
+
+@gen_cluster(client=True)
+def test_gen_cluster_legacy_implicit(c, s, a, b):
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert (yield c.submit(lambda: 123)) == 123
+
+
+@gen_cluster(client=True)
+@gen.coroutine
+def test_gen_cluster_legacy_explicit(c, s, a, b):
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert (yield c.submit(lambda: 123)) == 123
 
 
 @pytest.mark.skip(reason="This hangs on travis")
@@ -59,9 +81,9 @@ def test_gen_cluster_cleans_up_client(loop):
     assert not dask.config.get("get", None)
 
     @gen_cluster(client=True)
-    def f(c, s, a, b):
+    async def f(c, s, a, b):
         assert dask.config.get("get", None)
-        yield c.submit(inc, 1)
+        await c.submit(inc, 1)
 
     f()
 
@@ -69,11 +91,16 @@ def test_gen_cluster_cleans_up_client(loop):
 
 
 @gen_cluster(client=False)
-def test_gen_cluster_without_client(s, a, b):
+async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+
+    async with Client(s.address, asynchronous=True) as c:
+        future = c.submit(lambda x: x + 1, 1)
+        result = await future
+        assert result == 2
 
 
 @gen_cluster(
@@ -82,7 +109,7 @@ def test_gen_cluster_without_client(s, a, b):
     nthreads=[("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)],
     security=tls_only_security(),
 )
-def test_gen_cluster_tls(e, s, a, b):
+async def test_gen_cluster_tls(e, s, a, b):
     assert isinstance(e, Client)
     assert isinstance(s, Scheduler)
     assert s.address.startswith("tls://")
@@ -93,8 +120,19 @@ def test_gen_cluster_tls(e, s, a, b):
 
 
 @gen_test()
-def test_gen_test():
-    yield gen.sleep(0.01)
+async def test_gen_test():
+    await asyncio.sleep(0.01)
+
+
+@gen_test()
+def test_gen_test_legacy_implicit():
+    yield asyncio.sleep(0.01)
+
+
+@gen_test()
+@gen.coroutine
+def test_gen_test_legacy_explicit():
+    yield asyncio.sleep(0.01)
 
 
 @contextmanager
@@ -155,8 +193,8 @@ def test_new_config():
 
 def test_lingering_client():
     @gen_cluster()
-    def f(s, a, b):
-        c = yield Client(s.address, asynchronous=True)
+    async def f(s, a, b):
+        await Client(s.address, asynchronous=True)
 
     f()
 
@@ -178,7 +216,3 @@ def test_tls_cluster(tls_client):
 async def test_tls_scheduler(security, cleanup):
     async with Scheduler(security=security, host="localhost") as s:
         assert s.address.startswith("tls")
-
-
-if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_utils_tst import *  # noqa: F401, F403

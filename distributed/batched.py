@@ -12,8 +12,8 @@ from .utils import parse_timedelta
 logger = logging.getLogger(__name__)
 
 
-class BatchedSend(object):
-    """ Batch messages in batches on a stream
+class BatchedSend:
+    """Batch messages in batches on a stream
 
     This takes an IOStream and an interval (in ms) and ensures that we send no
     more than one message every interval milliseconds.  We send lists of
@@ -22,8 +22,8 @@ class BatchedSend(object):
     Batching several messages at once helps performance when sending
     a myriad of tiny messages.
 
-    Example
-    -------
+    Examples
+    --------
     >>> stream = yield connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
@@ -109,7 +109,7 @@ class BatchedSend(object):
         self.stopped.set()
 
     def send(self, msg):
-        """ Schedule a message for sending to the other side
+        """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
         """
@@ -123,13 +123,16 @@ class BatchedSend(object):
             self.waker.set()
 
     @gen.coroutine
-    def close(self):
-        """ Flush existing messages and then close comm """
+    def close(self, timeout=None):
+        """Flush existing messages and then close comm
+
+        If set, raises `tornado.util.TimeoutError` after a timeout.
+        """
         if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait()
+        yield self.stopped.wait(timeout=timeout)
         if not self.comm.closed():
             try:
                 if self.buffer:

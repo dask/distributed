@@ -6,8 +6,8 @@ import sys
 logger = logging.getLogger(__name__)
 
 
-class SchedulerPlugin(object):
-    """ Interface to extend the Scheduler
+class SchedulerPlugin:
+    """Interface to extend the Scheduler
 
     The scheduler operates by triggering and responding to events like
     ``task_finished``, ``update_graph``, ``task_erred``, etc..
@@ -40,6 +40,21 @@ class SchedulerPlugin(object):
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
 
+    async def start(self, scheduler):
+        """Run when the scheduler starts up
+
+        This runs at the end of the Scheduler startup process
+        """
+        pass
+
+    async def close(self):
+        """Run when the scheduler closes down
+
+        This runs at the beginning of the Scheduler shutdown process, but after
+        workers have been asked to shut down gracefully
+        """
+        pass
+
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
 
@@ -47,7 +62,7 @@ class SchedulerPlugin(object):
         """ Run when the scheduler restarts itself """
 
     def transition(self, key, start, finish, *args, **kwargs):
-        """ Run whenever a task changes state
+        """Run whenever a task changes state
 
         Parameters
         ----------
@@ -65,14 +80,21 @@ class SchedulerPlugin(object):
         """ Run when a new worker enters the cluster """
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a worker leaves the cluster"""
+        """ Run when a worker leaves the cluster """
+
+    def add_client(self, scheduler=None, client=None, **kwargs):
+        """ Run when a new client connects """
+
+    def remove_client(self, scheduler=None, client=None, **kwargs):
+        """ Run when a client disconnects """
 
 
-class WorkerPlugin(object):
-    """ Interface to extend the Worker
+class WorkerPlugin:
+    """Interface to extend the Worker
 
     A worker plugin enables custom code to run at different stages of the Workers'
-    lifecycle: at setup, during task state transitions and at teardown.
+    lifecycle: at setup, during task state transitions, when a task or dependency
+    is released, and at teardown.
 
     A plugin enables custom code to run at each of step of a Workers's life. Whenever such
     an event happens, the corresponding method on this class will be called. Note that the
@@ -130,9 +152,41 @@ class WorkerPlugin(object):
         kwargs: More options passed when transitioning
         """
 
+    def release_key(self, key, state, cause, reason, report):
+        """
+        Called when the worker releases a task.
+
+        Parameters
+        ----------
+        key: string
+        state: string
+            State of the released task.
+            One of waiting, ready, executing, long-running, memory, error.
+        cause: string or None
+            Additional information on what triggered the release of the task.
+        reason: None
+            Not used.
+        report: bool
+            Whether the worker should report the released task to the scheduler.
+        """
+
+    def release_dep(self, dep, state, report):
+        """
+        Called when the worker releases a dependency.
+
+        Parameters
+        ----------
+        dep: string
+        state: string
+            State of the released dependency.
+            One of waiting, flight, memory.
+        report: bool
+            Whether the worker should report the released dependency to the scheduler.
+        """
+
 
 class PipInstall(WorkerPlugin):
-    """ A Worker Plugin to pip install a set of packages
+    """A Worker Plugin to pip install a set of packages
 
     This accepts a set of packages to install on all workers.
     You can also optionally ask for the worker to restart itself after

@@ -26,10 +26,8 @@ from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 import dask
 from tornado import gen
-import toolz
 
 from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
-from distributed.diagnostics.progress_stream import nbytes_bar
 from distributed import profile
 from distributed.utils import log_errors, parse_timedelta
 
@@ -43,8 +41,8 @@ profile_interval = dask.config.get("distributed.worker.profile.interval")
 profile_interval = parse_timedelta(profile_interval, default="ms")
 
 
-class DashboardComponent(object):
-    """ Base class for Dask.distributed UI dashboard components.
+class DashboardComponent:
+    """Base class for Dask.distributed UI dashboard components.
 
     This class must have two attributes, ``root`` and ``source``, and one
     method ``update``:
@@ -64,7 +62,7 @@ class DashboardComponent(object):
 
 
 def add_periodic_callback(doc, component, interval):
-    """ Add periodic callback to doc in a way that avoids reference cycles
+    """Add periodic callback to doc in a way that avoids reference cycles
 
     If we instead use ``doc.add_periodic_callback(component.update, 100)`` then
     the component stays in memory as a reference cycle because its method is

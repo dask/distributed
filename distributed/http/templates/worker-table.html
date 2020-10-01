@@ -1,0 +1,34 @@
+<table class="table is-striped is-hoverable">
+    <tr>
+        <th> Worker </th>
+        <th> Name </th>
+        <th> Cores </th>
+        <th> Memory </th>
+        <th> Memory use </th>
+        <th> Occupancy </th>
+        <th> Processing </th>
+        <th> In-memory </th>
+        <th> Services</th>
+        <th> Logs </th>
+        <th> Last seen </th>
+    </tr>
+    {% for ws in worker_list %}
+    <tr {{ "style=background-color:#ffcdd2" if time() - ws.last_seen > 60 else ""}}>
+        <td><a href="../worker/{{ url_escape(ws.address) }}.html">{{ws.address}}</a></td>
+        <td> {{ ws.name if ws.name is not None else "" }} </td>
+        <td> {{ ws.nthreads }} </td>
+        <td> {{ format_bytes(ws.memory_limit) if ws.memory_limit is not None else "" }} </td>
+        <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress> </td>
+        <td> {{ format_time(ws.occupancy) }} </td>
+        <td> {{ len(ws.processing) }} </td>
+        <td> {{ len(ws.has_what) }} </td>
+        {% if 'dashboard' in ws.services %}
+        <td> <a href="../../proxy/{{ ws.services['dashboard'] }}/{{ ws.host }}/status">dashboard</a> </td>
+        {% else %}
+        <td> </td>
+        {% end %}
+        <td> <a href="../logs/{{ url_escape(ws.address) }}.html">logs</a></td>
+        <td> {{ format_time(time() - ws.last_seen) }} </td>
+    </tr>
+    {% end %}
+  </table>

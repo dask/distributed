@@ -1,17 +1,26 @@
 import asyncio
 import atexit
+from contextlib import suppress
 import copy
 import logging
 import math
 import weakref
+import warnings
 
 import dask
 from tornado import gen
 
 from .adaptive import Adaptive
 from .cluster import Cluster
-from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes, parse_timedelta
+from ..core import rpc, CommClosedError, Status
+from ..utils import (
+    LoopRunner,
+    silence_logging,
+    parse_bytes,
+    parse_timedelta,
+    import_term,
+    TimeoutError,
+)
 from ..scheduler import Scheduler
 from ..security import Security
 
@@ -28,24 +37,45 @@ class ProcessInterface:
     It should implement the methods below, like ``start`` and ``close``
     """
 
+    @property
+    def status(self):
+        return self._status
+
+    @status.setter
+    def status(self, new_status):
+        if isinstance(new_status, Status):
+            self._status = new_status
+        elif isinstance(new_status, str) or new_status is None:
+            warnings.warn(
+                f"Since distributed 2.19 `.status` is now an Enum, please assign `Status.{new_status}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
+            corresponding_enum_variants = [s for s in Status if s.value == new_status]
+            assert len(corresponding_enum_variants) == 1
+            self._status = corresponding_enum_variants[0]
+        else:
+            raise TypeError(f"expected Status or str, got {new_status}")
+
     def __init__(self, scheduler=None, name=None):
         self.address = getattr(self, "address", None)
         self.external_address = None
         self.lock = asyncio.Lock()
-        self.status = "created"
+        self.status = Status.created
+        self._event_finished = asyncio.Event()
 
     def __await__(self):
         async def _():
             async with self.lock:
-                if self.status == "created":
+                if self.status == Status.created:
                     await self.start()
-                    assert self.status == "running"
+                    assert self.status == Status.running
             return self
 
         return _().__await__()
 
     async def start(self):
-        """ Submit the process to the resource manager
+        """Submit the process to the resource manager
 
         For workers this doesn't have to wait until the process actually starts,
         but can return once the resource manager has the request, and will work
@@ -54,17 +84,22 @@ class ProcessInterface:
         For the scheduler we will expect the scheduler's ``.address`` attribute
         to be avaialble after this completes.
         """
-        self.status = "running"
+        self.status = Status.running
 
     async def close(self):
-        """ Close the process
+        """Close the process
 
         This will be called by the Cluster object when we scale down a node,
         but only after we ask the Scheduler to close the worker gracefully.
         This method should kill the process a bit more forcefully and does not
         need to worry about shutting down gracefully
         """
-        self.status = "closed"
+        self.status = Status.closed
+        self._event_finished.set()
+
+    async def finished(self):
+        """ Wait until the server has finished """
+        await self._event_finished.wait()
 
     def __repr__(self):
         return "<%s: status=%s>" % (type(self).__name__, self.status)
@@ -77,7 +112,7 @@ class ProcessInterface:
         await self.close()
 
 
-class NoOpAwaitable(object):
+class NoOpAwaitable:
     """An awaitable object that always returns None.
 
     Useful to return from a method that can be called in both asynchronous and
@@ -91,7 +126,7 @@ class NoOpAwaitable(object):
 
 
 class SpecCluster(Cluster):
-    """ Cluster that requires a full specification of workers
+    """Cluster that requires a full specification of workers
 
     The SpecCluster class expects a full specification of the Scheduler and
     Workers to use.  It removes any handling of user inputs (like threads vs
@@ -219,7 +254,6 @@ class SpecCluster(Cluster):
         self.workers = {}
         self._i = 0
         self.security = security or Security()
-        self.scheduler_comm = None
         self._futures = set()
 
         if silence_logs:
@@ -243,28 +277,30 @@ class SpecCluster(Cluster):
             self.sync(self._correct_state)
 
     async def _start(self):
-        while self.status == "starting":
+        while self.status == Status.starting:
             await asyncio.sleep(0.01)
-        if self.status == "running":
+        if self.status == Status.running:
             return
-        if self.status == "closed":
+        if self.status == Status.closed:
             raise ValueError("Cluster is closed")
 
         self._lock = asyncio.Lock()
 
         if self.scheduler_spec is None:
             try:
-                from distributed.dashboard import BokehScheduler
+                import distributed.dashboard  # noqa: F401
             except ImportError:
-                services = {}
+                pass
             else:
-                services = {("dashboard", 8787): BokehScheduler}
-            self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
-        self.scheduler = self.scheduler_spec["cls"](
-            **self.scheduler_spec.get("options", {})
-        )
+                options = {"dashboard": True}
+            self.scheduler_spec = {"cls": Scheduler, "options": options}
 
-        self.status = "starting"
+        cls = self.scheduler_spec["cls"]
+        if isinstance(cls, str):
+            cls = import_term(cls)
+        self.scheduler = cls(**self.scheduler_spec.get("options", {}))
+
+        self.status = Status.starting
         self.scheduler = await self.scheduler
         self.scheduler_comm = rpc(
             getattr(self.scheduler, "external_address", None) or self.scheduler.address,
@@ -288,12 +324,12 @@ class SpecCluster(Cluster):
             pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
-                if self.scheduler.status == "running":
+                if self.scheduler.status == Status.running:
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
                 tasks = [self.workers[w].close() for w in to_close if w in self.workers]
                 await asyncio.wait(tasks)
                 for task in tasks:  # for tornado gen.coroutine support
-                    with ignoring(RuntimeError):
+                    with suppress(RuntimeError):
                         await task
             for name in to_close:
                 if name in self.workers:
@@ -307,6 +343,8 @@ class SpecCluster(Cluster):
                 if "name" not in opts:
                     opts = opts.copy()
                     opts["name"] = name
+                if isinstance(cls, str):
+                    cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
                 workers.append(worker)
@@ -342,7 +380,7 @@ class SpecCluster(Cluster):
 
     def __await__(self):
         async def _():
-            if self.status == "created":
+            if self.status == Status.created:
                 await self._start()
             await self.scheduler
             await self._correct_state()
@@ -353,23 +391,26 @@ class SpecCluster(Cluster):
         return _().__await__()
 
     async def _close(self):
-        while self.status == "closing":
+        while self.status == Status.closing:
             await asyncio.sleep(0.1)
-        if self.status == "closed":
+        if self.status == Status.closed:
             return
-        self.status = "closing"
+        if self.status == Status.running:
+            self.status = Status.closing
+            self.scale(0)
+            await self._correct_state()
+            for future in self._futures:
+                await future
+            async with self._lock:
+                with suppress(CommClosedError):
+                    if self.scheduler_comm:
+                        await self.scheduler_comm.close(close_workers=True)
+                    else:
+                        logger.warning("Cluster closed without starting up")
 
-        self.scale(0)
-        await self._correct_state()
-        for future in self._futures:
-            await future
-        async with self._lock:
-            with ignoring(CommClosedError):
-                await self.scheduler_comm.close(close_workers=True)
-
-        await self.scheduler.close()
-        for w in self._created:
-            assert w.status == "closed", w.status
+            await self.scheduler.close()
+            for w in self._created:
+                assert w.status == Status.closed, w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
@@ -378,13 +419,14 @@ class SpecCluster(Cluster):
 
         await super()._close()
 
-    def __enter__(self):
-        self.sync(self._correct_state)
-        assert self.status == "running"
+    async def __aenter__(self):
+        await self
+        await self._correct_state()
+        assert self.status == Status.running
         return self
 
     def __exit__(self, typ, value, traceback):
-        self.close()
+        super().__exit__(typ, value, traceback)
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
@@ -393,7 +435,7 @@ class SpecCluster(Cluster):
             raise ValueError("To scale by cores= you must specify cores per worker")
 
         for name in ["nthreads", "ncores", "threads", "cores"]:
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 return self.new_spec["options"][name]
 
         if not self.new_spec:
@@ -407,7 +449,7 @@ class SpecCluster(Cluster):
             )
 
         for name in ["memory_limit", "memory"]:
-            with ignoring(KeyError):
+            with suppress(KeyError):
                 return parse_bytes(self.new_spec["options"][name])
 
         raise ValueError(
@@ -431,7 +473,7 @@ class SpecCluster(Cluster):
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
 
-        if self.status not in ("closing", "closed"):
+        if self.status not in (Status.closing, Status.closed):
             while len(self.worker_spec) < n:
                 self.worker_spec.update(self.new_worker_spec())
 
@@ -440,8 +482,16 @@ class SpecCluster(Cluster):
         if self.asynchronous:
             return NoOpAwaitable()
 
+    def _new_worker_name(self, worker_number):
+        """Returns new worker name.
+
+        This can be overriden in SpecCluster derived classes to customise the
+        worker names.
+        """
+        return worker_number
+
     def new_worker_spec(self):
-        """ Return name and spec for the next worker
+        """Return name and spec for the next worker
 
         Returns
         -------
@@ -451,10 +501,12 @@ class SpecCluster(Cluster):
         --------
         scale
         """
-        while self._i in self.worker_spec:
+        new_worker_name = self._new_worker_name(self._i)
+        while new_worker_name in self.worker_spec:
             self._i += 1
+            new_worker_name = self._new_worker_name(self._i)
 
-        return {self._i: self.new_spec}
+        return {new_worker_name: self.new_spec}
 
     @property
     def _supports_scaling(self):
@@ -513,9 +565,9 @@ class SpecCluster(Cluster):
         maximum_cores: int = None,
         minimum_memory: str = None,
         maximum_memory: str = None,
-        **kwargs
+        **kwargs,
     ) -> Adaptive:
-        """ Turn on adaptivity
+        """Turn on adaptivity
 
         This scales Dask clusters automatically based on scheduler activity.
 
@@ -532,7 +584,7 @@ class SpecCluster(Cluster):
         minimum_memory : str
             Minimum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
-        maximum_cores : int
+        maximum_memory : str
             Maximum amount of memory to keep around in the cluster
             Expressed as a string like "100 GiB"
 
@@ -566,9 +618,24 @@ class SpecCluster(Cluster):
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
 
 
+async def run_spec(spec: dict, *args):
+    workers = {}
+    for k, d in spec.items():
+        cls = d["cls"]
+        if isinstance(cls, str):
+            cls = import_term(cls)
+        workers[k] = cls(*args, **d.get("opts", {}))
+
+    if workers:
+        await asyncio.gather(*workers.values())
+        for w in workers.values():
+            await w  # for tornado gen.coroutine support
+    return workers
+
+
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring(gen.TimeoutError):
-            if cluster.status != "closed":
+        with suppress(gen.TimeoutError, TimeoutError):
+            if cluster.status != Status.closed:
                 cluster.close(timeout=10)

@@ -1,5 +1,10 @@
 import logging
+import math
 import socket
+
+import dask
+from dask.sizeof import sizeof
+from dask.utils import parse_bytes
 
 from .. import protocol
 from ..utils import get_ip, get_ipv6, nbytes, offload
@@ -11,10 +16,14 @@ logger = logging.getLogger(__name__)
 # Offload (de)serializing large frames to improve event loop responsiveness.
 # We use at most 4 threads to allow for parallel processing of large messages.
 
-FRAME_OFFLOAD_THRESHOLD = 10 * 1024 ** 2  # 10 MB
+FRAME_OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
+if isinstance(FRAME_OFFLOAD_THRESHOLD, str):
+    FRAME_OFFLOAD_THRESHOLD = parse_bytes(FRAME_OFFLOAD_THRESHOLD)
 
 
-async def to_frames(msg, serializers=None, on_error="message", context=None):
+async def to_frames(
+    msg, serializers=None, on_error="message", context=None, allow_offload=True
+):
     """
     Serialize a message into a list of Distributed protocol frames.
     """
@@ -31,16 +40,25 @@ async def to_frames(msg, serializers=None, on_error="message", context=None):
             logger.exception(e)
             raise
 
-    res = await offload(_to_frames)
+    if FRAME_OFFLOAD_THRESHOLD and allow_offload:
+        try:
+            msg_size = sizeof(msg)
+        except RecursionError:
+            msg_size = math.inf
+    else:
+        msg_size = 0
 
-    return res
+    if allow_offload and FRAME_OFFLOAD_THRESHOLD and msg_size > FRAME_OFFLOAD_THRESHOLD:
+        return await offload(_to_frames)
+    else:
+        return _to_frames()
 
 
-async def from_frames(frames, deserialize=True, deserializers=None):
+async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
     """
     Unserialize a list of Distributed protocol frames.
     """
-    size = sum(map(nbytes, frames))
+    size = False
 
     def _from_frames():
         try:
@@ -56,7 +74,14 @@ async def from_frames(frames, deserialize=True, deserializers=None):
             logger.error("truncated data stream (%d bytes): %s", size, datastr)
             raise
 
-    if deserialize and size > FRAME_OFFLOAD_THRESHOLD:
+    if allow_offload and deserialize and FRAME_OFFLOAD_THRESHOLD:
+        size = sum(map(nbytes, frames))
+    if (
+        allow_offload
+        and deserialize
+        and FRAME_OFFLOAD_THRESHOLD
+        and size > FRAME_OFFLOAD_THRESHOLD
+    ):
         res = await offload(_from_frames)
     else:
         res = _from_frames()

@@ -1,11 +1,15 @@
 import collections
+import logging
 import math
 
-from tornado.ioloop import IOLoop
-import toolz
+from tornado.ioloop import IOLoop, PeriodicCallback
+import tlz as toolz
 
 from ..metrics import time
-from ..utils import parse_timedelta, PeriodicCallback
+from ..utils import parse_timedelta
+
+
+logger = logging.getLogger(__name__)
 
 
 class AdaptiveCore:
@@ -13,7 +17,7 @@ class AdaptiveCore:
     The core logic for adaptive deployments, with none of the cluster details
 
     This class controls our adaptive scaling behavior.  It is intended to be
-    sued as a super-class or mixin.  It expects the following state and methods:
+    used as a super-class or mixin.  It expects the following state and methods:
 
     **State**
 
@@ -78,10 +82,13 @@ class AdaptiveCore:
         self.periodic_callback = None
 
         def f():
-            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
-            self.periodic_callback.start()
+            try:
+                self.periodic_callback.start()
+            except AttributeError:
+                pass
 
         if self.interval:
+            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
             try:
                 self.loop.add_callback(f)
             except AttributeError:
@@ -100,6 +107,8 @@ class AdaptiveCore:
         self.log = collections.deque(maxlen=10000)
 
     def stop(self):
+        logger.info("Adaptive stop")
+
         if self.periodic_callback:
             self.periodic_callback.stop()
             self.periodic_callback = None

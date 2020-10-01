@@ -1,5 +1,4 @@
 from contextlib import contextmanager
-import sys
 
 try:
     import ssl
@@ -7,11 +6,10 @@ except ImportError:
     ssl = None
 
 import pytest
-from tornado import gen
 
 from distributed.comm import connect, listen
 from distributed.security import Security
-from distributed.utils_test import get_cert, gen_test
+from distributed.utils_test import get_cert
 
 import dask
 
@@ -111,7 +109,7 @@ def test_repr():
     sec = Security(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
     assert (
         repr(sec)
-        == "Security(require_encryption=False, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
+        == "Security(require_encryption=True, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
     )
 
 
@@ -150,14 +148,14 @@ def test_tls_config_for_role():
         sec.get_tls_config_for_role("supervisor")
 
 
+def assert_many_ciphers(ctx):
+    assert len(ctx.get_ciphers()) > 2  # Most likely
+
+
 def test_connection_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
-
-    def many_ciphers(ctx):
-        if sys.version_info >= (3, 6):
-            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
@@ -172,12 +170,12 @@ def test_connection_args():
     assert not d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     d = sec.get_connection_args("worker")
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     # No cert defined => no TLS
     d = sec.get_connection_args("client")
@@ -194,23 +192,18 @@ def test_connection_args():
     assert d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    if sys.version_info >= (3, 6):
-        supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
-        assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-        if len(tls_13_ciphers):
-            assert len(tls_13_ciphers) == 3
+
+    supported_ciphers = ctx.get_ciphers()
+    tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
+    assert len(tls_12_ciphers) == 1
+    tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
+    assert len(tls_13_ciphers) in (0, 3)
 
 
 def test_listen_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is False
-
-    def many_ciphers(ctx):
-        if sys.version_info >= (3, 6):
-            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
@@ -225,12 +218,12 @@ def test_listen_args():
     assert not d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     d = sec.get_listen_args("worker")
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    many_ciphers(ctx)
+    assert_many_ciphers(ctx)
 
     # No cert defined => no TLS
     d = sec.get_listen_args("client")
@@ -247,27 +240,25 @@ def test_listen_args():
     assert d["require_encryption"]
     ctx = d["ssl_context"]
     basic_checks(ctx)
-    if sys.version_info >= (3, 6):
-        supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
-        assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
-        if len(tls_13_ciphers):
-            assert len(tls_13_ciphers) == 3
+
+    supported_ciphers = ctx.get_ciphers()
+    tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
+    assert len(tls_12_ciphers) == 1
+    tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
+    assert len(tls_13_ciphers) in (0, 3)
 
 
-@gen_test()
-def test_tls_listen_connect():
+@pytest.mark.asyncio
+async def test_tls_listen_connect():
     """
     Functional test for TLS connection args.
     """
 
-    @gen.coroutine
-    def handle_comm(comm):
+    async def handle_comm(comm):
         peer_addr = comm.peer_address
         assert peer_addr.startswith("tls://")
-        yield comm.write("hello")
-        yield comm.close()
+        await comm.write("hello")
+        await comm.close()
 
     c = {
         "distributed.comm.tls.ca-file": ca_file,
@@ -282,41 +273,36 @@ def test_tls_listen_connect():
     with dask.config.set(c):
         forced_cipher_sec = Security()
 
-    with listen(
-        "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
+    async with listen(
+        "tls://", handle_comm, **sec.get_listen_args("scheduler")
     ) as listener:
-        comm = yield connect(
-            listener.contact_address, connection_args=sec.get_connection_args("worker")
+        comm = await connect(
+            listener.contact_address, **sec.get_connection_args("worker")
         )
-        msg = yield comm.read()
+        msg = await comm.read()
         assert msg == "hello"
         comm.abort()
 
         # No SSL context for client
         with pytest.raises(TypeError):
-            yield connect(
-                listener.contact_address,
-                connection_args=sec.get_connection_args("client"),
-            )
+            await connect(listener.contact_address, **sec.get_connection_args("client"))
 
         # Check forced cipher
-        comm = yield connect(
-            listener.contact_address,
-            connection_args=forced_cipher_sec.get_connection_args("worker"),
+        comm = await connect(
+            listener.contact_address, **forced_cipher_sec.get_connection_args("worker")
         )
         cipher, _, _ = comm.extra_info["cipher"]
         assert cipher in [FORCED_CIPHER] + TLS_13_CIPHERS
         comm.abort()
 
 
-@gen_test()
-def test_require_encryption():
+@pytest.mark.asyncio
+async def test_require_encryption():
     """
     Functional test for "require_encryption" setting.
     """
 
-    @gen.coroutine
-    def handle_comm(comm):
+    async def handle_comm(comm):
         comm.abort()
 
     c = {
@@ -333,21 +319,19 @@ def test_require_encryption():
         sec2 = Security()
 
     for listen_addr in ["inproc://", "tls://"]:
-        with listen(
-            listen_addr, handle_comm, connection_args=sec.get_listen_args("scheduler")
+        async with listen(
+            listen_addr, handle_comm, **sec.get_listen_args("scheduler")
         ) as listener:
-            comm = yield connect(
-                listener.contact_address,
-                connection_args=sec2.get_connection_args("worker"),
+            comm = await connect(
+                listener.contact_address, **sec2.get_connection_args("worker")
             )
             comm.abort()
 
-        with listen(
-            listen_addr, handle_comm, connection_args=sec2.get_listen_args("scheduler")
+        async with listen(
+            listen_addr, handle_comm, **sec2.get_listen_args("scheduler")
         ) as listener:
-            comm = yield connect(
-                listener.contact_address,
-                connection_args=sec2.get_connection_args("worker"),
+            comm = await connect(
+                listener.contact_address, **sec2.get_connection_args("worker")
             )
             comm.abort()
 
@@ -358,30 +342,26 @@ def test_require_encryption():
         assert "encryption required" in str(excinfo.value)
 
     for listen_addr in ["tcp://"]:
-        with listen(
-            listen_addr, handle_comm, connection_args=sec.get_listen_args("scheduler")
+        async with listen(
+            listen_addr, handle_comm, **sec.get_listen_args("scheduler")
         ) as listener:
-            comm = yield connect(
-                listener.contact_address,
-                connection_args=sec.get_connection_args("worker"),
+            comm = await connect(
+                listener.contact_address, **sec.get_connection_args("worker")
             )
             comm.abort()
 
             with pytest.raises(RuntimeError):
-                yield connect(
-                    listener.contact_address,
-                    connection_args=sec2.get_connection_args("worker"),
+                await connect(
+                    listener.contact_address, **sec2.get_connection_args("worker")
                 )
 
         with pytest.raises(RuntimeError):
-            listen(
-                listen_addr,
-                handle_comm,
-                connection_args=sec2.get_listen_args("scheduler"),
-            )
+            listen(listen_addr, handle_comm, **sec2.get_listen_args("scheduler"))
 
 
 def test_temporary_credentials():
+    pytest.importorskip("cryptography")
+
     sec = Security.temporary()
     sec_repr = repr(sec)
     fields = ["tls_ca_file"]
@@ -396,25 +376,24 @@ def test_temporary_credentials():
         assert val not in sec_repr
 
 
-@gen_test()
-def test_tls_temporary_credentials_functional():
+@pytest.mark.asyncio
+async def test_tls_temporary_credentials_functional():
     pytest.importorskip("cryptography")
 
-    @gen.coroutine
-    def handle_comm(comm):
+    async def handle_comm(comm):
         peer_addr = comm.peer_address
         assert peer_addr.startswith("tls://")
-        yield comm.write("hello")
-        yield comm.close()
+        await comm.write("hello")
+        await comm.close()
 
     sec = Security.temporary()
 
-    with listen(
-        "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
+    async with listen(
+        "tls://", handle_comm, **sec.get_listen_args("scheduler")
     ) as listener:
-        comm = yield connect(
-            listener.contact_address, connection_args=sec.get_connection_args("worker")
+        comm = await connect(
+            listener.contact_address, **sec.get_connection_args("worker")
         )
-        msg = yield comm.read()
+        msg = await comm.read()
         assert msg == "hello"
         comm.abort()
