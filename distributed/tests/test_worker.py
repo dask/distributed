@@ -1638,16 +1638,24 @@ async def test_pip_install(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_pip_install_fails(c, s, a, b):
-    with mock.patch(
-        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
-        return_value=(b"", b"error"),
-    ) as p1:
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
         with mock.patch(
-            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
-        ) as p2:
-            p1.communicate.return_value = b"", b""
-            p1.wait.return_value = 1
-            await c.register_worker_plugin(PipInstall(packages=["not a package"]))
+            "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+            return_value=(b"", b"error"),
+        ) as p1:
+            with mock.patch(
+                "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+            ) as p2:
+                p1.communicate.return_value = (
+                    b"",
+                    b"Could not find a version that satisfies the requirement not-a-package",
+                )
+                p1.wait.return_value = 1
+                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+
+                assert "not-a-package" in logger.getvalue()
 
 
 #             args = p2.call_args[0][0]
