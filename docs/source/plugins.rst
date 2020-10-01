@@ -79,14 +79,14 @@ Worker Plugins
 
 :class:`distributed.diagnostics.plugin.WorkerPlugin` provides a base class
 for creating your own worker plugins. In addition, Dask provides some
-:ref:`built-in plugins <plugins.builtin>`_.
+:ref:`built-in plugins <plugins.builtin>`.
 
 .. autoclass:: distributed.diagnostics.plugin.WorkerPlugin
    :members:
 
-.. _plugins.buitin:
+.. _plugins.builtin:
 
-Built In Worker Plugins
+Built-In Worker Plugins
 -----------------------
 
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
