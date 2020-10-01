@@ -237,8 +237,14 @@ class PipInstall(WorkerPlugin):
                 + ["install"]
                 + self.packages,
                 stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
             stdout, stderr = proc.communicate()
+            returncode = proc.wait()
+
+            if returncode:
+                logger.error("Pip install failed with '%s'", stderr.decode().strip())
+                return
 
             if self.restart and worker.nanny:
                 lines = stdout.strip().split(b"\n")

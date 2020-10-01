@@ -1626,6 +1626,7 @@ async def test_pip_install(c, s, a, b):
             "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
         ) as p2:
             p1.communicate.return_value = b"", b""
+            p1.wait.return_value = 0
             await c.register_worker_plugin(
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
@@ -1633,6 +1634,25 @@ async def test_pip_install(c, s, a, b):
             args = p2.call_args[0][0]
             assert "python" in args[0]
             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
+@gen_cluster(client=True)
+async def test_pip_install_fails(c, s, a, b):
+    with mock.patch(
+        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+        return_value=(b"", b"error"),
+    ) as p1:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+        ) as p2:
+            p1.communicate.return_value = b"", b""
+            p1.wait.return_value = 1
+            await c.register_worker_plugin(PipInstall(packages=["not a package"]))
+
+
+#             args = p2.call_args[0][0]
+#             assert "python" in args[0]
+#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
 
 
 @pytest.mark.asyncio
