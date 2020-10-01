@@ -133,7 +133,7 @@ class GPUCurrentLoad(DashboardComponent):
             worker = []
             i = 0
 
-            for ws in workers:
+            for ws in workers[:1]:
                 try:
                     info = ws.extra["gpu"]
                 except KeyError:
