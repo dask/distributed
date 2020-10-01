@@ -199,20 +199,24 @@ class PipInstall(WorkerPlugin):
        libraries in the worker environment or image. This is
        primarily intended for experimentation and debugging.
 
+       Additional issues may arise if multiple workers share the same
+       file system. Each worker might try to install the packages
+       simultaneously.
+
     Parameters
     ----------
     packages : List[str]
         A list of strings to place after "pip install" command
     pip_options : List[str]
         Additional options to pass to pip.
-    restart : bool
+    restart : bool, default False
         Whether or not to restart the worker after pip installing
         Only functions if the worker has an attached nanny process
 
     Examples
     --------
     >>> from dask.distributed import PipInstall
-    >>> plugin = PipInstall(packages=["dask", "scikit-learn"], pip_options=["--upgrade"])
+    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
 
     >>> client.register_worker_plugin(plugin)
     """
