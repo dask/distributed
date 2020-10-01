@@ -22,5 +22,10 @@ def _register_transports():
     except ImportError:
         pass
 
+    try:
+        from . import mpi
+    except ImportError:
+        pass
+
 
 _register_transports()
