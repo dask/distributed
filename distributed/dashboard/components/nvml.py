@@ -133,19 +133,23 @@ class GPUCurrentLoad(DashboardComponent):
             worker = []
             i = 0
 
-            for ws in workers[:1]:
+            for ws in workers:
                 try:
                     info = ws.extra["gpu"]
                 except KeyError:
                     continue
                 metrics = ws.metrics["gpu"]
-                for j, (u, mem_used, mem_total) in enumerate(
+                for j, (u, mem_used, procs, mem_total) in enumerate(
                     zip(
                         metrics["utilization"],
                         metrics["memory-used"],
+                        metrics["procs"],
                         info["memory-total"],
                     )
                 ):
+                    # find which GPU maps to which process
+                    if ws.pid not in procs:
+                        continue
                     memory_max = max(memory_max, mem_total)
                     memory_total += mem_total
                     utilization.append(int(u))
