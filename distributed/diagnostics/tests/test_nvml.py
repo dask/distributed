@@ -1,7 +1,7 @@
 import pytest
 import os
 
-pytest.importorskip("pynvml")
+pynvml = pytest.importorskip("pynvml")
 
 from distributed.diagnostics import nvml
 
@@ -20,7 +20,15 @@ def test_1_visible_devices():
     assert len(output["memory-total"]) == 1
 
 
-def test_2_visible_devices():
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-    output = nvml.one_time()
-    assert len(output["memory-total"]) == 2
+@pytest.mark.parametrize("CVD", ["1,0", "0,1"])
+def test_2_visible_devices(CVD):
+    os.environ["CUDA_VISIBLE_DEVICES"] = CVD
+    idx = int(CVD.split(",")[0])
+
+    h = nvml._pynvml_handles()
+    h2 = pynvml.nvmlDeviceGetHandleByIndex(idx)
+
+    s = pynvml.nvmlDeviceGetSerial(h)
+    s2 = pynvml.nvmlDeviceGetSerial(h2)
+
+    assert s == s2
