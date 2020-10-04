@@ -1,6 +1,5 @@
 import dask.array as da
 from dask_mpi import initialize
-from datetime import datetime as dt
 from distributed import Client
 import time
 
@@ -10,6 +9,7 @@ protocol = "mpi://"
 
 
 initialize(protocol=protocol)
+client = Client()
 
 
 x = da.random.random((20000, 20000)).persist()
