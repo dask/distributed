@@ -1,13 +1,16 @@
 import asyncio  # for sleep
+from enum import Enum
 import logging
+import struct
 import threading
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
+from .utils import from_frames, to_frames
 
 from ..protocol import nested_deserialize
-from ..utils import get_ip, get_ipv6, ensure_ip
+from ..utils import get_ip, get_ipv6, ensure_ip, nbytes
 
 from tornado.ioloop import IOLoop
 
@@ -43,13 +46,23 @@ logging.basicConfig(
 logger = logging.getLogger("mpi")
 
 
+# Various MPI message types to experiment with; not expected to be in
+# production code.
+class MessageType(Enum):
+    PythonObjects = 1  # Pickled/unpickled using mpi4py
+    Frames = 2  # Byte string using to_frames and from_frames
+
+
+_message_type = MessageType.PythonObjects
+# _message_type = MessageType.Frames
+
+
 # To identify the completion of asynchronous MPI sends and receives, need to
 # keep polling them.  This is the (minimum) time between polls, in seconds.
 _polling_time = 0.005
 
 
 class AsyncMPIRecv:
-
     def __init__(self, source, tag):
         # source of None means receive from any rank.
         self._source = source if source is not None else MPI.ANY_SOURCE
@@ -61,9 +74,11 @@ class AsyncMPIRecv:
         while True:
             if self._cancel:
                 return None, None
-            if _mpi_comm.iprobe(source=self._source, tag=self._tag):
-                status = MPI.Status()
-                msg = _mpi_comm.recv(source=self._source, tag=self._tag, status=status)
+            status = MPI.Status()
+            if _mpi_comm.iprobe(source=self._source, tag=self._tag, status=status):
+                source = status.Get_source()
+                tag = status.Get_tag()
+                msg = _mpi_comm.recv(source=source, tag=tag, status=status)
                 return msg, status.Get_source()
             yield from asyncio.sleep(_polling_time).__await__()
 
@@ -72,7 +87,6 @@ class AsyncMPIRecv:
 
 
 class AsyncMPISend:
-
     def __init__(self, msg, target, tag):
         self._request = _mpi_comm.isend(msg, dest=target, tag=tag)
         self._lock = threading.Lock()
@@ -105,13 +119,13 @@ _new_response_tag = 2
 # unique MPI tags for new Comm objects.  Don't really need to store the Comms,
 # but useful for debugging.
 class CommStore:
-
     def __init__(self):
         # Tags only need to be unique from the sender's point of view, so can
         # reuse the same tags on different ranks.  But useful for them to be
         # different for debugging.
         self._next_available_tag = _mpi_rank * 100 + 3
         self._comms = []
+        logger.debug(f"MessageType {_message_type.name}")
 
     def get_next_tag(self):
         ret = self._next_available_tag
@@ -139,7 +153,6 @@ _comm_store = CommStore()
 
 
 class MPIComm(Comm):
-
     # Communication object, one sender and one receiver only.
     def __init__(self, local_addr, peer_addr, send_tag, recv_tag, deserialize=True):
         Comm.__init__(self)
@@ -192,8 +205,27 @@ class MPIComm(Comm):
         if msg is None:
             raise CommClosedError
 
-        if self.deserialize:
-            msg = nested_deserialize(msg)
+        if _message_type == MessageType.Frames:
+            n_frames = struct.unpack("Q", msg[:8])[0]
+            lengths = struct.unpack("Q" * n_frames, msg[8 : 8 + 8 * n_frames])
+
+            offset = 8 + 8 * n_frames
+            frames = []
+            for length in lengths:
+                frames.append(msg[offset : offset + length])
+                offset += length
+
+            # Check length of message correct?
+
+            msg = await from_frames(
+                frames,
+                deserialize=self.deserialize,
+                deserializers=deserializers,
+                allow_offload=self.allow_offload,
+            )
+        else:
+            if self.deserialize:
+                msg = nested_deserialize(msg)
 
         self._async_recv = None
         logger.debug(
@@ -209,6 +241,25 @@ class MPIComm(Comm):
             f"MPIComm.write to target_rank={target_rank} tag={tag} {str(msg)[:99]}"
         )
 
+        if _message_type == MessageType.Frames:
+            frames = await to_frames(
+                msg,
+                allow_offload=self.allow_offload,
+                serializers=serializers,
+                on_error=on_error,
+                context={
+                    "sender": self.local_info,
+                    "recipient": self.remote_info,
+                    **self.handshake_options,
+                },
+            )
+
+            lengths = [nbytes(frame) for frame in frames]
+            length_bytes = [struct.pack("Q", len(frames))] + [
+                struct.pack("Q", x) for x in lengths
+            ]
+            msg = b"".join(length_bytes + frames)  # Send all in one go!
+
         if False:
             # Direct send causes it to hang sometimes...
             _mpi_comm.send(msg, dest=target_rank, tag=tag)
@@ -220,11 +271,13 @@ class MPIComm(Comm):
 
         logger.debug("MPIComm.write completed")
 
-        return 0  # Return number of bytes?
+        if _message_type == MessageType.Frames:
+            return sum(lengths)
+        else:
+            return 0  # Return number of bytes sent?
 
 
 class MPIConnector(Connector):
-
     def __init__(self):
         logger.debug("MPIConnector.__init__")
 
