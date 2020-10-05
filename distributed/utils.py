@@ -779,22 +779,23 @@ def _maybe_complex(task):
 
 def convert(task, dsk, extra_values):
     typ = type(task)
-    if typ is tuple and len(task) > 1 and type(task[0]) is SubgraphCallable:
-        sc = task[0]
-        return (
-            SubgraphCallable(
-                convert(sc.dsk, dsk, extra_values),
-                sc.outkey,
-                convert(sc.inkeys, dsk, extra_values),
-                sc.name,
-            ),
-        ) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+    if typ is tuple and task:
+        if type(task[0]) is SubgraphCallable:
+            sc = task[0]
+            return (
+                SubgraphCallable(
+                    convert(sc.dsk, dsk, extra_values),
+                    sc.outkey,
+                    convert(sc.inkeys, dsk, extra_values),
+                    sc.name,
+                ),
+            ) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+        elif callable(task[0]):
+            return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
     if typ is list:
         return [convert(v, dsk, extra_values) for v in task]
     if typ is dict:
         return {k: convert(v, dsk, extra_values) for k, v in task.items()}
-    if typ is tuple and task and callable(task[0]):  # istask(o)
-        return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
     try:
         if task in dsk or task in extra_values:
             return tokey(task)
