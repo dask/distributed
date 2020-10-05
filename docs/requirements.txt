@@ -4,5 +4,5 @@ toolz
 cloudpickle
 dask
 sphinx
-dask-sphinx-theme>=1.3.3
+dask-sphinx-theme>=1.3.4
 sphinx-click
