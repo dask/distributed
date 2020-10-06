@@ -2997,9 +2997,9 @@ class Worker(ServerNode):
         # Get timeout value from dash config if not passed.
         # Defaults to 3s if the config is not set.
         if timeout is None:
-            timeout = parse_timedelta(
-                dask.config.get("distributed.comm.timeouts.connect", "3s"), "s"
-            )
+            timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
+
+        timeout = parse_timedelta(timeout, 's')
 
         try:
             from .client import default_client
@@ -3093,10 +3093,11 @@ def get_client(address=None, timeout=None, resolve_address=True):
     address : str, optional
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
-    timeout : int
+    timeout : int or str
         Timeout (in seconds) for getting the Client
         default: dash.config.get(distributed.comm.timeouts.connect) or
                  3s if the config is not set
+        Ex: get_client(timeout=10) or get_client(timeout="10s")
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
 
@@ -3126,9 +3127,9 @@ def get_client(address=None, timeout=None, resolve_address=True):
     # Get timeout value from dash config if not passed.
     # Defaults to 3s if the config is not set.
     if timeout is None:
-        timeout = parse_timedelta(
-            dask.config.get("distributed.comm.timeouts.connect", "3s"), "s"
-        )
+        timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
+
+    timeout = parse_timedelta(timeout, 's')
 
     if address and resolve_address:
         address = comm.resolve_address(address)
