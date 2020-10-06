@@ -6,7 +6,7 @@ pytest.importorskip("pynvml")
 
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
-    from distributed.diagnostics.nvml import handles
+    from distributed.diagnostics.nvml import _pynvml_handles as handles
 
     assert "gpu" in a.metrics
     assert len(s.workers[a.address].metrics["gpu"]["memory-used"]) == len(handles)
