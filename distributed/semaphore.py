@@ -437,6 +437,8 @@ class Semaphore:
             name=self.name,
             timeout=timeout,
             lease_id=lease_id,
+            operation="semaphore acquire: client=%s, lease_id=%s, name=%s"
+            % (self.client.id, lease_id, self.name),
         )
         if result:
             self._leases.append(lease_id)
@@ -460,6 +462,26 @@ class Semaphore:
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._acquire, timeout=timeout)
 
+    async def _release(self):
+        # popleft to release the oldest lease first
+        lease_id = self._leases.popleft()
+        logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
+
+        try:
+            return await retry_operation(
+                self.client.scheduler.semaphore_release,
+                name=self.name,
+                lease_id=lease_id,
+                operation="semaphore release: client=%s, lease_id=%s, name=%s"
+                % (self.client.id, lease_id, self.name),
+            )
+        except OSError:  # Too many broken connections, release fails
+            logger.error(
+                "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable."
+                % (self.client.id, lease_id, self.name),
+            )
+            return False
+
     def release(self):
         """
         Release a semaphore.
@@ -470,12 +492,8 @@ class Semaphore:
         """ Release the lock if already acquired """
         if not self._leases:
             raise RuntimeError("Released too often")
-        # popleft to release the oldest lease first
-        lease_id = self._leases.popleft()
-        logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
-        return self.client.sync(
-            self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id
-        )
+
+        return self.client.sync(self._release)
 
     def get_value(self):
         """
