@@ -11,6 +11,12 @@ async def test_gpu_metrics(s, a, b):
     h = handles()
 
     assert "gpu" in a.metrics
-    assert s.workers[a.address].metrics["gpu"]["memory-used"] == pynvml.nvmlDeviceGetMemoryInfo(h).used
+    assert (
+        s.workers[a.address].metrics["gpu"]["memory-used"]
+        == pynvml.nvmlDeviceGetMemoryInfo(h).used
+    )
     assert "gpu" in a.startup_information
-    assert s.workers[a.address].extra["gpu"]["name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert (
+        s.workers[a.address].extra["gpu"]["name"]
+        == pynvml.nvmlDeviceGetName(h).decode()
+    )
