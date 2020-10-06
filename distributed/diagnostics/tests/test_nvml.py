@@ -37,9 +37,7 @@ def test_2_visible_devices(CVD):
 
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
-    from distributed.diagnostics.nvml import _pynvml_handles as handles
-
-    h = handles()
+    h = nvml._pynvml_handles()
 
     assert "gpu" in a.metrics
     assert (
