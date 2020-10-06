@@ -18,7 +18,7 @@ def worker_client(timeout=None, separate_thread=True):
     Parameters
     ----------
     timeout: Number or String
-        Timeout after which to err
+        Timeout after which to error out
         Ex: worker_client(10) or worker_client("10s")
     separate_thread: bool, optional
         Whether to run this function outside of the normal thread pool
