@@ -77,7 +77,7 @@ class PrometheusHandler(RequestHandler):
     def __init__(self, *args, **kwargs):
         import prometheus_client
 
-        super(PrometheusHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         if PrometheusHandler._initialized:
             return
@@ -93,6 +93,4 @@ class PrometheusHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain; version=0.0.4")
 
 
-routes = [
-    (r"metrics", PrometheusHandler, {}),
-]
+routes = [(r"metrics", PrometheusHandler, {})]

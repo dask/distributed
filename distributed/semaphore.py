@@ -35,7 +35,7 @@ class _Watch:
 
 
 class SemaphoreExtension:
-    """ An extension for the scheduler to manage Semaphores
+    """An extension for the scheduler to manage Semaphores
 
     This adds the following routes to the scheduler
 
@@ -267,7 +267,7 @@ class SemaphoreExtension:
 
 
 class Semaphore:
-    """ Semaphore
+    """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
     will track leases on the scheduler which can be acquired and
@@ -386,7 +386,7 @@ class Semaphore:
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
 
         # Need to start the callback using IOLoop.add_callback to ensure that the
-        # PC uses the correct event lopp.
+        # PC uses the correct event loop.
         self.client.io_loop.add_callback(pc.start)
 
     def register(self):

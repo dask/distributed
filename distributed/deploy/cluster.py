@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class Cluster:
-    """ Superclass for cluster objects
+    """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
 
@@ -91,6 +91,15 @@ class Cluster:
         self.status = Status.closed
 
     def close(self, timeout=None):
+        # If the cluster is already closed, we're already done
+        if self.status == Status.closed:
+            if self.asynchronous:
+                future = asyncio.Future()
+                future.set_result(None)
+                return future
+            else:
+                return
+
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
@@ -124,7 +133,7 @@ class Cluster:
             raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
-        """ Turn on adaptivity
+        """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
 
@@ -141,7 +150,7 @@ class Cluster:
         return self._adaptive
 
     def scale(self, n: int) -> None:
-        """ Scale cluster to n workers
+        """Scale cluster to n workers
 
         Parameters
         ----------
@@ -209,7 +218,7 @@ class Cluster:
         return logs
 
     def get_logs(self, cluster=True, scheduler=True, workers=True):
-        """ Return logs for the cluster, scheduler and workers
+        """Return logs for the cluster, scheduler and workers
 
         Parameters
         ----------

@@ -15,7 +15,7 @@ class _PrometheusCollector:
         yield GaugeMetricFamily(
             "dask_scheduler_clients",
             "Number of clients connected.",
-            value=len(self.server.clients),
+            value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
         yield GaugeMetricFamily(
@@ -78,9 +78,7 @@ class PrometheusHandler(RequestHandler):
     def __init__(self, *args, dask_server=None, **kwargs):
         import prometheus_client
 
-        super(PrometheusHandler, self).__init__(
-            *args, dask_server=dask_server, **kwargs
-        )
+        super().__init__(*args, dask_server=dask_server, **kwargs)
 
         if PrometheusHandler._collectors:
             # Especially during testing, multiple schedulers are started

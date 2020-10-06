@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class LocalCluster(SpecCluster):
-    """ Create local Scheduler and Workers
+    """Create local Scheduler and Workers
 
     This creates a "cluster" of a scheduler and workers running on the local
     machine.
@@ -226,7 +226,7 @@ class LocalCluster(SpecCluster):
 
         workers = {i: worker for i in range(n_workers)}
 
-        super(LocalCluster, self).__init__(
+        super().__init__(
             scheduler=scheduler,
             workers=workers,
             worker=worker,

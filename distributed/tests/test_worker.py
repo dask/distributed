@@ -30,12 +30,7 @@ from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import (
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -1652,3 +1647,20 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                 else:
                     assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bad_local_directory(cleanup):
+    async with await Scheduler() as s:
+        try:
+            async with Worker(s.address, local_directory="/not/a/valid-directory"):
+                pass
+        except PermissionError:
+            pass
+        else:
+            if WINDOWS:
+                pass
+            else:
+                assert False
+
+        assert not any("error" in log for log in s.get_logs())
