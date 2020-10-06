@@ -18,7 +18,8 @@ def test_one_time():
 def test_1_visible_devices():
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     output = nvml.one_time()
-    assert len(output["memory-total"]) == 1
+    h = nvml._pynvml_handles()
+    assert output["memory-total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 
 @pytest.mark.parametrize("CVD", ["1,0", "0,1"])
