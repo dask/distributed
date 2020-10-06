@@ -4,6 +4,7 @@ import os
 pynvml = pytest.importorskip("pynvml")
 
 from distributed.diagnostics import nvml
+from distributed.utils_test import gen_cluster
 
 
 def test_one_time():
@@ -32,3 +33,21 @@ def test_2_visible_devices(CVD):
     s2 = pynvml.nvmlDeviceGetSerial(h2)
 
     assert s == s2
+
+
+@gen_cluster()
+async def test_gpu_metrics(s, a, b):
+    from distributed.diagnostics.nvml import _pynvml_handles as handles
+
+    h = handles()
+
+    assert "gpu" in a.metrics
+    assert (
+        s.workers[a.address].metrics["gpu"]["memory-used"]
+        == pynvml.nvmlDeviceGetMemoryInfo(h).used
+    )
+    assert "gpu" in a.startup_information
+    assert (
+        s.workers[a.address].extra["gpu"]["name"]
+        == pynvml.nvmlDeviceGetName(h).decode()
+    )
