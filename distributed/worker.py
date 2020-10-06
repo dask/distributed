@@ -2999,7 +2999,7 @@ class Worker(ServerNode):
         if timeout is None:
             timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
 
-        timeout = parse_timedelta(timeout, 's')
+        timeout = parse_timedelta(timeout, "s")
 
         try:
             from .client import default_client
@@ -3129,7 +3129,7 @@ def get_client(address=None, timeout=None, resolve_address=True):
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
 
-    timeout = parse_timedelta(timeout, 's')
+    timeout = parse_timedelta(timeout, "s")
 
     if address and resolve_address:
         address = comm.resolve_address(address)

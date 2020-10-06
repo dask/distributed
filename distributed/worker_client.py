@@ -47,7 +47,7 @@ def worker_client(timeout=None, separate_thread=True):
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
 
-    timeout = parse_timedelta(timeout, 's')
+    timeout = parse_timedelta(timeout, "s")
 
     worker = get_worker()
     client = get_client(timeout=timeout)
