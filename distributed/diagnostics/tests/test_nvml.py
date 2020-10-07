@@ -22,6 +22,9 @@ def test_1_visible_devices():
     assert output["memory-total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 
+@pytest.mark.skipif(
+    pynvml.nvmlDeviceGetCount() <= 1, reason="Machine only has a single GPU"
+)
 @pytest.mark.parametrize("CVD", ["1,0", "0,1"])
 def test_2_visible_devices(CVD):
     os.environ["CUDA_VISIBLE_DEVICES"] = CVD
