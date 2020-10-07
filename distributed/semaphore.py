@@ -477,8 +477,9 @@ class Semaphore:
             )
         except OSError:  # Too many broken connections, release fails
             logger.error(
-                "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable."
+                "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable?"
                 % (self.client.id, lease_id, self.name),
+                exc_info=True,
             )
             return False
 

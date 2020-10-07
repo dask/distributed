@@ -591,7 +591,7 @@ async def test_release_failure(c, s, a, b):
         semaphore_log = semaphore_log.getvalue().split("\n")[0]
         assert semaphore_log.startswith(
             "Release failed for client="
-        ) and semaphore_log.endswith("Cluster network might be unstable.")
+        ) and semaphore_log.endswith("Cluster network might be unstable?")
 
         # Check lease has timed out
         assert any(
