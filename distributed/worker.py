@@ -557,7 +557,7 @@ class Worker(ServerNode):
                 deserialize_bytes,
                 File(path),
             )
-            target = int(float(self.memory_limit) * self.memory_target_fraction)
+            target = int(float(self.memory_limit) * self.memory_target_fraction) or sys.maxsize
             self.data = Buffer({}, storage, target, weight)
             self.data.memory = self.data.fast
             self.data.disk = self.data.slow
