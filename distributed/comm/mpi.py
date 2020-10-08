@@ -291,10 +291,10 @@ class MPIConnector(Connector):
 
         if True:  # Is either OK?
             _mpi_comm.send(msg, dest=target_rank, tag=_new_connection_tag)
-            logger.debug("MPIConnector send called")
+            logger.debug(f"MPIConnector send called {msg}")
         else:
             async_send = AsyncMPISend(msg, target_rank, _new_connection_tag)
-            logger.debug("MPIConnector isend called")
+            logger.debug("MPIConnector isend called {msg}")
             ok = await async_send
             if not ok:
                 raise CommClosedError
@@ -329,7 +329,7 @@ class MPIListener(Listener):
     ):
         logger.debug(f"MPIListener.__init__ address={address}")
 
-        self.ip, _ = parse_host_port(address, default_port)
+        self.ip = get_ip()
         self._comm_handler = comm_handler
         self.deserialize = deserialize
         self.server_args = self._get_server_args(**connection_args)
@@ -351,13 +351,14 @@ class MPIListener(Listener):
             self._async_recv = AsyncMPIRecv(None, _new_connection_tag)
             msg, other_rank = await self._async_recv
             self._async_recv = None
-            logger.debug(
-                f"MPIListener async recv returned from rank={other_rank} {str(msg)[:99]}"
-            )
 
             if msg is None:
                 # Empty message can only be caused by cancelling the receive.
                 return
+
+            logger.debug(
+                f"MPIListener async recv returned from rank={other_rank} {msg}"
+            )
 
             # Should check format of received message.
             recv_tag, recv_ip = msg.split(":")
@@ -367,6 +368,7 @@ class MPIListener(Listener):
             send_tag = _comm_store.get_next_tag()
             msg = f"{send_tag}:{self.ip}"
             _mpi_comm.send(msg, dest=other_rank, tag=_new_response_tag)
+            logger.debug(f"MPIListener response sent {msg}")
 
             comm = MPIComm(
                 local_addr=f"mpi://{self.ip}:{_mpi_rank}",
