@@ -3404,8 +3404,12 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with pytest.raises(KilledWorker) as info:
-        await f
+    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+        with pytest.raises(KilledWorker) as info:
+            await f
+
+    text = logger.getvalue()
+    assert f.key in text
 
     assert info.value.last_worker.nanny in {a.address, b.address}
     await asyncio.gather(a.close(), b.close())

@@ -2261,6 +2261,12 @@ class Scheduler(ServerNode):
                         )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
+                        logger.info(
+                            "Task %s marked as failed because %d workers died"
+                            " while trying to run it",
+                            ts.key,
+                            self.allowed_failures,
+                        )
 
             for ts in ws.has_what:
                 ts.who_has.remove(ws)
