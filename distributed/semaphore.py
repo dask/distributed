@@ -419,9 +419,17 @@ class Semaphore:
                 self.name,
                 self._leases,
             )
-            await self.client.scheduler.semaphore_refresh_leases(
-                lease_ids=list(self._leases), name=self.name
-            )
+            try:
+                await retry_operation(
+                    self.client.scheduler.semaphore_refresh_leases,
+                    lease_ids=list(self._leases),
+                    name=self.name,
+                    operation=f"refresh semaphore leases for semaphore={self.name}, lease_ids={self._leases}",
+                )
+            except Exception:
+                logger.error(
+                    f"Refresh leases failed for name={self.name}", exc_info=True
+                )
 
     async def _acquire(self, timeout=None):
         lease_id = uuid.uuid4().hex

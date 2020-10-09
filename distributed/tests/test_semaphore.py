@@ -1,6 +1,7 @@
 import asyncio
 from datetime import timedelta
 import pickle
+import re
 import dask
 import pytest
 from dask.distributed import Client
@@ -598,3 +599,71 @@ async def test_release_failure(c, s, a, b):
             for log in semaphore_cleanup_log.getvalue().split("\n")
         )
         assert await semaphore.get_value() == 0
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.locks.lease-timeout": "100ms",
+        "distributed.scheduler.locks.lease-validation-interval": "100ms",
+    },
+)
+@pytest.mark.slow
+async def test_refresh_lease_retries(c, s, a, b):
+    with dask.config.set({"distributed.comm.retry.count": 1}):
+        import numpy as np
+
+        pool = await FlakyConnectionPool(failing_connections=np.inf)
+        rpc = pool(s.address)
+        c.scheduler = rpc
+        semaphore = await Semaphore(
+            max_leases=2, name="resource_we_want_to_limit", client=c
+        )
+        await semaphore.acquire()
+        await semaphore.acquire()
+
+        pool.activate()  # Comm chaos starts
+
+        # Release fails (after a single retry) because of broken connections
+        with captured_logger(
+            "distributed.semaphore", level=logging.ERROR
+        ) as release_log:
+            with captured_logger("distributed.utils_comm") as release_retry_log:
+                assert await semaphore.release() is False
+        # Check release was retried
+        release_retry_log = release_retry_log.getvalue().split("\n")[0]
+        assert release_retry_log.startswith(
+            "Retrying semaphore release:"
+        ) and release_retry_log.endswith("after exception in attempt 0/1: ")
+        # Check release failed
+        release_log = release_log.getvalue().split("\n")[0]
+        assert release_log.startswith(
+            "Release failed for client="
+        ) and release_log.endswith("Cluster network might be unstable?")
+
+        # Refresh leases fails
+        with captured_logger("distributed.semaphore") as refresh_leases_log:
+            with captured_logger("distributed.utils_comm") as refresh_leases_retry_log:
+                await asyncio.sleep(0.1)  # Wait for refresh-leases to be called
+        assert (
+            "Refresh leases failed for name=resource_we_want_to_limit"
+            "\nTraceback (most recent call last):" in refresh_leases_log.getvalue()
+        )
+        assert (
+            "Retrying refresh semaphore leases for semaphore=resource_we_want_to_limit"
+            in refresh_leases_retry_log.getvalue()
+        )
+        # FIXME: this is flaky: sometimes the log message we look for only appears during
+        # cluster shutdown
+        with captured_logger("distributed.semaphore") as cleanup_log:
+            pool.deactivate()  # comm chaos stops
+            # Wait for lease validation to kick in and clean up one lease
+            await asyncio.sleep(
+                0.5
+            )  # It can take a while for the callback to get scheduled again after comm chaos
+            assert await semaphore.get_value() == 1
+        assert re.match(
+            r"Lease [a-z0-9]+ for resource_we_want_to_limit timed out after (.|\s)*"
+            r"Releasing [a-z0-9]+ for resource_we_want_to_limit",
+            cleanup_log.getvalue(),
+        ), cleanup_log.getvalue()
