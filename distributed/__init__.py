@@ -4,7 +4,7 @@ from .actor import Actor, ActorFuture
 from .core import connect, rpc
 from .deploy import LocalCluster, Adaptive, SpecCluster, SSHCluster
 from .diagnostics.progressbar import progress
-from .diagnostics.plugin import WorkerPlugin, SchedulerPlugin
+from .diagnostics.plugin import WorkerPlugin, SchedulerPlugin, PipInstall
 from .client import (
     Client,
     Executor,

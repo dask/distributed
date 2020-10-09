@@ -1176,7 +1176,7 @@ class Worker(ServerNode):
             setproctitle("dask-worker [closed]")
         return "OK"
 
-    async def close_gracefully(self):
+    async def close_gracefully(self, restart=None):
         """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
@@ -1188,10 +1188,13 @@ class Worker(ServerNode):
         if self.status == Status.closed:
             return
 
+        if restart is None:
+            restart = self.lifetime_restart
+
         logger.info("Closing worker gracefully: %s", self.address)
         self.status = Status.closing_gracefully
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
-        await self.close(safe=True, nanny=not self.lifetime_restart)
+        await self.close(safe=True, nanny=not restart)
 
     async def terminate(self, comm=None, report=True, **kwargs):
         await self.close(report=report, **kwargs)

@@ -8,6 +8,7 @@ import psutil
 import sys
 from time import sleep
 import traceback
+from unittest import mock
 import asyncio
 
 import dask
@@ -26,6 +27,7 @@ from distributed import (
     Reschedule,
     wait,
 )
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -1612,6 +1614,53 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@gen_cluster(client=True)
+async def test_pip_install(c, s, a, b):
+    with mock.patch(
+        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+        return_value=(b"", b""),
+    ) as p1:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+        ) as p2:
+            p1.communicate.return_value = b"", b""
+            p1.wait.return_value = 0
+            await c.register_worker_plugin(
+                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+            )
+
+            args = p2.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
+@gen_cluster(client=True)
+async def test_pip_install_fails(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+            return_value=(b"", b"error"),
+        ) as p1:
+            with mock.patch(
+                "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+            ) as p2:
+                p1.communicate.return_value = (
+                    b"",
+                    b"Could not find a version that satisfies the requirement not-a-package",
+                )
+                p1.wait.return_value = 1
+                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+
+                assert "not-a-package" in logger.getvalue()
+
+
+#             args = p2.call_args[0][0]
+#             assert "python" in args[0]
+#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
 
 
 @pytest.mark.asyncio
