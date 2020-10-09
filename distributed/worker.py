@@ -559,7 +559,7 @@ class Worker(ServerNode):
             )
             target = (
                 int(float(self.memory_limit) * self.memory_target_fraction)
-                or sys.maxsize
+                or self.memory_limit
             )
             self.data = Buffer({}, storage, target, weight)
             self.data.memory = self.data.fast
