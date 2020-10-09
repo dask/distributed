@@ -2506,9 +2506,6 @@ class Worker(ServerNode):
                         self.scheduler_delay,
                     ),
                 )
-                # TODO: it seems insane that this needs to be here
-                # but it is occasionally cleared by something in executor_submit
-                self.executing.add(ts.key)
             except RuntimeError as e:
                 executor_error = e
                 raise
