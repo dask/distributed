@@ -539,7 +539,6 @@ async def test_release_retry(c, s, a, b):
         with captured_logger("distributed.utils_comm") as caplog:
             assert await semaphore.release() is True
         logs = caplog.getvalue().split("\n")
-        print(logs)
         log = logs[0]
         assert log.startswith("Retrying semaphore release:") and log.endswith(
             "after exception in attempt 0/1: "
