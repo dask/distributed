@@ -488,8 +488,6 @@ class Semaphore:
         """
         Release the semaphore.
 
-        This will increment the amount of available leases by one.
-
         Returns
         -------
         bool
