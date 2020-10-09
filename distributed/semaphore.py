@@ -486,12 +486,18 @@ class Semaphore:
 
     def release(self):
         """
-        Release a semaphore.
+        Release the semaphore.
 
-        Increment the internal counter by one.
+        This will increment the amount of available leases by one.
+
+        Returns
+        -------
+        bool
+            This value indicates whether a lease was released immediately or not. Note that a user should  *not* retry
+            this operation. Under certain circumstances (e.g. scheduler overload) the lease may not be released
+            immediately, but it will always be automatically released after a specific interval configured using
+            "distributed.scheduler.locks.lease-validation-interval" and "distributed.scheduler.locks.lease-timeout".
         """
-
-        """ Release the lock if already acquired """
         if not self._leases:
             raise RuntimeError("Released too often")
 
