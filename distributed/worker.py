@@ -1497,6 +1497,7 @@ class Worker(ServerNode):
     def transition_waiting_flight(self, ts, worker=None):
         try:
             if self.validate:
+                assert ts.key not in self.in_flight_tasks
                 assert ts.dependents
 
             self.in_flight_tasks[ts.key] = worker
@@ -1523,6 +1524,7 @@ class Worker(ServerNode):
 
             if not ts.who_has:
                 if ts.key not in self._missing_dep_flight:
+                    self._missing_dep_flight.add(ts.key)
                     self.loop.add_callback(self.handle_missing_dep, ts)
             for dependent in ts.dependents:
                 if dependent.state == "waiting":
@@ -1581,7 +1583,7 @@ class Worker(ServerNode):
                 assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
-            ts.waiting_for_data = set()
+            ts.waiting_for_data.clear()
 
             if ts.resource_restrictions is not None:
                 self.constrained.append(ts.key)
@@ -1797,7 +1799,7 @@ class Worker(ServerNode):
                         self._missing_dep_flight.add(dep.key)
                     self.loop.add_callback(self.handle_missing_dep, *missing_deps2)
 
-                    deps = [dep for dep in deps if dep.key not in missing_deps]
+                    deps = [dep for dep in deps if dep not in missing_deps]
 
                 self.log.append(("gather-dependencies", key, deps))
 
