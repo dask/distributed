@@ -243,7 +243,6 @@ class Worker(ServerNode):
     * **long_running**: {keys}
         A set of keys of tasks that are running and have started their own
         long-running clients.
-
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
     * **pending_data_per_worker**: ``{worker: [dep]}``
@@ -262,6 +261,8 @@ class Worker(ServerNode):
         The ID of the thread on which the task ran
     * **active_threads**: ``{int: key}``
         The keys currently running on active threads
+    * **waiting_for_data_count**: ``int``
+        A count of how many tasks are currently waiting for data
 
 
     Parameters
@@ -370,7 +371,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
-        self.waiting_for_data = 0
+        self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
         self.nanny = nanny
@@ -725,7 +726,7 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d>" % (
+        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
             self.__class__.__name__,
             self.address,
             self.name,
@@ -735,6 +736,7 @@ class Worker(ServerNode):
             self.nthreads,
             len(self.ready),
             len(self.in_flight_tasks),
+            self.waiting_for_data_count,
         )
 
     @property
@@ -1446,7 +1448,7 @@ class Worker(ServerNode):
 
                 if dep_ts.state != "memory":
                     ts.waiting_for_data.add(dep_ts.key)
-                    self.waiting_for_data += 1
+                    self.waiting_for_data_count += 1
 
                 dep_ts.who_has.update(workers)
 
@@ -1550,7 +1552,7 @@ class Worker(ServerNode):
                 for dependent in ts.dependents:
                     try:
                         dependent.waiting_for_data.remove(ts.key)
-                        self.waiting_for_data -= 1
+                        self.waiting_for_data_count -= 1
                     except KeyError:
                         pass
 
@@ -1601,7 +1603,7 @@ class Worker(ServerNode):
                 assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
-            self.waiting_for_data -= len(ts.waiting_for_data)
+            self.waiting_for_data_count -= len(ts.waiting_for_data)
             ts.waiting_for_data.clear()
             if value is not None:
                 self.put_key_in_memory(ts, value)
@@ -1915,7 +1917,7 @@ class Worker(ServerNode):
         for dep in ts.dependents:
             try:
                 dep.waiting_for_data.remove(ts.key)
-                self.waiting_for_data -= 1
+                self.waiting_for_data_count -= 1
             except KeyError:
                 pass
             if not dep.waiting_for_data:
