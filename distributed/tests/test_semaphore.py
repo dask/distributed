@@ -82,9 +82,9 @@ async def test_acquires_with_timeout(c, s, a, b):
     sem = await Semaphore(1, "x")
     assert await sem.acquire(timeout="25ms")
     assert not await sem.acquire(timeout=0.025)
-    await sem.release()
+    assert await sem.release() is True
     assert await sem.acquire(timeout=timedelta(seconds=0.025))
-    await sem.release()
+    assert await sem.release() is True
 
 
 def test_timeout_sync(client):
@@ -167,7 +167,7 @@ async def test_access_semaphore_by_name(c, s, a, b):
         if not sem.acquire(timeout=0.1):
             return False
         if release:
-            sem.release()
+            assert sem.release() is True
 
         return True
 
@@ -183,7 +183,7 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert len(s.extensions["semaphores"].leases["x"]) == 1
     futures = c.map(f, list(range(10)))
     assert not any(await c.gather(futures))
-    await sem.release()
+    assert await sem.release() is True
 
     del futures
 
@@ -243,20 +243,20 @@ def test_close_sync(client):
 async def test_release_once_too_many(c, s, a, b):
     sem = await Semaphore(name="x")
     assert await sem.acquire()
-    await sem.release()
+    assert await sem.release() is True
 
     with pytest.raises(RuntimeError, match="Released too often"):
-        await sem.release()
+        sem.release()
 
     assert await sem.acquire()
-    await sem.release()
+    assert await sem.release() is True
 
 
 @gen_cluster(client=True)
 async def test_release_once_too_many_resilience(c, s, a, b):
     def f(x, sem):
         sem.acquire()
-        sem.release()
+        assert sem.release() is True
         with pytest.raises(RuntimeError, match="Released too often"):
             sem.release()
         return x
@@ -453,7 +453,7 @@ async def test_timeout_zero(c, s, a, b):
 
     assert await sem.acquire(timeout=0)
     assert not await sem.acquire(timeout=0)
-    await sem.release()
+    assert await sem.release() is True
 
 
 @gen_cluster(client=True)
@@ -464,7 +464,7 @@ async def test_getvalue(c, s, a, b):
     assert await sem.get_value() == 0
     await sem.acquire()
     assert await sem.get_value() == 1
-    await sem.release()
+    assert await sem.release() is True
     assert await sem.get_value() == 0
 
 
@@ -537,7 +537,7 @@ async def test_release_retry(c, s, a, b):
         await semaphore.acquire()
         pool.activate()  # Comm chaos starts
         with captured_logger("distributed.utils_comm") as caplog:
-            await semaphore.release()
+            assert await semaphore.release() is True
         logs = caplog.getvalue().split("\n")
         print(logs)
         log = logs[0]
@@ -546,7 +546,7 @@ async def test_release_retry(c, s, a, b):
         )
 
         assert await semaphore.acquire() is True
-        assert await semaphore.release() is not False
+        assert await semaphore.release() is True
 
 
 @gen_cluster(

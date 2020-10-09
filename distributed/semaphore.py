@@ -468,14 +468,15 @@ class Semaphore:
         logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
 
         try:
-            return await retry_operation(
+            await retry_operation(
                 self.client.scheduler.semaphore_release,
                 name=self.name,
                 lease_id=lease_id,
                 operation="semaphore release: client=%s, lease_id=%s, name=%s"
                 % (self.client.id, lease_id, self.name),
             )
-        except OSError:  # Too many broken connections, release fails
+            return True
+        except Exception:  # Release fails for whatever reason
             logger.error(
                 "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable?"
                 % (self.client.id, lease_id, self.name),
