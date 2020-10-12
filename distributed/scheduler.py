@@ -6201,31 +6201,27 @@ class Scheduler(ServerNode):
             self.total_occupancy / target_duration
         )  # TODO: threads per worker
 
-        # Avoid a few long tasks from asking for many cores
-        ws: WorkerState
-        tasks_processing = 0
-        for ws in self.workers.values():
-            tasks_processing += len(ws._processing)
-
-            if tasks_processing > cpu:
-                break
-        else:
-            cpu = min(tasks_processing, cpu)
-
         if self.unrunnable and not self.workers:
             cpu = max(1, cpu)
 
-        # Memory
-        limit_bytes = {addr: ws._memory_limit for addr, ws in self.workers.items()}
-        worker_bytes = [ws._nbytes for ws in self.workers.values()]
-        limit = sum(limit_bytes.values())
-        total = sum(worker_bytes)
-        if total > 0.6 * limit:
+        # add more workers if more than 60% of memory is used
+        limit = sum(ws.memory_limit for ws in self.workers.values())
+        used = sum(ws.nbytes for ws in self.workers.values())
+        memory = 0
+        if used > 0.6 * limit:
             memory = 2 * len(self.workers)
-        else:
-            memory = 0
 
         target = max(memory, cpu)
+
+        # avoid having more workers than runnable tasks
+        runnable_states = ("processing", "no-worker")
+        tasks = 0
+        for task_group in self.task_groups.values():
+            tasks += sum(task_group.states[state] for state in runnable_states)
+            if tasks >= target:
+                break
+        target = min(target, tasks)
+
         if target >= len(self.workers):
             return target
         else:  # Scale down?

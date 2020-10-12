@@ -6,10 +6,10 @@ from time import sleep
 import dask
 import pytest
 
-from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
-from distributed.utils_test import gen_test, slowinc, clean
-from distributed.utils_test import loop, nodebug, cleanup  # noqa: F401
+from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
+from distributed.utils_test import clean, cleanup, gen_test, loop, slowinc  # noqa: F401
+from distributed.worker_client import get_worker
 
 
 @pytest.mark.asyncio
@@ -449,3 +449,44 @@ async def test_update_adaptive(cleanup):
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
+
+
+@pytest.mark.asyncio
+async def test_adaptive_too_many_workers(cleanup):
+    """ Make sure that not more workers are spawned than runnable tasks."""
+    n_tasks = 3
+    n_max_workers = 10
+
+    async with LocalCluster(
+        n_workers=0, threads_per_worker=1, memory_limit=0, asynchronous=True
+    ) as cluster:
+        cluster.adapt(minimum=0, maximum=n_max_workers, interval="100 ms")
+        async with Client(cluster, asynchronous=True) as client:
+            futures = client.map(sleep, range(n_tasks))
+            await client.gather(futures)
+
+        log = cluster._adaptive.log
+        for state in log:
+            if state[1]["status"] != "up":
+                continue
+            assert state[1]["n"] <= n_tasks
+
+
+@pytest.mark.parametrize("memory_limit", (0, "1G"))
+@pytest.mark.asyncio
+async def test_adaptive_memory_limit(memory_limit, cleanup):
+    """Make sure that adapt() works even when a memory limit is set."""
+
+    def _test_fun(x):
+        sleep(3)
+        return get_worker().name
+
+    n_tasks = 3
+
+    async with LocalCluster(
+        n_workers=0, threads_per_worker=1, memory_limit=memory_limit, asynchronous=True
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            cluster.adapt(minimum=1, maximum=n_tasks, interval="100 ms")
+            futures = client.map(_test_fun, range(n_tasks))
+            assert max(await client.gather(futures)) > 0
