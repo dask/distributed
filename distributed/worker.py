@@ -405,7 +405,7 @@ class Worker(ServerNode):
 
         self.ready = list()
         self.constrained = deque()
-        self.executing = set()
+        self.executing_count = 0
         self.executed_count = 0
         self.long_running = set()
 
@@ -732,7 +732,7 @@ class Worker(ServerNode):
             self.name,
             self.status,
             len(self.data),
-            len(self.executing),
+            self.executing_count,
             self.nthreads,
             len(self.ready),
             len(self.in_flight_tasks),
@@ -758,7 +758,7 @@ class Worker(ServerNode):
 
     async def get_metrics(self):
         core = dict(
-            executing=len(self.executing),
+            executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
@@ -1580,7 +1580,6 @@ class Worker(ServerNode):
                     for dep in ts.dependencies
                 )
                 assert all(dep.state == "memory" for dep in ts.dependencies)
-                assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
             ts.waiting_for_data.clear()
@@ -1602,7 +1601,6 @@ class Worker(ServerNode):
         try:
             if self.validate:
                 assert ts.state == "waiting"
-                assert ts.key not in self.executing
                 assert ts.key not in self.ready
 
             self.waiting_for_data_count -= len(ts.waiting_for_data)
@@ -1630,7 +1628,7 @@ class Worker(ServerNode):
                     for dep in ts.dependencies
                 )
 
-            self.executing.add(ts.key)
+            self.executing_count += 1
             self.loop.add_callback(self.execute, ts.key)
         except Exception as e:
             logger.exception(e)
@@ -1654,7 +1652,7 @@ class Worker(ServerNode):
     def transition_executing_done(self, ts, value=no_value, report=True):
         try:
             if self.validate:
-                assert ts.key in self.executing or ts.key in self.long_running
+                assert ts.state == "executing" or ts.key in self.long_running
                 assert not ts.waiting_for_data
                 assert ts.key not in self.ready
 
@@ -1664,7 +1662,7 @@ class Worker(ServerNode):
                     self.available_resources[resource] += quantity
 
             if ts.state == "executing":
-                self.executing.discard(ts.key)
+                self.executing_count -= 1
                 self.executed_count += 1
             elif ts.state == "long-running":
                 self.long_running.remove(ts.key)
@@ -1705,9 +1703,9 @@ class Worker(ServerNode):
     def transition_executing_long_running(self, ts, compute_duration=None):
         try:
             if self.validate:
-                assert ts.key in self.executing
+                assert ts.state == "executing"
 
-            self.executing.remove(ts.key)
+            self.executing_count -= 1
             self.long_running.add(ts.key)
             self.batched_stream.send(
                 {
@@ -1731,9 +1729,10 @@ class Worker(ServerNode):
             self.transition(ts, "long-running", compute_duration=compute_duration)
 
     def stateof(self, key):
+        ts = self.tasks[key]
         return {
-            "executing": key in self.executing,
-            "waiting_for_data": bool(self.tasks[key].waiting_for_data),
+            "executing": ts.state == "executing",
+            "waiting_for_data": bool(ts.waiting_for_data),
             "heap": key in pluck(1, self.ready),
             "data": key in self.data,
         }
@@ -2220,8 +2219,8 @@ class Worker(ServerNode):
             if key in self.threads:
                 del self.threads[key]
 
-            if key in self.executing:
-                self.executing.remove(key)
+            if ts.state == "executing":
+                self.executing_count -= 1
 
             if ts.resource_restrictions is not None:
                 if ts.state == "executing":
@@ -2410,7 +2409,7 @@ class Worker(ServerNode):
         if self.paused:
             return
         try:
-            while self.constrained and len(self.executing) < self.nthreads:
+            while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
                 ts = self.tasks[key]
                 if ts.state != "constrained":
@@ -2426,7 +2425,7 @@ class Worker(ServerNode):
                     self.transition(ts, "executing")
                 else:
                     break
-            while self.ready and len(self.executing) < self.nthreads:
+            while self.ready and self.executing_count < self.nthreads:
                 priority, key = heapq.heappop(self.ready)
                 ts = self.tasks.get(key)
                 if ts is None:
@@ -2456,10 +2455,10 @@ class Worker(ServerNode):
         if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
             return
         try:
-            if key not in self.executing or key not in self.tasks:
+            if key not in self.tasks:
                 return
             ts = self.tasks[key]
-            if ts.runspec is None:
+            if ts.state != "executing" or ts.runspec is None:
                 return
             if self.validate:
                 assert not ts.waiting_for_data
@@ -2550,7 +2549,7 @@ class Worker(ServerNode):
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
             if self.validate:
-                assert ts.key not in self.executing
+                assert ts.state != "executing"
                 assert not ts.waiting_for_data
 
             self.ensure_computing()
@@ -2565,11 +2564,6 @@ class Worker(ServerNode):
 
                     pdb.set_trace()
                 raise
-        finally:
-            # very possible this key has already been released due to errors here
-            # so don't check `ts.key`
-            if key in self.executing:
-                self.executing.remove(key)
 
     ##################
     # Administrative #
