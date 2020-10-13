@@ -5123,7 +5123,7 @@ async def test_call_stack_future(c, s, a, b):
     assert all(list(first(result.values())) == [future.key] for result in results)
     assert results[0] == results[1]
     result = results[0]
-    w = a if future.key in a.executing else b
+    w = a if future.key in a.executing_count else b
     assert list(result) == [w.address]
     assert list(result[w.address]) == [future.key]
     assert "slowinc" in str(result)
@@ -5133,10 +5133,10 @@ async def test_call_stack_future(c, s, a, b):
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
 async def test_call_stack_all(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.8)
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.01)
     result = await c.call_stack()
-    w = a if a.executing else b
+    w = a if a.executing_count else b
     assert list(result) == [w.address]
     assert list(result[w.address]) == [future.key]
     assert "slowinc" in str(result)
@@ -5146,7 +5146,7 @@ async def test_call_stack_all(c, s, a, b):
 async def test_call_stack_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack(x)
     assert result
@@ -5156,7 +5156,7 @@ async def test_call_stack_collections(c, s, a, b):
 async def test_call_stack_collections_all(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack()
     assert result

@@ -72,7 +72,7 @@ class StateTable(DashboardComponent):
             w = self.worker
             d = {
                 "Stored": [len(w.data)],
-                "Executing": ["%d / %d" % (len(w.executing), w.nthreads)],
+                "Executing": ["%d / %d" % (w.executing_count, w.nthreads)],
                 "Ready": [len(w.ready)],
                 "Waiting": [w.waiting_for_data_count],
                 "Connections": [len(w.in_flight_workers)],
@@ -265,7 +265,7 @@ class ExecutingTimeSeries(DashboardComponent):
     def update(self):
         with log_errors():
             self.source.stream(
-                {"x": [time() * 1000], "y": [len(self.worker.executing)]}, 1000
+                {"x": [time() * 1000], "y": [self.worker.executing_count]}, 1000
             )
 
 

@@ -67,7 +67,7 @@ async def test_str(s, a, b):
     assert a.address in repr(a)
     assert str(a.nthreads) in str(a)
     assert str(a.nthreads) in repr(a)
-    assert str(len(a.executing)) in repr(a)
+    assert str(a.executing_count) in repr(a)
 
 
 @pytest.mark.asyncio
@@ -94,7 +94,7 @@ async def test_worker_bad_args(c, s, a, b):
 
     x = c.submit(NoReprObj, workers=a.address)
     await wait(x)
-    assert not a.executing
+    assert not a.executing_count
     assert a.data
 
     def bad_func(*args, **kwargs):
@@ -126,7 +126,7 @@ async def test_worker_bad_args(c, s, a, b):
     y = c.submit(bad_func, x, k=x, workers=b.address)
     await wait(y)
 
-    assert not b.executing
+    assert not b.executing_count
     assert y.status == "error"
     # Make sure job died because of bad func and not because of bad
     # argument.
@@ -808,7 +808,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     del futures
 
     start = time()
-    while a.executing:
+    while a.executing_count:
         await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
@@ -1561,15 +1561,15 @@ async def test_close_gracefully(c, s, a, b):
         await asyncio.sleep(0.1)
 
     mem = set(b.data)
-    proc = set(b.executing)
+    proc = [ts for ts in b.tasks.values() if ts.state == "executing"]
 
     await b.close_gracefully()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
-    for key in proc:
-        assert s.tasks[key].state in ("processing", "memory")
+    for ts in proc:
+        assert ts.state in ("processing", "memory")
 
 
 @pytest.mark.slow
