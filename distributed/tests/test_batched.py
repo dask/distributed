@@ -11,7 +11,7 @@ from distributed.metrics import time
 from distributed.utils import All, TimeoutError
 from distributed.utils_test import captured_logger
 from distributed.protocol import to_serialize
-from distributed.compatibility import WINDOWS, PY37, TORNADO6
+from distributed.compatibility import WINDOWS, TORNADO6
 
 
 class EchoServer:
@@ -258,9 +258,7 @@ async def test_serializers():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    WINDOWS and not PY37 and not TORNADO6, reason="failing on windows, py36, tornado 5."
-)
+@pytest.mark.skipif(WINDOWS and not TORNADO6, reason="failing on windows, tornado 5.")
 async def test_handles_exceptions():
     # Ensure that we properly handle exceptions in BatchedSend.
     # https://github.com/pangeo-data/pangeo/issues/788
