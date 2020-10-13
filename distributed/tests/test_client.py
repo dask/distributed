@@ -5123,7 +5123,12 @@ async def test_call_stack_future(c, s, a, b):
     assert all(list(first(result.values())) == [future.key] for result in results)
     assert results[0] == results[1]
     result = results[0]
-    w = a if a.tasks[future.key].state == "executing" else b
+    ts = a.tasks.get(future.key)
+    if ts is not None and ts.state == "executing":
+        w = a
+    else:
+        w = b
+
     assert list(result) == [w.address]
     assert list(result[w.address]) == [future.key]
     assert "slowinc" in str(result)
