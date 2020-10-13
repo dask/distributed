@@ -118,7 +118,7 @@ class TaskState:
         The exception caused by running a task if it erred
     * **traceback**: ``str``
         The exception caused by running a task if it erred
-    * **type_**: ``type``
+    * **type**: ``type``
         The type of a particular piece of data
     * **suspicious_count**: ``int``
         The number of times a dependency has not been where we expected it
@@ -150,7 +150,7 @@ class TaskState:
         self.resource_restrictions = None
         self.exception = None
         self.traceback = None
-        self.type_ = None
+        self.type = None
         self.suspicious_count = 0
         self.startstops = list()
 
@@ -236,8 +236,8 @@ class Worker(ServerNode):
     * **constrained**: [keys]
         Keys for which we have the data to run, but are waiting on abstract
         resources like GPUs.  Stored in a FIFO deque
-    * **executing**: {keys}
-        Keys that are currently executing
+    * **executing_count**: ``int``
+        A count of tasks currently executing on this worker
     * **executed_count**: int
         A number of tasks that this worker has run in its lifetime
     * **long_running**: {keys}
@@ -1851,14 +1851,14 @@ class Worker(ServerNode):
     def send_task_state_to_scheduler(self, ts):
         if ts.key in self.data or self.actors.get(ts.key):
             nbytes = self.nbytes.get(ts.key)
-            typ = ts.type_
+            typ = ts.type
             if nbytes is None or typ is None:
                 try:
                     value = self.data[ts.key]
                 except KeyError:
                     value = self.actors[ts.key]
                 nbytes = self.nbytes[ts.key] = sizeof(value)
-                typ = ts.type_ = type(value)
+                typ = ts.type = type(value)
                 del value
             try:
                 typ_serialized = dumps_function(typ)
@@ -1913,7 +1913,7 @@ class Worker(ServerNode):
         if ts.key not in self.nbytes:
             self.nbytes[ts.key] = sizeof(value)
 
-        ts.type_ = type(value)
+        ts.type = type(value)
 
         for dep in ts.dependents:
             try:
@@ -2521,7 +2521,7 @@ class Worker(ServerNode):
 
             if result["op"] == "task-finished":
                 self.nbytes[ts.key] = result["nbytes"]
-                ts.type_ = result["type"]
+                ts.type = result["type"]
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
