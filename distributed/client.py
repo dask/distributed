@@ -2624,7 +2624,7 @@ class Client:
             # scheduler accepts high level graphs.
             dsk.keyset()
             dsk._keys.update({f.key for f in unpacked_futures})
-            dependencies = dsk.get_dependencies()
+            dependencies = dsk.get_all_dependencies()
 
             if priority is None:
                 # Removing all unpacked futures before calling order()
