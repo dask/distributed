@@ -266,6 +266,7 @@ class InProcListener(Listener):
             try:
                 await self.on_connection(comm)
             except CommClosedError:
+                comm.abort()
                 logger.debug("Connection closed before handshake completed")
                 return
             IOLoop.current().add_callback(self.comm_handler, comm)

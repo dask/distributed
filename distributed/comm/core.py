@@ -278,16 +278,18 @@ async def connect(
     if timeout and timeout / 20 < backoff:
         backoff = timeout / 20
 
-    retry_timeout_backoff = random.randrange(140, 160) / 100
+    retry_timeout_backoff = max(5, timeout / 4) * random.uniform(0.9, 1.1)
 
     # This starts a thread
     while True:
         try:
             while deadline - time() > 0:
-
-                async def _():
-                    comm = await connector.connect(
-                        loc, deserialize=deserialize, **connection_args
+                with suppress(TimeoutError):
+                    comm = await asyncio.wait_for(
+                        connector.connect(
+                            loc, deserialize=deserialize, **connection_args
+                        ),
+                        timeout=min(deadline - time(), retry_timeout_backoff),
                     )
                     local_info = {
                         **comm.handshake_info(),
@@ -310,12 +312,6 @@ async def connect(
 
                     comm.handshake_options = comm.handshake_configuration(
                         comm.local_info, comm.remote_info
-                    )
-                    return comm
-
-                with suppress(TimeoutError):
-                    comm = await asyncio.wait_for(
-                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
                     )
                     break
             if not comm:
