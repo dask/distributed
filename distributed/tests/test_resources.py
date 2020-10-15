@@ -229,8 +229,8 @@ async def test_submit_many_non_overlapping(c, s, a, b):
 
     while len(a.data) + len(b.data) < 100:
         await asyncio.sleep(0.01)
-        assert len(a.executing) <= 2
-        assert len(b.executing) <= 1
+        assert a.executing_count <= 2
+        assert b.executing_count <= 1
 
     await wait(futures)
     assert a.total_resources == a.available_resources
@@ -243,7 +243,7 @@ async def test_minimum_resource(c, s, a):
 
     while len(a.data) < 30:
         await asyncio.sleep(0.01)
-        assert len(a.executing) <= 1
+        assert a.executing_count <= 1
 
     await wait(futures)
     assert a.total_resources == a.available_resources

@@ -101,7 +101,7 @@ async def test_stealing_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:  # will steal soon
+    while not b.tasks:  # will steal soon
         await asyncio.sleep(0.01)
 
     se.update()
@@ -117,7 +117,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:
+    while not b.tasks:
         await asyncio.sleep(0.01)
 
     e.update()

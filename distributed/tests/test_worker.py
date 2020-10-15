@@ -69,7 +69,7 @@ async def test_str(s, a, b):
     assert a.address in repr(a)
     assert str(a.nthreads) in str(a)
     assert str(a.nthreads) in repr(a)
-    assert str(len(a.executing)) in repr(a)
+    assert str(a.executing_count) in repr(a)
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_worker_bad_args(c, s, a, b):
 
     x = c.submit(NoReprObj, workers=a.address)
     await wait(x)
-    assert not a.executing
+    assert not a.executing_count
     assert a.data
 
     def bad_func(*args, **kwargs):
@@ -128,7 +128,7 @@ async def test_worker_bad_args(c, s, a, b):
     y = c.submit(bad_func, x, k=x, workers=b.address)
     await wait(y)
 
-    assert not b.executing
+    assert not b.executing_count
     assert y.status == "error"
     # Make sure job died because of bad func and not because of bad
     # argument.
@@ -571,13 +571,8 @@ async def test_clean(c, s, a, b):
 
     collections = [
         a.tasks,
-        a.task_state,
-        a.startstops,
         a.data,
         a.nbytes,
-        a.durations,
-        a.priorities,
-        a.types,
         a.threads,
     ]
     for c in collections:
@@ -586,7 +581,7 @@ async def test_clean(c, s, a, b):
     x.release()
     y.release()
 
-    while x.key in a.task_state:
+    while x.key in a.tasks:
         await asyncio.sleep(0.01)
 
     for c in collections:
@@ -611,15 +606,16 @@ async def test_message_breakup(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_types(c, s, a, b):
-    assert not a.types
-    assert not b.types
+    assert all(ts.type is None for ts in a.tasks.values())
+    assert all(ts.type is None for ts in b.tasks.values())
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
-    assert a.types[x.key] == int
+    assert a.tasks[x.key].type == int
 
     y = c.submit(inc, x, workers=b.address)
     await wait(y)
-    assert b.types == {x.key: int, y.key: int}
+    assert b.tasks[x.key].type == int
+    assert b.tasks[y.key].type == int
 
     await c._cancel(y)
 
@@ -628,7 +624,7 @@ async def test_types(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    assert y.key not in b.types
+    assert y.key not in b.tasks
 
 
 @gen_cluster()
@@ -641,19 +637,24 @@ async def test_system_monitor(s, a, b):
     client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}}), ("127.0.0.1", 1)]
 )
 async def test_restrictions(c, s, a, b):
+    # Worker has resource available
+    assert a.available_resources == {"A": 1}
     # Resource restrictions
     x = c.submit(inc, 1, resources={"A": 1})
     await x
-    assert a.resource_restrictions == {x.key: {"A": 1}}
+    ts = a.tasks[x.key]
+    assert ts.resource_restrictions == {"A": 1}
     await c._cancel(x)
 
-    while x.key in a.task_state:
+    while ts.state != "memory":
+        # Resource should be unavailable while task isn't finished
+        assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
 
-    assert a.resource_restrictions == {}
+    # Resource restored after task is in memory
+    assert a.available_resources["A"] == 1
 
 
-@pytest.mark.xfail
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
@@ -697,7 +698,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
     await wait(z)
 
-    r = w3.startstops[z.key]
+    r = w3.tasks[z.key].startstops
     transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
@@ -809,7 +810,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     del futures
 
     start = time()
-    while a.executing:
+    while a.executing_count:
         await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
@@ -1562,15 +1563,15 @@ async def test_close_gracefully(c, s, a, b):
         await asyncio.sleep(0.1)
 
     mem = set(b.data)
-    proc = set(b.executing)
+    proc = [ts for ts in b.tasks.values() if ts.state == "executing"]
 
     await b.close_gracefully()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
-    for key in proc:
-        assert s.tasks[key].state in ("processing", "memory")
+    for ts in proc:
+        assert ts.state in ("processing", "memory")
 
 
 @pytest.mark.slow
