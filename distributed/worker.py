@@ -109,6 +109,8 @@ class TaskState:
         "rescheduled", "error"]
     * **who_has**: ``set(worker)``
         Workers that we believe have this data
+    * **coming_from**: ``str``
+        The worker that current task data is coming from if task is in flight
     * **waiting_for_data**: ``set(keys of dependencies)``
         A dynamic verion of dependencies.  All dependencies that we still don't
         have for a particular key.
@@ -146,6 +148,7 @@ class TaskState:
         self.priority = None
         self.state = None
         self.who_has = set()
+        self.coming_from = None
         self.waiting_for_data = set()
         self.resource_restrictions = None
         self.exception = None
@@ -247,9 +250,9 @@ class Worker(ServerNode):
         The data that we care about that we think a worker has
     * **pending_data_per_worker**: ``{worker: [dep]}``
         The data on each worker that we still want, prioritized as a deque
-    * **in_flight_tasks**: ``{task: worker}``
-        All dependencies that are coming to us in current peer-to-peer
-        connections and the workers from which they are coming.
+    * **in_flight_tasks**: ``int``
+        A count of the number of tasks that are coming to us in current
+        peer-to-peer connections
     * **in_flight_workers**: ``{worker: {task}}``
         The workers from which we are currently gathering data and the
         dependencies we expect from those connections
@@ -379,7 +382,7 @@ class Worker(ServerNode):
 
         self.data_needed = deque()  # TODO: replace with heap?
 
-        self.in_flight_tasks = dict()
+        self.in_flight_tasks = 0
         self.in_flight_workers = dict()
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
@@ -735,7 +738,7 @@ class Worker(ServerNode):
             self.executing_count,
             self.nthreads,
             len(self.ready),
-            len(self.in_flight_tasks),
+            self.in_flight_tasks,
             self.waiting_for_data_count,
         )
 
@@ -761,7 +764,7 @@ class Worker(ServerNode):
             executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
-            in_flight=len(self.in_flight_tasks),
+            in_flight=self.in_flight_tasks,
             bandwidth={
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
@@ -1497,10 +1500,11 @@ class Worker(ServerNode):
     def transition_waiting_flight(self, ts, worker=None):
         try:
             if self.validate:
-                assert ts.key not in self.in_flight_tasks
+                assert ts.state != "flight"
                 assert ts.dependents
 
-            self.in_flight_tasks[ts.key] = worker
+            ts.coming_from = worker
+            self.in_flight_tasks += 1
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1512,9 +1516,10 @@ class Worker(ServerNode):
     def transition_flight_waiting(self, ts, worker=None, remove=True):
         try:
             if self.validate:
-                assert ts.key in self.in_flight_tasks
+                assert ts.state == "flight"
 
-            del self.in_flight_tasks[ts.key]
+            self.in_flight_tasks -= 1
+            ts.coming_from = None
             if remove:
                 try:
                     ts.who_has.remove(worker)
@@ -1546,9 +1551,10 @@ class Worker(ServerNode):
     def transition_flight_memory(self, ts, value=None):
         try:
             if self.validate:
-                assert ts.key in self.in_flight_tasks
+                assert ts.state == "flight"
 
-            del self.in_flight_tasks[ts.key]
+            self.in_flight_tasks -= 1
+            ts.coming_from = None
             if ts.dependents:
                 self.put_key_in_memory(ts, value)
                 for dependent in ts.dependents:
@@ -2833,8 +2839,7 @@ class Worker(ServerNode):
     def validate_task_flight(self, ts):
         assert ts.key not in self.data
         assert not any(dep.key in self.ready for dep in ts.dependents)
-        peer = self.in_flight_tasks[ts.key]
-        assert ts.key in self.in_flight_workers[peer]
+        assert ts.key in self.in_flight_workers[ts.coming_from]
 
     def validate_task(self, ts):
         try:
@@ -2875,11 +2880,12 @@ class Worker(ServerNode):
                     assert dep.state is not None
                     assert ts in dep.dependents
                 for key in ts.waiting_for_data:
+                    ts_wait = self.tasks[key]
                     assert (
-                        key in self.in_flight_tasks
-                        or key in self._missing_dep_flight
-                        or self.tasks[key].who_has.issubset(self.in_flight_workers)
-                        or self.tasks[key].state == "waiting"
+                        ts_wait.state == "flight"
+                        or ts_wait.state == "waiting"
+                        or ts.wait.key in self._missing_dep_flight
+                        or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
                 if ts.state == "memory":
                     assert isinstance(self.nbytes[ts.key], int)
