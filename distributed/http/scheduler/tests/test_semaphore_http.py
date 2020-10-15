@@ -63,7 +63,7 @@ async def test_prometheus_collect_task_states(c, s, a, b):
     assert active_metrics["semaphore_release"].samples[0].value == 0
     assert active_metrics["semaphore_pending_leases"].samples[0].value == 0
 
-    await sem.release()
+    assert await sem.release() is True
     active_metrics = await fetch_metrics()
     assert active_metrics["semaphore_max_leases"].samples[0].value == 2
     assert active_metrics["semaphore_active_leases"].samples[0].value == 0

@@ -437,6 +437,8 @@ class Semaphore:
             name=self.name,
             timeout=timeout,
             lease_id=lease_id,
+            operation="semaphore acquire: client=%s, lease_id=%s, name=%s"
+            % (self.client.id, lease_id, self.name),
         )
         if result:
             self._leases.append(lease_id)
@@ -460,22 +462,44 @@ class Semaphore:
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._acquire, timeout=timeout)
 
-    def release(self):
-        """
-        Release a semaphore.
-
-        Increment the internal counter by one.
-        """
-
-        """ Release the lock if already acquired """
-        if not self._leases:
-            raise RuntimeError("Released too often")
+    async def _release(self):
         # popleft to release the oldest lease first
         lease_id = self._leases.popleft()
         logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
-        return self.client.sync(
-            self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id
-        )
+
+        try:
+            await retry_operation(
+                self.client.scheduler.semaphore_release,
+                name=self.name,
+                lease_id=lease_id,
+                operation="semaphore release: client=%s, lease_id=%s, name=%s"
+                % (self.client.id, lease_id, self.name),
+            )
+            return True
+        except Exception:  # Release fails for whatever reason
+            logger.error(
+                "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable?"
+                % (self.client.id, lease_id, self.name),
+                exc_info=True,
+            )
+            return False
+
+    def release(self):
+        """
+        Release the semaphore.
+
+        Returns
+        -------
+        bool
+            This value indicates whether a lease was released immediately or not. Note that a user should  *not* retry
+            this operation. Under certain circumstances (e.g. scheduler overload) the lease may not be released
+            immediately, but it will always be automatically released after a specific interval configured using
+            "distributed.scheduler.locks.lease-validation-interval" and "distributed.scheduler.locks.lease-timeout".
+        """
+        if not self._leases:
+            raise RuntimeError("Released too often")
+
+        return self.client.sync(self._release)
 
     def get_value(self):
         """
