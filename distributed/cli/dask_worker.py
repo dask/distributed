@@ -149,7 +149,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     - a float (fraction of total system memory).
     - a string (like 5GB or 5000M).
     - 'auto' for automatically computing the memory limit.
-    """
+    """,
 )
 @click.option(
     "--reconnect/--no-reconnect",
