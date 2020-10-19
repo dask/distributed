@@ -685,7 +685,6 @@ class Client:
 
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
-        self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.io_loop = self.loop = self._loop_runner.loop
 
@@ -1434,7 +1433,7 @@ class Client:
 
         assert self.status == "closed"
 
-        if self._should_close_loop and not shutting_down():
+        if not shutting_down():
             self._loop_runner.stop()
 
     async def _shutdown(self):

@@ -384,8 +384,9 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     await wait(futures)
 
     result = await c.submit(sum, futures, workers=a.address)
-    for dep in set(a.dep_state) - set(a.task_state):
-        a.release_dep(dep, report=True)
+    deps = [dep for dep in a.tasks.values() if dep.key not in a.data_needed]
+    for dep in deps:
+        a.release_key(dep.key, report=True)
 
     n_worker_address = n.worker_address
     with suppress(CommClosedError):
@@ -398,7 +399,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     await total
 
     assert not a.has_what.get(n_worker_address)
-    assert not any(n_worker_address in s for s in a.who_has.values())
+    assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)
 
     await n.close()
 
