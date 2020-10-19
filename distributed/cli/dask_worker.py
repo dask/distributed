@@ -142,11 +142,14 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--memory-limit",
     default="auto",
     show_default=True,
-    help="Bytes of memory per process that the worker can use. "
-    "This can be an integer (bytes), "
-    "float (fraction of total system memory), "
-    "string (like 5GB or 5000M), "
-    "'auto', or zero for no memory management",
+    help="""\b
+    Bytes of memory per process that the worker can use.
+    This can be:
+    - an integer (bytes), note 0 is a special case for no memory management.
+    - a float (fraction of total system memory)."
+    - a string (like 5GB or 5000M)."
+    - 'auto' for automatically computing the memory limit.",
+    """
 )
 @click.option(
     "--reconnect/--no-reconnect",
