@@ -224,10 +224,11 @@ properties:
                   These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
                   This is also a list that can be extended with user defined modules.
 
-          whitelist:
+          allowed-imports:
             type: array
             description: |
-              Whitelisted modules the schedular is allowed to import
+              A list of trusted modules the schedular is allowed to import. For security reasons, the
+              scheduler does not import arbitrary Python modules.
 
 
       worker:

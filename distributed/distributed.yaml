@@ -55,7 +55,7 @@ distributed:
         - distributed.http.proxy
         - distributed.http.statics
 
-    whitelist:
+    allowed-imports:
       - dask.highlevelgraph
       - dask.optimization
       - dask.blockwise
