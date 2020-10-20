@@ -6,6 +6,8 @@ from enum import Enum
 
 import dask
 from dask.base import normalize_token
+from dask.highlevelgraph import HighLevelGraph, Layer
+from dask.optimization import SubgraphCallable
 
 from tlz import valmap, get_in
 
@@ -76,9 +78,29 @@ def msgpack_decode_default(obj):
     Custom packer/unpacker for msgpack to support Enums
     """
     if "__Enum__" in obj:
-        mod = importlib.import_module(obj["__module__"])
+        mod = obj["__module__"]
         enum_type = getattr(mod, obj["__name__"])
-        obj = getattr(enum_type, obj["name"])
+        return getattr(enum_type, obj["name"])
+
+    if "__Set__" in obj:
+        return set(obj["as-list"])
+
+    if "__SubgraphCallable__" in obj:
+        mod = importlib.import_module(obj["__module__"])
+        layer_type = getattr(mod, obj["__name__"])
+        return layer_type(*obj["args"])
+
+    if "__Layer__" in obj:
+        mod = importlib.import_module(obj["__module__"])
+        layer_type = getattr(mod, obj["__name__"])
+        return layer_type(*obj["args"])
+
+    if "__HighLevelGraph__" in obj:
+        return HighLevelGraph(
+            obj["layers"],
+            obj["dependencies"],
+        )
+
     return obj
 
 
@@ -94,6 +116,35 @@ def msgpack_encode_default(obj):
             "__module__": obj.__module__,
             "__name__": type(obj).__name__,
         }
+
+    if isinstance(obj, set):
+        return {"__Set__": True, "as-list": list(obj)}
+
+    if isinstance(obj, SubgraphCallable):
+        cls, args = obj.__reduce__()
+        return {
+            "__SubgraphCallable__": True,
+            "__module__": obj.__module__,
+            "__name__": cls.__name__,
+            "args": args,
+        }
+
+    if isinstance(obj, Layer):
+        cls, args = obj.__reduce__()
+        return {
+            "__Layer__": True,
+            "__module__": obj.__module__,
+            "__name__": cls.__name__,
+            "args": args,
+        }
+
+    if isinstance(obj, HighLevelGraph):
+        return {
+            "__HighLevelGraph__": True,
+            "layers": obj.layers,
+            "dependencies": obj.dependencies,
+        }
+
     return obj
 
 
