@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from tlz import identity, valmap
 
+from dask.dataframe.io.parquet.core import ParquetSubgraph
 from dask.highlevelgraph import HighLevelGraph, BasicLayer
 from dask.blockwise import Blockwise
 from dask.utils_test import inc
@@ -495,6 +496,16 @@ def test_highlevelgraphs():
             numblocks={"x": (3,)},
             concatenate=False,
             new_axes=None,
+        ),
+        "parquet": ParquetSubgraph(
+            "",
+            None,
+            "",
+            None,
+            [],
+            [],
+            [],
+            {},
         ),
     }
     dependencies = {"basic": set(), "blockwise": {"basic"}}

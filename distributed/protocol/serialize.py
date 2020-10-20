@@ -6,7 +6,7 @@ from enum import Enum
 
 import dask
 from dask.base import normalize_token
-from dask.highlevelgraph import HighLevelGraph, Layer
+from dask.highlevelgraph import HighLevelGraph, Layer, BasicLayer
 from dask.optimization import SubgraphCallable
 
 from tlz import valmap, get_in
@@ -92,7 +92,13 @@ def msgpack_decode_default(obj):
 
     if "__Layer__" in obj:
         mod = importlib.import_module(obj["__module__"])
-        layer_type = getattr(mod, obj["__name__"])
+        obj_name = obj["__name__"]
+        if obj_name == "BasicLayer":
+            # The default implemention of Layer returns a BasicLayer, which might
+            # not be defined in `mod` therefore we import it explicitly here
+            layer_type = BasicLayer
+        else:
+            layer_type = getattr(mod, obj["__name__"])
         return layer_type(*obj["args"])
 
     if "__HighLevelGraph__" in obj:
