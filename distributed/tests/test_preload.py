@@ -107,6 +107,36 @@ def test_worker_preload_module(loop):
 
 
 @pytest.mark.asyncio
+async def test_worker_preload_click(cleanup, tmpdir):
+    CLICK_PRELOAD_TEXT = """
+import click
+
+@click.command()
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, preload=CLICK_PRELOAD_TEXT) as w:
+            assert w.foo == "setup"
+
+
+@pytest.mark.asyncio
+async def test_worker_preload_click_async(cleanup, tmpdir):
+    # Ensure we allow for click commands wrapping coroutines
+    # https://github.com/dask/distributed/issues/4169
+    CLICK_PRELOAD_TEXT = """
+import click
+
+@click.command()
+async def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, preload=CLICK_PRELOAD_TEXT) as w:
+            assert w.foo == "setup"
+
+
+@pytest.mark.asyncio
 async def test_preload_import_time(cleanup):
     text = """
 from distributed.comm.registry import backends
