@@ -55,6 +55,13 @@ distributed:
         - distributed.http.proxy
         - distributed.http.statics
 
+    whitelist:
+      - dask.highlevelgraph
+      - dask.optimization
+      - dask.blockwise
+      - dask.optimization
+      - dask.dataframe.io.parquet.core
+
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn

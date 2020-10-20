@@ -224,6 +224,11 @@ properties:
                   These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
                   This is also a list that can be extended with user defined modules.
 
+          whitelist:
+            type: array
+            description: |
+              Whitelisted modules the schedular is allowed to import
+
 
       worker:
         type: object

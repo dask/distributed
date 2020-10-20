@@ -27,9 +27,10 @@ from .utils import (
 
 lazy_registrations = {}
 
-
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
+
+_cached_whitelisted_modules = {}
 
 
 def dask_dumps(x, context=None):
@@ -73,12 +74,25 @@ def pickle_loads(header, frames):
     return pickle.loads(x, buffers=buffers)
 
 
+def import_whitelisted_module(name):
+    if name in _cached_whitelisted_modules:
+        return _cached_whitelisted_modules[name]
+
+    if name in dask.config.get("distributed.scheduler.whitelist"):
+        _cached_whitelisted_modules[name] = importlib.import_module(name)
+        return _cached_whitelisted_modules[name]
+    else:
+        raise RuntimeError(
+            f"Importing {repr(name)} is not allowed, add it to the whitelist"
+        )
+
+
 def msgpack_decode_default(obj):
     """
     Custom packer/unpacker for msgpack to support Enums
     """
     if "__Enum__" in obj:
-        mod = obj["__module__"]
+        mod = import_whitelisted_module(obj["__module__"])
         enum_type = getattr(mod, obj["__name__"])
         return getattr(enum_type, obj["name"])
 
@@ -86,18 +100,18 @@ def msgpack_decode_default(obj):
         return set(obj["as-list"])
 
     if "__SubgraphCallable__" in obj:
-        mod = importlib.import_module(obj["__module__"])
+        mod = import_whitelisted_module(obj["__module__"])
         layer_type = getattr(mod, obj["__name__"])
         return layer_type(*obj["args"])
 
     if "__Layer__" in obj:
-        mod = importlib.import_module(obj["__module__"])
         obj_name = obj["__name__"]
         if obj_name == "BasicLayer":
             # The default implemention of Layer returns a BasicLayer, which might
             # not be defined in `mod` therefore we import it explicitly here
             layer_type = BasicLayer
         else:
+            mod = import_whitelisted_module(obj["__module__"])
             layer_type = getattr(mod, obj["__name__"])
         return layer_type(*obj["args"])
 
