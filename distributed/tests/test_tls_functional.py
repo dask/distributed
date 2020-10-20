@@ -6,6 +6,7 @@ import asyncio
 import pytest
 
 from distributed import Scheduler, Worker, Client, Nanny, worker_client, Queue
+from distributed.core import Status
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.nanny import Nanny
@@ -178,7 +179,7 @@ async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {b.worker_address}
 
     start = time()
-    while a.status != "closed":
+    while a.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -201,11 +202,14 @@ async def test_security_dict_input(cleanup):
     scheduler = conf["distributed"]["comm"]["tls"]["scheduler"]["cert"]
 
     async with Scheduler(
-        security={"tls_ca_file": ca_file, "tls_scheduler_cert": scheduler}
+        host="localhost",
+        security={"tls_ca_file": ca_file, "tls_scheduler_cert": scheduler},
     ) as s:
+        assert s.address.startswith("tls://")
         async with Worker(
             s.address, security={"tls_ca_file": ca_file, "tls_worker_cert": worker}
         ) as w:
+            assert w.address.startswith("tls://")
             async with Client(
                 s.address,
                 security={"tls_ca_file": ca_file, "tls_client_cert": client},

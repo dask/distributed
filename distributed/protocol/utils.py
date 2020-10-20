@@ -1,7 +1,6 @@
 import struct
-import msgpack
 
-from ..utils import ensure_bytes, nbytes
+from ..utils import nbytes
 
 BIG_BYTES_SHARD_SIZE = 2 ** 26
 
@@ -10,13 +9,7 @@ msgpack_opts = {
     ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
 }
 msgpack_opts["strict_map_key"] = False
-
-try:
-    msgpack.loads(msgpack.dumps(""), raw=False, **msgpack_opts)
-    msgpack_opts["raw"] = False
-except TypeError:
-    # Backward compat with old msgpack (prior to 0.5.2)
-    msgpack_opts["encoding"] = "utf-8"
+msgpack_opts["raw"] = False
 
 
 def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
@@ -30,25 +23,19 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
-    if nbytes(frame) <= n:
+    frame = memoryview(frame)
+
+    if frame.nbytes <= n:
         return [frame]
 
-    if nbytes(frame) > n:
-        if isinstance(frame, (bytes, bytearray)):
-            frame = memoryview(frame)
-        try:
-            itemsize = frame.itemsize
-        except AttributeError:
-            itemsize = 1
+    nitems = frame.nbytes // frame.itemsize
+    items_per_shard = n // frame.itemsize
 
-        return [
-            frame[i : i + n // itemsize]
-            for i in range(0, nbytes(frame) // itemsize, n // itemsize)
-        ]
+    return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
 
 
 def merge_frames(header, frames):
-    """ Merge frames into original lengths
+    """Merge frames into original lengths
 
     Examples
     --------
@@ -58,18 +45,25 @@ def merge_frames(header, frames):
     [b'123456']
     """
     lengths = list(header["lengths"])
+    writeables = list(header["writeable"])
 
+    assert len(lengths) == len(writeables)
     assert sum(lengths) == sum(map(nbytes, frames))
 
     if all(len(f) == l for f, l in zip(frames, lengths)):
-        return frames
+        return [
+            (bytearray(f) if w else bytes(f)) if w == memoryview(f).readonly else f
+            for w, f in zip(header["writeable"], frames)
+        ]
 
     frames = frames[::-1]
     lengths = lengths[::-1]
+    writeables = writeables[::-1]
 
     out = []
     while lengths:
         l = lengths.pop()
+        w = writeables.pop()
         L = []
         while l:
             frame = frames.pop()
@@ -77,26 +71,28 @@ def merge_frames(header, frames):
                 L.append(frame)
                 l -= nbytes(frame)
             else:
-                mv = memoryview(frame)
-                L.append(mv[:l])
-                frames.append(mv[l:])
+                frame = memoryview(frame)
+                L.append(frame[:l])
+                frames.append(frame[l:])
                 l = 0
-        if len(L) == 1:  # no work necessary
+        if len(L) == 1 and w != memoryview(L[0]).readonly:  # no work necessary
             out.extend(L)
+        elif w:
+            out.append(bytearray().join(L))
         else:
-            out.append(b"".join(map(ensure_bytes, L)))
+            out.append(bytes().join(L))
+
     return out
 
 
 def pack_frames_prelude(frames):
-    lengths = [struct.pack("Q", len(frames))] + [
-        struct.pack("Q", nbytes(frame)) for frame in frames
-    ]
-    return b"".join(lengths)
+    nframes = len(frames)
+    nbytes_frames = map(nbytes, frames)
+    return struct.pack(f"Q{nframes}Q", nframes, *nbytes_frames)
 
 
 def pack_frames(frames):
-    """ Pack frames into a byte-like object
+    """Pack frames into a byte-like object
 
     This prepends length information to the front of the bytes-like object
 
@@ -104,16 +100,11 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    prelude = [pack_frames_prelude(frames)]
-
-    if not isinstance(frames, list):
-        frames = list(frames)
-
-    return b"".join(prelude + frames)
+    return b"".join([pack_frames_prelude(frames), *frames])
 
 
 def unpack_frames(b):
-    """ Unpack bytes into a sequence of frames
+    """Unpack bytes into a sequence of frames
 
     This assumes that length information is at the front of the bytestring,
     as performed by pack_frames
@@ -122,14 +113,20 @@ def unpack_frames(b):
     --------
     pack_frames
     """
-    (n_frames,) = struct.unpack("Q", b[:8])
+    b = memoryview(b)
+
+    fmt = "Q"
+    fmt_size = struct.calcsize(fmt)
+
+    (n_frames,) = struct.unpack_from(fmt, b)
+    lengths = struct.unpack_from(f"{n_frames}{fmt}", b, fmt_size)
 
     frames = []
-    start = 8 + n_frames * 8
-    for i in range(n_frames):
-        (length,) = struct.unpack("Q", b[(i + 1) * 8 : (i + 2) * 8])
-        frame = b[start : start + length]
+    start = fmt_size * (1 + n_frames)
+    for length in lengths:
+        end = start + length
+        frame = b[start:end]
         frames.append(frame)
-        start += length
+        start = end
 
     return frames

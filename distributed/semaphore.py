@@ -35,7 +35,7 @@ class _Watch:
 
 
 class SemaphoreExtension:
-    """ An extension for the scheduler to manage Semaphores
+    """An extension for the scheduler to manage Semaphores
 
     This adds the following routes to the scheduler
 
@@ -267,7 +267,7 @@ class SemaphoreExtension:
 
 
 class Semaphore:
-    """ Semaphore
+    """Semaphore
 
     This `semaphore <https://en.wikipedia.org/wiki/Semaphore_(programming)>`_
     will track leases on the scheduler which can be acquired and
@@ -324,18 +324,18 @@ class Semaphore:
     Examples
     --------
     >>> from distributed import Semaphore
-    >>> sem = Semaphore(max_leases=2, name='my_database')
-    >>>
-    >>> def access_resource(s, sem):
-    >>>     # This automatically acquires a lease from the semaphore (if available) which will be
-    >>>     # released when leaving the context manager.
-    >>>     with sem:
-    >>>         pass
-    >>>
-    >>> futures = client.map(access_resource, range(10), sem=sem)
-    >>> client.gather(futures)
-    >>> # Once done, close the semaphore to clean up the state on scheduler side.
-    >>> sem.close()
+    ... sem = Semaphore(max_leases=2, name='my_database')
+    ...
+    ... def access_resource(s, sem):
+    ...     # This automatically acquires a lease from the semaphore (if available) which will be
+    ...     # released when leaving the context manager.
+    ...     with sem:
+    ...         pass
+    ...
+    ... futures = client.map(access_resource, range(10), sem=sem)
+    ... client.gather(futures)
+    ... # Once done, close the semaphore to clean up the state on scheduler side.
+    ... sem.close()
 
     Notes
     -----
@@ -362,6 +362,12 @@ class Semaphore:
         self.id = uuid.uuid4().hex
         self._leases = deque()
 
+        self.refresh_leases = True
+
+        self._registered = None
+        if register:
+            self._registered = self.register()
+
         # this should give ample time to refresh without introducing another
         # config parameter since this *must* be smaller than the timeout anyhow
         refresh_leases_interval = (
@@ -371,7 +377,6 @@ class Semaphore:
             )
             / 5
         )
-        self._refreshing_leases = False
         pc = PeriodicCallback(
             self._refresh_leases, callback_time=refresh_leases_interval * 1000
         )
@@ -379,12 +384,10 @@ class Semaphore:
         # Registering the pc to the client here is important for proper cleanup
         self._periodic_callback_name = f"refresh_semaphores_{self.id}"
         self.client._periodic_callbacks[self._periodic_callback_name] = pc
-        pc.start()
-        self.refresh_leases = True
 
-        self._registered = None
-        if register:
-            self._registered = self.register()
+        # Need to start the callback using IOLoop.add_callback to ensure that the
+        # PC uses the correct event loop.
+        self.client.io_loop.add_callback(pc.start)
 
     def register(self):
         """
@@ -434,6 +437,8 @@ class Semaphore:
             name=self.name,
             timeout=timeout,
             lease_id=lease_id,
+            operation="semaphore acquire: client=%s, lease_id=%s, name=%s"
+            % (self.client.id, lease_id, self.name),
         )
         if result:
             self._leases.append(lease_id)
@@ -457,22 +462,44 @@ class Semaphore:
         timeout = parse_timedelta(timeout)
         return self.client.sync(self._acquire, timeout=timeout)
 
-    def release(self):
-        """
-        Release a semaphore.
-
-        Increment the internal counter by one.
-        """
-
-        """ Release the lock if already acquired """
-        if not self._leases:
-            raise RuntimeError("Released too often")
+    async def _release(self):
         # popleft to release the oldest lease first
         lease_id = self._leases.popleft()
         logger.info("%s releases %s for %s", self.client.id, lease_id, self.name)
-        return self.client.sync(
-            self.client.scheduler.semaphore_release, name=self.name, lease_id=lease_id
-        )
+
+        try:
+            await retry_operation(
+                self.client.scheduler.semaphore_release,
+                name=self.name,
+                lease_id=lease_id,
+                operation="semaphore release: client=%s, lease_id=%s, name=%s"
+                % (self.client.id, lease_id, self.name),
+            )
+            return True
+        except Exception:  # Release fails for whatever reason
+            logger.error(
+                "Release failed for client=%s, lease_id=%s, name=%s. Cluster network might be unstable?"
+                % (self.client.id, lease_id, self.name),
+                exc_info=True,
+            )
+            return False
+
+    def release(self):
+        """
+        Release the semaphore.
+
+        Returns
+        -------
+        bool
+            This value indicates whether a lease was released immediately or not. Note that a user should  *not* retry
+            this operation. Under certain circumstances (e.g. scheduler overload) the lease may not be released
+            immediately, but it will always be automatically released after a specific interval configured using
+            "distributed.scheduler.locks.lease-validation-interval" and "distributed.scheduler.locks.lease-timeout".
+        """
+        if not self._leases:
+            raise RuntimeError("Released too often")
+
+        return self.client.sync(self._release)
 
     def get_value(self):
         """

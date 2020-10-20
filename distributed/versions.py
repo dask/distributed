@@ -33,9 +33,7 @@ scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
 
 # notes to be displayed for mismatch packages
 notes_mismatch_package = {
-    "msgpack": "Variation is ok, as long as everything is above 0.6",
-    "lz4": "Variation is ok, but missing libraries are not",
-    "python": "Variation is sometimes ok, sometimes not. It depends on your workloads",
+    "msgpack": "Variation is ok, as long as everything is above 0.6"
 }
 
 
@@ -157,14 +155,20 @@ def error_message(scheduler, workers, client, client_name="client"):
         if pkg in notes_mismatch_package.keys():
             notes.append(f"-  {pkg}: {notes_mismatch_package[pkg]}")
 
+    out = {"warning": "", "error": ""}
+
     if errs:
         err_table = asciitable(["Package", client_name, "scheduler", "workers"], errs)
         err_msg = f"Mismatched versions found\n\n{err_table}"
         if notes:
             err_msg += "\nNotes: \n{}".format("\n".join(notes))
-        return err_msg
-    else:
-        return ""
+        out["warning"] += err_msg
+
+        for name, c, s, ws in errs:
+            if not isinstance(ws, set):
+                ws = {ws}
+
+    return out
 
 
 class VersionMismatchWarning(Warning):

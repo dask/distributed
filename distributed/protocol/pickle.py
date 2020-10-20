@@ -1,7 +1,15 @@
 import logging
-import pickle
+import sys
 
 import cloudpickle
+
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
@@ -25,16 +33,16 @@ def _always_use_pickle_for(x):
         return False
 
 
-def dumps(x, *, buffer_callback=None):
-    """ Manage between cloudpickle and pickle
+def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
+    """Manage between cloudpickle and pickle
 
     1.  Try pickle
     2.  If it is short then check if it contains __main__
     3.  If it is long, then first check type, then check __main__
     """
     buffers = []
-    dump_kwargs = {"protocol": HIGHEST_PROTOCOL}
-    if HIGHEST_PROTOCOL >= 5 and buffer_callback is not None:
+    dump_kwargs = {"protocol": protocol or HIGHEST_PROTOCOL}
+    if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
     try:
         buffers.clear()
@@ -65,6 +73,6 @@ def loads(x, *, buffers=()):
             return pickle.loads(x, buffers=buffers)
         else:
             return pickle.loads(x)
-    except Exception:
+    except Exception as e:
         logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
         raise

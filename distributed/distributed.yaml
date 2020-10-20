@@ -43,8 +43,8 @@ distributed:
         keep_alive_milliseconds: 500
         check_unused_sessions_milliseconds: 500
     locks:
-      lease-validation-interval: 10s  # The time to wait until an acquired semaphore is released if the Client goes out of scope
-      lease-timeout: 30s  # The timeout after which a lease will be released if not refreshed
+      lease-validation-interval: 10s  # The interval in which the scheduler validates staleness of all acquired leases. Must always be smaller than the lease-timeout itself.
+      lease-timeout: 30s  # Maximum interval to wait for a Client refresh before a lease is invalidated and released.
 
     http:
       routes:
@@ -130,7 +130,7 @@ distributed:
       connect: 10s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
-    require-encryption: False   # Whether to require encryption on non-local comms
+    require-encryption: null # Whether to require encryption on non-local comms
 
     tls:
       ciphers: null   # Allowed ciphers, specified as an OpenSSL cipher string.
@@ -179,3 +179,4 @@ ucx:
   rdmacm: null # enable RDMACM
   cuda_copy: null  # enable cuda-copy
   net-devices: null  # define which Infiniband device to use
+  reuse-endpoints: True  # enable endpoint reuse

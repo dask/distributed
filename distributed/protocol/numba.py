@@ -26,7 +26,7 @@ def cuda_serialize_numba_ndarray(x):
     header["lengths"] = [x.nbytes]
     frames = [
         numba.cuda.cudadrv.devicearray.DeviceNDArray(
-            shape=(x.nbytes,), strides=(1,), dtype=np.dtype("u1"), gpu_data=x.gpu_data,
+            shape=(x.nbytes,), strides=(1,), dtype=np.dtype("u1"), gpu_data=x.gpu_data
         )
     ]
 
@@ -51,6 +51,7 @@ def cuda_deserialize_numba_ndarray(header, frames):
 @dask_serialize.register(numba.cuda.devicearray.DeviceNDArray)
 def dask_serialize_numba_ndarray(x):
     header, frames = cuda_serialize_numba_ndarray(x)
+    header["writeable"] = (None,) * len(frames)
     frames = [memoryview(f.copy_to_host()) for f in frames]
     return header, frames
 

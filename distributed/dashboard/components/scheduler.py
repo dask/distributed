@@ -26,12 +26,15 @@ from bokeh.models import (
     BoxSelectTool,
     GroupFilter,
     CDSView,
+    Tabs,
+    Panel,
+    Title,
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.themes import Theme
-from bokeh.transform import factor_cmap, linear_cmap
+from bokeh.transform import factor_cmap, linear_cmap, cumsum
 from bokeh.io import curdoc
 import dask
 from dask import config
@@ -260,7 +263,9 @@ class NBytesHistogram(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
+        nbytes = np.asarray(
+            [ws.metrics["memory"] for ws in self.scheduler.workers.values()]
+        )
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
@@ -292,6 +297,7 @@ class BandwidthTypes(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
+            fig.xaxis.major_label_orientation = -0.5
             rect = fig.rect(
                 source=self.source,
                 x="bandwidth-half",
@@ -440,7 +446,7 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
-class ComputerPerKey(DashboardComponent):
+class ComputePerKey(DashboardComponent):
     """ Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
@@ -456,6 +462,8 @@ class ComputerPerKey(DashboardComponent):
 
             compute_data = {
                 "times": [0.2, 0.1],
+                "formatted_time": ["0.2 ms", "2.8 us"],
+                "angles": [3.14, 0.785],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["sum", "sum_partial"],
             }
@@ -477,14 +485,13 @@ class ComputerPerKey(DashboardComponent):
                 top="times",
                 width=0.7,
                 color="color",
-                legend_field="names",
             )
 
             fig.y_range.start = 0
             fig.min_border_right = 20
             fig.min_border_bottom = 60
             fig.yaxis.axis_label = "Time (s)"
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
             rect.nonselection_glyph = None
@@ -499,13 +506,76 @@ class ComputerPerKey(DashboardComponent):
             hover.tooltips = """
             <div>
                 <p><b>Name:</b> @names</p>
-                <p><b>Time:</b> @times s</p>
+                <p><b>Time:</b> @formatted_time</p>
             </div>
             """
             hover.point_policy = "follow_mouse"
             fig.add_tools(hover)
 
+            fig.add_layout(
+                Title(
+                    text="Note: tasks less than 2% of max are not displayed",
+                    text_font_style="italic",
+                ),
+                "below",
+            )
+
             self.fig = fig
+            tab1 = Panel(child=fig, title="Bar Chart")
+
+            compute_wedge_data = {
+                "times": [0.2, 0.1],
+                "formatted_time": ["0.2 ms", "2.8 us"],
+                "angles": [1.4, 0.8],
+                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
+                "names": ["sum", "sum_partial"],
+            }
+
+            fig2 = figure(
+                title="Compute Time Per Task",
+                tools="",
+                id="bk-Compute-by-key-pie",
+                name="compute_time_per_key-pie",
+                x_range=(-0.5, 1.0),
+                **kwargs,
+            )
+
+            wedge = fig2.wedge(
+                x=0,
+                y=1,
+                radius=0.4,
+                start_angle=cumsum("angles", include_zero=True),
+                end_angle=cumsum("angles"),
+                line_color="white",
+                fill_color="color",
+                legend_field="names",
+                source=self.compute_source,
+            )
+
+            fig2.axis.axis_label = None
+            fig2.axis.visible = False
+            fig2.grid.grid_line_color = None
+            fig2.add_layout(
+                Title(
+                    text="Note: tasks less than 2% of max are not displayed",
+                    text_font_style="italic",
+                ),
+                "below",
+            )
+
+            hover = HoverTool()
+            hover.tooltips = """
+            <div>
+                <p><b>Name:</b> @names</p>
+                <p><b>Time:</b> @formatted_time</p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig2.add_tools(hover)
+            self.wedge_fig = fig2
+            tab2 = Panel(child=fig2, title="Pie Chart")
+
+            self.tabs = Tabs(tabs=[tab1, tab2])
 
     @without_property_validation
     def update(self):
@@ -523,22 +593,33 @@ class ComputerPerKey(DashboardComponent):
                 compute_times.items(), key=lambda x: x[1], reverse=True
             )
 
-            compute_colors = list()
-            compute_names = list()
-            compute_time = list()
-            for name, t in compute_times:
-                compute_names.append(name)
-                compute_colors.append(ts_color_of(name))
-                compute_time.append(t)
+            # keep only time which are 2% of max or greater
+            if compute_times:
+                max_time = compute_times[0][1] * 0.02
+                compute_times = [(n, t) for n, t in compute_times if t > max_time]
+                compute_colors = list()
+                compute_names = list()
+                compute_time = list()
+                total_time = 0
+                for name, t in compute_times:
+                    compute_names.append(name)
+                    compute_colors.append(ts_color_of(name))
+                    compute_time.append(t)
+                    total_time += t
 
-            self.fig.x_range.factors = compute_names
-            self.fig.title.text = "Compute Time Per Task"
+                angles = [t / total_time * 2 * math.pi for t in compute_time]
 
-            compute_result = dict(
-                times=compute_time, color=compute_colors, names=compute_names,
-            )
+                self.fig.x_range.factors = compute_names
 
-            update(self.compute_source, compute_result)
+                compute_result = dict(
+                    angles=angles,
+                    times=compute_time,
+                    color=compute_colors,
+                    names=compute_names,
+                    formatted_time=[format_time(t) for t in compute_time],
+                )
+
+                update(self.compute_source, compute_result)
 
 
 class AggregateAction(DashboardComponent):
@@ -557,6 +638,7 @@ class AggregateAction(DashboardComponent):
 
             action_data = {
                 "times": [0.2, 0.1],
+                "formatted_time": ["0.2 ms", "2.8 us"],
                 "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
                 "names": ["transfer", "compute"],
             }
@@ -578,13 +660,12 @@ class AggregateAction(DashboardComponent):
                 top="times",
                 width=0.7,
                 color="color",
-                legend_field="names",
             )
 
             fig.y_range.start = 0
             fig.min_border_right = 20
             fig.min_border_bottom = 60
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0s")
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.axis_label = "Time (s)"
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
@@ -601,7 +682,7 @@ class AggregateAction(DashboardComponent):
             hover.tooltips = """
             <div>
                 <p><b>Name:</b> @names</p>
-                <p><b>Time:</b> @times s</p>
+                <p><b>Time:</b> @formatted_time</p>
             </div>
             """
             hover.point_policy = "follow_mouse"
@@ -635,7 +716,12 @@ class AggregateAction(DashboardComponent):
             self.fig.x_range.factors = agg_names
             self.fig.title.text = "Aggregate Time Per Action"
 
-            action_result = dict(times=agg_time, color=agg_colors, names=agg_names,)
+            action_result = dict(
+                times=agg_time,
+                color=agg_colors,
+                names=agg_names,
+                formatted_time=[format_time(t) for t in agg_time],
+            )
 
             update(self.action_source, action_result)
 
@@ -1347,6 +1433,9 @@ class TaskGraph(DashboardComponent):
         )
 
         self.root = figure(title="Task Graph", **kwargs)
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.root.add_layout(self.subtitle, "above")
+
         self.root.multi_line(
             xs="x",
             ys="y",
@@ -1381,21 +1470,33 @@ class TaskGraph(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            # occasionally reset the column data source to remove old nodes
-            if self.invisible_count > len(self.node_source.data["x"]) / 2:
-                self.layout.reset_index()
-                self.invisible_count = 0
-                update = True
+            # If there are too many tasks in the scheduler we'll disable this
+            # compoonents to not overload scheduler or client. Once we drop
+            # below the threshold, the data is filled up again as usual
+            if len(self.scheduler.tasks) > self.max_items:
+                self.subtitle.text = "Scheduler has too many tasks to display."
+                for container in [self.node_source, self.edge_source]:
+                    container.data = {col: [] for col in container.column_names}
             else:
-                update = False
+                # occasionally reset the column data source to remove old nodes
+                self.subtitle.text = " "
+                if self.invisible_count > len(self.node_source.data["x"]) / 2:
+                    self.layout.reset_index()
+                    self.invisible_count = 0
+                    update = True
+                else:
+                    update = False
 
-            new, self.layout.new = self.layout.new, []
-            new_edges = self.layout.new_edges
-            self.layout.new_edges = []
+                new, self.layout.new = self.layout.new, []
+                new_edges = self.layout.new_edges
+                self.layout.new_edges = []
 
-            self.add_new_nodes_edges(new, new_edges, update=update)
+                self.add_new_nodes_edges(new, new_edges, update=update)
 
-            self.patch_updates()
+                self.patch_updates()
+
+                if len(self.scheduler.tasks) == 0:
+                    self.subtitle.text = "Scheduler is empty."
 
     @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
@@ -1412,10 +1513,6 @@ class TaskGraph(DashboardComponent):
             y = self.layout.y
 
             tasks = self.scheduler.tasks
-            if len(tasks) > self.max_items:
-                # graph to big - no update, reset for next time
-                self.invisible_count = len(tasks)
-                return
             for key in new:
                 try:
                     task = tasks[key]
@@ -1471,14 +1568,14 @@ class TaskGraph(DashboardComponent):
         if self.layout.visible_updates:
             updates = self.layout.visible_updates
             updates = [(i, c) for i, c in updates if i < n]
-            self.visible_updates = []
+            self.layout.visible_updates = []
             self.node_source.patch({"visible": updates})
             self.invisible_count += len(updates)
 
         if self.layout.visible_edge_updates:
             updates = self.layout.visible_edge_updates
             updates = [(i, c) for i, c in updates if i < m]
-            self.visible_updates = []
+            self.layout.visible_edge_updates = []
             self.edge_source.patch({"visible": updates})
 
     def __del__(self):
@@ -1662,7 +1759,7 @@ class TaskProgress(DashboardComponent):
 
 
 class WorkerTable(DashboardComponent):
-    """ Status of the current workers
+    """Status of the current workers
 
     This is two plots, a text-based table for each host and a thin horizontal
     plot laying out hosts by their current memory use.
@@ -1794,7 +1891,7 @@ class WorkerTable(DashboardComponent):
             tooltips="""
                 <div>
                   <span style="font-size: 10px; font-family: Monaco, monospace;">Worker (@name): </span>
-                  <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu</span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu_fraction</span>
                 </div>
                 """,
         )
@@ -1856,7 +1953,39 @@ class WorkerTable(DashboardComponent):
                 )
                 continue
             try:
-                data[name].insert(0, sum(data[name]))
+                if len(self.scheduler.workers) == 0:
+                    total_data = None
+                elif name == "memory_percent":
+                    total_mem = sum(
+                        ws.memory_limit for ws in self.scheduler.workers.values()
+                    )
+                    total_data = (
+                        (
+                            sum(
+                                ws.metrics["memory"]
+                                for ws in self.scheduler.workers.values()
+                            )
+                            / total_mem
+                        )
+                        if total_mem
+                        else ""
+                    )
+                elif name == "cpu":
+                    total_data = (
+                        sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())
+                        / 100
+                        / len(self.scheduler.workers.values())
+                    )
+                elif name == "cpu_fraction":
+                    total_data = (
+                        sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())
+                        / 100
+                        / sum(ws.nthreads for ws in self.scheduler.workers.values())
+                    )
+                else:
+                    total_data = sum(data[name])
+
+                data[name].insert(0, total_data)
             except TypeError:
                 data[name].insert(0, None)
 
@@ -2108,10 +2237,10 @@ def individual_memory_by_key_doc(scheduler, extra, doc):
 
 def individual_compute_time_per_key_doc(scheduler, extra, doc):
     with log_errors():
-        component = ComputerPerKey(scheduler, sizing_mode="stretch_both")
+        component = ComputePerKey(scheduler, sizing_mode="stretch_both")
         component.update()
         add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
+        doc.add_root(component.tabs)
         doc.theme = BOKEH_THEME
 
 

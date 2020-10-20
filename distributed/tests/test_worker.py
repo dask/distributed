@@ -8,6 +8,7 @@ import psutil
 import sys
 from time import sleep
 import traceback
+from unittest import mock
 import asyncio
 
 import dask
@@ -26,16 +27,12 @@ from distributed import (
     Reschedule,
     wait,
 )
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
-from distributed.core import rpc, CommClosedError
+from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import (
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -72,7 +69,7 @@ async def test_str(s, a, b):
     assert a.address in repr(a)
     assert str(a.nthreads) in str(a)
     assert str(a.nthreads) in repr(a)
-    assert str(len(a.executing)) in repr(a)
+    assert str(a.executing_count) in repr(a)
 
 
 @pytest.mark.asyncio
@@ -99,7 +96,7 @@ async def test_worker_bad_args(c, s, a, b):
 
     x = c.submit(NoReprObj, workers=a.address)
     await wait(x)
-    assert not a.executing
+    assert not a.executing_count
     assert a.data
 
     def bad_func(*args, **kwargs):
@@ -131,7 +128,7 @@ async def test_worker_bad_args(c, s, a, b):
     y = c.submit(bad_func, x, k=x, workers=b.address)
     await wait(y)
 
-    assert not b.executing
+    assert not b.executing_count
     assert y.status == "error"
     # Make sure job died because of bad func and not because of bad
     # argument.
@@ -343,7 +340,7 @@ async def test_worker_waits_for_scheduler(cleanup):
         pass
     else:
         assert False
-    assert w.status not in ("closed", "running")
+    assert w.status not in (Status.closed, Status.running)
     await w.close(timeout=0.1)
 
 
@@ -534,7 +531,7 @@ async def test_close_on_disconnect(s, w):
     await s.close()
 
     start = time()
-    while w.status != "closed":
+    while w.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -574,13 +571,8 @@ async def test_clean(c, s, a, b):
 
     collections = [
         a.tasks,
-        a.task_state,
-        a.startstops,
         a.data,
         a.nbytes,
-        a.durations,
-        a.priorities,
-        a.types,
         a.threads,
     ]
     for c in collections:
@@ -589,7 +581,7 @@ async def test_clean(c, s, a, b):
     x.release()
     y.release()
 
-    while x.key in a.task_state:
+    while x.key in a.tasks:
         await asyncio.sleep(0.01)
 
     for c in collections:
@@ -614,15 +606,16 @@ async def test_message_breakup(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_types(c, s, a, b):
-    assert not a.types
-    assert not b.types
+    assert all(ts.type is None for ts in a.tasks.values())
+    assert all(ts.type is None for ts in b.tasks.values())
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
-    assert a.types[x.key] == int
+    assert a.tasks[x.key].type == int
 
     y = c.submit(inc, x, workers=b.address)
     await wait(y)
-    assert b.types == {x.key: int, y.key: int}
+    assert b.tasks[x.key].type == int
+    assert b.tasks[y.key].type == int
 
     await c._cancel(y)
 
@@ -631,7 +624,7 @@ async def test_types(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    assert y.key not in b.types
+    assert y.key not in b.tasks
 
 
 @gen_cluster()
@@ -644,19 +637,24 @@ async def test_system_monitor(s, a, b):
     client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}}), ("127.0.0.1", 1)]
 )
 async def test_restrictions(c, s, a, b):
+    # Worker has resource available
+    assert a.available_resources == {"A": 1}
     # Resource restrictions
     x = c.submit(inc, 1, resources={"A": 1})
     await x
-    assert a.resource_restrictions == {x.key: {"A": 1}}
+    ts = a.tasks[x.key]
+    assert ts.resource_restrictions == {"A": 1}
     await c._cancel(x)
 
-    while x.key in a.task_state:
+    while ts.state != "memory":
+        # Resource should be unavailable while task isn't finished
+        assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
 
-    assert a.resource_restrictions == {}
+    # Resource restored after task is in memory
+    assert a.available_resources["A"] == 1
 
 
-@pytest.mark.xfail
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
@@ -700,7 +698,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
     await wait(z)
 
-    r = w3.startstops[z.key]
+    r = w3.tasks[z.key].startstops
     transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
@@ -801,7 +799,7 @@ async def test_worker_death_timeout(s):
     assert "Worker" in str(info.value)
     assert "timed out" in str(info.value) or "failed to start" in str(info.value)
 
-    assert w.status == "closed"
+    assert w.status == Status.closed
 
 
 @gen_cluster(client=True)
@@ -812,7 +810,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     del futures
 
     start = time()
-    while a.executing:
+    while a.executing_count:
         await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
@@ -863,6 +861,15 @@ def test_worker_dir(worker):
             assert len(set(directories)) == 2  # distinct
 
         test_worker_dir()
+
+
+@gen_cluster(nthreads=[])
+async def test_false_worker_dir(s):
+    async with Worker(s.address, local_directory="") as w:
+        local_directory = w.local_directory
+
+    cwd = os.getcwd()
+    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
 
 
 @gen_cluster(client=True)
@@ -1042,7 +1049,7 @@ async def test_service_hosts_match_worker(s):
 
     async with Worker(s.address, host="tcp://127.0.0.1") as w:
         sock = first(w.http_server._sockets.values())
-        assert sock.getsockname()[0] == "127.0.0.1"
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
 
 @gen_cluster(nthreads=[])
@@ -1460,6 +1467,15 @@ async def test_local_directory(s):
             assert "dask-worker-space" in w.local_directory
 
 
+@gen_cluster(nthreads=[])
+async def test_local_directory_make_new_directory(s):
+    with tmpfile() as fn:
+        w = await Worker(s.address, local_directory=os.path.join(fn, "foo", "bar"))
+        assert w.local_directory.startswith(fn)
+        assert "foo" in w.local_directory
+        assert "dask-worker-space" in w.local_directory
+
+
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
@@ -1547,15 +1563,15 @@ async def test_close_gracefully(c, s, a, b):
         await asyncio.sleep(0.1)
 
     mem = set(b.data)
-    proc = set(b.executing)
+    proc = [ts for ts in b.tasks.values() if ts.state == "executing"]
 
     await b.close_gracefully()
 
-    assert b.status == "closed"
+    assert b.status == Status.closed
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
-    for key in proc:
-        assert s.tasks[key].state in ("processing", "memory")
+    for ts in proc:
+        assert ts.state in ("processing", "memory")
 
 
 @pytest.mark.slow
@@ -1566,7 +1582,7 @@ async def test_lifetime(cleanup):
             async with Client(s.address, asynchronous=True) as c:
                 futures = c.map(slowinc, range(200), delay=0.1)
                 await asyncio.sleep(1.5)
-                assert b.status != "running"
+                assert b.status != Status.running
                 await b.finished()
 
                 assert set(b.data).issubset(a.data)  # successfully moved data over
@@ -1601,6 +1617,53 @@ async def test_bad_startup(cleanup):
             pytest.fail("Startup exception was raised")
 
 
+@gen_cluster(client=True)
+async def test_pip_install(c, s, a, b):
+    with mock.patch(
+        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+        return_value=(b"", b""),
+    ) as p1:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+        ) as p2:
+            p1.communicate.return_value = b"", b""
+            p1.wait.return_value = 0
+            await c.register_worker_plugin(
+                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+            )
+
+            args = p2.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
+@gen_cluster(client=True)
+async def test_pip_install_fails(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+            return_value=(b"", b"error"),
+        ) as p1:
+            with mock.patch(
+                "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+            ) as p2:
+                p1.communicate.return_value = (
+                    b"",
+                    b"Could not find a version that satisfies the requirement not-a-package",
+                )
+                p1.wait.return_value = 1
+                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+
+                assert "not-a-package" in logger.getvalue()
+
+
+#             args = p2.call_args[0][0]
+#             assert "python" in args[0]
+#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
 @pytest.mark.asyncio
 async def test_update_latency(cleanup):
     async with await Scheduler() as s:
@@ -1630,7 +1693,24 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
                 await w.heartbeat()
                 if reconnect:
-                    assert w.status == "running"
+                    assert w.status == Status.running
                 else:
-                    assert w.status == "closed"
+                    assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bad_local_directory(cleanup):
+    async with await Scheduler() as s:
+        try:
+            async with Worker(s.address, local_directory="/not/a/valid-directory"):
+                pass
+        except PermissionError:
+            pass
+        else:
+            if WINDOWS:
+                pass
+            else:
+                assert False
+
+        assert not any("error" in log for log in s.get_logs())

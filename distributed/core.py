@@ -9,6 +9,7 @@ import threading
 import traceback
 import uuid
 import weakref
+import warnings
 
 import dask
 import tblib
@@ -52,11 +53,13 @@ class Status(Enum):
     closing = "closing"
     closing_gracefully = "closing-gracefully"
     init = "init"
+    created = "created"
     running = "running"
     starting = "starting"
     stopped = "stopped"
     stopping = "stopping"
     undefined = None
+    dont_reply = "dont-reply"
 
     def __eq__(self, other):
         """
@@ -69,6 +72,11 @@ class Status(Enum):
         if isinstance(other, type(self)):
             return self.value == other.value
         elif isinstance(other, str) or (other is None):
+            warnings.warn(
+                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
             assert other in [
                 s.value for s in type(self)
             ], f"comparison with non-existing states {other}"
@@ -102,7 +110,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
 class Server:
-    """ Dask Distributed Server
+    """Dask Distributed Server
 
     Superclass for endpoints in a distributed cluster, such as Worker
     and Scheduler objects.
@@ -261,9 +269,16 @@ class Server:
         if isinstance(new_status, Status):
             self._status = new_status
         elif isinstance(new_status, str) or new_status is None:
+            warnings.warn(
+                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
+                PendingDeprecationWarning,
+                stacklevel=1,
+            )
             corresponding_enum_variants = [s for s in Status if s.value == new_status]
             assert len(corresponding_enum_variants) == 1
             self._status = corresponding_enum_variants[0]
+        else:
+            raise TypeError(f"expected Status or str, got {new_status}")
 
     async def finished(self):
         """ Wait until the server has finished """
@@ -304,7 +319,7 @@ class Server:
         await self.close()
 
     def start_periodic_callbacks(self):
-        """ Start Periodic Callbacks consistently
+        """Start Periodic Callbacks consistently
 
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
         they are not yet running.  It does this safely on the IOLoop.
@@ -422,7 +437,7 @@ class Server:
         self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
-        """ Dispatch new communications to coroutine-handlers
+        """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
         coroutines.
@@ -467,10 +482,10 @@ class Server:
 
                 try:
                     op = msg.pop("op")
-                except KeyError:
+                except KeyError as e:
                     raise ValueError(
                         "Received unexpected message without 'op' key: " + str(msg)
-                    )
+                    ) from e
                 if self.counters is not None:
                     self.counters["op"].add(op)
                 self._comms[comm] = op
@@ -519,7 +534,14 @@ class Server:
                         logger.exception(e)
                         result = error_message(e, status="uncaught-error")
 
-                if reply and result != "dont-reply":
+                # result is not type stable:
+                # when LHS is not Status then RHS must not be Status or it raises.
+                # when LHS is Status then RHS must be status or it raises in tests
+                is_dont_reply = False
+                if isinstance(result, Status) and (result == Status.dont_reply):
+                    is_dont_reply = True
+
+                if reply and not is_dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (EnvironmentError, TypeError) as e:
@@ -606,7 +628,7 @@ class Server:
                 break
             else:
                 yield asyncio.sleep(0.05)
-        yield [comm.close() for comm in self._comms]  # then forcefully close
+        yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
@@ -623,7 +645,7 @@ def pingpong(comm):
 
 
 async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kwargs):
-    """ Send and recv with a Comm.
+    """Send and recv with a Comm.
 
     Keyword arguments turn into the message
 
@@ -674,7 +696,7 @@ def addr_from_args(addr=None, ip=None, port=None):
 
 
 class rpc:
-    """ Conveniently interact with a remote server
+    """Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
     >>> response = yield remote.add(x=10, y=20)  # doctest: +SKIP
@@ -714,7 +736,7 @@ class rpc:
         rpc.active.add(self)
 
     async def live_comm(self):
-        """ Get an open communication
+        """Get an open communication
 
         Some comms to the ip/port target may be in current use by other
         coroutines.  We track this with the `comms` dict
@@ -833,7 +855,7 @@ class rpc:
 
 
 class PooledRPCCall:
-    """ The result of ConnectionPool()('host:port')
+    """The result of ConnectionPool()('host:port')
 
     See Also:
         ConnectionPool
@@ -882,7 +904,7 @@ class PooledRPCCall:
 
 
 class ConnectionPool:
-    """ A maximum sized pool of Comm objects.
+    """A maximum sized pool of Comm objects.
 
     This provides a connect method that mirrors the normal distributed.connect
     method, but provides connection sharing and tracks connection limits.
@@ -1107,7 +1129,7 @@ def collect_causes(e):
 
 
 def error_message(e, status="error"):
-    """ Produce message to send back given an exception has occurred
+    """Produce message to send back given an exception has occurred
 
     This does the following:
 
@@ -1126,13 +1148,13 @@ def error_message(e, status="error"):
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
-        e3 = protocol.pickle.dumps(e2)
+        e3 = protocol.pickle.dumps(e2, protocol=4)
         protocol.pickle.loads(e3)
     except Exception:
         e2 = Exception(str(e2))
     e4 = protocol.to_serialize(e2)
     try:
-        tb2 = protocol.pickle.dumps(tb)
+        tb2 = protocol.pickle.dumps(tb, protocol=4)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
@@ -1145,7 +1167,7 @@ def error_message(e, status="error"):
 
 
 def clean_exception(exception, traceback, **kwargs):
-    """ Reraise exception and traceback. Deserialize if necessary
+    """Reraise exception and traceback. Deserialize if necessary
 
     See Also
     --------

@@ -23,9 +23,9 @@ class _PrometheusCollector:
             "dask_worker_tasks", "Number of tasks at worker.", labels=["state"]
         )
         tasks.add_metric(["stored"], len(self.worker.data))
-        tasks.add_metric(["executing"], len(self.worker.executing))
+        tasks.add_metric(["executing"], self.worker.executing_count)
         tasks.add_metric(["ready"], len(self.worker.ready))
-        tasks.add_metric(["waiting"], len(self.worker.waiting_for_data))
+        tasks.add_metric(["waiting"], self.worker.waiting_for_data_count)
         tasks.add_metric(["serving"], len(self.worker._comms))
         yield tasks
 
@@ -77,7 +77,7 @@ class PrometheusHandler(RequestHandler):
     def __init__(self, *args, **kwargs):
         import prometheus_client
 
-        super(PrometheusHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         if PrometheusHandler._initialized:
             return
@@ -93,6 +93,4 @@ class PrometheusHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain; version=0.0.4")
 
 
-routes = [
-    (r"metrics", PrometheusHandler, {}),
-]
+routes = [(r"metrics", PrometheusHandler, {})]

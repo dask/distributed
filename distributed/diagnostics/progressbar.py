@@ -64,7 +64,7 @@ class ProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler, **(self.client().connection_args if self.client else {}),
+            self.scheduler, **(self.client().connection_args if self.client else {})
         )
         logger.debug("Progressbar Connected to scheduler")
 
@@ -113,9 +113,9 @@ class TextProgressBar(ProgressBar):
         loop=None,
         complete=True,
         start=True,
-        **kwargs
+        **kwargs,
     ):
-        super(TextProgressBar, self).__init__(keys, scheduler, interval, complete)
+        super().__init__(keys, scheduler, interval, complete)
         self.width = width
         self.loop = loop or IOLoop()
 
@@ -141,7 +141,7 @@ class TextProgressBar(ProgressBar):
 
 
 class ProgressWidget(ProgressBar):
-    """ ProgressBar that uses an IPython ProgressBar widget for the notebook
+    """ProgressBar that uses an IPython ProgressBar widget for the notebook
 
     See Also
     --------
@@ -156,9 +156,9 @@ class ProgressWidget(ProgressBar):
         interval="100ms",
         complete=False,
         loop=None,
-        **kwargs
+        **kwargs,
     ):
-        super(ProgressWidget, self).__init__(keys, scheduler, interval, complete)
+        super().__init__(keys, scheduler, interval, complete)
 
         from ipywidgets import FloatProgress, HBox, VBox, HTML
 
@@ -215,7 +215,7 @@ class MultiProgressBar:
         func=key_split,
         interval="100ms",
         complete=False,
-        **kwargs
+        **kwargs,
     ):
         self.scheduler = get_scheduler(scheduler)
 
@@ -256,8 +256,7 @@ class MultiProgressBar:
             return result
 
         self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
+            self.scheduler, **(self.client().connection_args if self.client else {})
         )
         logger.debug("Progressbar Connected to scheduler")
 
@@ -292,7 +291,7 @@ class MultiProgressBar:
 
 
 class MultiProgressWidget(MultiProgressBar):
-    """ Multiple progress bar Widget suitable for the notebook
+    """Multiple progress bar Widget suitable for the notebook
 
     Displays multiple progress bars for a computation, split on computation
     type.
@@ -312,11 +311,9 @@ class MultiProgressWidget(MultiProgressBar):
         interval=0.1,
         func=key_split,
         complete=False,
-        **kwargs
+        **kwargs,
     ):
-        super(MultiProgressWidget, self).__init__(
-            keys, scheduler, func, interval, complete
-        )
+        super().__init__(keys, scheduler, func, interval, complete)
         from ipywidgets import VBox
 
         self.widget = VBox([])
@@ -399,7 +396,7 @@ class MultiProgressWidget(MultiProgressBar):
 
 
 def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
-    """ Track progress of futures
+    """Track progress of futures
 
     This operates differently in the notebook and the console
 

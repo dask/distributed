@@ -103,6 +103,8 @@ class Adaptive(AdaptiveCore):
 
         self.target_duration = parse_timedelta(target_duration)
 
+        logger.info("Adaptive scaling started: minimum=%s maximum=%s", minimum, maximum)
+
         super().__init__(
             minimum=minimum, maximum=maximum, wait_count=wait_count, interval=interval
         )
@@ -150,7 +152,7 @@ class Adaptive(AdaptiveCore):
             # are in sync before making recommendations.
             await self.cluster
 
-        return await super(Adaptive, self).recommendations(target)
+        return await super().recommendations(target)
 
     async def workers_to_close(self, target: int):
         """

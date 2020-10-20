@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import pickle
 import operator
 import re
 import sys
@@ -41,6 +40,14 @@ from distributed.utils_test import (  # noqa: F401
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
+
+if sys.version_info < (3, 8):
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+else:
+    import pickle
 
 
 alice = "alice:1234"
@@ -524,7 +531,7 @@ async def test_broadcast(s, a, b):
     assert result == {a.address: b"pong", b.address: b"pong"}
 
 
-@gen_cluster(security=tls_only_security(),)
+@gen_cluster(security=tls_only_security())
 async def test_broadcast_tls(s, a, b):
     result = await s.broadcast(msg={"op": "ping"})
     assert result == {a.address: b"pong", b.address: b"pong"}
@@ -958,7 +965,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1010,7 +1017,7 @@ async def test_no_workers_to_memory(c, s):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1040,7 +1047,7 @@ async def test_no_worker_to_memory_restrictions(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1, name="alice")
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1120,7 +1127,7 @@ async def test_close_nanny(c, s, a, b):
         assert not a.is_alive()
         assert a.pid is None
 
-    while a.status != "closed":
+    while a.status != Status.closed:
         await asyncio.sleep(0.05)
         assert time() < start + 10
 
@@ -1129,7 +1136,7 @@ async def test_close_nanny(c, s, a, b):
 async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers
-    while a.status != "closed" and b.status != "closed":
+    while a.status != Status.closed and b.status != Status.closed:
         await asyncio.sleep(0.01)
 
 
@@ -1141,7 +1148,7 @@ async def test_retire_nannies_close(c, s, a, b):
 
     start = time()
 
-    while any(n.status != "closed" for n in nannies):
+    while any(n.status != Status.closed for n in nannies):
         await asyncio.sleep(0.05)
         assert time() < start + 10
 
@@ -1205,8 +1212,8 @@ async def test_service_hosts():
     port = 0
     for url, expected in [
         ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", "127.0.0.1"),
-        ("tcp://127.0.0.1:38275", "127.0.0.1"),
+        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
+        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
     ]:
         async with Scheduler(host=url) as s:
             sock = first(s.http_server._sockets.values())
@@ -1536,7 +1543,7 @@ async def test_closing_scheduler_closes_workers(s, a, b):
     await s.close()
 
     start = time()
-    while a.status != "closed" or b.status != "closed":
+    while a.status != Status.closed or b.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 2
 
@@ -1547,12 +1554,12 @@ async def test_closing_scheduler_closes_workers(s, a, b):
 async def test_resources_reset_after_cancelled_task(c, s, w):
     future = c.submit(sleep, 0.2, resources={"A": 1})
 
-    while not w.executing:
+    while not w.executing_count:
         await asyncio.sleep(0.01)
 
     await future.cancel()
 
-    while w.executing:
+    while w.executing_count:
         await asyncio.sleep(0.01)
 
     assert not s.workers[w.address].used_resources["A"]
@@ -1606,16 +1613,16 @@ async def test_idle_timeout(c, s, a, b):
     await future
     assert s.idle_since is None or s.idle_since > beginning
 
-    assert s.status != "closed"
+    assert s.status != Status.closed
 
     with captured_logger("distributed.scheduler") as logs:
         start = time()
-        while s.status != "closed":
+        while s.status != Status.closed:
             await asyncio.sleep(0.01)
             assert time() < start + 3
 
         start = time()
-        while not (a.status == "closed" and b.status == "closed"):
+        while not (a.status == Status.closed and b.status == Status.closed):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
@@ -1628,7 +1635,7 @@ async def test_idle_timeout(c, s, a, b):
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
-    x = c.submit(operator.mul, b"0", 1000000, workers=a.address)
+    x = c.submit(operator.mul, b"0", 1000001, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
     await y
     await b.heartbeat()
@@ -1679,8 +1686,8 @@ async def test_result_type(c, s, a, b):
 @gen_cluster()
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)
-    assert a.status == "closed"
-    assert b.status == "closed"
+    assert a.status == Status.closed
+    assert b.status == Status.closed
 
 
 @pytest.mark.skipif(
@@ -1734,9 +1741,9 @@ async def test_adaptive_target(c, s, a, b):
 @pytest.mark.asyncio
 async def test_async_context_manager(cleanup):
     async with Scheduler(port=0) as s:
-        assert s.status == "running"
+        assert s.status == Status.running
         async with Worker(s.address) as w:
-            assert w.status == "running"
+            assert w.status == Status.running
             assert s.workers
         assert not s.workers
 
@@ -1911,8 +1918,7 @@ async def test_task_group_non_tuple_key(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_task_unique_groups(c, s, a, b):
-    """ This test ensure that task groups remain unique when using submit
-    """
+    """This test ensure that task groups remain unique when using submit"""
     x = c.submit(sum, [1, 2])
     y = c.submit(len, [1, 2])
     z = c.submit(sum, [3, 4])
@@ -1957,12 +1963,12 @@ class FlakyConnectionPool(ConnectionPool):
     def __init__(self, *args, failing_connections=0, **kwargs):
         self.cnn_count = 0
         self.failing_connections = failing_connections
-        super(FlakyConnectionPool, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     async def connect(self, *args, **kwargs):
         self.cnn_count += 1
         if self.cnn_count > self.failing_connections:
-            return await super(FlakyConnectionPool, self).connect(*args, **kwargs)
+            return await super().connect(*args, **kwargs)
         else:
             return BrokenComm()
 
@@ -2037,7 +2043,7 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     s.rpc = await FlakyConnectionPool(failing_connections=4)
 
     with dask.config.set(
-        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3,}
+        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3}
     ):
         with captured_logger(
             logging.getLogger("distributed.scheduler")
@@ -2147,3 +2153,22 @@ async def test_unknown_task_duration_config(client, s, a, b):
     assert len(s.unknown_durations) == 1
     await wait(future)
     assert len(s.unknown_durations) == 0
+
+
+@gen_cluster()
+async def test_unknown_task_duration_config(s, a, b):
+    assert s.idle_since == s.time_started
+
+
+@gen_cluster(client=True, timeout=1000)
+async def test_retire_state_change(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    y = c.map(lambda x: x ** 2, range(10))
+    await c.scatter(y)
+    for x in range(2):
+        v = c.map(lambda i: i * np.random.randint(1000), y)
+        k = c.map(lambda i: i * np.random.randint(1000), v)
+        foo = c.map(lambda j: j * 6, k)
+        step = c.compute(foo)
+        c.gather(step)
+    await c.retire_workers(workers=[a.address])
