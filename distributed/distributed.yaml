@@ -56,11 +56,8 @@ distributed:
         - distributed.http.statics
 
     allowed-imports:
-      - dask.highlevelgraph
-      - dask.optimization
-      - dask.blockwise
-      - dask.optimization
-      - dask.dataframe.io.parquet.core
+      - dask
+      - distributed
 
   worker:
     blocked-handlers: []

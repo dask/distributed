@@ -78,12 +78,14 @@ def import_allowed_module(name):
     if name in _cached_allowed_modules:
         return _cached_allowed_modules[name]
 
-    if name in dask.config.get("distributed.scheduler.allowed-imports"):
+    if name.split(".")[0] in dask.config.get("distributed.scheduler.allowed-imports"):
         _cached_allowed_modules[name] = importlib.import_module(name)
         return _cached_allowed_modules[name]
     else:
         raise RuntimeError(
-            f"Importing {repr(name)} is not allowed, add it to the whitelist"
+            f"Importing {repr(name)} is not allowed, please add it to the list of "
+            "allowed modules the scheduler can import via the "
+            "distributed.scheduler.allowed-imports configuration setting."
         )
 
 
