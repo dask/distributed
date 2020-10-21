@@ -1,45 +1,41 @@
 import asyncio
-import types
-from functools import partial
 import os
 import sys
 import threading
+import types
 import warnings
-
-import pkg_resources
-import pytest
-
-from tornado import ioloop
-from tornado.concurrent import Future
+from functools import partial
 
 import distributed
-from distributed.metrics import time
-from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import (
-    requires_ipv6,
-    has_ipv6,
-    get_cert,
-    get_server_ssl_context,
-    get_client_ssl_context,
-)
-from distributed.utils_test import loop  # noqa: F401
-
-from distributed.protocol import to_serialize, Serialized, serialize, deserialize
-
-from distributed.comm.registry import backends, get_backend
+import pkg_resources
+import pytest
 from distributed.comm import (
-    tcp,
-    inproc,
-    connect,
-    listen,
     CommClosedError,
-    parse_address,
-    parse_host_port,
-    unparse_host_port,
-    resolve_address,
+    connect,
     get_address_host,
     get_local_address_for,
+    inproc,
+    listen,
+    parse_address,
+    parse_host_port,
+    resolve_address,
+    tcp,
+    unparse_host_port,
 )
+from distributed.comm.registry import backends, get_backend
+from distributed.metrics import time
+from distributed.protocol import Serialized, deserialize, serialize, to_serialize
+from distributed.utils import get_ip, get_ipv6
+from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import (
+    get_cert,
+    get_client_ssl_context,
+    get_server_ssl_context,
+    has_ipv6,
+    requires_ipv6,
+)
+from tornado import ioloop
+from tornado.concurrent import Future
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
@@ -795,6 +791,101 @@ async def test_inproc_comm_closed_explicit_2():
 #
 # Various stress tests
 #
+
+
+import random
+
+from distributed.comm.core import Comm, Connector
+from distributed.comm.registry import Backend, backends
+
+
+class BrokenComm(Comm):
+    peer_address = None
+    local_address = None
+
+    def close(self):
+        pass
+
+    def closed(self):
+        pass
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise IOError
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise IOError
+
+
+class UnreliableConnector(Connector):
+    prefix = "chaos"
+
+    def __init__(self, backend, success_rate=0.1):
+
+        self.max_failures = 4
+        self.failures = 0
+        self.connector = backend.get_connector()
+        self.success_rate = success_rate
+
+    async def connect(self, address, deserialize=True, **connection_args):
+        if self.failures >= self.max_failures or random.random() <= self.success_rate:
+            return await self.connector.connect(address, deserialize, **connection_args)
+        else:
+            self.failures += 1
+            # Sometimes the connect fails and sometimes the connection is closed/broken already
+            if random.random() <= self.success_rate:
+                raise IOError()
+            return BrokenComm()
+
+
+class UnreliableBackend(Backend):
+    """Don't try this at home"""
+
+    def __init__(self):
+        self.backend = get_backend("tcp")
+
+    def get_connector(self):
+        return UnreliableConnector(backend=self.backend)
+
+    def get_listener(self, loc, handle_comm, deserialize, **connection_args):
+        return self.backend.get_listener(
+            loc, handle_comm, deserialize, **connection_args
+        )
+
+    def get_address_host(self, loc):
+        return self.backend.get_address_host(loc)
+
+    def resolve_address(self, loc):
+        return self.backend.resolve_address(loc)
+
+    def get_address_host_port(self, loc):
+        return self.backend.get_address_host_port(loc)
+
+    def get_local_address_for(self, loc):
+        return self.backend.get_local_address_for(loc)
+
+
+@pytest.mark.asyncio
+async def test_retries():
+    async def echo(comm):
+        message = await comm.read()
+        await comm.write(message)
+
+    from distributed.comm.registry import backends
+
+    try:
+
+        backends["chaos"] = UnreliableBackend()
+        listener = await listen("chaos://127.0.0.1:1234", echo)
+        comm = await connect(listener.contact_address.replace("tcp", "chaos"))
+        await comm.write(b"test")
+        msg = await comm.read()
+        assert msg == b"test"
+
+    finally:
+        del backends["chaos"]
 
 
 async def check_connect_timeout(addr):

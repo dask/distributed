@@ -274,68 +274,59 @@ async def connect(
         )
         raise IOError(msg)
 
-    backoff = 0.01
-    if timeout and timeout / 20 < backoff:
-        backoff = timeout / 20
+    backoff_base = 0.01
+    attempt = 0
 
-    retry_timeout_backoff = random.randrange(140, 160) / 100
-
-    # This starts a thread
     while True:
         try:
-            while deadline - time() > 0:
+            comm = await asyncio.wait_for(
+                connector.connect(loc, deserialize=deserialize, **connection_args),
+                timeout=deadline - time(),
+            )
 
-                async def _():
-                    comm = await connector.connect(
-                        loc, deserialize=deserialize, **connection_args
-                    )
-                    local_info = {
-                        **comm.handshake_info(),
-                        **(handshake_overrides or {}),
-                    }
-                    try:
-                        handshake = await asyncio.wait_for(comm.read(), 1)
-                        write = await asyncio.wait_for(comm.write(local_info), 1)
-                        # This would be better, but connections leak if worker is closed quickly
-                        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-                    except Exception as e:
-                        with suppress(Exception):
-                            await comm.close()
-                        raise CommClosedError() from e
+            local_info = {
+                **comm.handshake_info(),
+                **(handshake_overrides or {}),
+            }
 
-                    comm.remote_info = handshake
-                    comm.remote_info["address"] = comm._peer_addr
-                    comm.local_info = local_info
-                    comm.local_info["address"] = comm._local_addr
+            # This would be better, but connections leak if worker is closed quickly
+            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+            handshake = await asyncio.wait_for(comm.read(), deadline - time())
+            await asyncio.wait_for(comm.write(local_info), deadline - time())
 
-                    comm.handshake_options = comm.handshake_configuration(
-                        comm.local_info, comm.remote_info
-                    )
-                    return comm
+            comm.remote_info = handshake
+            comm.remote_info["address"] = comm._peer_addr
+            comm.local_info = local_info
+            comm.local_info["address"] = comm._local_addr
 
-                with suppress(TimeoutError):
-                    comm = await asyncio.wait_for(
-                        _(), timeout=min(deadline - time(), retry_timeout_backoff)
-                    )
-                    break
-            if not comm:
-                _raise(error)
+            comm.handshake_options = comm.handshake_configuration(
+                comm.local_info, comm.remote_info
+            )
+            return comm
         except FatalCommClosedError:
             raise
-        except EnvironmentError as e:
+        # CommClosed, EnvironmentError inherit from OSError
+        except (OSError, TimeoutError) as e:
+            if comm:
+                try:
+                    comm.close()
+                except Exception:
+                    comm.abort()
+                    comm = None
+
             error = str(e)
             if time() < deadline:
-                logger.debug("Could not connect, waiting before retrying")
+                # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+                backoff = random.uniform(0, backoff_base * 2 ** attempt)
+                # If there is no more time left, don't wait longer than the initial timeout
+                backoff = min(backoff, deadline - time())
+                attempt += 1
+                logger.debug(
+                    "Could not connect, waiting for %s before retrying", backoff
+                )
                 await asyncio.sleep(backoff)
-                backoff *= random.randrange(140, 160) / 100
-                retry_timeout_backoff *= random.randrange(140, 160) / 100
-                backoff = min(backoff, 1)  # wait at most one second
             else:
                 _raise(error)
-        else:
-            break
-
-    return comm
 
 
 def listen(addr, handle_comm, deserialize=True, **kwargs):
