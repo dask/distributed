@@ -81,10 +81,10 @@ def import_allowed_module(name):
     # Check for non-ASCII characters
     name = name.encode("ascii").decode()
     # We only compare the root module
-    name = name.split(".", 1)[0]
+    root = name.split(".", 1)[0]
 
     # Note, if an empty string creeps into allowed-imports it is disallowed explicitly
-    if name and name in dask.config.get("distributed.scheduler.allowed-imports"):
+    if root and root in dask.config.get("distributed.scheduler.allowed-imports"):
         _cached_allowed_modules[name] = importlib.import_module(name)
         return _cached_allowed_modules[name]
     else:
@@ -101,27 +101,27 @@ def msgpack_decode_default(obj):
     """
     if "__Enum__" in obj:
         mod = import_allowed_module(obj["__module__"])
-        enum_type = getattr(mod, obj["__name__"])
-        return getattr(enum_type, obj["name"])
+        typ = getattr(mod, obj["__name__"])
+        return getattr(typ, obj["name"])
 
     if "__Set__" in obj:
         return set(obj["as-list"])
 
     if "__SubgraphCallable__" in obj:
         mod = import_allowed_module(obj["__module__"])
-        layer_type = getattr(mod, obj["__name__"])
-        return layer_type(*obj["args"])
+        typ = getattr(mod, obj["__name__"])
+        return typ(*obj["args"])
 
     if "__Layer__" in obj:
         obj_name = obj["__name__"]
         if obj_name == "BasicLayer":
             # The default implemention of Layer returns a BasicLayer, which might
             # not be defined in `mod` therefore we import it explicitly here
-            layer_type = BasicLayer
+            typ = BasicLayer
         else:
             mod = import_allowed_module(obj["__module__"])
-            layer_type = getattr(mod, obj["__name__"])
-        return layer_type(*obj["args"])
+            typ = getattr(mod, obj["__name__"])
+        return typ(*obj["args"])
 
     if "__HighLevelGraph__" in obj:
         return HighLevelGraph(
