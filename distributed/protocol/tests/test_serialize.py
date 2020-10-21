@@ -507,6 +507,7 @@ def test_highlevelgraphs():
             [],
             {},
         ),
+        "Serialize": BasicLayer({"Serialize key": Serialize(42)}),
     }
     dependencies = {"basic": set(), "blockwise": {"basic"}}
     hlg = HighLevelGraph(layers, dependencies)
@@ -518,7 +519,11 @@ def test_highlevelgraphs():
     # Check the loaded result
     assert isinstance(res, HighLevelGraph)
     assert hlg.dependencies == res.dependencies
-    for l1, l2 in zip(hlg.layers, res.layers):
-        assert type(l1) == type(l2)
-        assert l1 == l2
-    assert dict(res) == dict(hlg)
+    assert hlg.layers.keys() == res.layers.keys()
+    for l1, l2 in zip(hlg.layers.values(), res.layers.values()):
+        if "Serialize key" in l1:
+            # `Serialize` wrapped values are not deserialized by `loads()`
+            ser = l2["Serialize key"]
+            assert deserialize(ser.header, ser.frames) == 42
+        else:
+            assert dict(l1) == dict(l2)

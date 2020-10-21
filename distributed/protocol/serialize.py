@@ -97,7 +97,7 @@ def import_allowed_module(name):
 
 def msgpack_decode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
     if "__Enum__" in obj:
         mod = import_allowed_module(obj["__module__"])
@@ -129,13 +129,19 @@ def msgpack_decode_default(obj):
             obj["dependencies"],
         )
 
+    if "__Serialized__" in obj:
+        return Serialized(*obj["data"])
+
     return obj
 
 
 def msgpack_encode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
+
+    if isinstance(obj, Serialize):
+        return {"__Serialized__": True, "data": serialize(obj.data)}
 
     if isinstance(obj, Enum):
         return {
