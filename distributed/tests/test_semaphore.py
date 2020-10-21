@@ -47,7 +47,7 @@ async def test_serializable(c, s, a, b):
     assert res
     sem2 = pickle.loads(pickle.dumps(sem))
     assert sem2.name == sem.name
-    assert sem2.client.scheduler.address == sem.client.scheduler.address
+    # assert sem2.client.scheduler.address == sem.client.scheduler.address
 
     # actual leases didn't change
     assert len(s.extensions["semaphores"].leases["x"]) == 1
@@ -73,6 +73,8 @@ async def test_release_simple(c, s, a, b):
             return x + 1
 
     sem = await Semaphore(max_leases=2, name="x")
+
+    assert s.extensions["semaphores"]._semaphore_exists("x")
     futures = c.map(f, list(range(10)), semaphore=sem)
     await c.gather(futures)
 
@@ -98,33 +100,30 @@ def test_timeout_sync(client):
     client=True,
     timeout=20,
     config={
-        "distributed.scheduler.locks.lease-validation-interval": "500ms",
-        "distributed.scheduler.locks.lease-timeout": "500ms",
+        "distributed.scheduler.locks.lease-validation-interval": "200ms",
+        "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
 async def test_release_semaphore_after_timeout(c, s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
-    semY = await Semaphore(name="y")
 
-    async with Client(s.address, asynchronous=True, name="ClientB") as clientB:
-        semB = await Semaphore(name="x", max_leases=2, client=clientB)
-        semYB = await Semaphore(name="y", client=clientB)
+    semB = await Semaphore(name="x", max_leases=2)
 
-        assert await semB.acquire()  # leases: 1 - 1 = 0
-        assert await semYB.acquire()
+    assert await semB.acquire()  # leases: 1 - 1 = 0
 
-        assert not (await sem.acquire(timeout=0.01))
-        assert not (await semB.acquire(timeout=0.01))
-        assert not (await semYB.acquire(timeout=0.01))
+    assert not (await sem.acquire(timeout=0.01))
+    assert not (await semB.acquire(timeout=0.01))
 
-    # `ClientB` goes out of scope, leases should be released
-    # At this point, we should be able to acquire x and y once
-    assert await sem.acquire()
-    assert await semY.acquire()
+    # B goes out of scope / cannot refresh anymore. For instance, because its
+    # worker died
 
-    assert not (await semY.acquire(timeout=0.5))
-    assert not (await sem.acquire(timeout=0.5))
+    semB.refresh_callback.stop()
+    del semB
+
+    assert await sem.acquire(timeout=1)
+
+    assert not (await sem.acquire(timeout=0.1))
 
 
 @gen_cluster()
@@ -312,16 +311,20 @@ class FlakyConnectionPool(ConnectionPool):
             self.cnn_count += 1
             return BrokenComm()
 
+    def reuse(self, addr, comm):
+        pass
+
 
 @gen_cluster(client=True)
 async def test_retry_acquire(c, s, a, b):
     with dask.config.set({"distributed.comm.retry.count": 1}):
 
         pool = await FlakyConnectionPool(failing_connections=1)
-        rpc = pool(s.address)
-        c.scheduler = rpc
+
         semaphore = await Semaphore(
-            max_leases=2, name="resource_we_want_to_limit", client=c
+            max_leases=2,
+            name="resource_we_want_to_limit",
+            scheduler_rpc=pool(s.address),
         )
         pool.activate()
 
@@ -529,10 +532,11 @@ async def test_release_retry(c, s, a, b):
     """Verify that we can properly retry a semaphore release operation"""
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=1)
-        rpc = pool(s.address)
-        c.scheduler = rpc
+
         semaphore = await Semaphore(
-            max_leases=2, name="resource_we_want_to_limit", client=c
+            max_leases=2,
+            name="resource_we_want_to_limit",
+            scheduler_rpc=pool(s.address),
         )
         await semaphore.acquire()
         pool.activate()  # Comm chaos starts
@@ -561,10 +565,11 @@ async def test_release_failure(c, s, a, b):
 
     with dask.config.set({"distributed.comm.retry.count": 1}):
         pool = await FlakyConnectionPool(failing_connections=5)
-        rpc = pool(s.address)
-        c.scheduler = rpc
+
         semaphore = await Semaphore(
-            max_leases=2, name="resource_we_want_to_limit", client=c
+            max_leases=2,
+            name="resource_we_want_to_limit",
+            scheduler_rpc=pool(s.address),
         )
         await semaphore.acquire()
         pool.activate()  # Comm chaos starts
@@ -589,7 +594,7 @@ async def test_release_failure(c, s, a, b):
         # Check release failed
         semaphore_log = semaphore_log.getvalue().split("\n")[0]
         assert semaphore_log.startswith(
-            "Release failed for client="
+            "Release failed for id="
         ) and semaphore_log.endswith("Cluster network might be unstable?")
 
         # Check lease has timed out
