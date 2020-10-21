@@ -227,7 +227,7 @@ properties:
           allowed-imports:
             type: array
             description: |
-              A list of trusted modules the schedular is allowed to import. For security reasons, the
+              A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
 
 

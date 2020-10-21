@@ -78,7 +78,13 @@ def import_allowed_module(name):
     if name in _cached_allowed_modules:
         return _cached_allowed_modules[name]
 
-    if name.split(".")[0] in dask.config.get("distributed.scheduler.allowed-imports"):
+    # Check for non-ASCII characters
+    name = name.encode("ascii").decode()
+    # We only compare the root module
+    name = name.split(".", 1)[0]
+
+    # Note, if an empty string creeps into allowed-imports it is disallowed explicitly
+    if name and name in dask.config.get("distributed.scheduler.allowed-imports"):
         _cached_allowed_modules[name] = importlib.import_module(name)
         return _cached_allowed_modules[name]
     else:
