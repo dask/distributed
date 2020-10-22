@@ -130,6 +130,11 @@ def msgpack_decode_default(obj):
         )
 
     if "__Serialized__" in obj:
+        # Notice, the data here is marked a Serialized rather than deserialized. This
+        # is because deserialization requires Pickle which the Scheduler cannot run
+        # because of security reasons.
+        # By marking it Serialized, the data is passed through to the workers that
+        # eventually will deserialize it.
         return Serialized(*obj["data"])
 
     return obj
