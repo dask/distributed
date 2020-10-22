@@ -2599,18 +2599,29 @@ class Client:
 
             # We need to track all futures unpack_remotedata() unpacks
             unpacked_futures = set()
-            future_deps = defaultdict(set)
 
             # Unpack remote data in `dsk`, which are "WrappedKeys" that are
             # unknown to `dsk` but known to the scheduler
-            def unpack_remote_data(tasks, key):
+            def unpack_remote_data(tasks):
                 tasks, futures = unpack_remotedata(tasks)
                 unpacked_futures.update(futures)
-                if futures:
-                    future_deps[key].update({f.key for f in futures})
                 return tasks
 
-            dsk = dsk.map_tasks(unpack_remote_data, pass_key=True)
+            # HACK: Need to loop through each layer manually to collect
+            # futures-related dependencies (for now).  This should be removed
+            # once the scheduler doesn't need these dependencies.
+            _dsk = {}
+            future_deps = defaultdict(set)
+            for key, layer in dsk.layers.items():
+                _dsk[key] = layer.map_tasks(unpack_remote_data)
+                # Here is the "manual" loop where the full graph
+                # needs to be materialized.
+                if unpacked_futures:
+                    for k, v in dict(layer).items():
+                        futures = unpack_remotedata(v)[1]
+                        future_deps[k].update({f.key for f in futures})
+            if _dsk:
+                dsk = HighLevelGraph(_dsk, dsk.dependencies, dsk.key_dependencies)
 
             for future in unpacked_futures:
                 if future.client is not self:
