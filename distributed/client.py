@@ -2599,15 +2599,18 @@ class Client:
 
             # We need to track all futures unpack_remotedata() unpacks
             unpacked_futures = set()
+            future_deps = defaultdict(set)
 
             # Unpack remote data in `dsk`, which are "WrappedKeys" that are
             # unknown to `dsk` but known to the scheduler
-            def unpack_remote_data(tasks):
+            def unpack_remote_data(tasks, key):
                 tasks, futures = unpack_remotedata(tasks)
                 unpacked_futures.update(futures)
+                if futures:
+                    future_deps[key].update({f.key for f in futures})
                 return tasks
 
-            dsk = dsk.map_tasks(unpack_remote_data)
+            dsk = dsk.map_tasks(unpack_remote_data, pass_key=True)
 
             for future in unpacked_futures:
                 if future.client is not self:
@@ -2621,9 +2624,13 @@ class Client:
             # know about the unpacked futures, we add them manually to `dsk` before
             # calculating dependencies. This hack shouldn't be necessary when the
             # scheduler accepts high level graphs.
-            dsk.keyset()
-            dsk._keys.update({f.key for f in unpacked_futures})
+            #dsk.keyset()
+            #dsk._keys.update({f.key for f in unpacked_futures})
             dependencies = dsk.get_all_dependencies()
+            # TODO: Adjust the above comment to explain the new approach below.
+            if future_deps:
+                for key in dependencies.keys():
+                    dependencies[key] |= future_deps.get(key, set())
 
             if priority is None:
                 # Removing all unpacked futures before calling order()
