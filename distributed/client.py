@@ -2632,13 +2632,11 @@ class Client:
 
             # HACK: currently when submitting work to the scheduler, the client need to
             # send all key dependencies along with the task graph. Since `dsk` doesn't
-            # know about the unpacked futures, we add them manually to `dsk` before
-            # calculating dependencies. This hack shouldn't be necessary when the
-            # scheduler accepts high level graphs.
-            #dsk.keyset()
-            #dsk._keys.update({f.key for f in unpacked_futures})
+            # know about the unpacked futures, we add futures-related dependencies from
+            # `future_deps`. This hack shouldn't be necessary when the scheduler accepts
+            # high level graphs.
+            dsk.keyset()
             dependencies = dsk.get_all_dependencies()
-            # TODO: Adjust the above comment to explain the new approach below.
             if future_deps:
                 for key in dependencies.keys():
                     dependencies[key] |= future_deps.get(key, set())
