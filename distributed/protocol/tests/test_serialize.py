@@ -5,7 +5,12 @@ import pickle
 import msgpack
 import numpy as np
 import pytest
-from tlz import identity
+from tlz import identity, valmap
+
+from dask.dataframe.io.parquet.core import ParquetSubgraph
+from dask.highlevelgraph import HighLevelGraph, BasicLayer
+from dask.blockwise import Blockwise
+from dask.utils_test import inc
 
 from distributed import wait
 from distributed.protocol import (
@@ -21,11 +26,14 @@ from distributed.protocol import (
     serialize_bytelist,
     register_serialization_family,
     dask_serialize,
+    dumps,
+    loads,
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
 from distributed.utils_test import inc, gen_test
 from distributed.comm.utils import to_frames, from_frames
+from distributed.worker import dumps_task
 
 
 class MyObj:
@@ -197,16 +205,12 @@ def test_empty():
 
 
 def test_empty_loads():
-    from distributed.protocol import loads, dumps
-
     e = Empty()
     e2 = loads(dumps([to_serialize(e)]))
     assert isinstance(e2[0], Empty)
 
 
 def test_empty_loads_deep():
-    from distributed.protocol import loads, dumps
-
     e = Empty()
     e2 = loads(dumps([[[to_serialize(e)]]]))
     assert isinstance(e2[0][0][0], Empty)
@@ -476,3 +480,50 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+def test_highlevelgraphs():
+    """Check dumps/loads of a HLG"""
+
+    # Create a HLG with different types of Layers
+    layers = {
+        "basic": BasicLayer({"a key": 42}),
+        "blockwise": Blockwise(
+            output="z",
+            output_indices=("i",),
+            dsk=valmap(dumps_task, {"z": (inc, ["x"])}),
+            indices=(("x", ("i",)),),
+            numblocks={"x": (3,)},
+            concatenate=False,
+            new_axes=None,
+        ),
+        "parquet": ParquetSubgraph(
+            "",
+            None,
+            "",
+            None,
+            [],
+            [],
+            [],
+            {},
+        ),
+        "Serialize": BasicLayer({"Serialize key": Serialize(42)}),
+    }
+    dependencies = {"basic": set(), "blockwise": {"basic"}}
+    hlg = HighLevelGraph(layers, dependencies)
+
+    # Dump and load the HLG
+    header, frames = dumps(hlg)
+    res = loads([header, frames])
+
+    # Check the loaded result
+    assert isinstance(res, HighLevelGraph)
+    assert hlg.dependencies == res.dependencies
+    assert hlg.layers.keys() == res.layers.keys()
+    for l1, l2 in zip(hlg.layers.values(), res.layers.values()):
+        if "Serialize key" in l1:
+            # `Serialize` wrapped values are not deserialized by `loads()`
+            ser = l2["Serialize key"]
+            assert deserialize(ser.header, ser.frames) == 42
+        else:
+            assert dict(l1) == dict(l2)

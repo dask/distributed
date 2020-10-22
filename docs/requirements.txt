@@ -2,7 +2,9 @@ numpydoc
 tornado
 toolz
 cloudpickle
-dask
+# TODO: Update our dask version requirement to
+# the latest dask release before releasing distributed
+dask @ git+https://github.com/dask/dask.git@master
 sphinx
 dask-sphinx-theme>=1.3.5
 sphinx-click
