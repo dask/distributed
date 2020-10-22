@@ -214,8 +214,15 @@ async def test_delayed_none(c, s, w):
 
 @pytest.mark.parametrize("typ", [tuple, list])
 def test_tuple_futures_arg(client, typ):
-    x = client.submit(make_time_dataframe,)
-    df2 = client.submit(pd.concat, typ([x,]))
-    dd.assert_eq(
-        df2.result().iloc[:0], make_time_dataframe().iloc[:0]
+    x = client.submit(
+        make_time_dataframe,
     )
+    df2 = client.submit(
+        pd.concat,
+        typ(
+            [
+                x,
+            ]
+        ),
+    )
+    dd.assert_eq(df2.result().iloc[:0], make_time_dataframe().iloc[:0])
