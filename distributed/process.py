@@ -1,4 +1,3 @@
-import atexit
 import logging
 import os
 from queue import Queue as PyQueue
