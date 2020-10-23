@@ -891,7 +891,7 @@ async def test_retries():
 async def check_connect_timeout(addr):
     t1 = time()
     with pytest.raises(IOError):
-        await connect(addr, timeout=0.15)
+        await connect(addr, timeout=0.3)
     dt = time() - t1
     assert 1 >= dt >= 0.1
 

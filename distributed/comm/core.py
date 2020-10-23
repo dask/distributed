@@ -263,25 +263,17 @@ async def connect(
 
     start = time()
     deadline = start + timeout
-    error = None
-
-    def _raise(error):
-        error = error or "connect() didn't finish in time"
-        msg = "Timed out trying to connect to %r after %s s: %s" % (
-            addr,
-            timeout,
-            error,
-        )
-        raise IOError(msg)
 
     backoff_base = 0.01
     attempt = 0
 
+    # Prefer multiple small attempts than one long attempt.
+    intermediate_cap = timeout / 5
     while True:
         try:
             comm = await asyncio.wait_for(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
-                timeout=deadline - time(),
+                timeout=min(intermediate_cap, deadline - time()),
             )
 
             local_info = {
@@ -291,8 +283,12 @@ async def connect(
 
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-            handshake = await asyncio.wait_for(comm.read(), deadline - time())
-            await asyncio.wait_for(comm.write(local_info), deadline - time())
+            handshake = await asyncio.wait_for(
+                comm.read(), min(intermediate_cap, deadline - time())
+            )
+            await asyncio.wait_for(
+                comm.write(local_info), min(intermediate_cap, deadline - time())
+            )
 
             comm.remote_info = handshake
             comm.remote_info["address"] = comm._peer_addr
@@ -305,28 +301,30 @@ async def connect(
             return comm
         except FatalCommClosedError:
             raise
+        except TimeoutError as exc:
+            raise IOError(
+                "Timed out trying to connect to %r after %s s", addr, timeout
+            ) from exc
         # CommClosed, EnvironmentError inherit from OSError
-        except (OSError, TimeoutError) as e:
+        except OSError as e:
             if comm:
                 try:
-                    comm.close()
+                    await comm.close()
                 except Exception:
                     comm.abort()
                     comm = None
 
-            error = str(e)
             if time() < deadline:
                 # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
                 backoff = random.uniform(0, backoff_base * 2 ** attempt)
-                # If there is no more time left, don't wait longer than the initial timeout
-                backoff = min(backoff, deadline - time())
+                # If there is no more time left, just raise the exception
+                if backoff > deadline - time():
+                    raise e
                 attempt += 1
                 logger.debug(
                     "Could not connect, waiting for %s before retrying", backoff
                 )
                 await asyncio.sleep(backoff)
-            else:
-                _raise(error)
 
 
 def listen(addr, handle_comm, deserialize=True, **kwargs):
