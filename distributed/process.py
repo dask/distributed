@@ -94,7 +94,7 @@ class AsyncProcess:
         def finalize(proc=self._process, r=repr(self)):
             if proc.is_alive():
                 try:
-                    logger.info("reaping stray process AAA %s" % (proc,))
+                    logger.info("reaping stray process %s" % (proc,))
                     proc.terminate()
                 except OSError:
                     pass
