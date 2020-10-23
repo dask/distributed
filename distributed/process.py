@@ -82,24 +82,15 @@ class AsyncProcess:
             ),
         )
         self._name = self._process.name
-        self._proc_finalizer = weakref.finalize(self, self._get_finalizer())
+        self._proc_finalizer = weakref.finalize(
+            self, _asyncprocess_finalizer, self._process
+        )
         self._watch_q = PyQueue()
         self._exit_future = Future()
         self._exit_callback = None
         self._closed = False
 
         self._start_threads()
-
-    def _get_finalizer(self):
-        def finalize(proc=self._process, r=repr(self)):
-            if proc.is_alive():
-                try:
-                    logger.info("reaping stray process %s" % (proc,))
-                    proc.terminate()
-                except OSError:
-                    pass
-
-        return finalize
 
     def __repr__(self):
         return "<%s %s>" % (self.__class__.__name__, self._name)
@@ -343,3 +334,12 @@ class AsyncProcess:
     @daemon.setter
     def daemon(self, value):
         self._process.daemon = value
+
+
+def _asyncprocess_finalizer(proc):
+    if proc.is_alive():
+        try:
+            logger.info("reaping stray process %s" % (proc,))
+            proc.terminate()
+        except OSError:
+            pass
