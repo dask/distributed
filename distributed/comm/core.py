@@ -214,8 +214,8 @@ class Listener(ABC):
     async def on_connection(self, comm: Comm, handshake_overrides=None):
         local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
         try:
-            write = await asyncio.wait_for(comm.write(local_info), 1)
-            handshake = await asyncio.wait_for(comm.read(), 1)
+            write = await comm.write(local_info)
+            handshake = await comm.read()
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
@@ -275,56 +275,50 @@ async def connect(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
                 timeout=min(intermediate_cap, deadline - time()),
             )
-
-            local_info = {
-                **comm.handshake_info(),
-                **(handshake_overrides or {}),
-            }
-
-            # This would be better, but connections leak if worker is closed quickly
-            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-            handshake = await asyncio.wait_for(
-                comm.read(), min(intermediate_cap, deadline - time())
-            )
-            await asyncio.wait_for(
-                comm.write(local_info), min(intermediate_cap, deadline - time())
-            )
-
-            comm.remote_info = handshake
-            comm.remote_info["address"] = comm._peer_addr
-            comm.local_info = local_info
-            comm.local_info["address"] = comm._local_addr
-
-            comm.handshake_options = comm.handshake_configuration(
-                comm.local_info, comm.remote_info
-            )
-            return comm
+            break
         except FatalCommClosedError:
             raise
-        except TimeoutError as exc:
-            raise IOError(
-                "Timed out trying to connect to %r after %s s", addr, timeout
-            ) from exc
         # CommClosed, EnvironmentError inherit from OSError
-        except OSError as e:
-            if comm:
-                try:
-                    await comm.close()
-                except Exception:
-                    comm.abort()
-                    comm = None
+        except (TimeoutError, OSError) as exc:
 
             if time() < deadline:
                 # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
                 backoff = random.uniform(0, backoff_base * 2 ** attempt)
                 # If there is no more time left, just raise the exception
                 if backoff > deadline - time():
-                    raise e
+                    raise IOError(
+                        f"Timed out trying to connect to {addr} after {timeout} s"
+                    ) from exc
                 attempt += 1
                 logger.debug(
                     "Could not connect, waiting for %s before retrying", backoff
                 )
                 await asyncio.sleep(backoff)
+
+    local_info = {
+        **comm.handshake_info(),
+        **(handshake_overrides or {}),
+    }
+    try:
+        # This would be better, but connections leak if worker is closed quickly
+        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        handshake = await asyncio.wait_for(comm.read(), deadline - time())
+        await asyncio.wait_for(comm.write(local_info), deadline - time())
+    except Exception as exc:
+        comm.abort()
+        raise IOError(
+            f"Timed out trying to connect to {addr} after {timeout} s"
+        ) from exc
+
+    comm.remote_info = handshake
+    comm.remote_info["address"] = comm._peer_addr
+    comm.local_info = local_info
+    comm.local_info["address"] = comm._local_addr
+
+    comm.handshake_options = comm.handshake_configuration(
+        comm.local_info, comm.remote_info
+    )
+    return comm
 
 
 def listen(addr, handle_comm, deserialize=True, **kwargs):
