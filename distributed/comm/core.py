@@ -307,7 +307,7 @@ async def connect(
     except Exception as exc:
         comm.abort()
         raise IOError(
-            f"Timed out trying to connect to {addr} after {timeout} s"
+            f"Timed out during handshake while connecting to {addr} after {timeout} s"
         ) from exc
 
     comm.remote_info = handshake

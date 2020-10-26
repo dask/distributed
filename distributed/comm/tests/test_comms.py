@@ -867,6 +867,14 @@ async def test_handshake_slow_comm(monkeypatch):
     msg = await comm.read()
     assert msg == b"test"
 
+    import dask
+
+    with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
+        with pytest.raises(
+            TimeoutError, match="Timed out during handshake while connecting to"
+        ):
+            await connect(listener.contact_address)
+
 
 async def check_connect_timeout(addr):
     t1 = time()
