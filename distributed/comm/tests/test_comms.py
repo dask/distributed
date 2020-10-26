@@ -1,5 +1,4 @@
 import asyncio
-from build.lib.distributed.comm.tcp import TCPConnector
 import os
 import sys
 import threading
@@ -24,7 +23,7 @@ from distributed.comm import (
     unparse_host_port,
 )
 from distributed.comm.registry import backends, get_backend
-from distributed.comm.tcp import TCP, TCPBackend
+from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
