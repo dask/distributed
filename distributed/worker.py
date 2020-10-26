@@ -126,6 +126,10 @@ class TaskState:
         The number of times a dependency has not been where we expected it
     * **startstops**: ``[{startstop}]``
         Log of transfer, load, and compute times for a task
+    * **start_time**: ``float``
+        Time at which task begins running
+    * **stop_time**: ``float``
+        Time at which task finishes running
 
     Parameters
     ----------
@@ -156,6 +160,8 @@ class TaskState:
         self.type = None
         self.suspicious_count = 0
         self.startstops = list()
+        self.start_time = None
+        self.stop_time = None
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -763,6 +769,7 @@ class Worker(ServerNode):
         return self.local_directory
 
     async def get_metrics(self):
+        now = time()
         core = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
@@ -772,6 +779,10 @@ class Worker(ServerNode):
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
+            },
+            active_durations={
+                key: now - self.tasks[key].start_time
+                for key in self.active_threads.values()
             },
         )
         custom = {}
@@ -2305,11 +2316,13 @@ class Worker(ServerNode):
         pc = PeriodicCallback(
             lambda: logger.debug("future state: %s - %s", key, future._state), 1000
         )
+        self.tasks[key].start_time = time()
         pc.start()
         try:
             yield future
         finally:
             pc.stop()
+            self.tasks[key].stop_time = time()
 
         result = future.result()
 
