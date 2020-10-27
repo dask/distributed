@@ -126,6 +126,9 @@ class TaskState:
         The number of times a dependency has not been where we expected it
     * **startstops**: ``[{startstop}]``
         Log of transfer, load, and compute times for a task
+    * **metadata**: ``dict``
+        Metadata related to task. Stored metadata should be msgpack
+        serializable (e.g. int, string, list, dict).
 
     Parameters
     ----------
@@ -156,6 +159,7 @@ class TaskState:
         self.type = None
         self.suspicious_count = 0
         self.startstops = list()
+        self.metadata = {}
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -1886,6 +1890,7 @@ class Worker(ServerNode):
                 "thread": self.threads.get(ts.key),
                 "type": typ_serialized,
                 "typename": typename(typ),
+                "metadata": ts.metadata,
             }
         elif ts.exception is not None:
             d = {
