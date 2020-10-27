@@ -1677,6 +1677,24 @@ async def test_update_latency(cleanup):
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_active_durations(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                ws = s.workers[w.address]
+                # Initially there are no active tasks
+                assert not ws.metrics["active_durations"]
+                # Submit a task and ensure the worker's heartbeat includes the task
+                # in it's active_durations
+                f = c.submit(slowinc, 1)
+                while not w.executing_count:
+                    await asyncio.sleep(0.001)
+                await w.heartbeat()
+                assert f.key in ws.metrics["active_durations"]
+                await f
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("reconnect", [True, False])
 async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
     with captured_logger("distributed.worker", level=logging.WARNING) as logger:
