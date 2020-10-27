@@ -2191,7 +2191,13 @@ class Worker(ServerNode):
             raise
 
     def steal_request(self, key):
-        state = self.tasks[key].state
+        # There may be a race condition between stealing and releasing a task.
+        # In this case the self.tasks is already cleared. The `None` will be
+        # registered as `already-computing` on the other end
+        if key in self.tasks:
+            state = self.tasks[key].state
+        else:
+            state = None
 
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
