@@ -84,6 +84,7 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.highlevelgraph import loads_highlevelgraph
 
 if sys.version_info < (3, 8):
     try:
@@ -1835,11 +1836,12 @@ class Scheduler(ServerNode):
         actors=None,
         fifo_timeout=0,
     ):
-        # print(f"update_graph_hlg() - hlg: {hlg}")
+
+        dsk, dependencies = loads_highlevelgraph(hlg)
 
         return self.update_graph(
             client,
-            dict(hlg),
+            dsk,
             keys,
             dependencies,
             restrictions,
