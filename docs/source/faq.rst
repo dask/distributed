@@ -41,10 +41,21 @@ in-place, include:
 
 .. _conda-pack: https://conda.github.io/conda-pack/
 
+Temporary installations
+```````````````````````
+The worker plugin ``distributed.diagnostics.plugin.PipInstall`` allows you to
+run pip installation commands on your workers, and optionally have them restart
+upon success. Please read the plugin documentation to see how to use this.
+
+
 Send Source
 ```````````
 
-Use ``client.upload_file``. For more detail, see the `API docs`_ and a
+Particularly during development, you may want to send files directly to workers
+that are already running.
+
+You should use ``client.upload_file`` in these cases.
+For more detail, see the `API docs`_ and a
 StackOverflow question
 `"Can I use functions imported from .py files in Dask/Distributed?"`__
 This function supports both standalone file and setuptools's ``.egg`` files
