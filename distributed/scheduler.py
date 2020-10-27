@@ -1313,6 +1313,7 @@ class Scheduler(ServerNode):
 
         client_handlers = {
             "update-graph": self.update_graph,
+            "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -1817,6 +1818,40 @@ class Scheduler(ServerNode):
             if comm:
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
+
+    def update_graph_hlg(
+        self,
+        client=None,
+        hlg=None,
+        keys=None,
+        dependencies=None,
+        restrictions=None,
+        priority=None,
+        loose_restrictions=None,
+        resources=None,
+        submitting_task=None,
+        retries=None,
+        user_priority=0,
+        actors=None,
+        fifo_timeout=0,
+    ):
+        # print(f"update_graph_hlg() - hlg: {hlg}")
+
+        return self.update_graph(
+            client,
+            dict(hlg),
+            keys,
+            dependencies,
+            restrictions,
+            priority,
+            loose_restrictions,
+            resources,
+            submitting_task,
+            retries,
+            user_priority,
+            actors,
+            fifo_timeout,
+        )
 
     def update_graph(
         self,
