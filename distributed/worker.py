@@ -2316,13 +2316,16 @@ class Worker(ServerNode):
         pc = PeriodicCallback(
             lambda: logger.debug("future state: %s - %s", key, future._state), 1000
         )
-        self.tasks[key].start_time = time()
+        ts = self.tasks.get(key)
+        if ts is not None:
+            ts.start_time = time()
         pc.start()
         try:
             yield future
         finally:
             pc.stop()
-            self.tasks[key].stop_time = time()
+            if ts is not None:
+                ts.stop_time = time()
 
         result = future.result()
 
