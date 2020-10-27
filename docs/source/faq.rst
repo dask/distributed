@@ -6,6 +6,44 @@ More questions can be found on StackOverflow at http://stackoverflow.com/search?
 How do I use external modules?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Most functions you will run on your cluster will require imports. This
+is even true for passing any object which is not a python builtin -
+the pickle serialisation method will save references to imported modules
+rather than trying to send all of your source code.
+
+You therefore must ensure that workers have access to all of the modules
+you will need, and ideally with exactly the same versions.
+
+Maintain consistent environments
+````````````````````````````````
+
+If you manage your environments yourself, then setting up module consistency
+can be as simple as creating environments from the same pip or conda specification
+on each machine. You should consult the documentation for ``pip``, ``pipenv``
+and ``conda``, whichever you normally use. You will normally want to be as specific
+about package versions as possible, and distribute the same environment file to
+workers before installation.
+
+However, other common ways to distribute an environment directly, rather than build it
+in-place, include:
+
+- docker images, where the environment has been built into the image; this is the
+  normal route when you are running on infrastructure enabled by docker, such as
+  kubernetes
+- `conda-pack`_ is a tool for bundling existing conda environments, so they can be
+  relocated to other machines. This tool was specifically created for dask on YARN/hadoop
+  clusters, but could be used elsewhere
+- shared filesystem, e.g., NFS, that can be seen by all machines. Note that importing
+  python modules is fairly IO intensive, so your server needs to be able to handle
+  many requests
+- cluster install method (parcels...): depending on your infrastructure, there may be
+  ways to install specific binaries to all workers in a cluster.
+
+.. _conda-pack: https://conda.github.io/conda-pack/
+
+Send Source
+```````````
+
 Use ``client.upload_file``. For more detail, see the `API docs`_ and a
 StackOverflow question
 `"Can I use functions imported from .py files in Dask/Distributed?"`__
