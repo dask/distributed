@@ -593,6 +593,10 @@ class TaskState:
            into the "processing" state and be sent for execution to another
            connected worker.
 
+        .. attribute: metadata: dict
+
+           Metadata related to task.
+
         .. attribute: actor: bool
 
            Whether or not this task is an Actor.
@@ -646,6 +650,7 @@ class TaskState:
         "type",
         "group_key",
         "group",
+        "metadata",
     )
 
     def __init__(self, key, run_spec):
@@ -672,6 +677,7 @@ class TaskState:
         self.type = None
         self.group_key = key_split_group(key)
         self.group = None
+        self.metadata = {}
 
     @property
     def state(self) -> str:
@@ -2084,6 +2090,7 @@ class Scheduler(ServerNode):
         if ts is None:
             return {}
         ws = self.workers[worker]
+        ts.metadata.update(kwargs["metadata"])
 
         if ts.state == "processing":
             recommendations = self.transition(key, "memory", worker=worker, **kwargs)

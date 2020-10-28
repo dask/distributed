@@ -27,7 +27,7 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.diagnostics.plugin import PipInstall
+from distributed.diagnostics.plugin import PipInstall, WorkerPlugin
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -1714,3 +1714,36 @@ async def test_bad_local_directory(cleanup):
                 assert False
 
         assert not any("error" in log for log in s.get_logs())
+
+
+@pytest.mark.asyncio
+async def test_taskstate_metadata(cleanup):
+    class MyPlugin(WorkerPlugin):
+        """WorkPlugin to populate TaskState.metadata"""
+
+        def setup(self, worker):
+            self.worker = worker
+
+        def transition(self, key, start, finish, **kwargs):
+            ts = self.worker.tasks[key]
+
+            if start == "ready" and finish == "executing":
+                ts.metadata["start_time"] = time()
+            elif start == "executing" and finish == "memory":
+                ts.metadata["stop_time"] = time()
+
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.register_worker_plugin(MyPlugin())
+
+                f = c.submit(inc, 1)
+                await f
+
+                ts = w.tasks[f.key]
+                assert "start_time" in ts.metadata
+                assert "stop_time" in ts.metadata
+                assert ts.metadata["stop_time"] > ts.metadata["start_time"]
+
+                # Check that Scheduler TaskState.metadata was also updated
+                assert s.tasks[f.key].metadata == ts.metadata
