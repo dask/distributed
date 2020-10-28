@@ -104,9 +104,12 @@ class WorkerPlugin:
     the plugin to your client in order to have it attached to every existing and
     future workers with ``Client.register_worker_plugin``.
 
+    Note: Do not inherit from this class. Just use it as a specification and implement
+    the methods that you need.
+
     Examples
     --------
-    >>> class ErrorLogger(WorkerPlugin):
+    >>> class ErrorLogger:
     ...     def __init__(self, logger):
     ...         self.logger = logger
     ...
