@@ -185,7 +185,7 @@ class WorkerPlugin:
         """
 
 
-class PipInstall(WorkerPlugin):
+class PipInstall:
     """A Worker Plugin to pip install a set of packages
 
     This accepts a set of packages to install on all workers.
