@@ -215,7 +215,7 @@ async def test_tcp_specific():
         await comm.write(msg)
         await comm.close()
 
-    listener = await tcp.TCPListener("localhost", handle_comm)
+    listener = await tcp.TCPListener("127.0.0.1", handle_comm)
     host, port = listener.get_host_port()
     assert host in ("localhost", "127.0.0.1", "::1")
     assert port > 0
@@ -261,7 +261,7 @@ async def test_tls_specific():
     server_ctx = get_server_ssl_context()
     client_ctx = get_client_ssl_context()
 
-    listener = await tcp.TLSListener("localhost", handle_comm, ssl_context=server_ctx)
+    listener = await tcp.TLSListener("127.0.0.1", handle_comm, ssl_context=server_ctx)
     host, port = listener.get_host_port()
     assert host in ("localhost", "127.0.0.1", "::1")
     assert port > 0
@@ -821,17 +821,18 @@ async def test_retry_connect(monkeypatch):
                 raise IOError()
 
     class UnreliableBackend(TCPBackend):
-        """Don't try this at home"""
-
         _connector_class = UnreliableConnector
 
     monkeypatch.setitem(backends, "tcp", UnreliableBackend())
 
     listener = await listen("tcp://127.0.0.1:1234", echo)
-    comm = await connect(listener.contact_address)
-    await comm.write(b"test")
-    msg = await comm.read()
-    assert msg == b"test"
+    try:
+        comm = await connect(listener.contact_address)
+        await comm.write(b"test")
+        msg = await comm.read()
+        assert msg == b"test"
+    finally:
+        listener.stop()
 
 
 @pytest.mark.asyncio
@@ -854,31 +855,32 @@ async def test_handshake_slow_comm(monkeypatch):
         comm_class = SlowComm
 
     class SlowBackend(TCPBackend):
-        """Don't try this at home"""
-
         _connector_class = SlowConnector
 
     monkeypatch.setitem(backends, "tcp", SlowBackend())
 
     listener = await listen("tcp://127.0.0.1:1234", echo)
-    comm = await connect(listener.contact_address)
-    await comm.write(b"test")
-    msg = await comm.read()
-    assert msg == b"test"
+    try:
+        comm = await connect(listener.contact_address)
+        await comm.write(b"test")
+        msg = await comm.read()
+        assert msg == b"test"
 
-    import dask
+        import dask
 
-    with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        with pytest.raises(
-            TimeoutError, match="Timed out during handshake while connecting to"
-        ):
-            await connect(listener.contact_address)
+        with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
+            with pytest.raises(
+                IOError, match="Timed out during handshake while connecting to"
+            ):
+                await connect(listener.contact_address)
+    finally:
+        listener.stop()
 
 
 async def check_connect_timeout(addr):
     t1 = time()
     with pytest.raises(IOError):
-        await connect(addr, timeout=0.3)
+        await connect(addr, timeout=0.15)
     dt = time() - t1
     assert 1 >= dt >= 0.1
 

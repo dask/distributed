@@ -262,38 +262,40 @@ async def connect(
     comm = None
 
     start = time()
-    deadline = start + timeout
+
+    def time_left():
+        deadline = start + timeout
+        return max(0, deadline - time())
 
     backoff_base = 0.01
     attempt = 0
 
     # Prefer multiple small attempts than one long attempt.
     intermediate_cap = timeout / 5
-    while True:
+    active_exception = None
+    while time_left() > 0:
         try:
             comm = await asyncio.wait_for(
                 connector.connect(loc, deserialize=deserialize, **connection_args),
-                timeout=min(intermediate_cap, deadline - time()),
+                timeout=min(intermediate_cap, time_left()),
             )
             break
         except FatalCommClosedError:
             raise
         # CommClosed, EnvironmentError inherit from OSError
         except (TimeoutError, OSError) as exc:
+            active_exception = exc
+            # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 
-            if time() < deadline:
-                # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
-                backoff = random.uniform(0, backoff_base * 2 ** attempt)
-                # If there is no more time left, just raise the exception
-                if backoff > deadline - time():
-                    raise IOError(
-                        f"Timed out trying to connect to {addr} after {timeout} s"
-                    ) from exc
-                attempt += 1
-                logger.debug(
-                    "Could not connect, waiting for %s before retrying", backoff
-                )
-                await asyncio.sleep(backoff)
+            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            backoff = random.uniform(0, upper_cap)
+            attempt += 1
+            logger.debug("Could not connect, waiting for %s before retrying", backoff)
+            await asyncio.sleep(backoff)
+    else:
+        raise IOError(
+            f"Timed out trying to connect to {addr} after {timeout} s"
+        ) from active_exception
 
     local_info = {
         **comm.handshake_info(),
@@ -302,10 +304,11 @@ async def connect(
     try:
         # This would be better, but connections leak if worker is closed quickly
         # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
-        handshake = await asyncio.wait_for(comm.read(), deadline - time())
-        await asyncio.wait_for(comm.write(local_info), deadline - time())
+        handshake = await asyncio.wait_for(comm.read(), time_left())
+        await asyncio.wait_for(comm.write(local_info), time_left())
     except Exception as exc:
-        comm.abort()
+        with suppress(Exception):
+            await comm.close()
         raise IOError(
             f"Timed out during handshake while connecting to {addr} after {timeout} s"
         ) from exc
