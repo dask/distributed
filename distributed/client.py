@@ -4223,6 +4223,9 @@ class Client:
         --------
         distributed.WorkerPlugin
         """
+        if isinstance(plugin, type):
+            raise ValueError("Plugin should be an instantiated object.")
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 

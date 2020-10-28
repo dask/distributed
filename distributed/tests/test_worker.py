@@ -1628,6 +1628,11 @@ async def test_pip_install(c, s, a, b):
         ) as p2:
             p1.communicate.return_value = b"", b""
             p1.wait.return_value = 0
+
+            # if plugin class isn't instantiated, fail early
+            with pytest.raises(ValueError, "instantiated"):
+                await c.register_worker_plugin(PipInstall)
+
             await c.register_worker_plugin(
                 PipInstall(packages=["requests"], pip_options=["--upgrade"])
             )
