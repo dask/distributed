@@ -2107,7 +2107,7 @@ class Worker(ServerNode):
 
     def bad_dep(self, dep):
         exc = ValueError(
-            "Could not find dependent %s.  Check worker logs" % str(dep.ts)
+            "Could not find dependent %s.  Check worker logs" % str(dep.key)
         )
         for ts in dep.dependents:
             msg = error_message(exc)
@@ -2159,7 +2159,7 @@ class Worker(ServerNode):
             retries = kwargs.get("retries", 5)
             self.log.append(("handle-missing-failed", retries, deps))
             if retries > 0:
-                await self.handle_missing_dep(self, *deps, retries=retries - 1)
+                await self.handle_missing_dep(*deps, retries=retries - 1)
             else:
                 raise
         finally:
