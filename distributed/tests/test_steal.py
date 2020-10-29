@@ -1,5 +1,6 @@
 import asyncio
 import itertools
+import logging
 import random
 import sys
 import weakref
@@ -676,6 +677,30 @@ async def test_dont_steal_executing_tasks(c, s, a, b):
     await asyncio.sleep(0.1)
     assert a.tasks[future.key].state == "executing"
     assert not b.executing_count
+
+
+@gen_cluster(client=True)
+async def test_dont_steal_already_released(c, s, a, b):
+    future = c.submit(slowinc, 1, delay=0.05, workers=a.address)
+    key = future.key
+    await asyncio.sleep(0.05)
+    assert key in a.tasks
+    del future
+    await asyncio.sleep(0.05)
+    # In case the system is slow (e.g. network) ensure that nothing bad happens
+    # if the key was already released
+    assert key not in a.tasks
+    a.steal_request(key)
+    assert a.batched_stream.buffer == [
+        {"op": "steal-response", "key": key, "state": None}
+    ]
+    with captured_logger(
+        logging.getLogger("distributed.stealing"), level=logging.DEBUG
+    ) as stealing_logs:
+        await asyncio.sleep(0.05)
+
+    logs = stealing_logs.getvalue()
+    assert f"Key released between request and confirm: {key}" in logs
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)

@@ -2607,7 +2607,21 @@ class Client:
                 unpacked_futures.update(futures)
                 return tasks
 
-            dsk = dsk.map_tasks(unpack_remote_data)
+            # HACK: Need to loop through each layer manually to collect
+            # futures-related dependencies (for now).  This should be removed
+            # once the scheduler doesn't need these dependencies.
+            _dsk = {}
+            future_deps = defaultdict(set)
+            for key, layer in dsk.layers.items():
+                _dsk[key] = layer.map_tasks(unpack_remote_data)
+                # Here is the "manual" loop where the full graph
+                # needs to be materialized.
+                if unpacked_futures:
+                    for k, v in dict(layer).items():
+                        futures = unpack_remotedata(v)[1]
+                        future_deps[k].update({f.key for f in futures})
+            if _dsk:
+                dsk = HighLevelGraph(_dsk, dsk.dependencies, dsk.key_dependencies)
 
             for future in unpacked_futures:
                 if future.client is not self:
@@ -2618,12 +2632,14 @@ class Client:
 
             # HACK: currently when submitting work to the scheduler, the client need to
             # send all key dependencies along with the task graph. Since `dsk` doesn't
-            # know about the unpacked futures, we add them manually to `dsk` before
-            # calculating dependencies. This hack shouldn't be necessary when the
-            # scheduler accepts high level graphs.
+            # know about the unpacked futures, we add futures-related dependencies from
+            # `future_deps`. This hack shouldn't be necessary when the scheduler accepts
+            # high level graphs.
             dsk.keyset()
-            dsk._keys.update({f.key for f in unpacked_futures})
             dependencies = dsk.get_all_dependencies()
+            if future_deps:
+                for key in dependencies.keys():
+                    dependencies[key] |= future_deps.get(key, set())
 
             if priority is None:
                 # Removing all unpacked futures before calling order()

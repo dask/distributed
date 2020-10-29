@@ -142,7 +142,7 @@ class WorkStealing(SchedulerPlugin):
     def move_task_request(self, ts, victim, thief):
         try:
             if self.scheduler.validate:
-                if victim is not ts.processing_on:
+                if victim is not ts.processing_on and LOG_PDB:
                     import pdb
 
                     pdb.set_trace()

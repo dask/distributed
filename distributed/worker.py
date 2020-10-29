@@ -130,6 +130,9 @@ class TaskState:
         Time at which task begins running
     * **stop_time**: ``float``
         Time at which task finishes running
+    * **metadata**: ``dict``
+        Metadata related to task. Stored metadata should be msgpack
+        serializable (e.g. int, string, list, dict).
 
     Parameters
     ----------
@@ -162,6 +165,7 @@ class TaskState:
         self.startstops = list()
         self.start_time = None
         self.stop_time = None
+        self.metadata = {}
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -1896,6 +1900,7 @@ class Worker(ServerNode):
                 "thread": self.threads.get(ts.key),
                 "type": typ_serialized,
                 "typename": typename(typ),
+                "metadata": ts.metadata,
             }
         elif ts.exception is not None:
             d = {
@@ -2201,7 +2206,13 @@ class Worker(ServerNode):
             raise
 
     def steal_request(self, key):
-        state = self.tasks[key].state
+        # There may be a race condition between stealing and releasing a task.
+        # In this case the self.tasks is already cleared. The `None` will be
+        # registered as `already-computing` on the other end
+        if key in self.tasks:
+            state = self.tasks[key].state
+        else:
+            state = None
 
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
