@@ -1677,19 +1677,19 @@ async def test_update_latency(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_active_durations(cleanup):
+async def test_heartbeat_executing(cleanup):
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
                 ws = s.workers[w.address]
                 # Initially there are no active tasks
-                assert not ws.metrics["active_durations"]
+                assert not ws.metrics["executing"]
                 # Submit a task and ensure the worker's heartbeat includes the task
-                # in it's active_durations
+                # in it's executing
                 f = c.submit(slowinc, 1, delay=1)
-                while not ws.metrics["active_durations"]:
+                while not ws.metrics["executing"]:
                     await w.heartbeat()
-                assert f.key in ws.metrics["active_durations"]
+                assert f.key in ws.metrics["executing"]
                 await f
 
 
