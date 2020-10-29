@@ -1686,10 +1686,9 @@ async def test_heartbeat_active_durations(cleanup):
                 assert not ws.metrics["active_durations"]
                 # Submit a task and ensure the worker's heartbeat includes the task
                 # in it's active_durations
-                f = c.submit(slowinc, 1)
-                while not w.executing_count:
-                    await asyncio.sleep(0.001)
-                await w.heartbeat()
+                f = c.submit(slowinc, 1, delay=1)
+                while not ws.metrics["active_durations"]:
+                    await w.heartbeat()
                 assert f.key in ws.metrics["active_durations"]
                 await f
 
