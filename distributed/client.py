@@ -2940,9 +2940,10 @@ class Client:
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
         # Let's append the finalize graph to dsk
-        layers = {f"finalize-{id(dsk2)}": dsk2}
+        finalize_name = tokenize(names)
+        layers = {finalize_name: dsk2}
         layers.update(dsk.layers)
-        dependencies = {f"finalize-{id(dsk2)}": set(dsk.layers.keys())}
+        dependencies = {finalize_name: set(dsk.layers.keys())}
         dependencies.update(dsk.dependencies)
         dsk = HighLevelGraph(layers, dependencies)
 
