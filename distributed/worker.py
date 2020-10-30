@@ -3122,7 +3122,7 @@ def get_client(address=None, timeout=None, resolve_address=True):
     """
 
     if timeout is None:
-        timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
 
     timeout = parse_timedelta(timeout, "s")
 
