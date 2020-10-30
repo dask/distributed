@@ -19,7 +19,8 @@ def worker_client(timeout=None, separate_thread=True):
     ----------
     timeout: Number or String
         Timeout after which to error out
-        Ex: worker_client(10) or worker_client("10s")
+        default: dash.config.get(distributed.comm.timeouts.connect)
+        Ex: get_client(timeout=10) or get_client(timeout="10s")
     separate_thread: bool, optional
         Whether to run this function outside of the normal thread pool
         defaults to True
@@ -42,10 +43,8 @@ def worker_client(timeout=None, separate_thread=True):
     secede
     """
 
-    # Get timeout value from dash config if not passed.
-    # Defaults to 3s if the config is not set.
     if timeout is None:
-        timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
 
     timeout = parse_timedelta(timeout, "s")
 
