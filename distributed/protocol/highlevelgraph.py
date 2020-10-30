@@ -4,7 +4,7 @@ from tlz import valmap
 from dask.blockwise import Blockwise
 from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph, Layer
-from dask.dataframe.shuffle import SimpleShuffleLayer
+from dask.dataframe.shuffle import SimpleShuffleLayer, ShuffleLayer
 
 from ..utils import (
     str_graph,
@@ -59,26 +59,44 @@ def _dump_materialized_layer(
 
 
 def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
-
     layers = []
-    for layer in hlg.layers.values():
-        if isinstance(layer, Blockwise) and False:  # TODO: implement
+
+    # Dump each layer (in topological order)
+    for layer in (hlg.layers[name] for name in hlg._toposort_layers()):
+        if isinstance(layer, Blockwise):  # TODO: implement
             pass
-        elif isinstance(layer, SimpleShuffleLayer) and False:  # TODO: implement
-            pass
-        else:
-            layers.append(
-                {
-                    "layer-type": "BasicLayer",
-                    "data": _dump_materialized_layer(
-                        layer,
-                        hlg.keyset(),
-                        hlg.key_dependencies,
-                        allowed_client,
-                        allows_futures,
-                    ),
-                }
-            )
+        elif isinstance(layer, SimpleShuffleLayer) and not hasattr(
+            layer, "_cached_dict"
+        ):  # Not materialized
+            attrs = [
+                "name",
+                "column",
+                "npartitions",
+                "npartitions_input",
+                "ignore_index",
+                "name_input",
+            ]
+            data = {attr: getattr(layer, attr) for attr in attrs}
+            data["parts_out"] = list(layer.parts_out)
+            data["meta_input"] = layer.meta_input.to_json()
+            data["layer-type"] = "SimpleShuffleLayer"
+            data["simple"] = False if isinstance(layer, ShuffleLayer) else True
+            layers.append(data)
+            continue
+
+        # Falling back to the default serialization, which will materialize the layer
+        layers.append(
+            {
+                "layer-type": "BasicLayer",
+                "data": _dump_materialized_layer(
+                    layer,
+                    hlg.get_all_external_keys(),
+                    hlg.key_dependencies,
+                    allowed_client,
+                    allows_futures,
+                ),
+            }
+        )
 
     return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
 
@@ -88,18 +106,44 @@ def _load_materialized_layer(layer):
 
 
 def loads_highlevelgraph(dumped_hlg):
+    from distributed.worker import dumps_task
+
+    # Notice, we set `use_list=True` to prevent msgpack converting lists to tuples
     hlg = msgpack.loads(
-        dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+        dumped_hlg, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
     )
     dsk = {}
     deps = {}
     for layer in hlg["layers"]:
-        layer_type = layer["layer-type"]
+        layer_type = layer.pop("layer-type")
         if layer_type == "BasicLayer":
             d1, d2 = _load_materialized_layer(layer["data"])
             dsk.update(d1)
             for k, v in d2.items():
                 deps[k] = list(set(deps.get(k, ())) | set(v))
+        elif layer_type == "SimpleShuffleLayer":
+            import pandas
+
+            layer["meta_input"] = pandas.read_json(layer["meta_input"])
+            if layer.pop("simple"):
+                obj = SimpleShuffleLayer(**layer)
+            else:
+                obj = ShuffleLayer(**layer)
+
+            input_keys = set()
+            for v in obj._cull_dependencies(
+                [(layer["name"], i) for i in range(layer["npartitions_input"])]
+            ).values():
+                input_keys.update(v)
+
+            raw = dict(obj)
+            raw = str_graph(raw, extra_values=input_keys)
+            dsk.update(valmap(dumps_task, raw))
+
+            # TODO: use shuffle-knowledge to calculate dependencies more efficiently
+            deps.update(
+                {k: keys_in_tasks(dsk, [v], as_list=True) for k, v in raw.items()}
+            )
         else:
             assert False
     return dsk, deps
