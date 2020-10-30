@@ -2936,8 +2936,19 @@ class Client:
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
+        if not isinstance(dsk, HighLevelGraph):
+            dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
+
+        # Let's append the finalize graph to dsk
+        finalize_name = tokenize(names)
+        layers = {finalize_name: dsk2}
+        layers.update(dsk.layers)
+        dependencies = {finalize_name: set(dsk.layers.keys())}
+        dependencies.update(dsk.dependencies)
+        dsk = HighLevelGraph(layers, dependencies)
+
         futures_dict = self._graph_to_futures(
-            merge(dsk2, dsk),
+            dsk,
             names,
             restrictions,
             loose_restrictions,
