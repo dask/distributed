@@ -1464,7 +1464,9 @@ class Worker(ServerNode):
                 assert workers
                 if dependency not in self.tasks:
                     self.tasks[dependency] = dep_ts = TaskState(key=dependency)
-                    dep_ts.state = "waiting"
+                    dep_ts.state = (
+                        "waiting" if dependency not in self.data else "memory"
+                    )
 
                 dep_ts = self.tasks[dependency]
                 self.log.append((dependency, "new-dep", dep_ts.state))
