@@ -76,6 +76,15 @@ def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
                 "ignore_index",
                 "name_input",
             ]
+            if isinstance(layer, ShuffleLayer):
+                attrs += [
+                    "inputs",
+                    "stage",
+                    "nsplits",
+                    "meta_input",
+                    "parts_out",
+                ]
+
             data = {attr: getattr(layer, attr) for attr in attrs}
             data["parts_out"] = list(layer.parts_out)
             data["meta_input"] = layer.meta_input.to_json()
@@ -128,6 +137,7 @@ def loads_highlevelgraph(dumped_hlg):
             if layer.pop("simple"):
                 obj = SimpleShuffleLayer(**layer)
             else:
+                layer["inputs"] = [tuple(k) for k in layer["inputs"]]
                 obj = ShuffleLayer(**layer)
 
             input_keys = set()
