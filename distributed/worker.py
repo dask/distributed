@@ -2997,7 +2997,7 @@ class Worker(ServerNode):
         # Get timeout value from dash config if not passed.
         # Defaults to 3s if the config is not set.
         if timeout is None:
-            timeout = dask.config.get("distributed.comm.timeouts.connect", "3s")
+            timeout = dask.config.get("distributed.comm.timeouts.connect")
 
         timeout = parse_timedelta(timeout, "s")
 
