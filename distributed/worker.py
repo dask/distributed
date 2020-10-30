@@ -105,8 +105,7 @@ class TaskState:
         The priority this task given by the scheduler.  Determines run order.
     * **state**: ``str``
         The current state of the task. One of ["waiting", "ready", "executing",
-        "memory", "flight", "executing", "error", "long-running",
-        "rescheduled", "error"]
+        "memory", "flight", "long-running", "rescheduled", "error"]
     * **who_has**: ``set(worker)``
         Workers that we believe have this data
     * **coming_from**: ``str``
@@ -1425,6 +1424,8 @@ class Worker(ServerNode):
                 if ts.state == "erred":
                     ts.exception = None
                     ts.traceback = None
+                else:
+                    ts.state = "waiting"
             else:
                 self.log.append((key, "new"))
                 self.tasks[key] = ts = TaskState(
@@ -1443,7 +1444,6 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
-            ts.state = "waiting"
 
             if nbytes is not None:
                 self.nbytes.update(nbytes)

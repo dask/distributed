@@ -1571,7 +1571,7 @@ async def test_close_gracefully(c, s, a, b):
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
     for ts in proc:
-        assert ts.state in ("processing", "memory")
+        assert ts.state in ("executing", "memory")
 
 
 @pytest.mark.slow
