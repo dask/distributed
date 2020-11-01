@@ -41,7 +41,7 @@
           {% end %}
           <tr>
               <th> Priority </th>
-              <td>{{ts.priority}}</td>
+              <td>{{(-ts.priority[0],*ts.priority[1:])}}</td>
           </tr>
           {% for attr in ['has_lost_dependencies', 'host_restrictions', 'worker_restrictions', 'resource_restrictions', 'loose_restrictions', 'suspicious', 'retries', 'metadata'] %}
           {% if getattr(ts, attr) %}
