@@ -36,7 +36,7 @@
             {% for ts in sorted(ws.processing, key=lambda ts: ts.priority) %}
             <tr>
                 <td> <a href="../task/{{ url_escape(ts.key) }}.html">{{ts.key}}</a></td>
-                <td> {{ts.priority }} </td>
+                <td> {{(-ts.priority[0],*ts.priority[1:])}} </td>
             </tr>
             {% end %}
           </table>
