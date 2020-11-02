@@ -784,7 +784,8 @@ class Worker(ServerNode):
             },
             executing={
                 key: now - self.tasks[key].start_time
-                for key in self.active_threads.values()
+                for key in self.active_threads.values() 
+                if key in self.tasks
             },
         )
         custom = {}

@@ -4068,6 +4068,28 @@ class Scheduler(ServerNode):
 
         return worker
 
+    def set_duration_estimate(self, ts, ws):
+        """Estimate task duration using worker state and task state.
+
+        If a task takes longer than twice the current average duration we
+        estimate the task duration to be 2x current-runtime, otherwise we set it
+        to be the average duration.
+        """
+        # we might want to pull these vars from settings?
+        support_outliers = True
+        threshold = 2
+
+        duration = self.get_task_duration(ts)
+        comm = self.get_comm_cost(ts, ws)
+        new_duration = duration + comm
+        exec_time = -1
+        if 'executing' in ws.metrics and ts.key in ws.metrics['executing']:
+            exec_time = ws.metrics['executing'][ts.key]
+        if support_outliers and exec_time > threshold * duration:
+            new_duration = 2 * exec_time
+        ws.processing[ts] = new_duration 
+        return ws.processing[ts]
+
     def transition_waiting_processing(self, key):
         try:
             ts = self.tasks[key]
@@ -4086,13 +4108,10 @@ class Scheduler(ServerNode):
                 return {}
             worker = ws.address
 
-            duration = self.get_task_duration(ts)
-            comm = self.get_comm_cost(ts, ws)
-
-            ws.processing[ts] = duration + comm
+            duration_estimate = self.set_duration_estimate(ts, ws)
             ts.processing_on = ws
-            ws.occupancy += duration + comm
-            self.total_occupancy += duration + comm
+            ws.occupancy += duration_estimate
+            self.total_occupancy += duration_estimate
             ts.state = "processing"
             self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
@@ -5304,10 +5323,7 @@ class Scheduler(ServerNode):
         new = 0
         nbytes = 0
         for ts in ws.processing:
-            duration = self.get_task_duration(ts)
-            comm = self.get_comm_cost(ts, ws)
-            ws.processing[ts] = duration + comm
-            new += duration + comm
+            new += self.set_duration_estimate(ts, ws)
 
         ws.occupancy = new
         self.total_occupancy += new - old
@@ -5595,6 +5611,9 @@ def heartbeat_interval(n):
     else:
         # no more than 200 hearbeats a second scaled by workers
         return n / 200 + 1
+
+
+
 
 
 class KilledWorker(Exception):
