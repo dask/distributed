@@ -1,10 +1,8 @@
 import msgpack
 from tlz import valmap
 
-from dask.blockwise import Blockwise
 from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph, Layer
-from dask.dataframe.shuffle import SimpleShuffleLayer, ShuffleLayer
 
 from ..utils import (
     str_graph,
@@ -16,6 +14,7 @@ from .utils import (
     msgpack_opts,
 )
 from .serialize import (
+    import_allowed_module,
     msgpack_encode_default,
     msgpack_decode_default,
 )
@@ -63,41 +62,24 @@ def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
 
     # Dump each layer (in topological order)
     for layer in (hlg.layers[name] for name in hlg._toposort_layers()):
-        if isinstance(layer, Blockwise):  # TODO: implement
-            pass
-        elif isinstance(layer, SimpleShuffleLayer) and not hasattr(
-            layer, "_cached_dict"
-        ):  # Not materialized
-            attrs = [
-                "name",
-                "column",
-                "npartitions",
-                "npartitions_input",
-                "ignore_index",
-                "name_input",
-            ]
-            if isinstance(layer, ShuffleLayer):
-                attrs += [
-                    "inputs",
-                    "stage",
-                    "nsplits",
-                    "meta_input",
-                    "parts_out",
-                ]
-
-            data = {attr: getattr(layer, attr) for attr in attrs}
-            data["parts_out"] = list(layer.parts_out)
-            data["meta_input"] = layer.meta_input.to_json()
-            data["layer-type"] = "SimpleShuffleLayer"
-            data["simple"] = False if isinstance(layer, ShuffleLayer) else True
-            layers.append(data)
-            continue
+        if not layer.is_materialized():
+            state = layer.distributed_pack()
+            if state is not None:
+                layers.append(
+                    {
+                        "__module__": layer.__module__,
+                        "__name__": type(layer).__name__,
+                        "state": state,
+                    }
+                )
+                continue
 
         # Falling back to the default serialization, which will materialize the layer
         layers.append(
             {
-                "layer-type": "BasicLayer",
-                "data": _dump_materialized_layer(
+                "__module__": None,
+                "__name__": None,
+                "state": _dump_materialized_layer(
                     layer,
                     hlg.get_all_external_keys(),
                     hlg.key_dependencies,
@@ -110,13 +92,13 @@ def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
     return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
 
 
-def _load_materialized_layer(layer):
-    return layer["dsk"], layer["dependencies"]
+def _load_materialized_layer(state, dsk, dependencies):
+    dsk.update(state["dsk"])
+    for k, v in state["dependencies"].items():
+        dependencies[k] = list(set(dependencies.get(k, ())) | set(v))
 
 
 def loads_highlevelgraph(dumped_hlg):
-    from distributed.worker import dumps_task
-
     # Notice, we set `use_list=True` to prevent msgpack converting lists to tuples
     hlg = msgpack.loads(
         dumped_hlg, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
@@ -124,36 +106,10 @@ def loads_highlevelgraph(dumped_hlg):
     dsk = {}
     deps = {}
     for layer in hlg["layers"]:
-        layer_type = layer.pop("layer-type")
-        if layer_type == "BasicLayer":
-            d1, d2 = _load_materialized_layer(layer["data"])
-            dsk.update(d1)
-            for k, v in d2.items():
-                deps[k] = list(set(deps.get(k, ())) | set(v))
-        elif layer_type == "SimpleShuffleLayer":
-            import pandas
-
-            layer["meta_input"] = pandas.read_json(layer["meta_input"])
-            if layer.pop("simple"):
-                obj = SimpleShuffleLayer(**layer)
-            else:
-                layer["inputs"] = [tuple(k) for k in layer["inputs"]]
-                obj = ShuffleLayer(**layer)
-
-            input_keys = set()
-            for v in obj._cull_dependencies(
-                [(layer["name"], i) for i in range(layer["npartitions_input"])]
-            ).values():
-                input_keys.update(v)
-
-            raw = dict(obj)
-            raw = str_graph(raw, extra_values=input_keys)
-            dsk.update(valmap(dumps_task, raw))
-
-            # TODO: use shuffle-knowledge to calculate dependencies more efficiently
-            deps.update(
-                {k: keys_in_tasks(dsk, [v], as_list=True) for k, v in raw.items()}
-            )
+        if layer["__module__"] is None:  # Default implementation
+            unpack_func = _load_materialized_layer
         else:
-            assert False
+            mod = import_allowed_module(layer["__module__"])
+            unpack_func = getattr(mod, layer["__name__"]).distributed_unpack
+        unpack_func(layer["state"], dsk, deps)
     return dsk, deps
