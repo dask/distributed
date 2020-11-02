@@ -20,7 +20,7 @@ from .serialize import (
 )
 
 
-def _dump_materialized_layer(
+def _materialized_layer_pack(
     layer: Layer, all_keys, known_key_dependencies, allowed_client, allows_futures
 ):
     from distributed.utils_comm import unpack_remotedata
@@ -57,7 +57,7 @@ def _dump_materialized_layer(
     return {"dsk": dsk, "dependencies": dependencies}
 
 
-def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
+def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allows_futures):
     layers = []
 
     # Dump each layer (in topological order)
@@ -79,7 +79,7 @@ def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
             {
                 "__module__": None,
                 "__name__": None,
-                "state": _dump_materialized_layer(
+                "state": _materialized_layer_pack(
                     layer,
                     hlg.get_all_external_keys(),
                     hlg.key_dependencies,
@@ -92,13 +92,13 @@ def dumps_highlevelgraph(hlg: HighLevelGraph, allowed_client, allows_futures):
     return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
 
 
-def _load_materialized_layer(state, dsk, dependencies):
+def _materialized_layer_unpack(state, dsk, dependencies):
     dsk.update(state["dsk"])
     for k, v in state["dependencies"].items():
         dependencies[k] = list(set(dependencies.get(k, ())) | set(v))
 
 
-def loads_highlevelgraph(dumped_hlg):
+def highlevelgraph_unpack(dumped_hlg):
     # Notice, we set `use_list=True` to prevent msgpack converting lists to tuples
     hlg = msgpack.loads(
         dumped_hlg, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
@@ -107,7 +107,7 @@ def loads_highlevelgraph(dumped_hlg):
     deps = {}
     for layer in hlg["layers"]:
         if layer["__module__"] is None:  # Default implementation
-            unpack_func = _load_materialized_layer
+            unpack_func = _materialized_layer_unpack
         else:
             mod = import_allowed_module(layer["__module__"])
             unpack_func = getattr(mod, layer["__name__"]).distributed_unpack

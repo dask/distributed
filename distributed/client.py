@@ -63,7 +63,7 @@ from .core import (
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
-from .protocol.highlevelgraph import dumps_highlevelgraph
+from .protocol.highlevelgraph import highlevelgraph_pack
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
@@ -2597,7 +2597,7 @@ class Client:
             # Notice, we only have to do the substitution on already materialized layers
             dsk = dsk.map_basic_layers(substitute_future_aliases)
 
-            dsk = dumps_highlevelgraph(dsk, self, self.futures)
+            dsk = highlevelgraph_pack(dsk, self, self.futures)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
