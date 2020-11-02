@@ -1421,7 +1421,7 @@ def check_thread_leak():
             and "watch message" not in v.name
             and "TCP-Executor" not in v.name
         ]
-        if len(bad) < 100:
+        if not bad:
             break
         else:
             sleep(0.01)
