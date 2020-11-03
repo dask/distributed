@@ -99,9 +99,9 @@ def _materialized_layer_unpack(state, dsk, dependencies):
 
 
 def highlevelgraph_unpack(dumped_hlg):
-    # Notice, we set `use_list=True` to prevent msgpack converting lists to tuples
+    # Notice, we set `use_list=False`, which makes msgpack convert lists to tuples
     hlg = msgpack.loads(
-        dumped_hlg, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
+        dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
     )
     dsk = {}
     deps = {}

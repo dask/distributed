@@ -6,10 +6,7 @@ import msgpack
 import numpy as np
 import pytest
 from tlz import identity
-import pandas as pd
 
-import dask.array as da
-import dask.dataframe as dd
 from dask.utils_test import inc
 
 from distributed import wait
@@ -479,35 +476,3 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
-
-
-@gen_cluster(client=True)
-async def test_highlevelgraph(c, s, a, b):
-    """Check dumps/loads of a HLG that has everything!"""
-
-    def add(x, y, z, extra_arg):
-        return x + y + z + extra_arg
-
-    y = c.submit(lambda x: x, 2)
-    z = c.submit(lambda x: x, 3)
-    x = da.blockwise(
-        add,
-        "x",
-        da.zeros((3,), chunks=(1,)),
-        "x",
-        da.ones((3,), chunks=(1,)),
-        "x",
-        y,
-        None,
-        concatenate=False,
-        dtype=int,
-        extra_arg=z,
-    )
-
-    df = dd.from_pandas(pd.DataFrame({"a": np.arange(3)}), npartitions=3)
-    df = df.shuffle("a", shuffle="tasks")
-    df = df["a"].to_dask_array()
-
-    res = x.sum() + df.sum()
-    res = await c.compute(res, optimize_graph=False)
-    assert res == 21
