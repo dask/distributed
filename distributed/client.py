@@ -4838,7 +4838,7 @@ class performance_report:
 
 
 class get_task_metadata:
-    """Collect task metadata
+    """Collect task metadata within a context block
 
     This gathers ``TaskState`` metadata from the scheduler for tasks which
     are submitted and finished within the scope of this context manager.
@@ -4847,7 +4847,7 @@ class get_task_metadata:
     --------
     >>> with get_task_metadata() as tasks:
     ...     x.compute()
-    >>> tasks.metdata
+    >>> tasks.metadata
     {...}
     """
 
