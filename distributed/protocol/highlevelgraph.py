@@ -63,7 +63,7 @@ def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allows_futures):
     # Dump each layer (in topological order)
     for layer in (hlg.layers[name] for name in hlg._toposort_layers()):
         if not layer.is_materialized():
-            state = layer.distributed_pack()
+            state = layer.__dask_distributed_pack__()
             if state is not None:
                 layers.append(
                     {
@@ -110,6 +110,6 @@ def highlevelgraph_unpack(dumped_hlg):
             unpack_func = _materialized_layer_unpack
         else:
             mod = import_allowed_module(layer["__module__"])
-            unpack_func = getattr(mod, layer["__name__"]).distributed_unpack
+            unpack_func = getattr(mod, layer["__name__"]).__dask_distributed_unpack__
         unpack_func(layer["state"], dsk, deps)
     return dsk, deps
