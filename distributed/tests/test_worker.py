@@ -1571,7 +1571,7 @@ async def test_close_gracefully(c, s, a, b):
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
     for ts in proc:
-        assert ts.state in ("processing", "memory")
+        assert ts.state in ("executing", "memory")
 
 
 @pytest.mark.slow
@@ -1674,6 +1674,23 @@ async def test_update_latency(cleanup):
 
             if w.digests is not None:
                 assert w.digests["latency"].size() > 0
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_executing(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                ws = s.workers[w.address]
+                # Initially there are no active tasks
+                assert not ws.metrics["executing"]
+                # Submit a task and ensure the worker's heartbeat includes the task
+                # in it's executing
+                f = c.submit(slowinc, 1, delay=1)
+                while not ws.metrics["executing"]:
+                    await w.heartbeat()
+                assert f.key in ws.metrics["executing"]
+                await f
 
 
 @pytest.mark.asyncio

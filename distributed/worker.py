@@ -105,8 +105,7 @@ class TaskState:
         The priority this task given by the scheduler.  Determines run order.
     * **state**: ``str``
         The current state of the task. One of ["waiting", "ready", "executing",
-        "memory", "flight", "executing", "error", "long-running",
-        "rescheduled", "error"]
+        "memory", "flight", "long-running", "rescheduled", "error"]
     * **who_has**: ``set(worker)``
         Workers that we believe have this data
     * **coming_from**: ``str``
@@ -126,6 +125,10 @@ class TaskState:
         The number of times a dependency has not been where we expected it
     * **startstops**: ``[{startstop}]``
         Log of transfer, load, and compute times for a task
+    * **start_time**: ``float``
+        Time at which task begins running
+    * **stop_time**: ``float``
+        Time at which task finishes running
     * **metadata**: ``dict``
         Metadata related to task. Stored metadata should be msgpack
         serializable (e.g. int, string, list, dict).
@@ -159,6 +162,8 @@ class TaskState:
         self.type = None
         self.suspicious_count = 0
         self.startstops = list()
+        self.start_time = None
+        self.stop_time = None
         self.metadata = {}
 
     def __repr__(self):
@@ -767,8 +772,8 @@ class Worker(ServerNode):
         return self.local_directory
 
     async def get_metrics(self):
+        now = time()
         core = dict(
-            executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=self.in_flight_tasks,
@@ -776,6 +781,10 @@ class Worker(ServerNode):
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
+            },
+            executing={
+                key: now - self.tasks[key].start_time
+                for key in self.active_threads.values()
             },
         )
         custom = {}
@@ -1425,6 +1434,8 @@ class Worker(ServerNode):
                 if ts.state == "erred":
                     ts.exception = None
                     ts.traceback = None
+                else:
+                    ts.state = "waiting"
             else:
                 self.log.append((key, "new"))
                 self.tasks[key] = ts = TaskState(
@@ -1443,7 +1454,6 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
-            ts.state = "waiting"
 
             if nbytes is not None:
                 self.nbytes.update(nbytes)
@@ -2316,11 +2326,16 @@ class Worker(ServerNode):
         pc = PeriodicCallback(
             lambda: logger.debug("future state: %s - %s", key, future._state), 1000
         )
+        ts = self.tasks.get(key)
+        if ts is not None:
+            ts.start_time = time()
         pc.start()
         try:
             yield future
         finally:
             pc.stop()
+            if ts is not None:
+                ts.stop_time = time()
 
         result = future.result()
 
