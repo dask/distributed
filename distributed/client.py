@@ -4160,7 +4160,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None):
+    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4176,7 +4176,7 @@ class Client:
         cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  A a plugin with that name has
+        used then that will control idempotency.  If a plugin with that name has
         already registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
@@ -4189,6 +4189,9 @@ class Client:
         name: str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+        **kwargs: optional
+            If you do pass an class name as the plugin, it will be instantiated
+            with any extra keyword arguments.
 
         Examples
         --------
@@ -4224,7 +4227,7 @@ class Client:
         distributed.WorkerPlugin
         """
         if isinstance(plugin, type):
-            raise ValueError("Plugin should be an instantiated object.")
+            plugin = plugin(self, **kwargs)
 
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
