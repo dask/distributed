@@ -45,5 +45,4 @@ dependencies:
       - git+https://github.com/dask/zict
       - git+https://github.com/jcrist/crick.git
       - git+https://github.com/intake/filesystem_spec.git
-      - git+https://github.com/dask/s3fs.git
       - keras
