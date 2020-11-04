@@ -4227,7 +4227,7 @@ class Client:
         distributed.WorkerPlugin
         """
         if isinstance(plugin, type):
-            plugin = plugin(self, **kwargs)
+            plugin = plugin(**kwargs)
 
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
