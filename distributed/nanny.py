@@ -93,9 +93,11 @@ class Nanny(ServerNode):
         port=None,
         protocol=None,
         config=None,
+        log_file=None,
         **worker_kwargs,
     ):
-        self._setup_logging(logger)
+        self.log_file = log_file or dask.config.get("distributed.nanny.log-file")
+        self._setup_logging(logger, self.log_file)
         self.loop = loop or IOLoop.current()
 
         if isinstance(security, dict):
@@ -347,6 +349,7 @@ class Nanny(ServerNode):
                 preload_argv=self.preload_argv,
                 security=self.security,
                 contact_address=self.contact_address,
+                log_file=self.log_file,
             )
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(

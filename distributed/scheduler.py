@@ -1101,9 +1101,12 @@ class Scheduler(ServerNode):
         preload=None,
         preload_argv=(),
         plugins=(),
+        log_file=None,
         **kwargs,
     ):
-        self._setup_logging(logger)
+        if log_file is None:
+            log_file = dask.config.get("distributed.scheduler.log-file")
+        self._setup_logging(logger, log_file)
 
         # Attributes
         if allowed_failures is None:
