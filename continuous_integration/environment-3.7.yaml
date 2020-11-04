@@ -4,6 +4,7 @@ channels:
   - defaults
 dependencies:
   - python=3.7
+  - pip
   - asyncssh
   - bokeh
   - click
@@ -34,9 +35,7 @@ dependencies:
   - tornado=6
   - zstandard
   - pickle5>=0.0.11
-  - libunwind
   - numba
-  - stacktrace
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/joblib/joblib.git
