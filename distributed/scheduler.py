@@ -3876,7 +3876,7 @@ class Scheduler(ServerNode):
 
         plugin = plugins[0]
         self.remove_plugin(plugin)
-        return plugin.metadata
+        return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
@@ -5667,6 +5667,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
         self.name = name
         self.keys = set()
         self.metadata = {}
+        self.state = {}
 
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         self.keys.update(keys)
@@ -5676,4 +5677,5 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
             ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.key in self.keys:
                 self.metadata[key] = ts.metadata
+                self.state[key] = finish
                 self.keys.discard(key)

@@ -6214,9 +6214,12 @@ async def test_get_task_metadata(c, s, a, b):
         await f
 
     metadata = tasks.metadata
-    assert metadata
     assert f.key in metadata
     assert metadata[f.key] == s.tasks.get(f.key).metadata
+
+    state = tasks.state
+    assert f.key in state
+    assert state[f.key] == "memory"
 
     assert not any(isinstance(p, CollectTaskMetaDataPlugin) for p in s.plugins)
 

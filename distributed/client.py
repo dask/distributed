@@ -4840,8 +4840,9 @@ class performance_report:
 class get_task_metadata:
     """Collect task metadata within a context block
 
-    This gathers ``TaskState`` metadata from the scheduler for tasks which
-    are submitted and finished within the scope of this context manager.
+    This gathers ``TaskState`` metadata and final state from the scheduler
+    for tasks which are submitted and finished within the scope of this
+    context manager.
 
     Examples
     --------
@@ -4849,19 +4850,24 @@ class get_task_metadata:
     ...     x.compute()
     >>> tasks.metadata
     {...}
+    >>> tasks.state
+    {...}
     """
 
     def __init__(self):
         self.name = f"task-metadata-{uuid.uuid4().hex}"
         self.keys = set()
         self.metadata = None
+        self.state = None
 
     async def __aenter__(self):
         await get_client().scheduler.start_task_metadata(name=self.name)
         return self
 
     async def __aexit__(self, typ, value, traceback):
-        self.metadata = await get_client().scheduler.stop_task_metadata(name=self.name)
+        response = await get_client().scheduler.stop_task_metadata(name=self.name)
+        self.metadata = response["metadata"]
+        self.state = response["state"]
 
     def __enter__(self):
         return get_client().sync(self.__aenter__)
