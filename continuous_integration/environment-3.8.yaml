@@ -1,34 +1,45 @@
 name: dask-distributed
 channels:
+  - pytorch
   - conda-forge
   - defaults
 dependencies:
-  - zstandard
-  - bokeh!=2.0.0
+  - python=3.8
+  - asyncssh
+  - bokeh
   - click
-  - cloudpickle
+  - coverage
   - dask
-  - lz4
+  - flake8
+  - h5py
   - ipykernel
   - ipywidgets
   - joblib
   - jupyter_client
   - msgpack-python>=0.6.0
+  - netcdf4
+  - paramiko
   - prometheus_client
   - psutil
-  - pytest
+  - pytest>=4
   - pytest-asyncio<0.14.0
+  - pytest-faulthandler
   - pytest-repeat
   - pytest-timeout
-  - pytest-faulthandler
   - requests
+  - scikit-learn
+  - scipy
   - sortedcollections
+  - tblib>=1.5.0
   - toolz
-  - tblib
-  - zict
-  - fsspec
-  - pip
+  - tornado=6
+  - zstandard
+  - pytorch
+  - torchvision
   - pip:
       - git+https://github.com/dask/dask
       - git+https://github.com/joblib/joblib.git
       - git+https://github.com/dask/zict
+      - git+https://github.com/intake/filesystem_spec.git
+      - git+https://github.com/dask/s3fs.git
+      - keras
