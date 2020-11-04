@@ -5672,7 +5672,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
         self.keys.update(keys)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        if start == "processing" and (finish == "memory" or finish == "erred"):
+        if finish == "memory" or finish == "erred":
             ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.key in self.keys:
                 self.metadata[key] = ts.metadata
