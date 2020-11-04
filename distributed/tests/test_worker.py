@@ -729,7 +729,7 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with tmpfile() as fn:

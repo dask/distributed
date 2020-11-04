@@ -171,7 +171,7 @@ def vsum(*args):
     return sum(args)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
 async def test_stress_communication(c, s, *workers):

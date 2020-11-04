@@ -73,7 +73,7 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")

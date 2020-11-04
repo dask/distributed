@@ -61,7 +61,7 @@ async def test_keywords():
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 def test_defer_to_old(loop):
     with pytest.warns(Warning):
         with SSHCluster(
@@ -74,7 +74,7 @@ def test_defer_to_old(loop):
             assert isinstance(c, OldSSHCluster)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 def test_old_ssh_wih_local_dir(loop):
     with pytest.warns(Warning):
         from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
