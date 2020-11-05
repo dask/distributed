@@ -84,6 +84,7 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.highlevelgraph import highlevelgraph_unpack
 
 if sys.version_info < (3, 8):
     try:
@@ -1313,6 +1314,7 @@ class Scheduler(ServerNode):
 
         client_handlers = {
             "update-graph": self.update_graph,
+            "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -1820,6 +1822,55 @@ class Scheduler(ServerNode):
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
 
+    def update_graph_hlg(
+        self,
+        client=None,
+        hlg=None,
+        keys=None,
+        dependencies=None,
+        restrictions=None,
+        priority=None,
+        loose_restrictions=None,
+        resources=None,
+        submitting_task=None,
+        retries=None,
+        user_priority=0,
+        actors=None,
+        fifo_timeout=0,
+    ):
+
+        dsk, dependencies = highlevelgraph_unpack(hlg)
+
+        # Remove any self-dependencies (happens on test_publish_bag() and others)
+        for k, v in dependencies.items():
+            deps = set(v)
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        if priority is None:
+            # Removing all non-local keys before calling order()
+            stripped_deps = {
+                k: v.intersection(dsk) for k, v in dependencies.items() if k in dsk
+            }
+            priority = dask.order.order(dsk, dependencies=stripped_deps)
+
+        return self.update_graph(
+            client,
+            dsk,
+            keys,
+            dependencies,
+            restrictions,
+            priority,
+            loose_restrictions,
+            resources,
+            submitting_task,
+            retries,
+            user_priority,
+            actors,
+            fifo_timeout,
+        )
+
     def update_graph(
         self,
         client=None,
@@ -1870,13 +1921,6 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
