@@ -46,7 +46,6 @@ from .utils_comm import (
     WrappedKey,
     unpack_remotedata,
     pack_data,
-    subs_multiple,
     scatter_to_workers,
     gather_from_workers,
     retry_operation,
@@ -2582,22 +2581,7 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            def substitute_future_aliases(dsk):
-                # Find aliases not in `keyset`
-                values = {
-                    k: v
-                    for k, v in dsk.items()
-                    if isinstance(v, Future) and k not in keyset
-                }
-                # And substitute all matching keys with its Future
-                if values:
-                    dsk = subs_multiple(dsk, values)
-                return dsk
-
-            # Notice, we only have to do the substitution on already materialized layers
-            dsk = dsk.map_basic_layers(substitute_future_aliases)
-
-            dsk = highlevelgraph_pack(dsk, self, self.futures)
+            dsk = highlevelgraph_pack(dsk, keyset, self, self.futures)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}

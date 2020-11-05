@@ -4,6 +4,9 @@ from tlz import valmap
 from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph, Layer
 
+from ..utils_comm import unpack_remotedata, subs_multiple
+from ..worker import dumps_task
+
 from ..utils import (
     str_graph,
     tokey,
@@ -21,11 +24,26 @@ from .serialize import (
 
 
 def _materialized_layer_pack(
-    layer: Layer, all_keys, known_key_dependencies, allowed_client, allowed_futures
+    layer: Layer,
+    all_keys,
+    known_key_dependencies,
+    client_keys,
+    allowed_client,
+    allowed_futures,
 ):
-    from distributed.utils_comm import unpack_remotedata
-    from distributed.worker import dumps_task
+    from ..client import Future
 
+    dsk = dict(layer)
+
+    # Find aliases not in `client_keys` and substitute all matching keys
+    # with its Future
+    values = {
+        k: v for k, v in dsk.items() if isinstance(v, Future) and k not in client_keys
+    }
+    if values:
+        dsk = subs_multiple(dsk, values)
+
+    # Unpack remote data re record its dependencies
     dsk = {k: unpack_remotedata(v, byte_keys=True) for k, v in layer.items()}
     unpacked_futures = set.union(*[v[1] for v in dsk.values()]) if dsk else set()
     for future in unpacked_futures:
@@ -41,6 +59,7 @@ def _materialized_layer_pack(
             unpacked_futures_deps[k] = {f.key for f in v[1]}
     dsk = {k: v[0] for k, v in dsk.items()}
 
+    # Calculate dependencies without re-calculating already known dependencies
     missing_keys = set(dsk.keys()).difference(known_key_dependencies.keys())
     dependencies = {
         k: keys_in_tasks(all_keys, [dsk[k]], as_list=False) for k in missing_keys
@@ -57,7 +76,9 @@ def _materialized_layer_pack(
     return {"dsk": dsk, "dependencies": dependencies}
 
 
-def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allowed_futures):
+def highlevelgraph_pack(
+    hlg: HighLevelGraph, client_keys, allowed_client, allowed_futures
+):
     layers = []
 
     # Dump each layer (in topological order)
@@ -83,6 +104,7 @@ def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allowed_futures):
                     layer,
                     hlg.get_all_external_keys(),
                     hlg.key_dependencies,
+                    client_keys,
                     allowed_client,
                     allowed_futures,
                 ),
