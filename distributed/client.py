@@ -4837,6 +4837,45 @@ class performance_report:
         get_client().sync(self.__aexit__, type, value, traceback, code=code)
 
 
+class get_task_metadata:
+    """Collect task metadata within a context block
+
+    This gathers ``TaskState`` metadata and final state from the scheduler
+    for tasks which are submitted and finished within the scope of this
+    context manager.
+
+    Examples
+    --------
+    >>> with get_task_metadata() as tasks:
+    ...     x.compute()
+    >>> tasks.metadata
+    {...}
+    >>> tasks.state
+    {...}
+    """
+
+    def __init__(self):
+        self.name = f"task-metadata-{uuid.uuid4().hex}"
+        self.keys = set()
+        self.metadata = None
+        self.state = None
+
+    async def __aenter__(self):
+        await get_client().scheduler.start_task_metadata(name=self.name)
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        response = await get_client().scheduler.stop_task_metadata(name=self.name)
+        self.metadata = response["metadata"]
+        self.state = response["state"]
+
+    def __enter__(self):
+        return get_client().sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return get_client().sync(self.__aexit__, type, value, traceback)
+
+
 @contextmanager
 def temp_default_client(c):
     """Set the default client for the duration of the context

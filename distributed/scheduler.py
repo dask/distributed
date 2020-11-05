@@ -1363,6 +1363,8 @@ class Scheduler(ServerNode):
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
+            "start_task_metadata": self.start_task_metadata,
+            "stop_task_metadata": self.stop_task_metadata,
         }
 
         self._transitions = {
@@ -3855,6 +3857,27 @@ class Scheduler(ServerNode):
         ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
         return ts.collect(start=start, stop=stop, count=count)
 
+    def start_task_metadata(self, comm=None, name=None):
+        plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
+
+        self.add_plugin(plugin)
+
+    def stop_task_metadata(self, comm=None, name=None):
+        plugins = [
+            p
+            for p in self.plugins
+            if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
+        ]
+        if len(plugins) != 1:
+            raise ValueError(
+                "Expected to find exactly one CollectTaskMetaDataPlugin "
+                f"with name {name} but found {len(plugins)}."
+            )
+
+        plugin = plugins[0]
+        self.remove_plugin(plugin)
+        return {"metadata": plugin.metadata, "state": plugin.state}
+
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append({"plugin": plugin, "name": name})
@@ -5636,3 +5659,23 @@ class WorkerStatusPlugin(SchedulerPlugin):
 
     def teardown(self):
         self.bcomm.close()
+
+
+class CollectTaskMetaDataPlugin(SchedulerPlugin):
+    def __init__(self, scheduler, name):
+        self.scheduler = scheduler
+        self.name = name
+        self.keys = set()
+        self.metadata = {}
+        self.state = {}
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+        self.keys.update(keys)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        if finish == "memory" or finish == "erred":
+            ts = self.scheduler.tasks.get(key)
+            if ts is not None and ts.key in self.keys:
+                self.metadata[key] = ts.metadata
+                self.state[key] = finish
+                self.keys.discard(key)

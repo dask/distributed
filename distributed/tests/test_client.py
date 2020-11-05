@@ -52,11 +52,12 @@ from distributed.client import (
     default_client,
     futures_of,
     temp_default_client,
+    get_task_metadata,
 )
 from distributed.compatibility import WINDOWS
 
 from distributed.metrics import time
-from distributed.scheduler import Scheduler, KilledWorker
+from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
 from distributed.sizeof import sizeof
 from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
 from distributed.utils_test import (
@@ -82,6 +83,7 @@ from distributed.utils_test import (
     async_wait_for,
     pristine_loop,
     save_sys_modules,
+    TaskStateMetadataPlugin,
 )
 from distributed.utils_test import (  # noqa: F401
     client as c,
@@ -6199,3 +6201,52 @@ async def test_futures_in_subgraphs(c, s, a, b):
     ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
     ddf["day"] = ddf.enter_time.dt.day_name()
     ddf = await c.submit(dd.categorical.categorize, ddf, columns=["day"], index=False)
+
+
+@gen_cluster(client=True)
+async def test_get_task_metadata(c, s, a, b):
+
+    # Populate task metadata
+    await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+    async with get_task_metadata() as tasks:
+        f = c.submit(slowinc, 1)
+        await f
+
+    metadata = tasks.metadata
+    assert f.key in metadata
+    assert metadata[f.key] == s.tasks.get(f.key).metadata
+
+    state = tasks.state
+    assert f.key in state
+    assert state[f.key] == "memory"
+
+    assert not any(isinstance(p, CollectTaskMetaDataPlugin) for p in s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_get_task_metadata_multiple(c, s, a, b):
+
+    # Populate task metadata
+    await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+    # Ensure that get_task_metadata only collects metadata for
+    # tasks which are submitted and completed within its context
+    async with get_task_metadata() as tasks1:
+        f1 = c.submit(slowinc, 1)
+        await f1
+        async with get_task_metadata() as tasks2:
+            f2 = c.submit(slowinc, 2)
+            await f2
+
+    metadata1 = tasks1.metadata
+    metadata2 = tasks2.metadata
+
+    assert len(metadata1) == 2
+    assert sorted(metadata1.keys()) == sorted([f1.key, f2.key])
+    assert metadata1[f1.key] == s.tasks.get(f1.key).metadata
+    assert metadata1[f2.key] == s.tasks.get(f2.key).metadata
+
+    assert len(metadata2) == 1
+    assert list(metadata2.keys()) == [f2.key]
+    assert metadata2[f2.key] == s.tasks.get(f2.key).metadata
