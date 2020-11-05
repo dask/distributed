@@ -425,6 +425,25 @@ async def test_io_loop(cleanup):
             assert w.io_loop is s.loop
 
 
+@gen_cluster(client=True)
+async def test_memory_leak(c, s, a, b):
+    import numpy as np
+    import time
+
+    x = {}
+    def memory_leaking_fn(data):
+        # leak 12MB blocks
+        x[data] = np.random.randint(100, size=12 * 1024 ** 2 // 8)
+
+        time.sleep(0.1)
+        return data
+
+    futures = c.map(memory_leaking_fn, range(1000))
+
+    for f in futures:
+        print(f.result())
+
+
 @gen_cluster(client=True, nthreads=[])
 async def test_spill_to_disk(c, s):
     np = pytest.importorskip("numpy")
