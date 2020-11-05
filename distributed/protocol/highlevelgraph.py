@@ -21,7 +21,7 @@ from .serialize import (
 
 
 def _materialized_layer_pack(
-    layer: Layer, all_keys, known_key_dependencies, allowed_client, allows_futures
+    layer: Layer, all_keys, known_key_dependencies, allowed_client, allowed_futures
 ):
     from distributed.utils_comm import unpack_remotedata
     from distributed.worker import dumps_task
@@ -33,7 +33,7 @@ def _materialized_layer_pack(
             raise ValueError(
                 "Inputs contain futures that were created by another client."
             )
-        if tokey(future.key) not in allows_futures:
+        if tokey(future.key) not in allowed_futures:
             raise CancelledError(tokey(future.key))
     unpacked_futures_deps = {}
     for k, v in dsk.items():
@@ -57,7 +57,7 @@ def _materialized_layer_pack(
     return {"dsk": dsk, "dependencies": dependencies}
 
 
-def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allows_futures):
+def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allowed_futures):
     layers = []
 
     # Dump each layer (in topological order)
@@ -84,7 +84,7 @@ def highlevelgraph_pack(hlg: HighLevelGraph, allowed_client, allows_futures):
                     hlg.get_all_external_keys(),
                     hlg.key_dependencies,
                     allowed_client,
-                    allows_futures,
+                    allowed_futures,
                 ),
             }
         )
