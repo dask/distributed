@@ -5571,6 +5571,7 @@ def test_client_repr_closed_sync(loop):
         c._repr_html_()
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/dask/pull/6807")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_nested_prioritization(c, s, w):
     x = delayed(inc)(1, dask_key_name=("a", 2))
