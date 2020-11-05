@@ -1839,6 +1839,20 @@ class Scheduler(ServerNode):
 
         dsk, dependencies = highlevelgraph_unpack(hlg)
 
+        # Remove any self-dependencies (happens on test_publish_bag() and others)
+        for k, v in dependencies.items():
+            deps = set(v)
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        if priority is None:
+            # Removing all non-local keys before calling order()
+            stripped_deps = {
+                k: v.intersection(dsk) for k, v in dependencies.items() if k in dsk
+            }
+            priority = dask.order.order(dsk, dependencies=stripped_deps)
+
         return self.update_graph(
             client,
             dsk,
@@ -1905,13 +1919,6 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
