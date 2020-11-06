@@ -91,10 +91,12 @@ def test_logging_default():
         foreign_log = foreign_log.getvalue().splitlines()
 
         # distributed log is configured at INFO level by default
-        assert distributed_log == [
+        expected_log_suffix = [
             "distributed - INFO - 2: info",
             "distributed.foo.bar - INFO - 3: info",
         ]
+        for result, expected_suffix in zip(distributed_log, expected_log_suffix):
+            assert result.endswith(expected_suffix)
 
         # foreign logs should be unaffected by distributed's logging
         # configuration.  They get the default ERROR level from logging.
@@ -139,10 +141,13 @@ def test_logging_simple_under_distributed():
 
             distributed_log = distributed_log.getvalue().splitlines()
 
-            assert distributed_log == [
+            expected_log_suffix = [
                 "distributed.foo - INFO - 1: info",
                 "distributed.foo.bar - ERROR - 3: error",
-                ], (dask.config.config, distributed_log)
+            ]
+    
+            for result, expected_suffix in zip(distributed_log, expected_log_suffix):
+                assert result.endswith(expected_suffix), (dask.config.config, distributed_log)
             """
 
         subprocess.check_call([sys.executable, "-c", code])
@@ -174,10 +179,13 @@ def test_logging_simple():
 
             distributed_log = distributed_log.getvalue().splitlines()
 
-            assert distributed_log == [
+            expected_log_suffix = [
                 "distributed.foo - INFO - 1: info",
                 "distributed.foo.bar - ERROR - 3: error",
-                ], (dask.config.config, distributed_log)
+            ]
+    
+            for result, expected_suffix in zip(distributed_log, expected_log_suffix):
+                assert result.endswith(expected_suffix), (dask.config.config, distributed_log)
             """
 
         subprocess.check_call([sys.executable, "-c", code])
