@@ -145,7 +145,7 @@ def test_logging_simple_under_distributed():
                 "distributed.foo - INFO - 1: info",
                 "distributed.foo.bar - ERROR - 3: error",
             ]
-    
+
             for result, expected_suffix in zip(distributed_log, expected_log_suffix):
                 assert result.endswith(expected_suffix), (dask.config.config, distributed_log)
             """
@@ -183,7 +183,7 @@ def test_logging_simple():
                 "distributed.foo - INFO - 1: info",
                 "distributed.foo.bar - ERROR - 3: error",
             ]
-    
+
             for result, expected_suffix in zip(distributed_log, expected_log_suffix):
                 assert result.endswith(expected_suffix), (dask.config.config, distributed_log)
             """
