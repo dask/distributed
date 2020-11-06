@@ -5,6 +5,7 @@ import warnings
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
+from distributed.core import Status
 from distributed.compatibility import WINDOWS
 from distributed.deploy.spec import close_clusters, ProcessInterface, run_spec
 from distributed.metrics import time
@@ -237,7 +238,7 @@ def test_spec_close_clusters(loop):
     cluster = SpecCluster(workers=workers, scheduler=scheduler, loop=loop)
     assert cluster in SpecCluster._instances
     close_clusters()
-    assert cluster.status == "closed"
+    assert cluster.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -267,11 +268,11 @@ async def test_nanny_port():
 @pytest.mark.asyncio
 async def test_spec_process():
     proc = ProcessInterface()
-    assert proc.status == "created"
+    assert proc.status == Status.created
     await proc
-    assert proc.status == "running"
+    assert proc.status == Status.running
     await proc.close()
-    assert proc.status == "closed"
+    assert proc.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -291,17 +292,20 @@ async def test_logs(cleanup):
 
         assert "Registered" in str(logs)
 
-        logs = await cluster.get_logs(scheduler=True, workers=False)
+        logs = await cluster.get_logs(cluster=True, scheduler=False, workers=False)
+        assert list(logs) == ["Cluster"]
+
+        logs = await cluster.get_logs(cluster=False, scheduler=True, workers=False)
         assert list(logs) == ["Scheduler"]
 
-        logs = await cluster.get_logs(scheduler=False, workers=False)
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=False)
         assert list(logs) == []
 
-        logs = await cluster.get_logs(scheduler=False, workers=True)
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=True)
         assert set(logs) == set(cluster.scheduler.workers)
 
         w = toolz.first(cluster.scheduler.workers)
-        logs = await cluster.get_logs(scheduler=False, workers=[w])
+        logs = await cluster.get_logs(cluster=False, scheduler=False, workers=[w])
         assert set(logs) == {w}
 
 

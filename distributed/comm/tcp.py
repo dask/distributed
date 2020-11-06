@@ -1,6 +1,7 @@
 import errno
 import logging
 import socket
+from ssl import SSLError
 import struct
 import sys
 from tornado import gen
@@ -118,9 +119,11 @@ def convert_stream_closed_error(obj, exc):
                 raise FatalCommClosedError(
                     "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
                 )
-        raise CommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc))
+        raise CommClosedError(
+            "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
+        ) from exc
     else:
-        raise CommClosedError("in %s: %s" % (obj, exc))
+        raise CommClosedError("in %s: %s" % (obj, exc)) from exc
 
 
 def _do_nothing():
@@ -222,7 +225,11 @@ class TCP(Comm):
             allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
-            context={"sender": self._local_addr, "recipient": self._peer_addr},
+            context={
+                "sender": self.local_info,
+                "recipient": self.remote_info,
+                **self.handshake_options,
+            },
         )
 
         try:
@@ -343,7 +350,6 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-
             # Under certain circumstances tornado will have a closed connnection with an error and not raise
             # a StreamClosedError.
             #
@@ -354,11 +360,15 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLError as err:
+            raise FatalCommClosedError() from err
 
         local_address = self.prefix + get_stream_address(stream)
-        return self.comm_class(
+        comm = self.comm_class(
             stream, local_address, self.prefix + address, deserialize
         )
+
+        return comm
 
 
 class TCPConnector(BaseTCPConnector):
@@ -444,6 +454,12 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
         comm.allow_offload = self.allow_offload
+
+        try:
+            await self.on_connection(comm)
+        except CommClosedError:
+            logger.info("Connection closed before handshake completed")
+
         await self.comm_handler(comm)
 
     def get_host_port(self):

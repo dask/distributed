@@ -50,7 +50,7 @@ conda create -n dask-distributed -c conda-forge -c defaults \
     prometheus_client \
     psutil \
     'pytest>=4' \
-    pytest-asyncio \
+    'pytest-asyncio<0.14.0' \
     pytest-faulthandler \
     pytest-repeat \
     pytest-timeout \
@@ -69,6 +69,11 @@ source activate dask-distributed
 
 if [[ $PYTHON == 3.6 ]]; then
   conda install -c conda-forge -c defaults contextvars
+fi
+
+if [[ $PYTHON == 3.8 ]]; then
+    # Install pytorch to run related tests
+    conda install -c pytorch -c conda-forge -c defaults pytorch torchvision
 fi
 
 if [[ $PYTHON != 3.8 ]]; then

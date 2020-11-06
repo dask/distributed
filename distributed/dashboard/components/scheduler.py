@@ -263,7 +263,9 @@ class NBytesHistogram(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
+        nbytes = np.asarray(
+            [ws.metrics["memory"] for ws in self.scheduler.workers.values()]
+        )
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
@@ -295,6 +297,7 @@ class BandwidthTypes(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
+            fig.xaxis.major_label_orientation = -0.5
             rect = fig.rect(
                 source=self.source,
                 x="bandwidth-half",
@@ -1430,6 +1433,9 @@ class TaskGraph(DashboardComponent):
         )
 
         self.root = figure(title="Task Graph", **kwargs)
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.root.add_layout(self.subtitle, "above")
+
         self.root.multi_line(
             xs="x",
             ys="y",
@@ -1464,21 +1470,33 @@ class TaskGraph(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            # occasionally reset the column data source to remove old nodes
-            if self.invisible_count > len(self.node_source.data["x"]) / 2:
-                self.layout.reset_index()
-                self.invisible_count = 0
-                update = True
+            # If there are too many tasks in the scheduler we'll disable this
+            # compoonents to not overload scheduler or client. Once we drop
+            # below the threshold, the data is filled up again as usual
+            if len(self.scheduler.tasks) > self.max_items:
+                self.subtitle.text = "Scheduler has too many tasks to display."
+                for container in [self.node_source, self.edge_source]:
+                    container.data = {col: [] for col in container.column_names}
             else:
-                update = False
+                # occasionally reset the column data source to remove old nodes
+                self.subtitle.text = " "
+                if self.invisible_count > len(self.node_source.data["x"]) / 2:
+                    self.layout.reset_index()
+                    self.invisible_count = 0
+                    update = True
+                else:
+                    update = False
 
-            new, self.layout.new = self.layout.new, []
-            new_edges = self.layout.new_edges
-            self.layout.new_edges = []
+                new, self.layout.new = self.layout.new, []
+                new_edges = self.layout.new_edges
+                self.layout.new_edges = []
 
-            self.add_new_nodes_edges(new, new_edges, update=update)
+                self.add_new_nodes_edges(new, new_edges, update=update)
 
-            self.patch_updates()
+                self.patch_updates()
+
+                if len(self.scheduler.tasks) == 0:
+                    self.subtitle.text = "Scheduler is empty."
 
     @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
@@ -1495,10 +1513,6 @@ class TaskGraph(DashboardComponent):
             y = self.layout.y
 
             tasks = self.scheduler.tasks
-            if len(tasks) > self.max_items:
-                # graph to big - no update, reset for next time
-                self.invisible_count = len(tasks)
-                return
             for key in new:
                 try:
                     task = tasks[key]
@@ -1554,14 +1568,14 @@ class TaskGraph(DashboardComponent):
         if self.layout.visible_updates:
             updates = self.layout.visible_updates
             updates = [(i, c) for i, c in updates if i < n]
-            self.visible_updates = []
+            self.layout.visible_updates = []
             self.node_source.patch({"visible": updates})
             self.invisible_count += len(updates)
 
         if self.layout.visible_edge_updates:
             updates = self.layout.visible_edge_updates
             updates = [(i, c) for i, c in updates if i < m]
-            self.visible_updates = []
+            self.layout.visible_edge_updates = []
             self.edge_source.patch({"visible": updates})
 
     def __del__(self):
@@ -1745,7 +1759,7 @@ class TaskProgress(DashboardComponent):
 
 
 class WorkerTable(DashboardComponent):
-    """ Status of the current workers
+    """Status of the current workers
 
     This is two plots, a text-based table for each host and a thin horizontal
     plot laying out hosts by their current memory use.
@@ -1942,9 +1956,20 @@ class WorkerTable(DashboardComponent):
                 if len(self.scheduler.workers) == 0:
                     total_data = None
                 elif name == "memory_percent":
-                    total_data = sum(
-                        ws.metrics["memory"] for ws in self.scheduler.workers.values()
-                    ) / sum(ws.memory_limit for ws in self.scheduler.workers.values())
+                    total_mem = sum(
+                        ws.memory_limit for ws in self.scheduler.workers.values()
+                    )
+                    total_data = (
+                        (
+                            sum(
+                                ws.metrics["memory"]
+                                for ws in self.scheduler.workers.values()
+                            )
+                            / total_mem
+                        )
+                        if total_mem
+                        else ""
+                    )
                 elif name == "cpu":
                     total_data = (
                         sum(ws.metrics["cpu"] for ws in self.scheduler.workers.values())

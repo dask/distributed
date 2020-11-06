@@ -9,7 +9,7 @@ from tornado import web
 
 import dask
 from distributed import Client, Scheduler, Worker, Nanny
-from distributed.utils_test import cluster
+from distributed.utils_test import cluster, captured_logger
 from distributed.utils_test import loop, cleanup  # noqa F401
 
 
@@ -69,7 +69,7 @@ def dask_teardown(worker):
     worker.foo = 'teardown'
 """
     with dask.config.set(
-        {"distributed.worker.preload": text, "distributed.nanny.preload": text,}
+        {"distributed.worker.preload": text, "distributed.nanny.preload": text}
     ):
         async with Scheduler(port=0) as s:
             async with Nanny(s.address) as w:
@@ -107,6 +107,36 @@ def test_worker_preload_module(loop):
 
 
 @pytest.mark.asyncio
+async def test_worker_preload_click(cleanup, tmpdir):
+    CLICK_PRELOAD_TEXT = """
+import click
+
+@click.command()
+def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, preload=CLICK_PRELOAD_TEXT) as w:
+            assert w.foo == "setup"
+
+
+@pytest.mark.asyncio
+async def test_worker_preload_click_async(cleanup, tmpdir):
+    # Ensure we allow for click commands wrapping coroutines
+    # https://github.com/dask/distributed/issues/4169
+    CLICK_PRELOAD_TEXT = """
+import click
+
+@click.command()
+async def dask_setup(worker):
+    worker.foo = 'setup'
+"""
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, preload=CLICK_PRELOAD_TEXT) as w:
+            assert w.foo == "setup"
+
+
+@pytest.mark.asyncio
 async def test_preload_import_time(cleanup):
     text = """
 from distributed.comm.registry import backends
@@ -139,7 +169,9 @@ def dask_setup(dask_server):
     app = web.Application([(r"/preload", MyHandler)])
     server = app.listen(12345)
     try:
-        async with Scheduler(preload=["http://localhost:12345/preload"]) as s:
-            assert s.foo == 1
+        with captured_logger("distributed.preloading") as log:
+            async with Scheduler(preload=["http://localhost:12345/preload"]) as s:
+                assert s.foo == 1
+        assert "12345/preload" in log.getvalue()
     finally:
         server.stop()

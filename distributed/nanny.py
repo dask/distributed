@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class Nanny(ServerNode):
-    """ A process to manage worker processes
+    """A process to manage worker processes
 
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary. It is necessary if you want to use the
@@ -198,7 +198,7 @@ class Nanny(ServerNode):
             "run": self.run,
         }
 
-        super(Nanny, self).__init__(
+        super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
         )
 
@@ -293,7 +293,7 @@ class Nanny(ServerNode):
 
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
-        if response == "running":
+        if response == Status.running:
             assert self.worker_address
             self.status = Status.running
         else:
@@ -304,7 +304,7 @@ class Nanny(ServerNode):
         return self
 
     async def kill(self, comm=None, timeout=2):
-        """ Kill the local worker process
+        """Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
         informed
@@ -316,8 +316,8 @@ class Nanny(ServerNode):
         deadline = self.loop.time() + timeout
         await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
 
-    async def instantiate(self, comm=None):
-        """ Start a local worker process
+    async def instantiate(self, comm=None) -> Status:
+        """Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
         """
@@ -438,7 +438,7 @@ class Nanny(ServerNode):
         self.loop.add_callback(self._on_exit, exitcode)
 
     async def _on_exit(self, exitcode):
-        if self.status not in (Status.closing, Status.closed):
+        if self.status not in (Status.init, Status.closing, Status.closed):
             try:
                 await self.scheduler.unregister(address=self.worker_address)
             except (EnvironmentError, CommClosedError):
@@ -535,7 +535,7 @@ class WorkerProcess:
         self.worker_dir = None
         self.worker_address = None
 
-    async def start(self):
+    async def start(self) -> Status:
         """
         Ensure the worker process is started.
         """
@@ -584,7 +584,7 @@ class WorkerProcess:
         self.worker_address = msg["address"]
         self.worker_dir = msg["dir"]
         assert self.worker_address
-        self.status = "running"
+        self.status = Status.running
         self.running.set()
 
         init_q.close()

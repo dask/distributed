@@ -72,7 +72,7 @@ def is_webaddress(s: str) -> bool:
 
 
 def _import_module(name, file_dir=None) -> ModuleType:
-    """ Imports module and extract preload interface functions.
+    """Imports module and extract preload interface functions.
 
     Import modules specified by name and extract 'dask_setup'
     and 'dask_teardown' if present.
@@ -120,6 +120,7 @@ def _import_module(name, file_dir=None) -> ModuleType:
 
 
 async def _download_module(url: str) -> ModuleType:
+    logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
 
     client = AsyncHTTPClient()
@@ -171,7 +172,12 @@ class Preload:
                 context = dask_setup.make_context(
                     "dask_setup", list(self.argv), allow_extra_args=False
                 )
-                dask_setup.callback(self.dask_server, *context.args, **context.params)
+                result = dask_setup.callback(
+                    self.dask_server, *context.args, **context.params
+                )
+                if inspect.isawaitable(result):
+                    await result
+                logger.info("Run preload setup click command: %s", self.name)
             else:
                 future = dask_setup(self.dask_server)
                 if inspect.isawaitable(future):

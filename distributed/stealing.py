@@ -109,7 +109,7 @@ class WorkStealing(SchedulerPlugin):
             pass
 
     def steal_time_ratio(self, ts):
-        """ The compute to communication time ratio of a key
+        """The compute to communication time ratio of a key
 
         Returns
         -------
@@ -142,7 +142,7 @@ class WorkStealing(SchedulerPlugin):
     def move_task_request(self, ts, victim, thief):
         try:
             if self.scheduler.validate:
-                if victim is not ts.processing_on:
+                if victim is not ts.processing_on and LOG_PDB:
                     import pdb
 
                     pdb.set_trace()

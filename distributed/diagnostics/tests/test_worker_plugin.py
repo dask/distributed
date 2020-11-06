@@ -31,18 +31,14 @@ class MyPlugin(WorkerPlugin):
 
     def transition(self, key, start, finish, **kwargs):
         self.observed_notifications.append(
-            {"key": key, "start": start, "finish": finish,}
+            {"key": key, "start": start, "finish": finish}
         )
 
     def release_key(self, key, state, cause, reason, report):
-        self.observed_notifications.append(
-            {"key": key, "state": state,}
-        )
+        self.observed_notifications.append({"key": key, "state": state})
 
     def release_dep(self, dep, state, report):
-        self.observed_notifications.append(
-            {"dep": dep, "state": state,}
-        )
+        self.observed_notifications.append({"dep": dep, "state": state})
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -77,7 +73,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.task_state, timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -100,7 +96,7 @@ async def test_failing_task_transitions_called(c, s, w):
 
 
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1)], client=True, worker_kwargs={"resources": {"X": 1}},
+    nthreads=[("127.0.0.1", 1)], client=True, worker_kwargs={"resources": {"X": 1}}
 )
 async def test_superseding_task_transitions_called(c, s, w):
     expected_notifications = [
@@ -114,15 +110,12 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.task_state, timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_release_dep_called(c, s, w):
-    dsk = {
-        "dep": 1,
-        "task": (inc, "dep"),
-    }
+    dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
         {"key": "dep", "start": "waiting", "finish": "ready"},
@@ -132,7 +125,6 @@ async def test_release_dep_called(c, s, w):
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
         {"key": "dep", "state": "memory"},
-        {"dep": "dep", "state": "memory"},
         {"key": "task", "state": "memory"},
     ]
 
@@ -140,7 +132,24 @@ async def test_release_dep_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not (w.task_state or w.dep_state), timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_registering_with_name_arg(c, s, w):
+    class FooWorkerPlugin:
+        def setup(self, worker):
+            if hasattr(worker, "foo"):
+                raise RuntimeError(f"Worker {worker.address} already has foo!")
+
+            worker.foo = True
+
+    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
+    assert list(responses.values()) == [{"status": "OK"}]
+
+    async with Worker(s.address, loop=s.loop):
+        responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
+        assert list(responses.values()) == [{"status": "repeat"}] * 2
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

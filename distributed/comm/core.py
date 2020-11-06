@@ -4,6 +4,7 @@ from contextlib import suppress
 import inspect
 import logging
 import random
+import sys
 import weakref
 
 import dask
@@ -12,6 +13,8 @@ from ..metrics import time
 from ..utils import parse_timedelta, TimeoutError
 from . import registry
 from .addressing import parse_address
+from ..protocol.compression import get_default_compression
+from ..protocol import pickle
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,9 @@ class Comm(ABC):
         self._instances.add(self)
         self.allow_offload = True  # for deserialization in utils.from_frames
         self.name = None
+        self.local_info = {}
+        self.remote_info = {}
+        self.handshake_options = {}
 
     # XXX add set_close_callback()?
 
@@ -118,6 +124,36 @@ class Comm(ABC):
         """
         return {}
 
+    @staticmethod
+    def handshake_info():
+        return {
+            "compression": get_default_compression(),
+            "python": tuple(sys.version_info)[:3],
+            "pickle-protocol": pickle.HIGHEST_PROTOCOL,
+        }
+
+    @staticmethod
+    def handshake_configuration(local, remote):
+        try:
+            out = {
+                "pickle-protocol": min(
+                    local["pickle-protocol"], remote["pickle-protocol"]
+                )
+            }
+        except KeyError as e:
+            raise ValueError(
+                "Your Dask versions may not be in sync. "
+                "Please ensure that you have the same version of dask "
+                "and distributed on your client, scheduler, and worker machines"
+            ) from e
+
+        if local["compression"] == remote["compression"]:
+            out["compression"] = local["compression"]
+        else:
+            out["compression"] = None
+
+        return out
+
     def __repr__(self):
         clsname = self.__class__.__name__
         if self.closed():
@@ -175,6 +211,33 @@ class Listener(ABC):
 
         return _().__await__()
 
+    async def on_connection(self, comm: Comm, handshake_overrides=None):
+        local_info = {**comm.handshake_info(), **(handshake_overrides or {})}
+
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
+        timeout = parse_timedelta(timeout, default="seconds")
+        try:
+            # Timeout is to ensure that we'll terminate connections eventually.
+            # Connector side will employ smaller timeouts and we should only
+            # reach this if the comm is dead anyhow.
+            write = await asyncio.wait_for(comm.write(local_info), timeout=timeout)
+            handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
+            # This would be better, but connections leak if worker is closed quickly
+            # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        except Exception as e:
+            with suppress(Exception):
+                await comm.close()
+            raise CommClosedError() from e
+
+        comm.remote_info = handshake
+        comm.remote_info["address"] = comm._peer_addr
+        comm.local_info = local_info
+        comm.local_info["address"] = comm._local_addr
+
+        comm.handshake_options = comm.handshake_configuration(
+            comm.local_info, comm.remote_info
+        )
+
 
 class Connector(ABC):
     @abstractmethod
@@ -187,7 +250,9 @@ class Connector(ABC):
         """
 
 
-async def connect(addr, timeout=None, deserialize=True, **connection_args):
+async def connect(
+    addr, timeout=None, deserialize=True, handshake_overrides=None, **connection_args
+):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -203,53 +268,71 @@ async def connect(addr, timeout=None, deserialize=True, **connection_args):
     comm = None
 
     start = time()
-    deadline = start + timeout
-    error = None
 
-    def _raise(error):
-        error = error or "connect() didn't finish in time"
-        msg = "Timed out trying to connect to %r after %s s: %s" % (
-            addr,
-            timeout,
-            error,
-        )
-        raise IOError(msg)
+    def time_left():
+        deadline = start + timeout
+        return max(0, deadline - time())
 
-    backoff = 0.01
-    if timeout and timeout / 20 < backoff:
-        backoff = timeout / 20
+    backoff_base = 0.01
+    attempt = 0
 
-    retry_timeout_backoff = random.randrange(140, 160) / 100
-
-    # This starts a thread
-    while True:
+    # Prefer multiple small attempts than one long attempt. This should protect
+    # primarily from DNS race conditions
+    # gh3104, gh4176, gh4167
+    intermediate_cap = timeout / 5
+    active_exception = None
+    while time_left() > 0:
         try:
-            while deadline - time() > 0:
-                future = connector.connect(
-                    loc, deserialize=deserialize, **connection_args
-                )
-                with suppress(TimeoutError):
-                    comm = await asyncio.wait_for(
-                        future, timeout=min(deadline - time(), retry_timeout_backoff)
-                    )
-                    break
-            if not comm:
-                _raise(error)
+            comm = await asyncio.wait_for(
+                connector.connect(loc, deserialize=deserialize, **connection_args),
+                timeout=min(intermediate_cap, time_left()),
+            )
+            break
         except FatalCommClosedError:
             raise
-        except EnvironmentError as e:
-            error = str(e)
-            if time() < deadline:
-                logger.debug("Could not connect, waiting before retrying")
-                await asyncio.sleep(backoff)
-                backoff *= random.randrange(140, 160) / 100
-                retry_timeout_backoff *= random.randrange(140, 160) / 100
-                backoff = min(backoff, 1)  # wait at most one second
-            else:
-                _raise(error)
-        else:
-            break
+        # CommClosed, EnvironmentError inherit from OSError
+        except (TimeoutError, OSError) as exc:
+            active_exception = exc
 
+            # The intermediate capping is mostly relevant for the initial
+            # connect. Afterwards we should be more forgiving
+            intermediate_cap = intermediate_cap * 1.5
+            # FullJitter see https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+
+            upper_cap = min(time_left(), backoff_base * (2 ** attempt))
+            backoff = random.uniform(0, upper_cap)
+            attempt += 1
+            logger.debug("Could not connect, waiting for %s before retrying", backoff)
+            await asyncio.sleep(backoff)
+    else:
+        raise IOError(
+            f"Timed out trying to connect to {addr} after {timeout} s"
+        ) from active_exception
+
+    local_info = {
+        **comm.handshake_info(),
+        **(handshake_overrides or {}),
+    }
+    try:
+        # This would be better, but connections leak if worker is closed quickly
+        # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
+        handshake = await asyncio.wait_for(comm.read(), time_left())
+        await asyncio.wait_for(comm.write(local_info), time_left())
+    except Exception as exc:
+        with suppress(Exception):
+            await comm.close()
+        raise IOError(
+            f"Timed out during handshake while connecting to {addr} after {timeout} s"
+        ) from exc
+
+    comm.remote_info = handshake
+    comm.remote_info["address"] = comm._peer_addr
+    comm.local_info = local_info
+    comm.local_info["address"] = comm._local_addr
+
+    comm.handshake_options = comm.handshake_configuration(
+        comm.local_info, comm.remote_info
+    )
     return comm
 
 

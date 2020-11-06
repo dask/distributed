@@ -1,10 +1,13 @@
 import logging
+import socket
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
 
 class SchedulerPlugin:
-    """ Interface to extend the Scheduler
+    """Interface to extend the Scheduler
 
     The scheduler operates by triggering and responding to events like
     ``task_finished``, ``update_graph``, ``task_erred``, etc..
@@ -38,14 +41,14 @@ class SchedulerPlugin:
     """
 
     async def start(self, scheduler):
-        """ Run when the scheduler starts up
+        """Run when the scheduler starts up
 
         This runs at the end of the Scheduler startup process
         """
         pass
 
     async def close(self):
-        """ Run when the scheduler closes down
+        """Run when the scheduler closes down
 
         This runs at the beginning of the Scheduler shutdown process, but after
         workers have been asked to shut down gracefully
@@ -59,7 +62,7 @@ class SchedulerPlugin:
         """ Run when the scheduler restarts itself """
 
     def transition(self, key, start, finish, *args, **kwargs):
-        """ Run whenever a task changes state
+        """Run whenever a task changes state
 
         Parameters
         ----------
@@ -87,7 +90,7 @@ class SchedulerPlugin:
 
 
 class WorkerPlugin:
-    """ Interface to extend the Worker
+    """Interface to extend the Worker
 
     A worker plugin enables custom code to run at different stages of the Workers'
     lifecycle: at setup, during task state transitions, when a task or dependency
@@ -180,3 +183,78 @@ class WorkerPlugin:
         report: bool
             Whether the worker should report the released dependency to the scheduler.
         """
+
+
+class PipInstall(WorkerPlugin):
+    """A Worker Plugin to pip install a set of packages
+
+    This accepts a set of packages to install on all workers.
+    You can also optionally ask for the worker to restart itself after
+    performing this installation.
+
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
+       Additional issues may arise if multiple workers share the same
+       file system. Each worker might try to install the packages
+       simultaneously.
+
+    Parameters
+    ----------
+    packages : List[str]
+        A list of strings to place after "pip install" command
+    pip_options : List[str]
+        Additional options to pass to pip.
+    restart : bool, default False
+        Whether or not to restart the worker after pip installing
+        Only functions if the worker has an attached nanny process
+
+    Examples
+    --------
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
+
+    >>> client.register_worker_plugin(plugin)
+    """
+
+    name = "pip"
+
+    def __init__(self, packages, pip_options=None, restart=False):
+        self.packages = packages
+        self.restart = restart
+        if pip_options is None:
+            pip_options = []
+        self.pip_options = pip_options
+
+    async def setup(self, worker):
+        from ..lock import Lock
+
+        async with Lock(socket.gethostname()):  # don't clobber one installation
+            logger.info("Pip installing the following packages: %s", self.packages)
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "pip"]
+                + self.pip_options
+                + ["install"]
+                + self.packages,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = proc.communicate()
+            returncode = proc.wait()
+
+            if returncode:
+                logger.error("Pip install failed with '%s'", stderr.decode().strip())
+                return
+
+            if self.restart and worker.nanny:
+                lines = stdout.strip().split(b"\n")
+                if not all(
+                    line.startswith(b"Requirement already satisfied") for line in lines
+                ):
+                    worker.loop.add_callback(
+                        worker.close_gracefully, restart=True
+                    )  # restart

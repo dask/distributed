@@ -38,7 +38,7 @@ profile_interval = parse_timedelta(profile_interval, default="ms")
 
 
 class Processing(DashboardComponent):
-    """ Processing and distribution per core
+    """Processing and distribution per core
 
     This shows how many tasks are actively running on each worker and how many
     tasks are enqueued for each worker and how many are in the common pool
@@ -128,7 +128,7 @@ class Processing(DashboardComponent):
 
 
 class ProfilePlot(DashboardComponent):
-    """ Time plots of the current resource usage on the cluster
+    """Time plots of the current resource usage on the cluster
 
     This is two plots, one for CPU and Memory and another for Network I/O
     """
@@ -171,7 +171,7 @@ class ProfilePlot(DashboardComponent):
 
 
 class ProfileTimePlot(DashboardComponent):
-    """ Time plots of the current resource usage on the cluster
+    """Time plots of the current resource usage on the cluster
 
     This is two plots, one for CPU and Memory and another for Network I/O
     """
@@ -238,9 +238,9 @@ class ProfileTimePlot(DashboardComponent):
             height=150,
             x_axis_type="datetime",
             active_drag="xbox_select",
-            y_range=[0, 1 / profile_interval],
             tools="xpan,xwheel_zoom,xbox_select,reset",
             sizing_mode="stretch_width",
+            toolbar_location="above",
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(
@@ -336,7 +336,7 @@ class ProfileTimePlot(DashboardComponent):
 
 
 class ProfileServer(DashboardComponent):
-    """ Time plots of the current resource usage on the cluster
+    """Time plots of the current resource usage on the cluster
 
     This is two plots, one for CPU and Memory and another for Network I/O
     """
@@ -391,9 +391,9 @@ class ProfileServer(DashboardComponent):
             height=150,
             x_axis_type="datetime",
             active_drag="xbox_select",
-            y_range=[0, 1 / profile_interval],
             tools="xpan,xwheel_zoom,xbox_select,reset",
             sizing_mode="stretch_width",
+            toolbar_location="above",
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(

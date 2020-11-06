@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from contextlib import suppress
 import logging
 import threading
@@ -10,6 +11,7 @@ from dask.utils import format_bytes
 
 from .adaptive import Adaptive
 
+from ..core import Status
 from ..utils import (
     log_errors,
     sync,
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class Cluster:
-    """ Superclass for cluster objects
+    """Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
 
@@ -49,15 +51,17 @@ class Cluster:
 
     _supports_scaling = True
 
-    def __init__(self, asynchronous):
+    def __init__(self, asynchronous, quiet=False):
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
+        self._cluster_manager_logs = []
+        self.quiet = quiet
         self.scheduler_comm = None
 
-        self.status = "created"
+        self.status = Status.created
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
@@ -67,10 +71,10 @@ class Cluster:
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
-        self.status = "running"
+        self.status = Status.running
 
     async def _close(self):
-        if self.status == "closed":
+        if self.status == Status.closed:
             return
 
         if self._watch_worker_status_comm:
@@ -84,14 +88,23 @@ class Cluster:
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
 
-        self.status = "closed"
+        self.status = Status.closed
 
     def close(self, timeout=None):
+        # If the cluster is already closed, we're already done
+        if self.status == Status.closed:
+            if self.asynchronous:
+                future = asyncio.Future()
+                future.set_result(None)
+                return future
+            else:
+                return
+
         with suppress(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
     def __del__(self):
-        if self.status != "closed":
+        if self.status != Status.closed:
             with suppress(AttributeError, RuntimeError):  # during closing
                 self.loop.add_callback(self.close)
 
@@ -120,7 +133,7 @@ class Cluster:
             raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
-        """ Turn on adaptivity
+        """Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
 
@@ -137,7 +150,7 @@ class Cluster:
         return self._adaptive
 
     def scale(self, n: int) -> None:
-        """ Scale cluster to n workers
+        """Scale cluster to n workers
 
         Parameters
         ----------
@@ -169,8 +182,29 @@ class Cluster:
         else:
             return sync(self.loop, func, *args, **kwargs)
 
-    async def _get_logs(self, scheduler=True, workers=True):
+    def _log(self, log):
+        """Log a message.
+
+        Output a message to the user and also store for future retrieval.
+
+        For use in subclasses where initialisation may take a while and it would
+        be beneficial to feed back to the user.
+
+        Examples
+        --------
+        >>> self._log("Submitted job X to batch scheduler")
+        """
+        self._cluster_manager_logs.append((datetime.datetime.now(), log))
+        if not self.quiet:
+            print(log)
+
+    async def _get_logs(self, cluster=True, scheduler=True, workers=True):
         logs = Logs()
+
+        if cluster:
+            logs["Cluster"] = Log(
+                "\n".join(line[1] for line in self._cluster_manager_logs)
+            )
 
         if scheduler:
             L = await self.scheduler_comm.get_logs()
@@ -183,11 +217,13 @@ class Cluster:
 
         return logs
 
-    def get_logs(self, scheduler=True, workers=True):
-        """ Return logs for the scheduler and workers
+    def get_logs(self, cluster=True, scheduler=True, workers=True):
+        """Return logs for the cluster, scheduler and workers
 
         Parameters
         ----------
+        cluster : boolean
+            Whether or not to collect logs for the cluster manager
         scheduler : boolean
             Whether or not to collect logs for the scheduler
         workers : boolean or Iterable[str], optional
@@ -200,7 +236,9 @@ class Cluster:
             A dictionary of logs, with one item for the scheduler and one for
             each worker
         """
-        return self.sync(self._get_logs, scheduler=scheduler, workers=workers)
+        return self.sync(
+            self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
+        )
 
     def logs(self, *args, **kwargs):
         warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)

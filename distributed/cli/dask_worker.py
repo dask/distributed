@@ -127,7 +127,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=int,
     default=1,
     show_default=True,
-    help="Number of worker processes to launch.",
+    help="Number of worker processes to launch. "
+    "If negative, then (CPU_COUNT + 1 + nprocs) is used.",
 )
 @click.option(
     "--name",
@@ -141,11 +142,14 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--memory-limit",
     default="auto",
     show_default=True,
-    help="Bytes of memory per process that the worker can use. "
-    "This can be an integer (bytes), "
-    "float (fraction of total system memory), "
-    "string (like 5GB or 5000M), "
-    "'auto', or zero for no memory management",
+    help="""\b
+    Bytes of memory per process that the worker can use.
+    This can be:
+    - an integer (bytes), note 0 is a special case for no memory management.
+    - a float (fraction of total system memory).
+    - a string (like 5GB or 5000M).
+    - 'auto' for automatically computing the memory limit.
+    """,
 )
 @click.option(
     "--reconnect/--no-reconnect",
@@ -287,6 +291,15 @@ def main(
         ]
         if v is not None
     }
+
+    if nprocs < 0:
+        nprocs = CPU_COUNT + 1 + nprocs
+
+    if nprocs <= 0:
+        logger.error(
+            "Failed to launch worker. Must specify --nprocs so that there's at least one process."
+        )
+        sys.exit(1)
 
     if nprocs > 1 and not nanny:
         logger.error(

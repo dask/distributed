@@ -1,5 +1,4 @@
 import struct
-import msgpack
 
 from ..utils import nbytes
 
@@ -10,13 +9,7 @@ msgpack_opts = {
     ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
 }
 msgpack_opts["strict_map_key"] = False
-
-try:
-    msgpack.loads(msgpack.dumps(""), raw=False, **msgpack_opts)
-    msgpack_opts["raw"] = False
-except TypeError:
-    # Backward compat with old msgpack (prior to 0.5.2)
-    msgpack_opts["encoding"] = "utf-8"
+msgpack_opts["raw"] = False
 
 
 def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
@@ -30,25 +23,19 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
-    if nbytes(frame) <= n:
+    frame = memoryview(frame)
+
+    if frame.nbytes <= n:
         return [frame]
 
-    if nbytes(frame) > n:
-        if isinstance(frame, (bytes, bytearray)):
-            frame = memoryview(frame)
-        try:
-            itemsize = frame.itemsize
-        except AttributeError:
-            itemsize = 1
+    nitems = frame.nbytes // frame.itemsize
+    items_per_shard = n // frame.itemsize
 
-        return [
-            frame[i : i + n // itemsize]
-            for i in range(0, nbytes(frame) // itemsize, n // itemsize)
-        ]
+    return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
 
 
 def merge_frames(header, frames):
-    """ Merge frames into original lengths
+    """Merge frames into original lengths
 
     Examples
     --------
@@ -58,36 +45,44 @@ def merge_frames(header, frames):
     [b'123456']
     """
     lengths = list(header["lengths"])
-    frames = list(map(memoryview, frames))
+    writeables = list(header["writeable"])
 
+    assert len(lengths) == len(writeables)
     assert sum(lengths) == sum(map(nbytes, frames))
 
-    if not all(len(f) == l for f, l in zip(frames, lengths)):
-        frames = frames[::-1]
-        lengths = lengths[::-1]
+    if all(len(f) == l for f, l in zip(frames, lengths)):
+        return [
+            (bytearray(f) if w else bytes(f)) if w == memoryview(f).readonly else f
+            for w, f in zip(header["writeable"], frames)
+        ]
 
-        out = []
-        while lengths:
-            l = lengths.pop()
-            L = []
-            while l:
-                frame = frames.pop()
-                if nbytes(frame) <= l:
-                    L.append(frame)
-                    l -= nbytes(frame)
-                else:
-                    L.append(frame[:l])
-                    frames.append(frame[l:])
-                    l = 0
-            if len(L) == 1:  # no work necessary
-                out.append(L[0])
+    frames = frames[::-1]
+    lengths = lengths[::-1]
+    writeables = writeables[::-1]
+
+    out = []
+    while lengths:
+        l = lengths.pop()
+        w = writeables.pop()
+        L = []
+        while l:
+            frame = frames.pop()
+            if nbytes(frame) <= l:
+                L.append(frame)
+                l -= nbytes(frame)
             else:
-                out.append(memoryview(bytearray().join(L)))
-        frames = out
+                frame = memoryview(frame)
+                L.append(frame[:l])
+                frames.append(frame[l:])
+                l = 0
+        if len(L) == 1 and w != memoryview(L[0]).readonly:  # no work necessary
+            out.extend(L)
+        elif w:
+            out.append(bytearray().join(L))
+        else:
+            out.append(bytes().join(L))
 
-    frames = [memoryview(bytearray(f)) if f.readonly else f for f in frames]
-
-    return frames
+    return out
 
 
 def pack_frames_prelude(frames):
@@ -97,7 +92,7 @@ def pack_frames_prelude(frames):
 
 
 def pack_frames(frames):
-    """ Pack frames into a byte-like object
+    """Pack frames into a byte-like object
 
     This prepends length information to the front of the bytes-like object
 
@@ -105,13 +100,11 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    data = [pack_frames_prelude(frames)]
-    data.extend(frames)
-    return b"".join(data)
+    return b"".join([pack_frames_prelude(frames), *frames])
 
 
 def unpack_frames(b):
-    """ Unpack bytes into a sequence of frames
+    """Unpack bytes into a sequence of frames
 
     This assumes that length information is at the front of the bytestring,
     as performed by pack_frames

@@ -44,7 +44,6 @@ from .config import initialize_logging
 from .core import connect, rpc, CommClosedError, Status
 from .deploy import SpecCluster
 from .metrics import time
-from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
@@ -62,6 +61,7 @@ from .utils import (
 )
 from .worker import Worker
 from .nanny import Nanny
+from .diagnostics.plugin import WorkerPlugin
 
 try:
     import dask.array  # register config
@@ -741,7 +741,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 
 
 def gen_test(timeout=10):
-    """ Coroutine test
+    """Coroutine test
 
     @gen_test(timeout=5)
     async def test_foo():
@@ -914,7 +914,7 @@ def gen_cluster(
                                 s.validate_state()
                         finally:
                             if client and c.status not in ("closing", "closed"):
-                                await c._close(fast=s.status == "closed")
+                                await c._close(fast=s.status == Status.closed)
                             await end_cluster(s, workers)
                             await asyncio.wait_for(cleanup_global_workers(), 1)
 
@@ -1137,9 +1137,7 @@ async def assert_can_connect_from_everywhere_4_6(port, protocol="tcp", **kwargs)
     await asyncio.gather(*futures)
 
 
-async def assert_can_connect_from_everywhere_4(
-    port, protocol="tcp", **kwargs,
-):
+async def assert_can_connect_from_everywhere_4(port, protocol="tcp", **kwargs):
     """
     Check that the local *port* is reachable from all IPv4 addresses.
     """
@@ -1205,8 +1203,7 @@ async def assert_can_connect_locally_6(port, **kwargs):
 
 @contextmanager
 def captured_logger(logger, level=logging.INFO, propagate=None):
-    """Capture output from the given Logger.
-    """
+    """Capture output from the given Logger."""
     if isinstance(logger, str):
         logger = logging.getLogger(logger)
     orig_level = logger.level
@@ -1228,8 +1225,7 @@ def captured_logger(logger, level=logging.INFO, propagate=None):
 
 @contextmanager
 def captured_handler(handler):
-    """Capture output from the given logging.StreamHandler.
-    """
+    """Capture output from the given logging.StreamHandler."""
     assert isinstance(handler, logging.StreamHandler)
     orig_stream = handler.stream
     handler.stream = io.StringIO()
@@ -1455,7 +1451,6 @@ def check_process_leak(check=True):
         else:
             assert not mp_context.active_children()
 
-    _cleanup_dangling()
     for proc in mp_context.active_children():
         proc.terminate()
 
@@ -1505,7 +1500,7 @@ def check_instances():
     ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO
-    assert all(c.status == "closed" for c in SpecCluster._instances), list(
+    assert all(c.status == Status.closed for c in SpecCluster._instances), list(
         SpecCluster._instances
     )
     SpecCluster._instances.clear()
@@ -1543,3 +1538,18 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
 def cleanup():
     with clean():
         yield
+
+
+class TaskStateMetadataPlugin(WorkerPlugin):
+    """WorkPlugin to populate TaskState.metadata"""
+
+    def setup(self, worker):
+        self.worker = worker
+
+    def transition(self, key, start, finish, **kwargs):
+        ts = self.worker.tasks[key]
+
+        if start == "ready" and finish == "executing":
+            ts.metadata["start_time"] = time()
+        elif start == "executing" and finish == "memory":
+            ts.metadata["stop_time"] = time()

@@ -101,7 +101,7 @@ async def test_stealing_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:  # will steal soon
+    while not b.tasks:  # will steal soon
         await asyncio.sleep(0.01)
 
     se.update()
@@ -117,7 +117,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:
+    while not b.tasks:
         await asyncio.sleep(0.01)
 
     e.update()
@@ -276,7 +276,7 @@ async def test_ProcessingHistogram(c, s, a, b):
 async def test_NBytesHistogram(c, s, a, b):
     nh = NBytesHistogram(s)
     nh.update()
-    assert (nh.source.data["top"] != 0).sum() == 1
+    assert any(nh.source.data["top"] != 0)
 
     futures = c.map(inc, range(10))
     await wait(futures)
@@ -430,6 +430,17 @@ async def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     assert s.workers[a.address].metrics["metric"] == -999
 
 
+@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
+
+    wt = WorkerTable(s)
+    wt.update()
+    assert all(wt.source.data.values())
+    assert wt.source.data["name"][0] == "Total (2)"
+    assert wt.source.data["memory_limit"][0] == 0
+    assert wt.source.data["memory_percent"][0] == ""
+
+
 @gen_cluster(client=True)
 async def test_TaskGraph(c, s, a, b):
     gp = TaskGraph(s)
@@ -496,9 +507,7 @@ async def test_TaskGraph_clear(c, s, a, b):
         assert time() < start + 5
 
 
-@gen_cluster(
-    client=True, config={"distributed.dashboard.graph-max-items": 2,},
-)
+@gen_cluster(client=True, config={"distributed.dashboard.graph-max-items": 2})
 async def test_TaskGraph_limit(c, s, a, b):
     gp = TaskGraph(s)
 
@@ -515,8 +524,9 @@ async def test_TaskGraph_limit(c, s, a, b):
     assert len(gp.node_source.data["x"]) == 2
     f3 = c.submit(func, 3)
     await wait(f3)
+    # Breached task limit, clearing graph
     gp.update()
-    assert len(gp.node_source.data["x"]) == 2
+    assert len(gp.node_source.data["x"]) == 0
 
 
 @gen_cluster(client=True, timeout=30)
@@ -579,9 +589,7 @@ async def test_profile_server(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster(
-    client=True, scheduler_kwargs={"dashboard": True},
-)
+@gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_root_redirect(c, s, a, b):
     http_client = AsyncHTTPClient()
     response = await http_client.fetch("http://localhost:%d/" % s.http_server.port)
