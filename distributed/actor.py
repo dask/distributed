@@ -1,5 +1,6 @@
 import asyncio
 import functools
+from inspect import iscoroutinefunction
 import threading
 from queue import Queue
 
@@ -118,12 +119,26 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-        attr = getattr(self._cls, key)
+        print("###getattr", file=open("temp", "at"))
 
         if self._future and self._future.status not in ("finished", "pending"):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
+
+        if self._worker and self._worker.address == self._address:
+            actor = self._worker.actors[self.key]
+            attr = getattr(actor, key)
+
+            if iscoroutinefunction(attr):
+                return lambda *args, **kwargs: attr(*args, **kwargs)
+
+            elif callable(attr):
+                return lambda *args, **kwargs: ActorFuture(None, None, result=attr(*args, **kwargs))
+            else:
+                return attr
+
+        attr = getattr(self._cls, key)
 
         if callable(attr):
 
@@ -206,9 +221,14 @@ class ActorFuture:
     Actor
     """
 
-    def __init__(self, q, io_loop):
+    def __init__(self, q, io_loop, result=None):
         self.q = q
         self.io_loop = io_loop
+        if result:
+            self._cached_result = result
+
+    def __await__(self):
+        return self.result()
 
     def result(self, timeout=None):
         try:
