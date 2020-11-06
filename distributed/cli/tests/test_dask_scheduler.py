@@ -237,7 +237,7 @@ def test_dashboard_port_zero(loop):
         with popen(["dask-scheduler", "--dashboard-address", ":0"]) as proc:
             count = 0
             while count < 1:
-                line = proc.stderr.readline().decode('utf8')
+                line = proc.stderr.readline().decode("utf8")
                 if "dashboard" in line.lower():
                     sleep(0.01)
                     count += 1
