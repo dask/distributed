@@ -1,4 +1,5 @@
-import asyncio  # for sleep
+import asyncio
+from collections import namedtuple
 from enum import Enum
 import logging
 import struct
@@ -40,6 +41,7 @@ logging.basicConfig(
     filename=f"rank{_mpi_rank}.log",
     filemode="w",
     level=logging.DEBUG,
+    #level=logging.INFO,
     format="%(asctime)s.%(msecs)03d %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -59,31 +61,31 @@ _message_type = MessageType.PythonObjects
 
 # To identify the completion of asynchronous MPI sends and receives, need to
 # keep polling them.  This is the (minimum) time between polls, in seconds.
-_polling_time = 0.005
+_polling_time = 0.001
 
 
-class AsyncMPIRecv:
-    def __init__(self, source, tag):
-        # source of None means receive from any rank.
-        self._source = source if source is not None else MPI.ANY_SOURCE
-        self._tag = tag
-        self._cancel = False
-        logger.debug(f"AsyncMPIRecv.__init__ source={self._source} tag={tag}")
+#class AsyncMPIRecv:
+#    def __init__(self, source, tag):
+#        # source of None means receive from any rank.
+#        self._source = source if source is not None else MPI.ANY_SOURCE
+#        self._tag = tag
+#        self._cancel = False
+#        logger.debug(f"AsyncMPIRecv.__init__ source={self._source} tag={tag}")
 
-    def __await__(self):
-        while True:
-            if self._cancel:
-                return None, None
-            status = MPI.Status()
-            if _mpi_comm.iprobe(source=self._source, tag=self._tag, status=status):
-                source = status.Get_source()
-                tag = status.Get_tag()
-                msg = _mpi_comm.recv(source=source, tag=tag, status=status)
-                return msg, status.Get_source()
-            yield from asyncio.sleep(_polling_time).__await__()
+#    def __await__(self):
+#        while True:
+#            if self._cancel:
+#                return None, None
+#            status = MPI.Status()
+#            if _mpi_comm.iprobe(source=self._source, tag=self._tag, status=status):
+#                source = status.Get_source()
+#                tag = status.Get_tag()
+#                msg = _mpi_comm.recv(source=source, tag=tag, status=status)
+#                return msg, status.Get_source()
+#            yield from asyncio.sleep(_polling_time).__await__()
 
-    def cancel(self):
-        self._cancel = True
+#    def cancel(self):
+#        self._cancel = True
 
 
 class AsyncMPISend:
@@ -108,6 +110,109 @@ class AsyncMPISend:
             if self._request:
                 self._request.Cancel()
                 self._request = None
+
+
+Item = namedtuple("Item", ["event", "message_queue"])
+
+
+class MessageReceiver:
+    def __init__(self):
+        logger.debug("MessageReceiver.__init__")
+        self._running = False
+        self._request_stop = False
+        self._lock = threading.Lock()
+        self._items = {}
+        self._task = None
+
+    def get_message(self, tag, source_rank):
+        with self._lock:
+            item = self._items.get((tag, source_rank))
+            if item is None or len(item.message_queue) == 0:
+                # Close down whoever is receiving these messages.
+                return None, None
+            source, msg = item.message_queue.pop(0)
+            if len(item.message_queue) == 0:
+                item.event.clear()
+            logger.debug(f"removed from: {self.items_as_string()}")
+        return source, msg
+
+    def register(self, tag, source_rank):
+        logger.debug(f"MessageReceiver.register tag={tag} source_rank={source_rank}")
+        with self._lock:
+            logger.debug(f"items before {self.items_as_string()}")
+            # check it is not already there...
+            event = asyncio.Event()
+            key = (tag, source_rank)
+            if key in self._items:
+                logger.debug(f"ERROR: tag,source_rank ({tag},{source_rank} already in items!!!")
+            self._items[key] = Item(event, [])
+            logger.debug(f"items after  {self.items_as_string()}")
+            if not self._running:
+                self._task = asyncio.create_task(self.run())
+        return event
+        
+    async def run(self):
+        logger.debug("MessageReceiver.run")
+        self._running = True
+        status = MPI.Status()
+        while True:
+            if self._request_stop:
+                logger.debug("MessageReceiver is stopping...")
+                break
+            if _mpi_comm.iprobe(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status):
+                source = status.Get_source()
+                tag = status.Get_tag()
+                #logger.debug(f"MessageReceiver iprobe tag={tag} source={source}")
+                with self._lock:
+                    key = (tag, source)
+                    item = self._items.get(key)
+                    if item is None:
+                        # Check if source corresponds to MPI.ANY_SOURCE.
+                        key = (tag, None)
+                        item = self._items.get(key)
+                        
+                    if item is None:
+                        logger.debug(f"ERROR: MessageReceiver has unexpected message tag={tag} source={source}")
+                        # Should I read and dump message????
+
+                        msg = _mpi_comm.recv(source=source, tag=tag, status=status)
+                        logger.debug(f"ERROR msg={msg}")
+
+                    else:
+                        logger.debug(f"MessageReceiver has msg for tag {tag} from source {source}")
+                        msg = _mpi_comm.recv(source=source, tag=tag, status=status)
+                        item.message_queue.append((source, msg))
+                        if not item.event.is_set():
+                            item.event.set()
+                        logger.debug(f"added to: {self.items_as_string()}")
+            await asyncio.sleep(_polling_time)
+
+        self._running = False
+        logger.debug("MessageReceiver exiting async run()")
+        self._task = None
+
+    def stop(self):
+        logger.debug("MessageReceiver.stop")
+        self._request_stop = True
+
+    def unregister(self, tag, source_rank, send_empty_message=False):
+        logger.debug(f"MessageReceiver.unregister tag={tag} source_rank={source_rank}")
+        with self._lock:
+            logger.debug(f"items before {self.items_as_string()}")
+            item = self._items.pop((tag, source_rank))
+            if send_empty_message:
+                logger.debug(f"MessageReceiver sending empty message to tag={tag} source_rank={source_rank}")
+                item.event.set()
+            else:
+                item.event.clear()
+            # check rank and source_rank are the same?
+            logger.debug(f"items after  {self.items_as_string()}")
+            if self._running and len(self._items) == 0:
+                self._request_stop = True
+
+    def items_as_string(self):
+        return " ".join(f"{k}:{len(v.message_queue)}" for k,v in self._items.items())
+
 
 
 # Unique MPI tags for handshakes.
@@ -154,34 +259,51 @@ _comm_store = CommStore()
 
 class MPIComm(Comm):
     # Communication object, one sender and one receiver only.
-    def __init__(self, local_addr, peer_addr, tag, deserialize=True):
+    def __init__(self, local_addr, peer_addr, tag, message_receiver,
+                 deserialize=True):
         Comm.__init__(self)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self._tag = tag
+        self._message_receiver = message_receiver
         self.deserialize = deserialize
-        self._closed = False
-        self._async_recv = None
+        self._closed = False        
         _comm_store.register_comm(self)
 
         self._local_rank = parse_host_port(self._local_addr)[1]
         self._peer_rank = parse_host_port(self._peer_addr)[1]
 
+        self._want_event = True
+        #self._want_event = False
+
+        if self._want_event:
+            self._event = self._message_receiver.register(self._tag, self._peer_rank)
+        else:
+            self._async_recv = None
+
         logger.debug(
-            f"MPIComm.__init__ local={self._local_rank} peer={self._peer_rank} tag={self._tag}"
+            f"MPIComm.__init__ peer={self._peer_rank} tag={self._tag}"
         )
 
     async def close(self):
-        logger.debug("MPIComm.close")
-        self.abort()
+        logger.debug(f"MPIComm.close peer={self._peer_rank} tag={self._tag}")
+        if self._want_event:
+            if not self._closed:
+                self._message_receiver.unregister(self._tag, self._peer_rank, True)
+                self._closed = True
+        else:
+            self.abort()
 
     def abort(self):
-        logger.debug(f"MPIComm.abort {self._async_recv}")
-        if not self._closed:
-            if self._async_recv:
-                self._async_recv.cancel()
-            self._closed = True
-            _comm_store.remove_comm(self)
+        logger.debug(f"MPIComm.abort peer={self._peer_rank} tag={self._tag}")
+        if self._want_event:
+            pass
+        else:
+            if not self._closed:
+                if self._async_recv:
+                    self._async_recv.cancel()
+                    self._closed = True
+                    _comm_store.remove_comm(self)
 
     def closed(self):
         return self._closed
@@ -199,10 +321,15 @@ class MPIComm(Comm):
             f"MPIComm.read (listening) from rank={self._peer_rank} tag={self._tag}"
         )
 
-        self._async_recv = AsyncMPIRecv(self._peer_rank, self._tag)
-        msg, _ = await self._async_recv
+        if self._want_event:
+            await self._event.wait()
+            other_rank, msg = self._message_receiver.get_message(self._tag, self._peer_rank)
+        else:
+            self._async_recv = AsyncMPIRecv(self._peer_rank, self._tag)
+            msg, _ = await self._async_recv
 
         if msg is None:
+            logger.debug(f"MPIComm read has empty message peer={self._peer_rank} tag={self._tag}")
             raise CommClosedError
 
         if _message_type == MessageType.Frames:
@@ -227,7 +354,10 @@ class MPIComm(Comm):
             if self.deserialize:
                 msg = nested_deserialize(msg)
 
-        self._async_recv = None
+        if self._want_event:
+            pass
+        else:
+            self._async_recv = None
         logger.debug(
             f"MPIComm.read completed from rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}"
         )
@@ -267,7 +397,7 @@ class MPIComm(Comm):
             if not ok:
                 raise CommClosedError
 
-        logger.debug("MPIComm.write completed")
+        logger.debug(f"MPIComm.write completed  peer={self._peer_rank} tag={self._tag}")
 
         if _message_type == MessageType.Frames:
             return sum(lengths)
@@ -276,8 +406,9 @@ class MPIComm(Comm):
 
 
 class MPIConnector(Connector):
-    def __init__(self):
+    def __init__(self, message_receiver):
         logger.debug("MPIConnector.__init__")
+        self._message_receiver = message_receiver
 
     async def connect(self, address, deserialize=True, **connection_args):
         logger.debug(f"MPIConnector.connect to remote address={address}")
@@ -302,7 +433,8 @@ class MPIConnector(Connector):
         # Create and return new comm
         local_address = f"mpi://{get_ip()}:{_mpi_rank}"
         peer_address = f"mpi://{target_ip}:{target_rank}"
-        comm = MPIComm(local_address, peer_address, new_tag, deserialize)
+        comm = MPIComm(local_address, peer_address, new_tag,
+                       self._message_receiver, deserialize)
         return comm
 
 
@@ -310,16 +442,26 @@ class MPIListener(Listener):
     prefix = "mpi://"
 
     def __init__(
-        self, address, comm_handler, deserialize=True, default_port=0, **connection_args
+        self, address, comm_handler, message_receiver, deserialize=True,
+        default_port=0, **connection_args
     ):
         logger.debug(f"MPIListener.__init__ address={address}")
 
         self.ip = get_ip()
         self._comm_handler = comm_handler
+        self._message_receiver = message_receiver
         self.deserialize = deserialize
         self.server_args = self._get_server_args(**connection_args)
 
-        self._async_recv = None
+        self._listen_future = None
+        
+        self._want_event = True
+        #self._want_event = False
+
+        if self._want_event:
+            self._event = None
+        else:
+            self._async_recv = None
 
     def _get_server_args(self, **connection_args):
         return {}
@@ -331,11 +473,19 @@ class MPIListener(Listener):
         # rank, so need to repeat whenever a new connection request is received.
         status = MPI.Status()
 
+        if self._want_event:
+            self._event = self._message_receiver.register(_new_connection_tag, None)
+
         while True:
             logger.debug("MPIListener waiting for contact")
-            self._async_recv = AsyncMPIRecv(None, _new_connection_tag)
-            msg, other_rank = await self._async_recv
-            self._async_recv = None
+
+            if self._want_event:
+                await self._event.wait()
+                other_rank, msg = self._message_receiver.get_message(_new_connection_tag, None)
+            else:
+                self._async_recv = AsyncMPIRecv(None, _new_connection_tag)
+                msg, other_rank = await self._async_recv
+                self._async_recv = None
 
             if msg is None:
                 # Empty message can only be caused by cancelling the receive.
@@ -353,6 +503,7 @@ class MPIListener(Listener):
                 local_addr=f"mpi://{self.ip}:{_mpi_rank}",
                 peer_addr=f"mpi://{recv_ip}:{other_rank}",
                 tag=tag,
+                message_receiver=self._message_receiver,
                 deserialize=self.deserialize,
             )
 
@@ -364,15 +515,30 @@ class MPIListener(Listener):
 
             IOLoop.current().add_callback(self._comm_handler, comm)
 
+        # may have already called unregister if called stop()????????
+        if self._want_event:
+            if self._event:
+                self._message_receiver.unregister(_new_connection_tag, None)
+                self._event = None
+        self._listen_future = None
+
     async def start(self):
         logger.debug("MPIListener.start")
-        asyncio.ensure_future(self._listen())
+        self._listen_future = asyncio.ensure_future(self._listen())
 
     def stop(self):
         logger.debug("MPIListener.stop")
-        if self._async_recv:
-            self._async_recv.cancel()
-            self._async_recv = None
+        if self._listen_future:
+            self._listen_future.cancel()
+            
+        if self._want_event:
+            if self._event:
+                self._message_receiver.unregister(_new_connection_tag, None)
+                self._event = None
+        else:
+            if self._async_recv:
+                self._async_recv.cancel()
+                self._async_recv = None
 
     @property
     def listen_address(self):
@@ -384,13 +550,23 @@ class MPIListener(Listener):
 
 
 class MPIBackend(Backend):
+    def __init__(self):
+        logger.debug("MPIBackend.__init__")
+        self._message_receiver = None
+
+    def _get_or_create_message_receiver(self):
+        if self._message_receiver is None:
+            self._message_receiver = MessageReceiver()
+        return self._message_receiver
+
     def get_connector(self):
         logger.debug("MPIBackend.get_connector")
-        return MPIConnector()
+        return MPIConnector(self._get_or_create_message_receiver())
 
     def get_listener(self, loc, handle_comm, deserialize, **connection_args):
         logger.debug(f"MPIBackend.get_listener loc={loc}")
-        return MPIListener(loc, handle_comm, deserialize, **connection_args)
+        return MPIListener(loc, handle_comm, self._get_or_create_message_receiver(),
+                           deserialize, **connection_args)
 
     def get_address_host(self, loc):
         return parse_host_port(loc)[0]
