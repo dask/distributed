@@ -144,7 +144,7 @@ class CommStore:
         logger.debug("CommStore start")
         for c in self._comms:
             logger.debug(
-                f"cache {c._local_addr} {c._peer_addr} {c._send_tag} {c._recv_tag}"
+                f"cache {c._local_addr} {c._peer_addr} {c._tag}"
             )
         logger.debug("CommStore end")
 
@@ -154,19 +154,21 @@ _comm_store = CommStore()
 
 class MPIComm(Comm):
     # Communication object, one sender and one receiver only.
-    def __init__(self, local_addr, peer_addr, send_tag, recv_tag, deserialize=True):
+    def __init__(self, local_addr, peer_addr, tag, deserialize=True):
         Comm.__init__(self)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
-        self._send_tag = send_tag
-        self._recv_tag = recv_tag
+        self._tag = tag
         self.deserialize = deserialize
         self._closed = False
         self._async_recv = None
         _comm_store.register_comm(self)
 
+        self._local_rank = parse_host_port(self._local_addr)[1]
+        self._peer_rank = parse_host_port(self._peer_addr)[1]
+
         logger.debug(
-            f"MPIComm.__init__ local={local_addr} peer={peer_addr} tags={send_tag} {recv_tag}"
+            f"MPIComm.__init__ local={self._local_rank} peer={self._peer_rank} tag={self._tag}"
         )
 
     async def close(self):
@@ -193,13 +195,11 @@ class MPIComm(Comm):
         return self._peer_addr
 
     async def read(self, deserializers="ignored"):
-        _, source_rank = parse_host_port(self._peer_addr)
-        tag = self._recv_tag
         logger.debug(
-            f"MPIComm.read (listening) from source_rank={source_rank} tag={tag}"
+            f"MPIComm.read (listening) from rank={self._peer_rank} tag={self._tag}"
         )
 
-        self._async_recv = AsyncMPIRecv(source_rank, tag)
+        self._async_recv = AsyncMPIRecv(self._peer_rank, self._tag)
         msg, _ = await self._async_recv
 
         if msg is None:
@@ -229,16 +229,14 @@ class MPIComm(Comm):
 
         self._async_recv = None
         logger.debug(
-            f"MPIComm.read completed from source_rank={source_rank} tag={tag} {str(msg)[:99]}"
+            f"MPIComm.read completed from rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}"
         )
 
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):
-        _, target_rank = parse_host_port(self._peer_addr)
-        tag = self._send_tag
         logger.debug(
-            f"MPIComm.write to target_rank={target_rank} tag={tag} {str(msg)[:99]}"
+            f"MPIComm.write to rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}"
         )
 
         if _message_type == MessageType.Frames:
@@ -262,9 +260,9 @@ class MPIComm(Comm):
 
         if False:
             # Direct send causes it to hang sometimes...
-            _mpi_comm.send(msg, dest=target_rank, tag=tag)
+            _mpi_comm.send(msg, dest=self._peer_rank, tag=self._tag)
         else:
-            async_send = AsyncMPISend(msg, target_rank, tag)
+            async_send = AsyncMPISend(msg, self._peer_rank, self._tag)
             ok = await async_send
             if not ok:
                 raise CommClosedError
@@ -284,10 +282,11 @@ class MPIConnector(Connector):
     async def connect(self, address, deserialize=True, **connection_args):
         logger.debug(f"MPIConnector.connect to remote address={address}")
 
-        _, target_rank = parse_host_port(address)
+        target_ip, target_rank = parse_host_port(address)
 
-        send_tag = _comm_store.get_next_tag()
-        msg = f"{send_tag}:{get_ip()}"
+        # Tag to be used for MPIComm.
+        new_tag = _comm_store.get_next_tag()
+        msg = f"{new_tag}:{get_ip()}"
 
         if True:  # Is either OK?
             _mpi_comm.send(msg, dest=target_rank, tag=_new_connection_tag)
@@ -300,24 +299,10 @@ class MPIConnector(Connector):
                 raise CommClosedError
             logger.debug("MPIConnector isend returned")
 
-        # Receive tag in other direction.
-        if True:
-            async_recv = AsyncMPIRecv(target_rank, _new_response_tag)
-            logger.debug("MPIConnector irecv called")
-            msg, _ = await async_recv
-        else:
-            logger.debug("MPIConnector recv called")
-            msg = _mpi_comm.recv(source=target_rank, tag=_new_response_tag)
-
-        # Should check format of received message.
-        recv_tag, recv_ip = msg.split(":")
-        recv_tag = int(recv_tag)
-        logger.debug(f"MPIConnector recv returned {msg} {recv_tag}")
-
         # Create and return new comm
         local_address = f"mpi://{get_ip()}:{_mpi_rank}"
-        peer_address = f"mpi://{recv_ip}:{target_rank}"
-        comm = MPIComm(local_address, peer_address, send_tag, recv_tag, deserialize)
+        peer_address = f"mpi://{target_ip}:{target_rank}"
+        comm = MPIComm(local_address, peer_address, new_tag, deserialize)
         return comm
 
 
@@ -361,20 +346,13 @@ class MPIListener(Listener):
             )
 
             # Should check format of received message.
-            recv_tag, recv_ip = msg.split(":")
-            recv_tag = int(recv_tag)
-
-            # Send response message.
-            send_tag = _comm_store.get_next_tag()
-            msg = f"{send_tag}:{self.ip}"
-            _mpi_comm.send(msg, dest=other_rank, tag=_new_response_tag)
-            logger.debug(f"MPIListener response sent {msg}")
+            tag, recv_ip = msg.split(":")
+            tag = int(tag)
 
             comm = MPIComm(
                 local_addr=f"mpi://{self.ip}:{_mpi_rank}",
                 peer_addr=f"mpi://{recv_ip}:{other_rank}",
-                send_tag=send_tag,
-                recv_tag=recv_tag,
+                tag=tag,
                 deserialize=self.deserialize,
             )
 
