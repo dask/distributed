@@ -1850,8 +1850,11 @@ class Scheduler(ServerNode):
 
         if priority is None:
             # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of a set is much faster than a dict_keys
             stripped_deps = {
-                k: v.intersection(dsk) for k, v in dependencies.items() if k in dsk
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
             }
             priority = dask.order.order(dsk, dependencies=stripped_deps)
 
