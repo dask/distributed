@@ -576,7 +576,7 @@ def test_one_thread_deadlock():
 
 
 @gen_cluster(client=True)
-async def test_waiter(client, s, a, b):
+async def test_async_deadlock(client, s, a, b):
     ac = await client.submit(Counter, actor=True)
     ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
 
