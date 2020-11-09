@@ -119,14 +119,18 @@ class Actor(WrappedKey):
         return sorted(o)
 
     def __getattr__(self, key):
-        print("###getattr", file=open("temp", "at"))
 
         if self._future and self._future.status not in ("finished", "pending"):
             raise ValueError(
                 "Worker holding Actor was lost.  Status: " + self._future.status
             )
 
-        if self._worker and self._worker.address == self._address:
+        if (
+            self._worker
+            and self._worker.address == self._address
+            and threading.current_thread().name.startswith("Dask-Actor-Threads")
+        ):
+            # actor calls actor on same worker
             actor = self._worker.actors[self.key]
             attr = getattr(actor, key)
 
