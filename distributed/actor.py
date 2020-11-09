@@ -131,7 +131,7 @@ class Actor(WrappedKey):
             attr = getattr(actor, key)
 
             if iscoroutinefunction(attr):
-                return lambda *args, **kwargs: attr(*args, **kwargs)
+                return attr
 
             elif callable(attr):
                 return lambda *args, **kwargs: ActorFuture(
