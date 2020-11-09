@@ -134,7 +134,9 @@ class Actor(WrappedKey):
                 return lambda *args, **kwargs: attr(*args, **kwargs)
 
             elif callable(attr):
-                return lambda *args, **kwargs: ActorFuture(None, None, result=attr(*args, **kwargs))
+                return lambda *args, **kwargs: ActorFuture(
+                    None, None, result=attr(*args, **kwargs)
+                )
             else:
                 return attr
 
