@@ -1,5 +1,5 @@
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
@@ -184,8 +184,6 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self.events = None
-        self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
         self._event_finished = asyncio.Event()
 
@@ -224,8 +222,6 @@ class Server:
         from .counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-        self.events = defaultdict(lambda: deque(maxlen=10000))
-        self.event_counts = defaultdict(lambda: 0)
 
         self.periodic_callbacks = dict()
 
@@ -368,16 +364,6 @@ class Server:
             )
         if self.digests is not None:
             self.digests["tick-duration"].add(diff)
-
-    def log_event(self, name, msg):
-        msg["time"] = time()
-        if isinstance(name, list):
-            for n in name:
-                self.events[n].append(msg)
-                self.event_counts[n] += 1
-        else:
-            self.events[name].append(msg)
-            self.event_counts[name] += 1
 
     @property
     def address(self):
