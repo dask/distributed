@@ -3579,6 +3579,12 @@ class Client:
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
+    def log_event(self, topic, msg):
+        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
+
+    def get_events(self, topic=None):
+        return self.sync(self.scheduler.events, topic=topic)
+
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler
 
