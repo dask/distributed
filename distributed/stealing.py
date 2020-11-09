@@ -57,9 +57,8 @@ class WorkStealing(SchedulerPlugin):
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
-    @property
-    def log(self):
-        return self.scheduler.events["stealing"]
+    def log(self, msg):
+        self.scheduler.log_event("stealing", msg)
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
@@ -86,7 +85,9 @@ class WorkStealing(SchedulerPlugin):
         ws = ts.processing_on
         worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
-        self.log.append(("add-stealable", ts.key, worker, level))
+        self.log(
+            {"action": "add-stealable", "key": ts.key, "worker": worker, "level": level}
+        )
         if cost_multiplier is not None:
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
@@ -98,7 +99,14 @@ class WorkStealing(SchedulerPlugin):
             return
 
         worker, level = result
-        self.log.append(("remove-stealable", ts.key, worker, level))
+        self.log(
+            {
+                "action": "remove-stealable",
+                "key": ts.key,
+                "worker": worker,
+                "level": level,
+            }
+        )
         try:
             self.stealable[worker][level].remove(ts)
         except KeyError:
@@ -232,8 +240,13 @@ class WorkStealing(SchedulerPlugin):
 
             # Victim had already started execution, reverse stealing
             if state in ("memory", "executing", "long-running", None):
-                self.log.append(
-                    ("already-computing", key, victim.address, thief.address)
+                self.log(
+                    {
+                        "action": "already-computing",
+                        "key": key,
+                        "victim": victim.address,
+                        "thief": thief.address,
+                    }
                 )
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
@@ -257,7 +270,14 @@ class WorkStealing(SchedulerPlugin):
                     self.scheduler.send_task_to_worker(thief.address, key)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
-                self.log.append(("confirm", key, victim.address, thief.address))
+                self.log(
+                    {
+                        "action": "confirm",
+                        "key": key,
+                        "victim": victim.address,
+                        "thief": thief.address,
+                    }
+                )
             else:
                 raise ValueError("Unexpected task state: %s" % state)
         except Exception as e:
@@ -290,16 +310,17 @@ class WorkStealing(SchedulerPlugin):
             if occ_idl + cost_multiplier * duration <= occ_sat - duration / 2:
                 self.move_task_request(ts, sat, idl)
                 log.append(
-                    (
-                        start,
-                        level,
-                        ts.key,
-                        duration,
-                        sat.address,
-                        occ_sat,
-                        idl.address,
-                        occ_idl,
-                    )
+                    {
+                        "action": "move-task",
+                        "start": start,
+                        "level": level,
+                        "key": ts.key,
+                        "duration": duration,
+                        "saturated_address": sat.address,
+                        "saturated_occupancy": occ_sat,
+                        "idle_address": idl.address,
+                        "idle_occupancy": occ_idl,
+                    }
                 )
                 s.check_idle_saturated(sat, occ=occ_sat)
                 s.check_idle_saturated(idl, occ=occ_idl)
@@ -392,7 +413,8 @@ class WorkStealing(SchedulerPlugin):
                         )
 
             if log:
-                self.log.append(log)
+                for l in log:
+                    self.log(l)
                 self.count += 1
             stop = time()
             if s.digests:
@@ -410,11 +432,9 @@ class WorkStealing(SchedulerPlugin):
     def story(self, *keys):
         keys = set(keys)
         out = []
-        for L in self.log:
-            if not isinstance(L, list):
-                L = [L]
+        for L in self.scheduler.get_event("stealing"):
             for t in L:
-                if any(x in keys for x in t):
+                if any(x["key"] in keys for x in t):
                     out.append(t)
         return out
 
