@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -258,3 +260,39 @@ class PipInstall(WorkerPlugin):
                     worker.loop.add_callback(
                         worker.close_gracefully, restart=True
                     )  # restart
+
+
+# Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
+class UploadFile(WorkerPlugin):
+    """A Worker Plugin to upload a local python module to workers
+
+    Parameters
+    ----------
+
+    Examples
+    --------
+    """
+
+    name = "upload_file"
+
+    def __init__(self, filepath):
+        """
+        Initialize the plugin by reading in the 
+        """
+        files = [filepath] if isinstance(filepath, str) else files
+        self.data = {}
+        for fname in files:
+            with open(fname, "rb") as f:
+                self.data[os.path.basename(fname)] = f.read()
+
+
+    async def setup(self, worker):
+        responses = await asyncio.gather(
+            *[
+                 worker.upload_file(comm=None, filename=filename, data=data, load=True)
+                 for filename, data in self.data.items()
+            ]
+        )
+        assert all(
+            len(data) == r["nbytes"] for r, data in zip(responses, self.data.values())
+        )
