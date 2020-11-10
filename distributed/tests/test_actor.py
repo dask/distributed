@@ -6,7 +6,7 @@ import pytest
 
 import dask
 from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import cluster, gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 from distributed.metrics import time
 
@@ -21,9 +21,23 @@ class Counter:
         self.n += 1
         return self.n
 
+    async def ainc(self):
+        self.n += 1
+        return self.n
+
     def add(self, x):
         self.n += x
         return self.n
+
+
+class UsesCounter:
+    # An actor whose method argument is another actor
+
+    def do_inc(self, ac):
+        return ac.increment().result()
+
+    async def ado_inc(self, ac):
+        return await ac.ainc()
 
 
 class List:
@@ -550,3 +564,20 @@ async def test_waiter(c, s, a, b):
     await waiter.set()
 
     await c.gather(futures)
+
+
+def test_one_thread_deadlock():
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Counter, actor=True).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+
+        assert ac2.do_inc(ac).result() == 1
+
+
+@gen_cluster(client=True)
+async def test_async_deadlock(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
+
+    assert (await ac2.ado_inc(ac)) == 1
