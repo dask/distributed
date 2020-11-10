@@ -275,12 +275,13 @@ class UploadFile(WorkerPlugin):
 
     name = "upload_file"
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, raise_on_error=True):
         """
         Initialize the plugin by reading in the 
         """
         files = [filepath] if isinstance(filepath, str) else files
         self.data = {}
+        self.raise_on_error = raise_on_error
         for fname in files:
             with open(fname, "rb") as f:
                 self.data[os.path.basename(fname)] = f.read()
@@ -293,6 +294,14 @@ class UploadFile(WorkerPlugin):
                  for filename, data in self.data.items()
             ]
         )
+
+        if self.raise_on_error and any(r["status"] == "error" for r in responses):
+            exc = next(r["exception"] for r in responses if r["status"] == "error")
+            print(exc, type(exc))
+            raise exc
+
+        for r in responses:
+            print(r)
         assert all(
             len(data) == r["nbytes"] for r, data in zip(responses, self.data.values())
         )
