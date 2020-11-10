@@ -6,7 +6,7 @@ from queue import Queue
 
 from .client import Future, default_client
 from .protocol import to_serialize
-from .utils import sync
+from .utils import thread_state, sync
 from .utils_comm import WrappedKey
 from .worker import get_worker
 
@@ -128,7 +128,7 @@ class Actor(WrappedKey):
         if (
             self._worker
             and self._worker.address == self._address
-            and threading.current_thread().name.startswith("Dask-Actor-Threads")
+            and getattr(thread_state, "actor", False)
         ):
             # actor calls actor on same worker
             actor = self._worker.actors[self.key]
