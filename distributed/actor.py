@@ -163,10 +163,17 @@ class Actor(WrappedKey):
                             await self._future
                         else:
                             raise OSError("Unable to contact Actor's worker")
-                    return result["result"]
+                    return result
 
                 if self._asynchronous:
-                    return asyncio.ensure_future(run_actor_function_on_worker())
+
+                    async def unwrap():
+                        result = await run_actor_function_on_worker()
+                        if "result" in result:
+                            return result["result"]
+                        raise result["exception"]
+
+                    return asyncio.ensure_future(unwrap())
                 else:
                     # TODO: this mechanism is error prone
                     # we should endeavor to make dask's standard code work here
@@ -188,7 +195,10 @@ class Actor(WrappedKey):
                 x = await self._worker_rpc.actor_attribute(
                     attribute=key, actor=self.key
                 )
-                return x["result"]
+                if "result" in x:
+                    return x["result"]
+                else:
+                    raise x["exception"]
 
             return self._sync(get_actor_attribute_from_worker)
 
@@ -238,10 +248,16 @@ class ActorFuture:
 
     def result(self, timeout=None):
         try:
+            if isinstance(self._cached_result, Exception):
+                raise self._cached_result
             return self._cached_result
         except AttributeError:
-            self._cached_result = self.q.get(timeout=timeout)
-            return self._cached_result
+            out = self.q.get(timeout=timeout)
+            if "result" in out:
+                self._cached_result = out["result"]
+            else:
+                self._cached_result = out["exception"]
+        return self.result()
 
     def __repr__(self):
         return "<ActorFuture>"
