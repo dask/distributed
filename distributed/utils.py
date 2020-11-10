@@ -72,6 +72,10 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
+    if not WINDOWS:
+        # For some reason this is required in python >= 3.9
+        import multiprocessing.popen_spawn_posix
+
     if WINDOWS or PYPY:
         return multiprocessing
     else:
