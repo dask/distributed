@@ -531,8 +531,11 @@ class Server:
                             logger.info("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
-                        logger.exception(e)
-                        result = error_message(e, status="uncaught-error")
+                        # We have to assume the worst: `comm` is no longer usable, even
+                        # to send any error message. Therefore, just log and re-raise
+                        # to close `comm` in the finally block below (GitHub #4133)
+                        logger.exception("Exception while handling op %s", op)
+                        raise
 
                 # result is not type stable:
                 # when LHS is not Status then RHS must not be Status or it raises.
