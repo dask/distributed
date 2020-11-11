@@ -48,6 +48,11 @@ logging.basicConfig(
 logger = logging.getLogger("mpi")
 
 
+# Log contents of messages sent/received.  Helps with debugging, but very slow
+# (conversion of arbitrary objects to/from string).
+log_msg = False
+
+
 # Various MPI message types to experiment with; not expected to be in
 # production code.
 class MessageType(Enum):
@@ -92,7 +97,10 @@ class AsyncMPISend:
     def __init__(self, msg, target, tag):
         self._request = _mpi_comm.isend(msg, dest=target, tag=tag)
         self._lock = threading.Lock()
-        logger.debug(f"AsyncMPISend.__init__ target={target} tag={tag} {str(msg)[:99]}")
+        if log_msg:
+            logger.debug(f"AsyncMPISend.__init__ target={target} tag={tag} {str(msg)[:99]}")
+        else:
+            logger.debug(f"AsyncMPISend.__init__ target={target} tag={tag}")
 
     def __await__(self):
         status = MPI.Status()
@@ -174,13 +182,15 @@ class MessageReceiver:
                     if item is None:
                         logger.debug(f"ERROR: MessageReceiver has unexpected message tag={tag} source={source}")
                         # Should I read and dump message????
-
                         msg = _mpi_comm.recv(source=source, tag=tag, status=status)
-                        logger.debug(f"ERROR msg={msg}")
-
+                        if log_msg:
+                            logger.debug(f"ERROR msg={msg}")
                     else:
-                        logger.debug(f"MessageReceiver has msg for tag {tag} from source {source}")
                         msg = _mpi_comm.recv(source=source, tag=tag, status=status)
+                        if log_msg:
+                            logger.debug(f"MessageReceiver has msg for tag {tag} from source {source} msg={str(msg)[:50]}")
+                        else:
+                            logger.debug(f"MessageReceiver has msg for tag {tag} from source {source}")
                         item.message_queue.append((source, msg))
                         if not item.event.is_set():
                             item.event.set()
@@ -358,16 +368,19 @@ class MPIComm(Comm):
             pass
         else:
             self._async_recv = None
-        logger.debug(
-            f"MPIComm.read completed from rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}"
-        )
+
+        if log_msg:
+            logger.debug(f"MPIComm.read completed from rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}")
+        else:
+            logger.debug(f"MPIComm.read completed from rank={self._peer_rank} tag={self._tag}")
 
         return msg
 
     async def write(self, msg, serializers=None, on_error=None):
-        logger.debug(
-            f"MPIComm.write to rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}"
-        )
+        if log_msg:
+            logger.debug(f"MPIComm.write to rank={self._peer_rank} tag={self._tag} {str(msg)[:99]}")
+        else:
+            logger.debug(f"MPIComm.write to rank={self._peer_rank} tag={self._tag}")
 
         if _message_type == MessageType.Frames:
             frames = await to_frames(
@@ -421,10 +434,16 @@ class MPIConnector(Connector):
 
         if True:  # Is either OK?
             _mpi_comm.send(msg, dest=target_rank, tag=_new_connection_tag)
-            logger.debug(f"MPIConnector send called {msg}")
+            if log_msg:
+                logger.debug(f"MPIConnector send called {msg}")
+            else:
+                logger.debug(f"MPIConnector send called")
         else:
             async_send = AsyncMPISend(msg, target_rank, _new_connection_tag)
-            logger.debug("MPIConnector isend called {msg}")
+            if log_msg:
+                logger.debug("MPIConnector isend called {msg}")
+            else:
+                logger.debug("MPIConnector isend called")
             ok = await async_send
             if not ok:
                 raise CommClosedError
@@ -491,9 +510,10 @@ class MPIListener(Listener):
                 # Empty message can only be caused by cancelling the receive.
                 return
 
-            logger.debug(
-                f"MPIListener async recv returned from rank={other_rank} {msg}"
-            )
+            if log_msg:
+                logger.debug(f"MPIListener async recv returned from rank={other_rank} {msg}")
+            else:
+                logger.debug(f"MPIListener async recv returned from rank={other_rank}")
 
             # Should check format of received message.
             tag, recv_ip = msg.split(":")
@@ -558,7 +578,7 @@ class MPIBackend(Backend):
         if self._message_receiver is None:
             self._message_receiver = MessageReceiver()
         return self._message_receiver
-
+        
     def get_connector(self):
         logger.debug("MPIBackend.get_connector")
         return MPIConnector(self._get_or_create_message_receiver())
