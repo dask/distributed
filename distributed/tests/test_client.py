@@ -1693,8 +1693,8 @@ async def test_upload_file_new_worker(c, s):
 
     with tmp_text("myfile.py", "x = 123") as fn:
         await c.upload_file(fn)
-        await Worker(s.address, loop=s.loop)
-        x = await c.submit(g)
+        async with Worker(s.address):
+            x = await c.submit(g)
 
         assert x == 123
 
