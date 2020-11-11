@@ -790,6 +790,25 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
+@pytest.mark.asyncio
+async def test_comm_closed_on_buffer_error():
+    # Internal errors from comm.stream.write, such as
+    # BufferError should lead to the stream being closed
+    # and not re-used. See GitHub #4133
+    reader, writer = await get_tcp_comm_pair()
+
+    def _write(data):
+        raise BufferError
+
+    writer.stream.write = _write
+    with pytest.raises(BufferError):
+        await writer.write("x")
+    assert writer.stream is None
+
+    await reader.close()
+    await writer.close()
+
+
 #
 # Various stress tests
 #

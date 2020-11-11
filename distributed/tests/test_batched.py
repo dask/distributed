@@ -297,11 +297,5 @@ async def test_handles_exceptions():
             b.send("hello")
             b.send("world")
             await asyncio.sleep(0.020)
-            result = await comm.read()
-            assert result == ("hello", "hello", "world")
-
-            b.send("raises when flushed")
-            await asyncio.sleep(0.020)  # CommClosedError hit in callback
-
             with pytest.raises(CommClosedError):
-                b.send("raises when sent")
+                await comm.read()
