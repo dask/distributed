@@ -4190,8 +4190,8 @@ class Client:
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
         **kwargs: optional
-            If you do pass an class name as the plugin, it will be instantiated
-            with any extra keyword arguments.
+            If you pass a class as the plugin, instead of a class instance, then the
+            class will be instantiated with any extra keyword arguments.
 
         Examples
         --------
