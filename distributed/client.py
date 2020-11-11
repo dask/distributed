@@ -3083,7 +3083,7 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        return self.sync(self._upload_file, filename, raise_on_error=self.asynchronous)
+        return self.sync(self._upload_file, filename)
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
@@ -4092,7 +4092,7 @@ class Client:
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  If a plugin with that name has
-        already registered then any future plugins will not run.
+        already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
