@@ -3036,8 +3036,8 @@ class Client:
 
     async def _upload_file(self, filename, raise_on_error=True):
         await self._register_worker_plugin(
-                UploadFile(filename),
-                name=filename+str(uuid.uuid4()),
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
 
     async def _upload_large_file(self, local_filename, remote_filename=None):

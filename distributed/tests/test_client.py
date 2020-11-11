@@ -1688,6 +1688,7 @@ def test_upload_file_exception_sync(c):
 async def test_upload_file_new_worker(c, s):
     def g():
         import myfile
+
         return myfile.x
 
     with tmp_text("myfile.py", "x = 123") as fn:
