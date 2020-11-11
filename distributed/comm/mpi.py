@@ -224,47 +224,29 @@ class MessageReceiver:
         return " ".join(f"{k}:{len(v.message_queue)}" for k,v in self._items.items())
 
 
-
 # Unique MPI tags for handshakes.
 _new_connection_tag = 1
 _new_response_tag = 2
 
 
-# Store for all MPIComm objects used by this rank, and a mechanism to create
-# unique MPI tags for new Comm objects.  Don't really need to store the Comms,
-# but useful for debugging.
-class CommStore:
+# Mechanism to create unique MPI tags for new Comm and Controller objects.
+class TagGenerator:
     def __init__(self):
         # Tags only need to be unique from the sender's point of view, so can
         # reuse the same tags on different ranks.  But useful for them to be
         # different for debugging.
-        self._next_available_tag = _mpi_rank * 100 + 3
-        self._comms = []
-        logger.debug(f"MessageType {_message_type.name}")
+        self._next_available_tag = _mpi_rank * 100 + 2
+        self._lock = threading.Lock()
 
     def get_next_tag(self):
-        ret = self._next_available_tag
-        self._next_available_tag += 1
-        return ret
-
-    def register_comm(self, comm):
-        self._comms.append(comm)
-        self.write()
-
-    def remove_comm(self, comm):
-        self._comms.remove(comm)
-        self.write()
-
-    def write(self):
-        logger.debug("CommStore start")
-        for c in self._comms:
-            logger.debug(
-                f"cache {c._local_addr} {c._peer_addr} {c._tag}"
-            )
-        logger.debug("CommStore end")
+        with self._lock:
+            tag = self._next_available_tag
+            self._next_available_tag += 1
+        logger.debug(f"TagGenerator issuing tag {tag}")
+        return tag
 
 
-_comm_store = CommStore()
+_tag_generator = TagGenerator()
 
 
 class MPIComm(Comm):
@@ -278,7 +260,6 @@ class MPIComm(Comm):
         self._message_receiver = message_receiver
         self.deserialize = deserialize
         self._closed = False        
-        _comm_store.register_comm(self)
 
         self._local_rank = parse_host_port(self._local_addr)[1]
         self._peer_rank = parse_host_port(self._peer_addr)[1]
@@ -313,7 +294,6 @@ class MPIComm(Comm):
                 if self._async_recv:
                     self._async_recv.cancel()
                     self._closed = True
-                    _comm_store.remove_comm(self)
 
     def closed(self):
         return self._closed
@@ -429,7 +409,7 @@ class MPIConnector(Connector):
         target_ip, target_rank = parse_host_port(address)
 
         # Tag to be used for MPIComm.
-        new_tag = _comm_store.get_next_tag()
+        new_tag = _tag_generator.get_next_tag()
         msg = f"{new_tag}:{get_ip()}"
 
         if True:  # Is either OK?
