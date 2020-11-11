@@ -4,6 +4,7 @@ from enum import Enum
 import logging
 import struct
 import threading
+import time
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -52,6 +53,10 @@ logger = logging.getLogger("mpi")
 # (conversion of arbitrary objects to/from string).
 log_msg = False
 
+# Log time taken from messages being received by MessageReceiver and to when
+# they are consumed by Comm or Connector, and similar for AsyncMPISends.
+log_msg_time = True
+
 
 # Various MPI message types to experiment with; not expected to be in
 # production code.
@@ -97,6 +102,8 @@ class AsyncMPISend:
     def __init__(self, msg, target, tag):
         self._request = _mpi_comm.isend(msg, dest=target, tag=tag)
         self._lock = threading.Lock()
+        if log_msg_time:
+            self._start = time.time()
         if log_msg:
             logger.debug(f"AsyncMPISend.__init__ target={target} tag={tag} {str(msg)[:99]}")
         else:
@@ -110,6 +117,9 @@ class AsyncMPISend:
                     return False
                 finished, _ = self._request.test(status)
             if finished:
+                if log_msg_time:
+                    seconds = time.time() - self._start
+                    logger.debug(f"AsyncMPISend milliseconds={seconds*1000:.3f}")
                 return True
             yield from asyncio.sleep(_polling_time).__await__()
 
@@ -138,7 +148,12 @@ class MessageReceiver:
             if item is None or len(item.message_queue) == 0:
                 # Close down whoever is receiving these messages.
                 return None, None
-            source, msg = item.message_queue.pop(0)
+            if log_msg_time:
+                source, msg, time_arrived = item.message_queue.pop(0)
+                seconds = time.time() - time_arrived
+                logger.debug(f"log_msg_time milliseconds={seconds*1000:.3f}")
+            else:
+                source, msg = item.message_queue.pop(0)
             if len(item.message_queue) == 0:
                 item.event.clear()
             logger.debug(f"removed from: {self.items_as_string()}")
@@ -191,7 +206,11 @@ class MessageReceiver:
                             logger.debug(f"MessageReceiver has msg for tag {tag} from source {source} msg={str(msg)[:50]}")
                         else:
                             logger.debug(f"MessageReceiver has msg for tag {tag} from source {source}")
-                        item.message_queue.append((source, msg))
+                        if log_msg_time:
+                            now = time.time()
+                            item.message_queue.append((source, msg, now))
+                        else:
+                            item.message_queue.append((source, msg))
                         if not item.event.is_set():
                             item.event.set()
                         logger.debug(f"added to: {self.items_as_string()}")
