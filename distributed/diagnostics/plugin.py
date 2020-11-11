@@ -263,16 +263,16 @@ class PipInstall(WorkerPlugin):
 
 # Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
 class UploadFile(WorkerPlugin):
-    """A WorkerPlugin to upload a local python module to workers.
+    """A WorkerPlugin to upload a local file to workers.
 
     Parameters
     ----------
     filepath: str
-        A path to the python module (.py, egg, or zip) to upload
+        A path to the file (.py, egg, or zip) to upload
 
     Examples
     --------
-    >>> from dask.distributed import UploadFile
+    >>> from distributed.diagnostics.plugin import UploadFile
 
     >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
     """
