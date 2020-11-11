@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import socket
@@ -277,27 +276,16 @@ class UploadFile(WorkerPlugin):
 
     def __init__(self, filepath):
         """
-        Initialize the plugin by reading in the 
+        Initialize the plugin by reading in the data from the given file.
         """
-        files = [filepath] if isinstance(filepath, str) else files
-        self.data = {}
-        for fname in files:
-            with open(fname, "rb") as f:
-                self.data[os.path.basename(fname)] = f.read()
-
+        self.filename = os.path.basename(filepath)
+        with open(filepath, "rb") as f:
+            self.data = f.read()
 
     async def setup(self, worker):
-        responses = await asyncio.gather(
-            *[
-                 worker.upload_file(comm=None, filename=filename, data=data, load=True)
-                 for filename, data in self.data.items()
-            ]
+        response = await worker.upload_file(
+            comm=None, filename=self.filename, data=self.data, load=True
         )
-
-        if any(r["status"] == "error" for r in responses):
-            exc = next(r["exception"] for r in responses if r["status"] == "error")
-            raise exc
-
-        assert all(
-            len(data) == r["nbytes"] for r, data in zip(responses, self.data.values())
-        )
+        if response["status"] == "error":
+            raise response["exception"]
+        assert len(self.data) == response["nbytes"]
