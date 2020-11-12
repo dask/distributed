@@ -5324,13 +5324,13 @@ class Scheduler(ServerNode):
         return results
 
     def log_event(self, name, msg):
-        msg["time"] = time()
+        event = (time(), msg)
         if isinstance(name, list):
             for n in name:
-                self.events[n].append(msg)
+                self.events[n].append(event)
                 self.event_counts[n] += 1
         else:
-            self.events[name].append(msg)
+            self.events[name].append(event)
             self.event_counts[name] += 1
 
     def get_events(self, comm=None, topic=None):

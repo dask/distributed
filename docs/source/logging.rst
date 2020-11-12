@@ -55,18 +55,16 @@ For example, below we log start and stop times to the ``"runtimes"`` topic using
     ...     dask.distributed.get_worker().log_event("runtimes", {"start": start, "stop": stop})
     >>> futures = client.map(myfunc, range(10))
     >>> client.get_events("runtimes")
-    ({'start': 1605199867.613919,
-      'stop': 1605199867.613919,
-      'time': 1605199867.617635},
-     {'start': 1605199867.613919,
-      'stop': 1605199867.613919,
-      'time': 1605199867.617635},
+    ((1605207481.77175, {'start': 1605207481.769397, 'stop': 1605207481.769397}),
+     (1605207481.772021, {'start': 1605207481.770036, 'stop': 1605207481.770037}),
      ...
     )
 
 Events for a given topic can be retrieved using the :meth:`Client.get_events` method.
 In the above example, we retrieved the logged start and stop times with
-``client.get_events("runtimes")``.
+``client.get_events("runtimes")``. Note that ``Client.get_events`` returns a tuple for
+each logged event which contains the logged message along with a timestamp for when
+the event was logged.
 
 When combined with scheduler and worker plugins, the structured events system can produce
 rich logging / diagnostic systems.

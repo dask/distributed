@@ -3579,20 +3579,31 @@ class Client:
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
-    def log_event(self, topic: str, msg: dict):
+    def log_event(self, topic: str, msg):
         """Log an event under a given topic
 
         Parameters
         ----------
         topic: str
             Name of the topic under which to log an event
-        msg: dict
-            Event to log. Note that this must be a msgpack serializable dictionary.
+        msg
+            Event to log. Note this must be a msgpack serializable.
+
+        Examples
+        --------
+        >>> from time import time
+        >>> client.log_event("current-time", time())
         """
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
     def get_events(self, topic: str = None):
-        """Retrieve structured logs"""
+        """Retrieve structured logs
+
+        Parameters
+        ----------
+        topic: str
+            Name of topic log to retrieve events for
+        """
         return self.sync(self.scheduler.events, topic=topic)
 
     def retire_workers(self, workers=None, close_workers=True, **kwargs):

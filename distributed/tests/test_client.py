@@ -6264,7 +6264,7 @@ async def test_log_event(c, s, a, b):
     await c.submit(foo)
     events = await c.get_events("topic1")
     assert len(events) == 1
-    assert events[0]["foo"] == "bar"
+    assert events[0][1] == {"foo": "bar"}
 
     # Log an event while on the scheduler
     def log_scheduler(dask_scheduler):
@@ -6273,10 +6273,10 @@ async def test_log_event(c, s, a, b):
     await c.run_on_scheduler(log_scheduler)
     events = await c.get_events("topic2")
     assert len(events) == 1
-    assert events[0]["woo"] == "hoo"
+    assert events[0][1] == {"woo": "hoo"}
 
     # Log an event from the client process
-    await c.log_event("topic2", {"alice": "bob"})
+    await c.log_event("topic2", ("alice", "bob"))
     events = await c.get_events("topic2")
     assert len(events) == 2
-    assert events[1]["alice"] == "bob"
+    assert events[1][1] == ("alice", "bob")
