@@ -291,6 +291,4 @@ class UploadFile(WorkerPlugin):
         response = await worker.upload_file(
             comm=None, filename=self.filename, data=self.data, load=True
         )
-        if response["status"] == "error":
-            raise response["exception"]
         assert len(self.data) == response["nbytes"]
