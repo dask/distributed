@@ -1998,7 +1998,7 @@ class Worker(ServerNode):
 
                 # dep states may have changed before gather_dep runs
                 # if a dep is no longer in-flight then don't fetch it
-                deps_ts = [self.tasks[key] for key in deps]
+                deps_ts = [self.tasks.get(key, None) or TaskState(key) for key in deps]
                 deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
                 deps = [d.key for d in deps_ts]
 
