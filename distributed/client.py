@@ -3034,12 +3034,6 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename):
-        await self._register_worker_plugin(
-            UploadFile(filename),
-            name=filename + str(uuid.uuid4()),
-        )
-
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
@@ -3083,7 +3077,10 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        return self.sync(self._upload_file, filename)
+        return self.register_worker_plugin(
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
+        )
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
