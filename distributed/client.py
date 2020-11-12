@@ -3034,7 +3034,7 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename, raise_on_error=True):
+    async def _upload_file(self, filename):
         await self._register_worker_plugin(
             UploadFile(filename),
             name=filename + str(uuid.uuid4()),
