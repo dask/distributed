@@ -27,13 +27,13 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.diagnostics.plugin import PipInstall, UploadFile
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
-from distributed.utils import tmpfile, tmp_text, TimeoutError
+from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     inc,
@@ -1663,32 +1663,6 @@ async def test_pip_install_fails(c, s, a, b):
 #             args = p2.call_args[0][0]
 #             assert "python" in args[0]
 #             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
-
-
-@gen_cluster(client=True)
-async def test_upload_file_plugin(c, s, a, b):
-    def g():
-        import myfile
-
-        return myfile.x
-
-    with tmp_text("myfile.py", "x = 123") as fn:
-        await c.register_worker_plugin(UploadFile(fn))
-        x = await c.submit(g)
-
-        assert x == 123
-
-
-@gen_cluster(client=True)
-async def test_upload_file_plugin_exception(c, s, a, b):
-    def g():
-        import myfile
-
-        return myfile.x
-
-    with tmp_text("myfile.py", "!syntax_error") as fn:
-        with pytest.raises(SyntaxError):
-            await c.register_worker_plugin(UploadFile(fn))
 
 
 @pytest.mark.asyncio
