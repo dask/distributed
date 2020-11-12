@@ -3416,6 +3416,7 @@ def apply_function_actor(
 
     thread_state.execution_state = execution_state
     thread_state.key = key
+    thread_state.actor = True
 
     result = function(*args, **kwargs)
 
