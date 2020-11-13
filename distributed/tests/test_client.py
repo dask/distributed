@@ -1684,6 +1684,21 @@ def test_upload_file_exception_sync(c):
             c.upload_file(fn)
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_upload_file_new_worker(c, s):
+    def g():
+        import myfile
+
+        return myfile.x
+
+    with tmp_text("myfile.py", "x = 123") as fn:
+        await c.upload_file(fn)
+        async with Worker(s.address):
+            x = await c.submit(g)
+
+        assert x == 123
+
+
 @pytest.mark.skip
 @gen_cluster()
 async def test_multiple_clients(s, a, b):

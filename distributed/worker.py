@@ -999,7 +999,7 @@ class Worker(ServerNode):
                 cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
-                return {"status": "error", "exception": to_serialize(e)}
+                raise e
 
         return {"status": "OK", "nbytes": len(data)}
 

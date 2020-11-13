@@ -69,7 +69,7 @@ from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import get_client, get_worker, secede
-from .diagnostics.plugin import WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
@@ -3034,23 +3034,6 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename, raise_on_error=True):
-        with open(filename, "rb") as f:
-            data = f.read()
-        _, fn = os.path.split(filename)
-        d = await self.scheduler.broadcast(
-            msg={"op": "upload_file", "filename": fn, "data": to_serialize(data)}
-        )
-
-        if any(v["status"] == "error" for v in d.values()):
-            exceptions = [v["exception"] for v in d.values() if v["status"] == "error"]
-            if raise_on_error:
-                raise exceptions[0]
-            else:
-                return exceptions[0]
-
-        assert all(len(data) == v["nbytes"] for v in d.values())
-
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
@@ -3094,13 +3077,10 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        result = self.sync(
-            self._upload_file, filename, raise_on_error=self.asynchronous, **kwargs
+        return self.register_worker_plugin(
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
-        if isinstance(result, Exception):
-            raise result
-        else:
-            return result
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
@@ -4109,7 +4089,7 @@ class Client:
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  If a plugin with that name has
-        already registered then any future plugins will not run.
+        already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
