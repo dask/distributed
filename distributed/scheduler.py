@@ -84,6 +84,7 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.highlevelgraph import highlevelgraph_unpack
 
 if sys.version_info < (3, 8):
     try:
@@ -1313,6 +1314,7 @@ class Scheduler(ServerNode):
 
         client_handlers = {
             "update-graph": self.update_graph,
+            "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -1363,6 +1365,8 @@ class Scheduler(ServerNode):
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
+            "start_task_metadata": self.start_task_metadata,
+            "stop_task_metadata": self.stop_task_metadata,
         }
 
         self._transitions = {
@@ -1818,6 +1822,58 @@ class Scheduler(ServerNode):
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
 
+    def update_graph_hlg(
+        self,
+        client=None,
+        hlg=None,
+        keys=None,
+        dependencies=None,
+        restrictions=None,
+        priority=None,
+        loose_restrictions=None,
+        resources=None,
+        submitting_task=None,
+        retries=None,
+        user_priority=0,
+        actors=None,
+        fifo_timeout=0,
+    ):
+
+        dsk, dependencies = highlevelgraph_unpack(hlg)
+
+        # Remove any self-dependencies (happens on test_publish_bag() and others)
+        for k, v in dependencies.items():
+            deps = set(v)
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        if priority is None:
+            # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
+            stripped_deps = {
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
+            }
+            priority = dask.order.order(dsk, dependencies=stripped_deps)
+
+        return self.update_graph(
+            client,
+            dsk,
+            keys,
+            dependencies,
+            restrictions,
+            priority,
+            loose_restrictions,
+            resources,
+            submitting_task,
+            retries,
+            user_priority,
+            actors,
+            fifo_timeout,
+        )
+
     def update_graph(
         self,
         client=None,
@@ -1868,13 +1924,6 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
@@ -3855,6 +3904,27 @@ class Scheduler(ServerNode):
         ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
         return ts.collect(start=start, stop=stop, count=count)
 
+    def start_task_metadata(self, comm=None, name=None):
+        plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
+
+        self.add_plugin(plugin)
+
+    def stop_task_metadata(self, comm=None, name=None):
+        plugins = [
+            p
+            for p in self.plugins
+            if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
+        ]
+        if len(plugins) != 1:
+            raise ValueError(
+                "Expected to find exactly one CollectTaskMetaDataPlugin "
+                f"with name {name} but found {len(plugins)}."
+            )
+
+        plugin = plugins[0]
+        self.remove_plugin(plugin)
+        return {"metadata": plugin.metadata, "state": plugin.state}
+
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append({"plugin": plugin, "name": name})
@@ -5636,3 +5706,23 @@ class WorkerStatusPlugin(SchedulerPlugin):
 
     def teardown(self):
         self.bcomm.close()
+
+
+class CollectTaskMetaDataPlugin(SchedulerPlugin):
+    def __init__(self, scheduler, name):
+        self.scheduler = scheduler
+        self.name = name
+        self.keys = set()
+        self.metadata = {}
+        self.state = {}
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+        self.keys.update(keys)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        if finish == "memory" or finish == "erred":
+            ts = self.scheduler.tasks.get(key)
+            if ts is not None and ts.key in self.keys:
+                self.metadata[key] = ts.metadata
+                self.state[key] = finish
+                self.keys.discard(key)

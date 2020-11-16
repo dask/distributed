@@ -6,8 +6,6 @@ from enum import Enum
 
 import dask
 from dask.base import normalize_token
-from dask.highlevelgraph import HighLevelGraph, Layer, BasicLayer
-from dask.optimization import SubgraphCallable
 
 from tlz import valmap, get_in
 
@@ -107,28 +105,6 @@ def msgpack_decode_default(obj):
     if "__Set__" in obj:
         return set(obj["as-list"])
 
-    if "__SubgraphCallable__" in obj:
-        mod = import_allowed_module(obj["__module__"])
-        typ = getattr(mod, obj["__name__"])
-        return typ(*obj["args"])
-
-    if "__Layer__" in obj:
-        obj_name = obj["__name__"]
-        if obj_name == "BasicLayer":
-            # The default implemention of Layer returns a BasicLayer, which might
-            # not be defined in `mod` therefore we import it explicitly here
-            typ = BasicLayer
-        else:
-            mod = import_allowed_module(obj["__module__"])
-            typ = getattr(mod, obj["__name__"])
-        return typ(*obj["args"])
-
-    if "__HighLevelGraph__" in obj:
-        return HighLevelGraph(
-            obj["layers"],
-            obj["dependencies"],
-        )
-
     if "__Serialized__" in obj:
         # Notice, the data here is marked a Serialized rather than deserialized. This
         # is because deserialization requires Pickle which the Scheduler cannot run
@@ -158,31 +134,6 @@ def msgpack_encode_default(obj):
 
     if isinstance(obj, set):
         return {"__Set__": True, "as-list": list(obj)}
-
-    if isinstance(obj, SubgraphCallable):
-        cls, args = obj.__reduce__()
-        return {
-            "__SubgraphCallable__": True,
-            "__module__": obj.__module__,
-            "__name__": cls.__name__,
-            "args": args,
-        }
-
-    if isinstance(obj, Layer):
-        cls, args = obj.__reduce__()
-        return {
-            "__Layer__": True,
-            "__module__": obj.__module__,
-            "__name__": cls.__name__,
-            "args": args,
-        }
-
-    if isinstance(obj, HighLevelGraph):
-        return {
-            "__HighLevelGraph__": True,
-            "layers": obj.layers,
-            "dependencies": obj.dependencies,
-        }
 
     return obj
 

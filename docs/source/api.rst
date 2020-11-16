@@ -98,6 +98,7 @@ API
    fire_and_forget
    futures_of
    get_task_stream
+   get_task_metadata
 
 
 Asynchronous methods
@@ -193,6 +194,7 @@ Other
 .. autofunction:: distributed.rejoin
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
+.. autoclass:: get_task_metadata
 
 .. autoclass:: Event
    :members:

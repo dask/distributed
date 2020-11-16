@@ -46,7 +46,6 @@ from .utils_comm import (
     WrappedKey,
     unpack_remotedata,
     pack_data,
-    subs_multiple,
     scatter_to_workers,
     gather_from_workers,
     retry_operation,
@@ -63,19 +62,19 @@ from .core import (
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
+from .protocol.highlevelgraph import highlevelgraph_pack
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
-from .worker import dumps_task, get_client, get_worker, secede
-from .diagnostics.plugin import WorkerPlugin
+from .worker import get_client, get_worker, secede
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
     tokey,
     log_errors,
-    str_graph,
     key_split,
     thread_state,
     no_default,
@@ -2516,7 +2515,7 @@ class Client:
         """
         Spawn a coroutine on all workers.
 
-        This spaws a coroutine on all currently known workers and then waits
+        This spawns a coroutine on all currently known workers and then waits
         for the coroutine on each worker.  The coroutines' results are returned
         as a dictionary keyed by worker address.
 
@@ -2582,84 +2581,7 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            def substitute_future_aliases(dsk):
-                # Find aliases not in `keyset`
-                values = {
-                    k: v
-                    for k, v in dsk.items()
-                    if isinstance(v, Future) and k not in keyset
-                }
-                # And substitute all matching keys with its Future
-                if values:
-                    dsk = subs_multiple(dsk, values)
-                return dsk
-
-            # Notice, we only have to do the substitution on already materialized layers
-            dsk = dsk.map_basic_layers(substitute_future_aliases)
-
-            # We need to track all futures unpack_remotedata() unpacks
-            unpacked_futures = set()
-
-            # Unpack remote data in `dsk`, which are "WrappedKeys" that are
-            # unknown to `dsk` but known to the scheduler
-            def unpack_remote_data(tasks):
-                tasks, futures = unpack_remotedata(tasks)
-                unpacked_futures.update(futures)
-                return tasks
-
-            # HACK: Need to loop through each layer manually to collect
-            # futures-related dependencies (for now).  This should be removed
-            # once the scheduler doesn't need these dependencies.
-            _dsk = {}
-            future_deps = defaultdict(set)
-            for key, layer in dsk.layers.items():
-                _dsk[key] = layer.map_tasks(unpack_remote_data)
-                # Here is the "manual" loop where the full graph
-                # needs to be materialized.
-                if unpacked_futures:
-                    for k, v in dict(layer).items():
-                        futures = unpack_remotedata(v)[1]
-                        future_deps[k].update({f.key for f in futures})
-            if _dsk:
-                dsk = HighLevelGraph(_dsk, dsk.dependencies, dsk.key_dependencies)
-
-            for future in unpacked_futures:
-                if future.client is not self:
-                    msg = "Inputs contain futures that were created by another client."
-                    raise ValueError(msg)
-                if tokey(future.key) not in self.futures:
-                    raise CancelledError(tokey(future.key))
-
-            # HACK: currently when submitting work to the scheduler, the client need to
-            # send all key dependencies along with the task graph. Since `dsk` doesn't
-            # know about the unpacked futures, we add futures-related dependencies from
-            # `future_deps`. This hack shouldn't be necessary when the scheduler accepts
-            # high level graphs.
-            dsk.keyset()
-            dependencies = dsk.get_all_dependencies()
-            if future_deps:
-                for key in dependencies.keys():
-                    dependencies[key] |= future_deps.get(key, set())
-
-            if priority is None:
-                # Removing all unpacked futures before calling order()
-                unpacked_keys = {future.key for future in unpacked_futures}
-                stripped_dsk = {k: v for k, v in dsk.items() if k not in unpacked_keys}
-                stripped_deps = {
-                    k: v - unpacked_keys
-                    for k, v in dependencies.items()
-                    if k not in unpacked_keys
-                }
-                priority = dask.order.order(stripped_dsk, dependencies=stripped_deps)
-                priority = keymap(tokey, priority)
-
-            # The scheduler expect all keys to be strings
-            dependencies = {
-                tokey(k): [tokey(dep) for dep in deps]
-                for k, deps in dependencies.items()
-                if deps
-            }
-            dsk = str_graph(dsk, extra_values={f.key for f in unpacked_futures})
+            dsk = highlevelgraph_pack(dsk, keyset, self, self.futures)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
@@ -2668,9 +2590,8 @@ class Client:
             futures = {key: Future(key, self, inform=False) for key in keyset}
             self._send_to_scheduler(
                 {
-                    "op": "update-graph",
-                    "tasks": valmap(dumps_task, dsk),
-                    "dependencies": dependencies,
+                    "op": "update-graph-hlg",
+                    "hlg": dsk,
                     "keys": list(map(tokey, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
@@ -3113,23 +3034,6 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename, raise_on_error=True):
-        with open(filename, "rb") as f:
-            data = f.read()
-        _, fn = os.path.split(filename)
-        d = await self.scheduler.broadcast(
-            msg={"op": "upload_file", "filename": fn, "data": to_serialize(data)}
-        )
-
-        if any(v["status"] == "error" for v in d.values()):
-            exceptions = [v["exception"] for v in d.values() if v["status"] == "error"]
-            if raise_on_error:
-                raise exceptions[0]
-            else:
-                return exceptions[0]
-
-        assert all(len(data) == v["nbytes"] for v in d.values())
-
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
@@ -3173,13 +3077,10 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        result = self.sync(
-            self._upload_file, filename, raise_on_error=self.asynchronous, **kwargs
+        return self.register_worker_plugin(
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
-        if isinstance(result, Exception):
-            raise result
-        else:
-            return result
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
@@ -4171,7 +4072,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None):
+    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4187,8 +4088,8 @@ class Client:
         cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  A a plugin with that name has
-        already registered then any future plugins will not run.
+        used then that will control idempotency.  If a plugin with that name has
+        already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
@@ -4200,6 +4101,9 @@ class Client:
         name: str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+        **kwargs: optional
+            If you pass a class as the plugin, instead of a class instance, then the
+            class will be instantiated with any extra keyword arguments.
 
         Examples
         --------
@@ -4234,6 +4138,9 @@ class Client:
         --------
         distributed.WorkerPlugin
         """
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
@@ -4835,6 +4742,45 @@ class performance_report:
         except Exception:
             code = ""
         get_client().sync(self.__aexit__, type, value, traceback, code=code)
+
+
+class get_task_metadata:
+    """Collect task metadata within a context block
+
+    This gathers ``TaskState`` metadata and final state from the scheduler
+    for tasks which are submitted and finished within the scope of this
+    context manager.
+
+    Examples
+    --------
+    >>> with get_task_metadata() as tasks:
+    ...     x.compute()
+    >>> tasks.metadata
+    {...}
+    >>> tasks.state
+    {...}
+    """
+
+    def __init__(self):
+        self.name = f"task-metadata-{uuid.uuid4().hex}"
+        self.keys = set()
+        self.metadata = None
+        self.state = None
+
+    async def __aenter__(self):
+        await get_client().scheduler.start_task_metadata(name=self.name)
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        response = await get_client().scheduler.stop_task_metadata(name=self.name)
+        self.metadata = response["metadata"]
+        self.state = response["state"]
+
+    def __enter__(self):
+        return get_client().sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return get_client().sync(self.__aexit__, type, value, traceback)
 
 
 @contextmanager

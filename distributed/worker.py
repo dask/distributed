@@ -999,7 +999,7 @@ class Worker(ServerNode):
                 cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
-                return {"status": "error", "exception": to_serialize(e)}
+                raise e
 
         return {"status": "OK", "nbytes": len(data)}
 
@@ -1998,7 +1998,7 @@ class Worker(ServerNode):
 
                 # dep states may have changed before gather_dep runs
                 # if a dep is no longer in-flight then don't fetch it
-                deps_ts = [self.tasks[key] for key in deps]
+                deps_ts = [self.tasks.get(key, None) or TaskState(key) for key in deps]
                 deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
                 deps = [d.key for d in deps_ts]
 
@@ -3416,6 +3416,7 @@ def apply_function_actor(
 
     thread_state.execution_state = execution_state
     thread_state.key = key
+    thread_state.actor = True
 
     result = function(*args, **kwargs)
 

@@ -27,7 +27,7 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.diagnostics.plugin import PipInstall, WorkerPlugin
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -53,6 +53,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     a,
     b,
+    TaskStateMetadataPlugin,
 )
 
 
@@ -1735,24 +1736,11 @@ async def test_bad_local_directory(cleanup):
 
 @pytest.mark.asyncio
 async def test_taskstate_metadata(cleanup):
-    class MyPlugin(WorkerPlugin):
-        """WorkPlugin to populate TaskState.metadata"""
-
-        def setup(self, worker):
-            self.worker = worker
-
-        def transition(self, key, start, finish, **kwargs):
-            ts = self.worker.tasks[key]
-
-            if start == "ready" and finish == "executing":
-                ts.metadata["start_time"] = time()
-            elif start == "executing" and finish == "memory":
-                ts.metadata["stop_time"] = time()
 
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
-                await c.register_worker_plugin(MyPlugin())
+                await c.register_worker_plugin(TaskStateMetadataPlugin())
 
                 f = c.submit(inc, 1)
                 await f
