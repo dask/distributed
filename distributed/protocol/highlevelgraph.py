@@ -81,7 +81,7 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
     # Dump each layer (in topological order)
     for layer in (hlg.layers[name] for name in hlg._toposort_layers()):
         if not layer.is_materialized():
-            state = layer.__dask_distributed_pack__()
+            state = layer.__dask_distributed_pack__(client)
             if state is not None:
                 layers.append(
                     {
