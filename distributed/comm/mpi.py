@@ -102,6 +102,7 @@ class AsyncMPISend:
     def __init__(self, msg, target, tag):
         self._request = _mpi_comm.isend(msg, dest=target, tag=tag)
         self._lock = threading.Lock()
+        self._sleep_time = 0.001
         if log_msg_time:
             self._start = time.time()
         if log_msg:
@@ -121,7 +122,8 @@ class AsyncMPISend:
                     seconds = time.time() - self._start
                     logger.debug(f"AsyncMPISend milliseconds={seconds*1000:.3f}")
                 return True
-            yield from asyncio.sleep(_polling_time).__await__()
+            yield from asyncio.sleep(self._sleep_time).__await__()
+            self._sleep_time *= 2  # Backoff.
 
     def cancel(self):
         with self._lock:
