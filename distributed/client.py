@@ -26,10 +26,11 @@ import weakref
 
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
-from dask.core import flatten, get_dependencies
+from dask.core import flatten
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes, funcname
+from dask.highlevelgraph import HighLevelGraph
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
 
@@ -45,7 +46,6 @@ from .utils_comm import (
     WrappedKey,
     unpack_remotedata,
     pack_data,
-    subs_multiple,
     scatter_to_workers,
     gather_from_workers,
     retry_operation,
@@ -62,19 +62,19 @@ from .core import (
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
+from .protocol.highlevelgraph import highlevelgraph_pack
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
-from .worker import dumps_task, get_client, get_worker, secede
-from .diagnostics.plugin import WorkerPlugin
+from .worker import get_client, get_worker, secede
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
     tokey,
     log_errors,
-    str_graph,
     key_split,
     thread_state,
     no_default,
@@ -684,7 +684,6 @@ class Client:
 
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
-        self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.io_loop = self.loop = self._loop_runner.loop
 
@@ -1433,7 +1432,7 @@ class Client:
 
         assert self.status == "closed"
 
-        if self._should_close_loop and not shutting_down():
+        if not shutting_down():
             self._loop_runner.stop()
 
     async def _shutdown(self):
@@ -2516,7 +2515,7 @@ class Client:
         """
         Spawn a coroutine on all workers.
 
-        This spaws a coroutine on all currently known workers and then waits
+        This spawns a coroutine on all currently known workers and then waits
         for the coroutine on each worker.  The coroutines' results are returned
         as a dictionary keyed by worker address.
 
@@ -2569,26 +2568,6 @@ class Client:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
 
-            keyset = set(keys)
-
-            values = {
-                k: v
-                for k, v in dsk.items()
-                if isinstance(v, Future) and k not in keyset
-            }
-            if values:
-                dsk = subs_multiple(dsk, values)
-
-            d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-            extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
-            extra_keys = {tokey(future.key) for future in extra_futures}
-            dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
-            dsk3 = {k: v for k, v in dsk2.items() if k is not v}
-            for future in extra_futures:
-                if future.client is not self:
-                    msg = "Inputs contain futures that were created by another client."
-                    raise ValueError(msg)
-
             if restrictions:
                 restrictions = keymap(tokey, restrictions)
                 restrictions = valmap(list, restrictions)
@@ -2596,39 +2575,23 @@ class Client:
             if loose_restrictions is not None:
                 loose_restrictions = list(map(tokey, loose_restrictions))
 
-            future_dependencies = {
-                tokey(k): {tokey(f.key) for f in v[1]} for k, v in d.items()
-            }
+            keyset = set(keys)
 
-            for s in future_dependencies.values():
-                for v in s:
-                    if v not in self.futures:
-                        raise CancelledError(v)
+            # Make sure `dsk` is a high level graph
+            if not isinstance(dsk, HighLevelGraph):
+                dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
-
-            if priority is None:
-                priority = dask.order.order(dsk, dependencies=dependencies)
-                priority = keymap(tokey, priority)
-
-            dependencies = {
-                tokey(k): [tokey(dep) for dep in deps]
-                for k, deps in dependencies.items()
-                if deps
-            }
-            for k, deps in future_dependencies.items():
-                if deps:
-                    dependencies[k] = list(set(dependencies.get(k, ())) | deps)
+            dsk = highlevelgraph_pack(dsk, keyset, self, self.futures)
 
             if isinstance(retries, Number) and retries > 0:
-                retries = {k: retries for k in dsk3}
+                retries = {k: retries for k in dsk}
 
+            # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
             self._send_to_scheduler(
                 {
-                    "op": "update-graph",
-                    "tasks": valmap(dumps_task, dsk3),
-                    "dependencies": dependencies,
+                    "op": "update-graph-hlg",
+                    "hlg": dsk,
                     "keys": list(map(tokey, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
@@ -2894,8 +2857,19 @@ class Client:
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
+        if not isinstance(dsk, HighLevelGraph):
+            dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
+
+        # Let's append the finalize graph to dsk
+        finalize_name = tokenize(names)
+        layers = {finalize_name: dsk2}
+        layers.update(dsk.layers)
+        dependencies = {finalize_name: set(dsk.layers.keys())}
+        dependencies.update(dsk.dependencies)
+        dsk = HighLevelGraph(layers, dependencies)
+
         futures_dict = self._graph_to_futures(
-            merge(dsk2, dsk),
+            dsk,
             names,
             restrictions,
             loose_restrictions,
@@ -3060,23 +3034,6 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename, raise_on_error=True):
-        with open(filename, "rb") as f:
-            data = f.read()
-        _, fn = os.path.split(filename)
-        d = await self.scheduler.broadcast(
-            msg={"op": "upload_file", "filename": fn, "data": to_serialize(data)}
-        )
-
-        if any(v["status"] == "error" for v in d.values()):
-            exceptions = [v["exception"] for v in d.values() if v["status"] == "error"]
-            if raise_on_error:
-                raise exceptions[0]
-            else:
-                return exceptions[0]
-
-        assert all(len(data) == v["nbytes"] for v in d.values())
-
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
@@ -3120,13 +3077,10 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        result = self.sync(
-            self._upload_file, filename, raise_on_error=self.asynchronous, **kwargs
+        return self.register_worker_plugin(
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
-        if isinstance(result, Exception):
-            raise result
-        else:
-            return result
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
@@ -4118,7 +4072,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None):
+    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4134,8 +4088,8 @@ class Client:
         cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  A a plugin with that name has
-        already registered then any future plugins will not run.
+        used then that will control idempotency.  If a plugin with that name has
+        already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
@@ -4147,6 +4101,9 @@ class Client:
         name: str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+        **kwargs: optional
+            If you pass a class as the plugin, instead of a class instance, then the
+            class will be instantiated with any extra keyword arguments.
 
         Examples
         --------
@@ -4181,6 +4138,9 @@ class Client:
         --------
         distributed.WorkerPlugin
         """
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
@@ -4782,6 +4742,45 @@ class performance_report:
         except Exception:
             code = ""
         get_client().sync(self.__aexit__, type, value, traceback, code=code)
+
+
+class get_task_metadata:
+    """Collect task metadata within a context block
+
+    This gathers ``TaskState`` metadata and final state from the scheduler
+    for tasks which are submitted and finished within the scope of this
+    context manager.
+
+    Examples
+    --------
+    >>> with get_task_metadata() as tasks:
+    ...     x.compute()
+    >>> tasks.metadata
+    {...}
+    >>> tasks.state
+    {...}
+    """
+
+    def __init__(self):
+        self.name = f"task-metadata-{uuid.uuid4().hex}"
+        self.keys = set()
+        self.metadata = None
+        self.state = None
+
+    async def __aenter__(self):
+        await get_client().scheduler.start_task_metadata(name=self.name)
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        response = await get_client().scheduler.stop_task_metadata(name=self.name)
+        self.metadata = response["metadata"]
+        self.state = response["state"]
+
+    def __enter__(self):
+        return get_client().sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        return get_client().sync(self.__aexit__, type, value, traceback)
 
 
 @contextmanager

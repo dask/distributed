@@ -36,6 +36,7 @@ except ImportError:
 
 import dask
 from dask import istask
+from dask.optimization import SubgraphCallable
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
@@ -371,10 +372,8 @@ class LoopRunner:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
-            self._should_close_loop = True
         else:
             self._loop = loop
-            self._should_close_loop = False
         self._asynchronous = asynchronous
         self._loop_thread = None
         self._started = False
@@ -779,17 +778,31 @@ def _maybe_complex(task):
 
 
 def convert(task, dsk, extra_values):
-    if type(task) is list:
+    typ = type(task)
+    if typ is tuple and task:
+        if type(task[0]) is SubgraphCallable:
+            sc = task[0]
+            return (
+                SubgraphCallable(
+                    convert(sc.dsk, dsk, extra_values),
+                    sc.outkey,
+                    convert(sc.inkeys, dsk, extra_values),
+                    sc.name,
+                ),
+            ) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+        elif callable(task[0]):
+            return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+    if typ is list:
         return [convert(v, dsk, extra_values) for v in task]
-    if type(task) is dict:
+    if typ is dict:
         return {k: convert(v, dsk, extra_values) for k, v in task.items()}
-    if istask(task):
-        return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
     try:
         if task in dsk or task in extra_values:
             return tokey(task)
     except TypeError:
         pass
+    if typ is tuple:  # If the tuple itself isn't a key, check its elements
+        return tuple(convert(v, dsk, extra_values) for v in task)
     return task
 
 

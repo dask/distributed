@@ -1,3 +1,5 @@
+from distutils.version import LooseVersion
+
 import pytest
 
 pytest.importorskip("numpy")
@@ -11,7 +13,14 @@ from distributed.utils_test import gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 import numpy as np
 import pandas as pd
-import pandas.testing as tm
+
+PANDAS_VERSION = LooseVersion(pd.__version__)
+PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
+
+if PANDAS_GT_100:
+    import pandas.testing as tm  # noqa: F401
+else:
+    import pandas.util.testing as tm  # noqa: F401
 
 
 dfs = [
@@ -201,3 +210,19 @@ async def test_delayed_none(c, s, w):
     [xx, yy] = c.compute([x, y])
     assert await xx is None
     assert await yy == 123
+
+
+@pytest.mark.parametrize("typ", [tuple, list])
+def test_tuple_futures_arg(client, typ):
+    x = client.submit(
+        make_time_dataframe,
+    )
+    df2 = client.submit(
+        pd.concat,
+        typ(
+            [
+                x,
+            ]
+        ),
+    )
+    dd.assert_eq(df2.result().iloc[:0], make_time_dataframe().iloc[:0])

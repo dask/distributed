@@ -20,6 +20,7 @@ from distributed.utils_test import (  # noqa: F401
     slowidentity,
     loop,
 )
+import logging
 
 
 @gen_cluster(client=True)
@@ -81,9 +82,9 @@ async def test_acquires_with_timeout(c, s, a, b):
     sem = await Semaphore(1, "x")
     assert await sem.acquire(timeout="25ms")
     assert not await sem.acquire(timeout=0.025)
-    await sem.release()
+    assert await sem.release() is True
     assert await sem.acquire(timeout=timedelta(seconds=0.025))
-    await sem.release()
+    assert await sem.release() is True
 
 
 def test_timeout_sync(client):
@@ -166,7 +167,7 @@ async def test_access_semaphore_by_name(c, s, a, b):
         if not sem.acquire(timeout=0.1):
             return False
         if release:
-            sem.release()
+            assert sem.release() is True
 
         return True
 
@@ -182,7 +183,7 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert len(s.extensions["semaphores"].leases["x"]) == 1
     futures = c.map(f, list(range(10)))
     assert not any(await c.gather(futures))
-    await sem.release()
+    assert await sem.release() is True
 
     del futures
 
@@ -242,20 +243,20 @@ def test_close_sync(client):
 async def test_release_once_too_many(c, s, a, b):
     sem = await Semaphore(name="x")
     assert await sem.acquire()
-    await sem.release()
+    assert await sem.release() is True
 
     with pytest.raises(RuntimeError, match="Released too often"):
-        await sem.release()
+        sem.release()
 
     assert await sem.acquire()
-    await sem.release()
+    assert await sem.release() is True
 
 
 @gen_cluster(client=True)
 async def test_release_once_too_many_resilience(c, s, a, b):
     def f(x, sem):
         sem.acquire()
-        sem.release()
+        assert sem.release() is True
         with pytest.raises(RuntimeError, match="Released too often"):
             sem.release()
         return x
@@ -300,6 +301,9 @@ class FlakyConnectionPool(ConnectionPool):
 
     def activate(self):
         self._flaky_active = True
+
+    def deactivate(self):
+        self._flaky_active = False
 
     async def connect(self, *args, **kwargs):
         if self.cnn_count >= self.failing_connections or not self._flaky_active:
@@ -449,7 +453,7 @@ async def test_timeout_zero(c, s, a, b):
 
     assert await sem.acquire(timeout=0)
     assert not await sem.acquire(timeout=0)
-    await sem.release()
+    assert await sem.release() is True
 
 
 @gen_cluster(client=True)
@@ -460,7 +464,7 @@ async def test_getvalue(c, s, a, b):
     assert await sem.get_value() == 0
     await sem.acquire()
     assert await sem.get_value() == 1
-    await sem.release()
+    assert await sem.release() is True
     assert await sem.get_value() == 0
 
 
@@ -518,3 +522,79 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
                     protected_ressource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
+
+
+@gen_cluster(client=True)
+async def test_release_retry(c, s, a, b):
+    """Verify that we can properly retry a semaphore release operation"""
+    with dask.config.set({"distributed.comm.retry.count": 1}):
+        pool = await FlakyConnectionPool(failing_connections=1)
+        rpc = pool(s.address)
+        c.scheduler = rpc
+        semaphore = await Semaphore(
+            max_leases=2, name="resource_we_want_to_limit", client=c
+        )
+        await semaphore.acquire()
+        pool.activate()  # Comm chaos starts
+        with captured_logger("distributed.utils_comm") as caplog:
+            assert await semaphore.release() is True
+        logs = caplog.getvalue().split("\n")
+        log = logs[0]
+        assert log.startswith("Retrying semaphore release:") and log.endswith(
+            "after exception in attempt 0/1: "
+        )
+
+        assert await semaphore.acquire() is True
+        assert await semaphore.release() is True
+
+
+@gen_cluster(
+    client=True,
+    config={
+        "distributed.scheduler.locks.lease-timeout": "100ms",
+        "distributed.scheduler.locks.lease-validation-interval": "100ms",
+    },
+)
+async def test_release_failure(c, s, a, b):
+    """Don't raise even if release fails: lease will be cleaned up by the lease-validation after
+    a specified interval anyways (see config parameters used)."""
+
+    with dask.config.set({"distributed.comm.retry.count": 1}):
+        pool = await FlakyConnectionPool(failing_connections=5)
+        rpc = pool(s.address)
+        c.scheduler = rpc
+        semaphore = await Semaphore(
+            max_leases=2, name="resource_we_want_to_limit", client=c
+        )
+        await semaphore.acquire()
+        pool.activate()  # Comm chaos starts
+
+        # Release fails (after a single retry) because of broken connections
+        with captured_logger(
+            "distributed.semaphore", level=logging.ERROR
+        ) as semaphore_log:
+            with captured_logger("distributed.utils_comm") as retry_log:
+                assert await semaphore.release() is False
+
+        with captured_logger("distributed.semaphore") as semaphore_cleanup_log:
+            pool.deactivate()  # comm chaos stops
+            assert await semaphore.get_value() == 1  # lease is still registered
+            await asyncio.sleep(0.2)  # Wait for lease to be cleaned up
+
+        # Check release was retried
+        retry_log = retry_log.getvalue().split("\n")[0]
+        assert retry_log.startswith(
+            "Retrying semaphore release:"
+        ) and retry_log.endswith("after exception in attempt 0/1: ")
+        # Check release failed
+        semaphore_log = semaphore_log.getvalue().split("\n")[0]
+        assert semaphore_log.startswith(
+            "Release failed for client="
+        ) and semaphore_log.endswith("Cluster network might be unstable?")
+
+        # Check lease has timed out
+        assert any(
+            log.startswith("Lease") and "timed out after" in log
+            for log in semaphore_cleanup_log.getvalue().split("\n")
+        )
+        assert await semaphore.get_value() == 0

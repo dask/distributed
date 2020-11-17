@@ -219,4 +219,6 @@ def loads_msgpack(header, payload):
                 " installed" % str(header["compression"])
             )
 
-    return msgpack.loads(payload, use_list=False, **msgpack_opts)
+    return msgpack.loads(
+        payload, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+    )

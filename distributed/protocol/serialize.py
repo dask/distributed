@@ -25,9 +25,10 @@ from .utils import (
 
 lazy_registrations = {}
 
-
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
+
+_cached_allowed_modules = {}
 
 
 def dask_dumps(x, context=None):
@@ -71,21 +72,57 @@ def pickle_loads(header, frames):
     return pickle.loads(x, buffers=buffers)
 
 
+def import_allowed_module(name):
+    if name in _cached_allowed_modules:
+        return _cached_allowed_modules[name]
+
+    # Check for non-ASCII characters
+    name = name.encode("ascii").decode()
+    # We only compare the root module
+    root = name.split(".", 1)[0]
+
+    # Note, if an empty string creeps into allowed-imports it is disallowed explicitly
+    if root and root in dask.config.get("distributed.scheduler.allowed-imports"):
+        _cached_allowed_modules[name] = importlib.import_module(name)
+        return _cached_allowed_modules[name]
+    else:
+        raise RuntimeError(
+            f"Importing {repr(name)} is not allowed, please add it to the list of "
+            "allowed modules the scheduler can import via the "
+            "distributed.scheduler.allowed-imports configuration setting."
+        )
+
+
 def msgpack_decode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
     if "__Enum__" in obj:
-        mod = importlib.import_module(obj["__module__"])
-        enum_type = getattr(mod, obj["__name__"])
-        obj = getattr(enum_type, obj["name"])
+        mod = import_allowed_module(obj["__module__"])
+        typ = getattr(mod, obj["__name__"])
+        return getattr(typ, obj["name"])
+
+    if "__Set__" in obj:
+        return set(obj["as-list"])
+
+    if "__Serialized__" in obj:
+        # Notice, the data here is marked a Serialized rather than deserialized. This
+        # is because deserialization requires Pickle which the Scheduler cannot run
+        # because of security reasons.
+        # By marking it Serialized, the data is passed through to the workers that
+        # eventually will deserialize it.
+        return Serialized(*obj["data"])
+
     return obj
 
 
 def msgpack_encode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
+
+    if isinstance(obj, Serialize):
+        return {"__Serialized__": True, "data": serialize(obj.data)}
 
     if isinstance(obj, Enum):
         return {
@@ -94,6 +131,10 @@ def msgpack_encode_default(obj):
             "__module__": obj.__module__,
             "__name__": type(obj).__name__,
         }
+
+    if isinstance(obj, set):
+        return {"__Set__": True, "as-list": list(obj)}
+
     return obj
 
 
