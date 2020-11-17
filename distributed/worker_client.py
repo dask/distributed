@@ -18,9 +18,8 @@ def worker_client(timeout=None, separate_thread=True):
     Parameters
     ----------
     timeout: Number or String
-        Timeout after which to error out
-        default: dash.config.get(distributed.comm.timeouts.connect)
-        Ex: get_client(timeout=10) or get_client(timeout="10s")
+        Timeout after which to error out. Defaults to the
+        ``distributed.comm.timeouts.connect`` configuration value.
     separate_thread: bool, optional
         Whether to run this function outside of the normal thread pool
         defaults to True
@@ -28,7 +27,7 @@ def worker_client(timeout=None, separate_thread=True):
     Examples
     --------
     >>> def func(x):
-    ...     with worker_client() as c:  # connect from worker back to scheduler
+    ...     with worker_client(timeout="10s") as c:  # connect from worker back to scheduler
     ...         a = c.submit(inc, x)     # this task can submit more tasks
     ...         b = c.submit(dec, x)
     ...         result = c.gather([a, b])  # and gather results

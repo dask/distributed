@@ -3061,9 +3061,8 @@ def get_client(address=None, timeout=None, resolve_address=True):
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
     timeout : int or str
-        Timeout (in seconds) for getting the Client
-        default: dash.config.get(distributed.comm.timeouts.connect)
-        Ex: get_client(timeout=10) or get_client(timeout="10s")
+        Timeout (in seconds) for getting the Client. Defaults to the
+        ``distributed.comm.timeouts.connect`` configuration value.
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
 
@@ -3074,7 +3073,7 @@ def get_client(address=None, timeout=None, resolve_address=True):
     Examples
     --------
     >>> def f():
-    ...     client = get_client()
+    ...     client = get_client(timeout="10s")
     ...     futures = client.map(lambda x: x + 1, range(10))  # spawn many tasks
     ...     results = client.gather(futures)
     ...     return sum(results)
