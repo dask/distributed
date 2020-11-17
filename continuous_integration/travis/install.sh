@@ -87,7 +87,7 @@ if [[ $PYTHON != 3.8 ]]; then
     conda install --no-deps -c conda-forge -c defaults -c numba stacktrace
 fi
 
-python -m pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
+python -m pip install -q git+https://github.com/madsbk/dask.git@dask_distributed_pack_client_arg --upgrade --no-deps
 python -m pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
 python -m pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
