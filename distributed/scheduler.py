@@ -5231,6 +5231,7 @@ class Scheduler(ServerNode):
         bandwidth_types.update()
 
         from bokeh.models import Panel, Tabs, Div
+        import distributed
 
         # HTML
         html = """
@@ -5251,6 +5252,8 @@ class Scheduler(ServerNode):
           <li> Workers: {nworkers} </li>
           <li> Threads: {threads} </li>
           <li> Memory: {memory} </li>
+          <li> Dask Version: {dask_version} </li>
+          <li> Dask.Distributed Version: {distributed_version} </li>
         </ul>
 
         <h2> Calling Code </h2>
@@ -5266,6 +5269,8 @@ class Scheduler(ServerNode):
             threads=sum(w.nthreads for w in self.workers.values()),
             memory=format_bytes(sum(w.memory_limit for w in self.workers.values())),
             code=code,
+            dask_version=dask.__version__,
+            distributed_version=distributed.__version__,
         )
         html = Div(text=html)
 
