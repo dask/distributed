@@ -3579,15 +3579,16 @@ class Client:
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
-    def log_event(self, topic: str, msg):
+    def log_event(self, topic, msg):
         """Log an event under a given topic
 
         Parameters
         ----------
-        topic: str
-            Name of the topic under which to log an event
+        topic: str, list
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
         msg
-            Event to log. Note this must be a msgpack serializable.
+            Event message to log. Note this must be msgpack serializable.
 
         Examples
         --------
@@ -3597,12 +3598,13 @@ class Client:
         return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
 
     def get_events(self, topic: str = None):
-        """Retrieve structured logs
+        """Retrieve structured topic logs
 
         Parameters
         ----------
-        topic: str
-            Name of topic log to retrieve events for
+        topic: str, optional
+            Name of topic log to retrieve events for. If no ``topic`` is
+            provided, then logs for all topics will be returned.
         """
         return self.sync(self.scheduler.events, topic=topic)
 
