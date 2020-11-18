@@ -2,13 +2,13 @@ import asyncio
 import functools
 from inspect import iscoroutinefunction
 import threading
-from queue import Queue
+from queue import Queue, Empty
 
 from .client import Future, default_client
 from .protocol import to_serialize
 from .utils import thread_state, sync
 from .utils_comm import WrappedKey
-from .worker import get_worker
+from .worker import get_worker, logger
 
 
 class Actor(WrappedKey):
@@ -56,14 +56,19 @@ class Actor(WrappedKey):
         self.key = key
         self._future = None
         if worker:
+            # made by a worker
             self._worker = worker
             self._client = None
+            assert self.key in self._worker.actors
+            assert self._address == self._worker.address
         else:
             try:
+                # instance on a worker, but not made by worker
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
             try:
+                # claim remote original actor
                 self._client = default_client()
                 self._future = Future(key)
             except ValueError:
@@ -73,7 +78,7 @@ class Actor(WrappedKey):
         return "<Actor: %s, key=%s>" % (self._cls.__name__, self.key)
 
     def __reduce__(self):
-        return (Actor, (self._cls, self._address, self.key))
+        return Actor, (self._cls, self._address, self.key)
 
     @property
     def _io_loop(self):
@@ -151,18 +156,30 @@ class Actor(WrappedKey):
             @functools.wraps(attr)
             def func(*args, **kwargs):
                 async def run_actor_function_on_worker():
-                    try:
-                        result = await self._worker_rpc.actor_execute(
-                            function=key,
-                            actor=self.key,
-                            args=[to_serialize(arg) for arg in args],
-                            kwargs={k: to_serialize(v) for k, v in kwargs.items()},
-                        )
-                    except OSError:
-                        if self._future:
-                            await self._future
-                        else:
-                            raise OSError("Unable to contact Actor's worker")
+                    retry = 3
+                    while retry > 0:
+                        try:
+                            result = await asyncio.wait_for(self._worker_rpc.actor_execute(
+                                function=key,
+                                actor=self.key,
+                                args=[to_serialize(arg) for arg in args],
+                                kwargs={k: to_serialize(v) for k, v in kwargs.items()},
+                            ), timeout=0.5)
+                            if "cannot schedule new futures after shutdown" not in str(result.get('exception', "")):
+                                break
+                        except OSError as e:
+                            print("ERROR", e)
+                            if self._future:
+                                print("have future")
+                                try:
+                                    print(await self._future)
+                                except asyncio.TimeoutError:
+                                    result = {"exception": TimeoutError()}
+                        except Exception as e:
+                            result = {"exception": e}
+                            retry -= 1
+                    print(result)
+
                     return result
 
                 if self._asynchronous:
@@ -180,8 +197,12 @@ class Actor(WrappedKey):
                     q = Queue()
 
                     async def wait_then_add_to_queue():
-                        x = await run_actor_function_on_worker()
-                        q.put(x)
+                        try:
+                            x = await run_actor_function_on_worker()
+                            print("2", x)
+                            q.put(x)
+                        except Exception as e:
+                            q.put({"exception": e})
 
                     self._io_loop.add_callback(wait_then_add_to_queue)
 
@@ -246,17 +267,22 @@ class ActorFuture:
     def __await__(self):
         return self.result()
 
-    def result(self, timeout=None):
+    def result(self, timeout=1):
         try:
             if isinstance(self._cached_result, Exception):
                 raise self._cached_result
+            print("Result!", self._cached_result)
             return self._cached_result
         except AttributeError:
+            pass
+        try:
             out = self.q.get(timeout=timeout)
             if "result" in out:
                 self._cached_result = out["result"]
             else:
                 self._cached_result = out["exception"]
+        except Empty:
+            self._cached_result = TimeoutError()
         return self.result()
 
     def __repr__(self):

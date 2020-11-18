@@ -165,7 +165,7 @@ class WorkerState:
     .. attribute:: processing: {TaskState: cost}
 
        A dictionary of tasks that have been submitted to this worker.
-       Each task state is asssociated with the expected cost in seconds
+       Each task state is associated with the expected cost in seconds
        of running that task, summing both the task's expected computation
        time and the expected communication time of its result.
 
@@ -1339,6 +1339,7 @@ class Scheduler(ServerNode):
             "ncores": self.get_ncores,
             "has_what": self.get_has_what,
             "who_has": self.get_who_has,
+            "find_actor": self.find_actor,
             "processing": self.get_processing,
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
@@ -3752,6 +3753,21 @@ class Scheduler(ServerNode):
             return {
                 w: [ts.key for ts in ws.processing] for w, ws in self.workers.items()
             }
+
+    def find_actor(self, _, actor_key=None):
+        assert self.tasks[actor_key].actor
+        if actor_key in self.tasks:
+            workers = self.tasks[actor_key].who_has
+            out = [ws.address for ws in workers
+                   if actor_key in [a.key for a in ws.actors]]
+            if not out:
+                worker = random.choice([ws.address for ws in self.tasks[actor_key].who_has]
+                                       or self.workers)
+                self.send_task_to_worker(worker, actor_key)
+                out = [worker]
+        else:
+            out = []
+        return out
 
     def get_who_has(self, comm=None, keys=None):
         if keys is not None:

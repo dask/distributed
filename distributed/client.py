@@ -1800,6 +1800,9 @@ class Client:
 
         return [futures[tokey(k)] for k in keys]
 
+    def find_actor(self, ac):
+        return self.sync(self.scheduler.find_actor, actor_key=ac.key)
+
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
         keys = [tokey(future.key) for future in future_set]

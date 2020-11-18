@@ -1421,7 +1421,7 @@ class Worker(ServerNode):
         **kwargs2,
     ):
         try:
-            if key in self.tasks:
+            if key in self.tasks and not actor:
                 ts = self.tasks[key]
                 if ts.state == "memory":
                     assert key in self.data or key in self.actors
@@ -1449,7 +1449,9 @@ class Worker(ServerNode):
                 self.generation -= 1
 
             if actor:
+                logger.warning("Actor! %s %s" % (self.address, ts))
                 self.actors[ts.key] = None
+                self.data.pop(ts.key, None)
 
             ts.priority = priority
             ts.duration = duration
@@ -2387,12 +2389,12 @@ class Worker(ServerNode):
         key = actor
         actor = self.actors[key]
         func = getattr(actor, function)
-        name = key_split(key) + "." + function
 
         try:
             if iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             elif separate_thread:
+                name = key_split(key) + "." + function
                 result = await self.executor_submit(
                     name,
                     apply_function_actor,
