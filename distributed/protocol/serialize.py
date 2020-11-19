@@ -489,7 +489,7 @@ def _extract_serialize(x, ser, path=()):
         elif (
             typ_v is Serialize
             or typ_v is Serialized
-            or typ_v in (bytes, bytearray)
+            or (typ_v is bytes or typ_v is bytearray)
             and len(v) > 2 ** 16
         ):
             ser[path_k] = v
