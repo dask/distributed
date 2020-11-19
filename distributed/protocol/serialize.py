@@ -1,13 +1,12 @@
 from array import array
 from functools import partial
+from itertools import repeat
 import traceback
 import importlib
 from enum import Enum
 
 import dask
 from dask.base import normalize_token
-
-from tlz import valmap, get_in
 
 import msgpack
 
@@ -433,15 +432,6 @@ class Serialized:
         return not (self == other)
 
 
-def container_copy(c):
-    typ = type(c)
-    if typ is list:
-        return list(map(container_copy, c))
-    if typ is dict:
-        return valmap(container_copy, c)
-    return c
-
-
 def extract_serialize(x):
     """Pull out Serialize objects from message
 
@@ -455,50 +445,34 @@ def extract_serialize(x):
     >>> extract_serialize(msg)
     ({'op': 'update'}, {('data',): <Serialize: 123>}, set())
     """
+    x2 = type(x)()
     ser = {}
-    _extract_serialize(x, ser)
-    if ser:
-        x = container_copy(x)
-        for path in ser:
-            t = get_in(path[:-1], x)
-            if isinstance(t, dict):
-                del t[path[-1]]
-            else:
-                t[path[-1]] = None
-
     bytestrings = set()
-    for k, v in ser.items():
-        if type(v) in (bytes, bytearray):
-            ser[k] = to_serialize(v)
-            bytestrings.add(k)
-    return x, ser, bytestrings
+    _extract_serialize(x, x2, ser, bytestrings)
+    return x2, ser, bytestrings
 
 
-def _extract_serialize(x, ser, path=()):
-    if type(x) is dict:
-        for k, v in x.items():
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
-    elif type(x) is list:
-        for k, v in enumerate(x):
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
+def _extract_serialize(x, x2, ser, bytestrings, path=()):
+    typ_x = type(x)
+    if typ_x is dict:
+        x_items = x.items()
+    elif typ_x is list:
+        x_items = enumerate(x)
+        x2.extend(repeat(None, len(x)))
+
+    for k, v in x_items:
+        path_k = path + (k,)
+        typ_v = type(v)
+        if typ_v is dict or typ_v is list:
+            x2[k] = v2 = typ_v()
+            _extract_serialize(v, v2, ser, bytestrings, path_k)
+        elif typ_v is Serialize or typ_v is Serialized:
+            ser[path_k] = v
+        elif (typ_v is bytes or typ_v is bytearray) and len(v) > 2 ** 16:
+            ser[path_k] = to_serialize(v)
+            bytestrings.add(path_k)
+        else:
+            x2[k] = v
 
 
 def nested_deserialize(x):
