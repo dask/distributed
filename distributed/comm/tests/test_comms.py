@@ -216,11 +216,14 @@ async def test_tcp_listener_does_not_call_handler_on_handshake_error():
         host, port = listener.get_host_port()
         # connect without handshake:
         reader, writer = await asyncio.open_connection(host=host, port=port)
+        # wait a but to let the listener side hit the timeout on the handshake:
         await asyncio.sleep(0.02)
 
     assert not handle_comm_called
 
     writer.close()
+    if hasattr(writer, "wait_closed"):  # always true for python >= 3.7, but not for 3.6
+        await writer.wait_closed()
 
 
 @pytest.mark.asyncio
