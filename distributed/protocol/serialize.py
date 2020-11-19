@@ -475,9 +475,10 @@ def extract_serialize(x):
 
 
 def _extract_serialize(x, ser, path=()):
-    if type(x) is dict:
+    typ_x = type(x)
+    if typ_x is dict:
         x_items = x.items()
-    elif type(x) is list:
+    elif typ_x is list:
         x_items = enumerate(x)
 
     for k, v in x_items:
