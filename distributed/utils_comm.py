@@ -7,11 +7,11 @@ import random
 
 from dask.optimization import SubgraphCallable
 import dask.config
-from dask.utils import parse_timedelta
+from dask.utils import parse_timedelta, stringify
 from tlz import merge, concat, groupby, drop
 
 from .core import rpc
-from .utils import All, tokey
+from .utils import All
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
             if futures:
                 myset.update(futures)
                 futures = (
-                    tuple(tokey(f.key) for f in futures)
+                    tuple(stringify(f.key) for f in futures)
                     if byte_keys
                     else tuple(f.key for f in futures)
                 )
@@ -238,7 +238,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
     elif issubclass(typ, WrappedKey):  # TODO use type is Future
         k = o.key
         if byte_keys:
-            k = tokey(k)
+            k = stringify(k)
         myset.add(o)
         return k
     else:

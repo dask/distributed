@@ -25,6 +25,7 @@ from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
 import dask
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.utils import stringify
 import dask.bag as db
 from distributed import (
     Worker,
@@ -59,7 +60,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
 from distributed.sizeof import sizeof
-from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
+from distributed.utils import mp_context, sync, tmp_text, tmpfile, is_valid_xml
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -3574,7 +3575,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         await wait(b4)
 
-        assert set(map(tokey, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(map(stringify, b3.__dask_keys__())).issubset(s.tasks)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3584,7 +3585,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         await wait(b4)
 
-        assert not any(tokey(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(stringify(k) in s.tasks for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3965,7 +3966,7 @@ async def test_serialize_future(s, a, b):
             with ctxman():
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
-                assert tokey(future2.key) in ci.futures
+                assert stringify(future2.key) in ci.futures
                 result2 = await future2
                 assert result == result2
 
@@ -5601,7 +5602,7 @@ async def test_nested_prioritization(c, s, w):
     await wait([fx, fy])
 
     assert (o[x.key] < o[y.key]) == (
-        s.tasks[tokey(fx.key)].priority < s.tasks[tokey(fy.key)].priority
+        s.tasks[stringify(fx.key)].priority < s.tasks[stringify(fy.key)].priority
     )
 
 

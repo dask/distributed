@@ -1,6 +1,8 @@
 from collections.abc import MutableMapping
 
-from .utils import log_errors, tokey
+from dask.utils import stringify
+
+from .utils import log_errors
 
 
 class PublishExtension:
@@ -32,7 +34,7 @@ class PublishExtension:
         with log_errors():
             if not override and name in self.datasets:
                 raise KeyError("Dataset %s already exists" % name)
-            self.scheduler.client_desires_keys(keys, "published-%s" % tokey(name))
+            self.scheduler.client_desires_keys(keys, "published-%s" % stringify(name))
             self.datasets[name] = {"data": data, "keys": keys}
             return {"status": "OK", "name": name}
 
@@ -40,7 +42,7 @@ class PublishExtension:
         with log_errors():
             out = self.datasets.pop(name, {"keys": []})
             self.scheduler.client_releases_keys(
-                out["keys"], "published-%s" % tokey(name)
+                out["keys"], "published-%s" % stringify(name)
             )
 
     def list(self, *args):
