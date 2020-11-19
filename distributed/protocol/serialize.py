@@ -476,29 +476,21 @@ def extract_serialize(x):
 
 def _extract_serialize(x, ser, path=()):
     if type(x) is dict:
-        for k, v in x.items():
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
+        x_items = x.items()
     elif type(x) is list:
-        for k, v in enumerate(x):
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
+        x_items = enumerate(x)
+
+    for k, v in x_items:
+        typ = type(v)
+        if typ is list or typ is dict:
+            _extract_serialize(v, ser, path + (k,))
+        elif (
+            typ is Serialize
+            or typ is Serialized
+            or typ in (bytes, bytearray)
+            and len(v) > 2 ** 16
+        ):
+            ser[path + (k,)] = v
 
 
 def nested_deserialize(x):
