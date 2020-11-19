@@ -482,7 +482,7 @@ def _extract_serialize(x, ser, path=()):
 
     for k, v in x_items:
         typ = type(v)
-        if typ is list or typ is dict:
+        if typ is dict or typ is list:
             _extract_serialize(v, ser, path + (k,))
         elif (
             typ is Serialize
