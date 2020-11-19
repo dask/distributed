@@ -447,17 +447,12 @@ def extract_serialize(x):
     """
     x2 = type(x)()
     ser = {}
-    _extract_serialize(x, x2, ser)
-
     bytestrings = set()
-    for k, v in ser.items():
-        if type(v) in (bytes, bytearray):
-            ser[k] = to_serialize(v)
-            bytestrings.add(k)
+    _extract_serialize(x, x2, ser, bytestrings)
     return x2, ser, bytestrings
 
 
-def _extract_serialize(x, x2, ser, path=()):
+def _extract_serialize(x, x2, ser, bytestrings, path=()):
     typ_x = type(x)
     if typ_x is dict:
         x_items = x.items()
@@ -470,14 +465,12 @@ def _extract_serialize(x, x2, ser, path=()):
         typ_v = type(v)
         if typ_v is dict or typ_v is list:
             x2[k] = v2 = typ_v()
-            _extract_serialize(v, v2, ser, path_k)
-        elif (
-            typ_v is Serialize
-            or typ_v is Serialized
-            or (typ_v is bytes or typ_v is bytearray)
-            and len(v) > 2 ** 16
-        ):
+            _extract_serialize(v, v2, ser, bytestrings, path_k)
+        elif typ_v is Serialize or typ_v is Serialized:
             ser[path_k] = v
+        elif (typ_v is bytes or typ_v is bytearray) and len(v) > 2 ** 16:
+            ser[path_k] = to_serialize(v)
+            bytestrings.add(path_k)
         else:
             x2[k] = v
 
