@@ -483,13 +483,13 @@ def _extract_serialize(x, ser, path=()):
 
     for k, v in x_items:
         path_k = path + (k,)
-        typ = type(v)
-        if typ is dict or typ is list:
+        typ_v = type(v)
+        if typ_v is dict or typ_v is list:
             _extract_serialize(v, ser, path_k)
         elif (
-            typ is Serialize
-            or typ is Serialized
-            or typ in (bytes, bytearray)
+            typ_v is Serialize
+            or typ_v is Serialized
+            or typ_v in (bytes, bytearray)
             and len(v) > 2 ** 16
         ):
             ser[path_k] = v
