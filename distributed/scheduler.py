@@ -3849,7 +3849,7 @@ class Scheduler(ServerNode):
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
+        return sum(dts.nbytes or 0 for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
     def get_task_duration(self, ts, default=None):
         """
