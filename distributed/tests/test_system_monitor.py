@@ -14,7 +14,7 @@ def fib(n):
 def test_subprocess():
     sm = SystemMonitor()
     a = sm.update()
-    p = multiprocessing.Process(target=fib, args=(20, ))
+    p = multiprocessing.Process(target=fib, args=(20,))
     p.start()
     # On the first iteration CPU usage of the subprocess is 0
     sm.update()

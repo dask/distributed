@@ -56,9 +56,11 @@ class SystemMonitor:
                 new_children = children - self.children
                 if new_children:
                     self.children.update(new_children)
-                self.children = set(item for item in self.children
-                                    if item.is_running()
-                                    and item.status() != psutil.STATUS_ZOMBIE)
+                self.children = set(
+                    item
+                    for item in self.children
+                    if item.is_running() and item.status() != psutil.STATUS_ZOMBIE
+                )
                 for child in self.children:
                     with child.oneshot():
                         cpu += child.cpu_percent()
