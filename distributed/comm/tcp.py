@@ -398,7 +398,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         deserialize=True,
         allow_offload=True,
         default_port=0,
-        **connection_args
+        **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
