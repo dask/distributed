@@ -4231,7 +4231,7 @@ class Scheduler(ServerNode):
             self.send_task_to_worker(worker, key)
 
             # spectask : if only one dependent, recommend speculative assignment
-            if len(ts.dependents) == 1:
+            if len(ts.dependents) == 1 and len(list(ts.dependents)[0].dependencies) == 1:
                 return {list(ts.dependents)[0].key: "speculative"}
 
             else:
@@ -5611,8 +5611,7 @@ def validate_task_state(ts):
             str(dts.dependents),
         )
         if ts.state in ("waiting", "processing"):
-            breakpoint()
-            assert dts in ts.waiting_on or dts.who_has or dts.speculative, (
+            assert dts in ts.waiting_on or dts.who_has or ts.speculative, (
                 "dep missing",
                 str(ts),
                 str(dts),
@@ -5637,7 +5636,7 @@ def validate_task_state(ts):
     assert (ts.processing_on is not None) == (ts.state == "processing")
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has)
 
-    if ts.state == "processing":
+    if ts.state == "processing" and not ts.speculative:
         assert all(dts.who_has for dts in ts.dependencies), (
             "task processing without all deps",
             str(ts),
