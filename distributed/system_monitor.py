@@ -8,6 +8,7 @@ from .metrics import time
 class SystemMonitor:
     def __init__(self, n=10000):
         self.proc = psutil.Process()
+        self.children = set()
 
         self.time = deque(maxlen=n)
         self.cpu = deque(maxlen=n)
@@ -45,6 +46,24 @@ class SystemMonitor:
         with self.proc.oneshot():
             cpu = self.proc.cpu_percent()
             memory = self.proc.memory_info().rss
+            children = set(self.proc.children(True))
+            # "self.children" tracks the subprocesses to calculate the CPU
+            # usage correctly. Otherwise, the computed CPU usage would always
+            # be 0 as no time interval would exist for the calculation
+            # (cf. psutil.Process.cpu_percent). We also have to track the new
+            # children and delete the old ones for the calculation.
+            if children:
+                new_children = children - self.children
+                if new_children:
+                    self.children.update(new_children)
+                self.children = set(item for item in self.children
+                                    if item.is_running()
+                                    and item.status() != psutil.STATUS_ZOMBIE)
+                for child in self.children:
+                    with child.oneshot():
+                        cpu += child.cpu_percent()
+                        memory += child.memory_info().rss
+
         now = time()
 
         self.cpu.append(cpu)

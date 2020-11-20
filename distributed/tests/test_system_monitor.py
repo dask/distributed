@@ -1,12 +1,35 @@
-from time import sleep
+import multiprocessing
+import time
 
 from distributed.system_monitor import SystemMonitor
+
+
+def fib(n):
+    if n < 2:
+        return 1
+    else:
+        return fib(n - 1) + fib(n - 2)
+
+
+def test_subprocess():
+    sm = SystemMonitor()
+    a = sm.update()
+    p = multiprocessing.Process(target=fib, args=(20, ))
+    p.start()
+    # On the first iteration CPU usage of the subprocess is 0
+    sm.update()
+    b = sm.update()
+    p.join()
+    assert sm.cpu
+    assert sm.memory
+    assert a["cpu"] != b["cpu"]
+    assert a["memory"] < b["memory"]
 
 
 def test_SystemMonitor():
     sm = SystemMonitor()
     a = sm.update()
-    sleep(0.01)
+    time.sleep(0.01)
     b = sm.update()
 
     assert sm.cpu
