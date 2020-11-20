@@ -296,7 +296,13 @@ class UCX(Comm):
 
     async def close(self):
         if self._ep is not None:
-            await self.ep.send(struct.pack("?Q", True, 0))
+            try:
+                await self.ep.send(struct.pack("?Q", True, 0))
+            except ucp.exceptions.UCXError:
+                # If the other end is in the process of closing,
+                # UCX will sometimes raise a `Input/output` error,
+                # which we can ignore.
+                pass
             self.abort()
             self._ep = None
 

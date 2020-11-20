@@ -1000,7 +1000,7 @@ class Worker(ServerNode):
                 cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
-                return {"status": "error", "exception": to_serialize(e)}
+                raise e
 
         return {"status": "OK", "nbytes": len(data)}
 
@@ -2001,7 +2001,7 @@ class Worker(ServerNode):
 
                 # dep states may have changed before gather_dep runs
                 # if a dep is no longer in-flight then don't fetch it
-                deps_ts = [self.tasks[key] for key in deps]
+                deps_ts = [self.tasks.get(key, None) or TaskState(key) for key in deps]
                 deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
                 deps = [d.key for d in deps_ts]
 
@@ -2962,7 +2962,7 @@ class Worker(ServerNode):
             else:
                 return self._get_client()
 
-    def _get_client(self, timeout=3):
+    def _get_client(self, timeout=None):
         """Get local client attached to this worker
 
         If no such client exists, create one
@@ -2971,6 +2971,12 @@ class Worker(ServerNode):
         --------
         get_client
         """
+
+        if timeout is None:
+            timeout = dask.config.get("distributed.comm.timeouts.connect")
+
+        timeout = parse_timedelta(timeout, "s")
+
         try:
             from .client import default_client
 
@@ -3001,6 +3007,7 @@ class Worker(ServerNode):
             )
             if not asynchronous:
                 assert self._client.status == "running"
+
         return self._client
 
     def get_current_task(self):
@@ -3052,7 +3059,7 @@ def get_worker():
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=3, resolve_address=True):
+def get_client(address=None, timeout=None, resolve_address=True):
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -3062,8 +3069,9 @@ def get_client(address=None, timeout=3, resolve_address=True):
     address : str, optional
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
-    timeout : int, default 3
-        Timeout (in seconds) for getting the Client
+    timeout : int or str
+        Timeout (in seconds) for getting the Client. Defaults to the
+        ``distributed.comm.timeouts.connect`` configuration value.
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
 
@@ -3074,7 +3082,7 @@ def get_client(address=None, timeout=3, resolve_address=True):
     Examples
     --------
     >>> def f():
-    ...     client = get_client()
+    ...     client = get_client(timeout="10s")
     ...     futures = client.map(lambda x: x + 1, range(10))  # spawn many tasks
     ...     results = client.gather(futures)
     ...     return sum(results)
@@ -3089,6 +3097,12 @@ def get_client(address=None, timeout=3, resolve_address=True):
     worker_client
     secede
     """
+
+    if timeout is None:
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
+
+    timeout = parse_timedelta(timeout, "s")
+
     if address and resolve_address:
         address = comm.resolve_address(address)
     try:
