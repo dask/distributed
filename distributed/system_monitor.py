@@ -62,9 +62,15 @@ class SystemMonitor:
                     if item.is_running() and item.status() != psutil.STATUS_ZOMBIE
                 )
                 for child in self.children:
-                    with child.oneshot():
-                        cpu += child.cpu_percent()
-                        memory += child.memory_info().rss
+                    # If the process dies between the time children are
+                    # enumerated, and their information is collected, "psutils"
+                    # throws an exception.
+                    try:
+                        with child.oneshot():
+                            cpu += child.cpu_percent()
+                            memory += child.memory_info().rss
+                    except psutil.NoSuchProcess:
+                        pass
 
         now = time()
 
