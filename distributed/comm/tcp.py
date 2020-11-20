@@ -240,7 +240,8 @@ class TCP(Comm):
                 b = b"".join([length_bytes, *frames])  # small enough, send in one go
                 stream.write(b)
             else:
-                stream.write(length_bytes)  # avoid large memcpy, send in many
+                # avoid large memcpy, send in many
+                stream.write(length_bytes)
 
                 for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
