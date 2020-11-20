@@ -233,8 +233,9 @@ class TCP(Comm):
         )
 
         try:
+            nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
-            length_bytes = [struct.pack("Q", len(frames))] + [
+            length_bytes = [struct.pack("Q", nframes)] + [
                 struct.pack("Q", x) for x in lengths
             ]
             if sum(lengths) < 2 ** 17:  # 128kiB
