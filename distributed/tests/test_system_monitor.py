@@ -14,15 +14,17 @@ def fib(n):
 def test_subprocess():
     sm = SystemMonitor()
     a = sm.update()
-    p = multiprocessing.Process(target=fib, args=(20,))
+    p = multiprocessing.Process(target=fib, args=(30,))
     p.start()
+
     # On the first iteration CPU usage of the subprocess is 0
     sm.update()
     b = sm.update()
     p.join()
+
     assert sm.cpu
     assert sm.memory
-    assert a["cpu"] != b["cpu"]
+    assert len(sm.children) != 0
     assert a["memory"] < b["memory"]
 
 
