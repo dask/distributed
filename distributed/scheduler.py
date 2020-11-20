@@ -4184,6 +4184,13 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
+            # spectask : if only one dependent, recommend speculative assignment
+            if len(ts.dependents) == 1 and len(list(ts.dependents)[0].dependencies) == 1:
+                return {list(ts.dependents)[0].key: "speculative"}
+
+            else:
+                return {}
+
             return {}
         except Exception as e:
             logger.exception(e)
