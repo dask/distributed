@@ -6,6 +6,8 @@ import types
 import warnings
 from functools import partial
 
+import dask
+
 import distributed
 import pkg_resources
 import pytest
@@ -199,6 +201,29 @@ def test_get_local_address_for():
 #
 # Test concrete transport APIs
 #
+
+
+@pytest.mark.asyncio
+async def test_tcp_listener_does_not_call_handler_on_handshake_error():
+    handle_comm_called = False
+
+    async def handle_comm(comm):
+        nonlocal handle_comm_called
+        handle_comm_called = True
+
+    with dask.config.set({"distributed.comm.timeouts.connect": 0.01}):
+        listener = await tcp.TCPListener("127.0.0.1", handle_comm)
+        host, port = listener.get_host_port()
+        # connect without handshake:
+        reader, writer = await asyncio.open_connection(host=host, port=port)
+        # wait a bit to let the listener side hit the timeout on the handshake:
+        await asyncio.sleep(0.02)
+
+    assert not handle_comm_called
+
+    writer.close()
+    if hasattr(writer, "wait_closed"):  # always true for python >= 3.7, but not for 3.6
+        await writer.wait_closed()
 
 
 @pytest.mark.asyncio
