@@ -114,7 +114,7 @@ DEFAULT_EXTENSIONS = [
     EventExtension,
 ]
 
-ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory", "speculative"}
 
 
 class ClientState:
@@ -645,6 +645,7 @@ class TaskState:
         "exception",
         "traceback",
         "exception_blame",
+        "speculative",
         "suspicious",
         "retries",
         "nbytes",
@@ -679,6 +680,7 @@ class TaskState:
         self.group_key = key_split_group(key)
         self.group = None
         self.metadata = {}
+        self.speculative = False
 
     @property
     def state(self) -> str:
@@ -1371,9 +1373,11 @@ class Scheduler(ServerNode):
 
         self._transitions = {
             ("released", "waiting"): self.transition_released_waiting,
+            ("released", "speculative"): self.transition_waiting_speculative,
             ("waiting", "released"): self.transition_waiting_released,
             ("waiting", "processing"): self.transition_waiting_processing,
             ("waiting", "memory"): self.transition_waiting_memory,
+            ("waiting", "speculative"): self.transition_waiting_speculative,
             ("processing", "released"): self.transition_processing_released,
             ("processing", "memory"): self.transition_processing_memory,
             ("processing", "erred"): self.transition_processing_erred,
@@ -2473,8 +2477,8 @@ class Scheduler(ServerNode):
         assert ts in ws.processing
         assert not ts.who_has
         for dts in ts.dependencies:
-            assert dts.who_has
-            assert ts in dts.waiters
+            assert dts.who_has or ts.speculative
+            assert ts in dts.waiters or ts.speculative
 
     def validate_memory(self, key):
         ts = self.tasks[key]
@@ -2699,13 +2703,21 @@ class Scheduler(ServerNode):
                 msg["resource_restrictions"] = ts.resource_restrictions
             if ts.actor:
                 msg["actor"] = True
+            if ts.speculative:
+                msg["speculative"] = True
 
             deps = ts.dependencies
-            if deps:
+            if deps and not ts.speculative:
                 msg["who_has"] = {
                     dep.key: [ws.address for ws in dep.who_has] for dep in deps
                 }
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
+            elif ts.speculative:
+                msg["who_has"] = {
+                    dep.key: dep.processing_on.address for dep in deps
+                }
+                msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
+
 
             if self.validate and deps:
                 assert all(msg["who_has"].values())
@@ -4138,6 +4150,49 @@ class Scheduler(ServerNode):
 
         return worker
 
+    def transition_waiting_speculative(self, key):
+        try:
+
+            ts = self.tasks[key]
+
+            if self.validate:
+                assert len(ts.dependencies) == 1
+
+            ws = list(ts.dependencies)[0].processing_on
+
+            worker = ws.address
+
+            duration = self.get_task_duration(ts)
+            # There are no comm costs if this is speculative
+            #comm = self.get_comm_cost(ts, ws)
+
+            ws.processing[ts] = duration
+            ts.processing_on = ws
+            ws.occupancy += duration
+            self.total_occupancy += duration
+            ts.state = "processing"
+            self.consume_resources(ts, ws)
+            self.check_idle_saturated(ws)
+            self.n_tasks += 1
+
+            if ts.actor:
+                ws.actors.add(ts)
+
+            ts.speculative = True
+
+            # logger.debug("Send job to worker: %s, %s", worker, key)
+
+            self.send_task_to_worker(worker, key)
+
+            return {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     def transition_waiting_processing(self, key):
         try:
             ts = self.tasks[key]
@@ -4175,7 +4230,12 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            return {}
+            # spectask : if only one dependent, recommend speculative assignment
+            if len(ts.dependents) == 1:
+                return {list(ts.dependents)[0].key: "speculative"}
+
+            else:
+                return {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -5551,7 +5611,8 @@ def validate_task_state(ts):
             str(dts.dependents),
         )
         if ts.state in ("waiting", "processing"):
-            assert dts in ts.waiting_on or dts.who_has, (
+            breakpoint()
+            assert dts in ts.waiting_on or dts.who_has or dts.speculative, (
                 "dep missing",
                 str(ts),
                 str(dts),

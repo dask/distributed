@@ -77,7 +77,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 no_value = "--no-value-sentinel--"
 
 IN_PLAY = ("waiting", "ready", "executing", "long-running")
-PENDING = ("waiting", "ready", "constrained")
+PENDING = ("speculative", "waiting", "ready", "constrained")
 PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running")
 READY = ("ready", "constrained")
 
@@ -449,6 +449,7 @@ class Worker(ServerNode):
             ("flight", "memory"): self.transition_flight_memory,
             ("flight", "ready"): self.transition_flight_memory,
             ("flight", "waiting"): self.transition_flight_waiting,
+            ("speculative", "ready"): self.transition_speculative_ready,
         }
 
         self.incoming_transfer_log = deque(maxlen=100000)
@@ -1417,6 +1418,7 @@ class Worker(ServerNode):
         duration=None,
         resource_restrictions=None,
         actor=False,
+        speculative=False,
         **kwargs2,
     ):
         try:
@@ -1441,7 +1443,7 @@ class Worker(ServerNode):
                 self.tasks[key] = ts = TaskState(
                     key=key, runspec=SerializedTask(function, args, kwargs, task)
                 )
-                ts.state = "waiting"
+                ts.state = "waiting" if not speculative else "speculative"
 
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
@@ -1518,6 +1520,25 @@ class Worker(ServerNode):
         if self.validate:
             self.validate_task(ts)
         self._notify_plugins("transition", ts.key, start, state or finish, **kwargs)
+
+    def transition_speculative_ready(self, ts):
+        try:
+            if self.validate:
+                assert ts.state == "speculative"
+                assert all(dep.key in self.data for dep in ts.dependencies)
+                assert not ts.waiting_for_data
+
+            # TODO add constrained condition
+            heapq.heappush(self.ready, (ts.priority, ts.key))
+
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
 
     def transition_waiting_flight(self, ts, worker=None):
         try:
