@@ -293,6 +293,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
+    callback_timeout = parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
