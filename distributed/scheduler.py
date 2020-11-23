@@ -2471,7 +2471,9 @@ class Scheduler(ServerNode):
 
     def validate_processing(self, key):
         ts = self.tasks[key]
-        assert not ts.waiting_on
+        # speculative doesn't update waiting_on, so ensure that all dependencies are
+        # processing on the same worker if not `waiting_on`
+        assert not ts.waiting_on or len({dts.processing_on for dts in ts.waiting_on}) == 1
         ws = ts.processing_on
         assert ws
         assert ts in ws.processing
@@ -3849,7 +3851,9 @@ class Scheduler(ServerNode):
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        return sum(dts.nbytes or 0 for dts in ts.dependencies - ws.has_what) / self.bandwidth
+        # TODO: How is it possible for nbytes to be None when there's a getter that is supposed to
+        # stop that from happening?
+        return sum(dts.nbytes or DEFAULT_DATA_SIZE for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
     def get_task_duration(self, ts, default=None):
         """
