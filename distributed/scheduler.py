@@ -1413,6 +1413,7 @@ class Scheduler(ServerNode):
             ("waiting", "memory"): self.transition_waiting_memory,
             ("waiting", "speculative"): self.transition_waiting_speculative,
             ("speculative", "processing"): self.transition_speculative_processing,
+            ("speculative", "released"): self.transition_speculative_released,
             ("processing", "released"): self.transition_processing_released,
             ("processing", "memory"): self.transition_processing_memory,
             ("processing", "erred"): self.transition_processing_erred,
@@ -4246,6 +4247,38 @@ class Scheduler(ServerNode):
             ts.state = "processing"
 
             return {}
+
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_speculative_released(self, key):
+        try:
+            ts = self.tasks[key]
+
+            if self.validate:
+                assert ts.state == "speculative"
+                assert ts.processing_on
+
+            ts.waiters.clear()
+            ts.waiting_on.clear()
+
+            self._remove_from_processing(
+                ts, send_worker_msg={"op": "release-task", "key": key}
+            )
+            ts.state = "released"
+
+            recommendations = {}
+
+            for dts in ts.dependents:
+                if dts.state in ("erred", "speculative"):
+                    recommendations[dts.key] = "released"
+
+            return recommendations
 
         except Exception as e:
             logger.exception(e)
