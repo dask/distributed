@@ -2586,6 +2586,7 @@ class Scheduler(ServerNode):
     # Manage Messages #
     ###################
 
+    @profile
     def report(self, msg, ts=None, client=None):
         """
         Publish updates to all listening Queues and Comms
@@ -2699,6 +2700,7 @@ class Scheduler(ServerNode):
         )
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
+    @profile
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
         try:
@@ -2868,6 +2870,7 @@ class Scheduler(ServerNode):
         """ Remove external plugin from scheduler """
         self.plugins.remove(plugin)
 
+    @profile
     def worker_send(self, worker, msg):
         """Send message to worker
 
@@ -3681,6 +3684,7 @@ class Scheduler(ServerNode):
             if client:
                 self.client_desires_keys(keys=list(who_has), client=client)
 
+    @profile
     def report_on_key(self, key=None, ts=None, client=None):
         assert (key is None) + (ts is None) == 1, (key, ts)
         if ts is None:
@@ -3953,6 +3957,7 @@ class Scheduler(ServerNode):
     # State Transitions #
     #####################
 
+    @profile
     def _remove_from_processing(self, ts, send_worker_msg=None):
         """
         Remove *ts* from the set of processing tasks.
@@ -3973,6 +3978,7 @@ class Scheduler(ServerNode):
             if send_worker_msg:
                 self.worker_send(w, send_worker_msg)
 
+    @profile
     def _add_to_memory(
         self, ts, ws, recommendations, type=None, typename=None, **kwargs
     ):
@@ -4115,6 +4121,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def decide_worker(self, ts):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
@@ -4662,6 +4669,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def remove_key(self, key):
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
@@ -4675,6 +4683,7 @@ class Scheduler(ServerNode):
         if key in self.task_metadata:
             del self.task_metadata[key]
 
+    @profile
     def _propagate_forgotten(self, ts, recommendations):
         ts.state = "forgotten"
         key = ts.key
@@ -4935,6 +4944,7 @@ class Scheduler(ServerNode):
     # Assigning Tasks to Workers #
     ##############################
 
+    @profile
     def check_idle_saturated(self, ws, occ=None):
         """Update the status of the idle and saturated state
 
@@ -5509,6 +5519,7 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
+@profile
 def decide_worker(ts, all_workers, valid_workers, objective):
     """
     Decide which worker should take task *ts*.
