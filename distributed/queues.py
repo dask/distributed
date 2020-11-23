@@ -3,8 +3,10 @@ from collections import defaultdict
 import logging
 import uuid
 
+from dask.utils import stringify
+
 from .client import Future, Client
-from .utils import tokey, sync, thread_state
+from .utils import sync, thread_state
 from .worker import get_client
 from .utils import parse_timedelta
 
@@ -201,7 +203,7 @@ class Queue:
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):
             await self.client.scheduler.queue_put(
-                key=tokey(value.key), timeout=timeout, name=self.name
+                key=stringify(value.key), timeout=timeout, name=self.name
             )
         else:
             await self.client.scheduler.queue_put(

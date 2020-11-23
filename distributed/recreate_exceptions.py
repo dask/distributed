@@ -1,6 +1,7 @@
 import logging
+from dask.utils import stringify
 from .client import futures_of, wait
-from .utils import sync, tokey
+from .utils import sync
 from .utils_comm import pack_data
 from .worker import _deserialize
 
@@ -38,7 +39,7 @@ class ReplayExceptionScheduler:
         for key in keys:
             if isinstance(key, list):
                 key = tuple(key)  # ensure not a list from msgpack
-            key = tokey(key)
+            key = stringify(key)
             ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.exception_blame is not None:
                 cause = ts.exception_blame
