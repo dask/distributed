@@ -983,6 +983,33 @@ class _StateLegacySet(Set):
         return "%s(%s)" % (self.__class__, set(self))
 
 
+def _recommend_speculative_assignment(ts):
+    """
+    Recommend speculative assignment for dependent (child) task IFF:
+
+    - Current task only has a single dependent task
+    - All dependencies of that child task are present / processing on the same worker
+
+    This function is called from two transition functions:
+      - transition_waiting_processing
+      - transition_waiting_speculative
+
+    As each task passes through either of these (nearly every task goes through
+    waiting -> processing), this function returns a recommendation (or no
+    recommendation) for how to process the dependent task.
+
+    """
+
+    if (
+        len(ts.dependents) == 1
+        and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1
+    ):
+        return {list(ts.dependents)[0].key: "speculative"}
+
+    else:
+        return {}
+
+
 def _legacy_task_key_set(tasks):
     """
     Transform a set of task states into a set of task keys.
@@ -4201,17 +4228,7 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            if (
-                len(ts.dependents) == 1
-                and len(
-                    {dts.processing_on for dts in list(ts.dependents)[0].dependencies}
-                )
-                == 1
-            ):
-                return {list(ts.dependents)[0].key: "speculative"}
-
-            else:
-                return {}
+            return _recommend_speculative_assignment(ts)
 
             return {}
         except Exception as e:
@@ -4259,17 +4276,8 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            if (
-                len(ts.dependents) == 1
-                and len(
-                    {dts.processing_on for dts in list(ts.dependents)[0].dependencies}
-                )
-                == 1
-            ):
-                return {list(ts.dependents)[0].key: "speculative"}
+            return _recommend_speculative_assignment(ts)
 
-            else:
-                return {}
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
