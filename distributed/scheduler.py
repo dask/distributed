@@ -1003,6 +1003,7 @@ def _recommend_speculative_assignment(ts):
     if (
         len(ts.dependents) == 1
         and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1
+        and not ts.actor
     ):
         return {list(ts.dependents)[0].key: "speculative"}
 
@@ -1413,6 +1414,7 @@ class Scheduler(ServerNode):
             ("waiting", "processing"): self.transition_waiting_processing,
             ("waiting", "memory"): self.transition_waiting_memory,
             ("waiting", "speculative"): self.transition_waiting_speculative,
+            ("speculative", "processing"): self.transition_speculative_processing,
             ("processing", "released"): self.transition_processing_released,
             ("processing", "memory"): self.transition_processing_memory,
             ("processing", "erred"): self.transition_processing_erred,
@@ -2504,13 +2506,15 @@ class Scheduler(ServerNode):
             assert bool(dts.who_has) + (dts in ts.waiting_on) == 1
             assert ts in dts.waiters  # XXX even if dts.who_has?
 
+    def validate_speculative(self, key):
+        ts = self.tasks[key]
+        assert len({dts.processing_on for dts in ts.waiting_on}) == 1
+        ws = ts.processing_on
+        assert ws
+
     def validate_processing(self, key):
         ts = self.tasks[key]
-        # speculative doesn't update waiting_on, so ensure that all dependencies are
-        # processing on the same worker if not `waiting_on`
-        assert (
-            not ts.waiting_on or len({dts.processing_on for dts in ts.waiting_on}) == 1
-        )
+        assert not ts.waiting_on
         ws = ts.processing_on
         assert ws
         assert ts in ws.processing
@@ -4214,23 +4218,41 @@ class Scheduler(ServerNode):
             ts.processing_on = ws
             ws.occupancy += duration
             self.total_occupancy += duration
-            ts.state = "processing"
+            ts.state = "speculative"
             self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
-            if ts.actor:
-                ws.actors.add(ts)
-
             ts.speculative = True
 
-            # logger.debug("Send job to worker: %s, %s", worker, key)
+            for dts in ts.dependencies:
+                ts.waiting_on.add(dts)
 
             self.send_task_to_worker(worker, key)
 
             return _recommend_speculative_assignment(ts)
 
             return {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_speculative_processing(self, key):
+        try:
+            ts = self.tasks[key]
+
+            if self.validate:
+                assert ts.state == "speculative"
+                assert not ts.waiting_on
+
+            ts.state = "processing"
+
+            return {}
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -5675,7 +5697,7 @@ def validate_task_state(ts):
         )
         assert dts.state != "forgotten"
 
-    assert (ts.processing_on is not None) == (ts.state == "processing")
+    assert (ts.processing_on is not None) == (ts.state in ("processing", "speculative"))
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has)
 
     if ts.state == "processing" and not ts.speculative:
