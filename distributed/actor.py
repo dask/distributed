@@ -98,10 +98,13 @@ class Actor(WrappedKey):
         print("SETTING ADDRESS from", self._address)
         self._address, = self._sync(self._scheduler_rpc.find_actor, actor_key=self.key)
         print(self._address)
-        try:
-            print(self._sync(self._worker_rpc.get_data, keys=[self.key]))
-        except Exception as e:
-            print("GET DATA FAIL", e)
+        if self._client:
+            if self._future:
+                self._future.result()
+            else:
+                self._future = Future(self.key)
+        elif self._worker:
+            pass
         print("synced future")
 
     @property
