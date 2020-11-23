@@ -1,15 +1,60 @@
 from collections import deque
+import threading
 import psutil
+import time
+import weakref
 
 from .compatibility import WINDOWS
-from .metrics import time
+from . import metrics
+
+
+class TrackChildren(threading.Thread):
+    def __init__(self, proc, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "ThreadedTrackChildren"
+        self._proc = weakref.ref(proc)
+        self._cpu = 0
+        self._mem = 0
+        self._children = set()
+        self._lock = threading.Lock()
+
+    def metrics(self):
+        with self._lock:
+            return self._cpu, self._mem
+
+    def run(self):
+        while True:
+            proc = self._proc()
+            if proc is None:
+                break
+            children = set(proc.children(True))
+            del proc
+            # "self.children" tracks the subprocesses to calculate the CPU
+            # usage correctly. Otherwise, the computed CPU usage would always
+            # be 0 as no time interval would exist for the calculation
+            # (cf. psutil.Process.cpu_percent).
+            cpu = 0
+            mem = 0
+            if children:
+                new_children = children - self._children
+                if new_children:
+                    self._children.update(new_children)
+                for child in list(self._children):
+                    # The inspected process may die during its introspection.
+                    try:
+                        with child.oneshot():
+                            cpu += child.cpu_percent()
+                            mem += child.memory_info().rss
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        self._children.remove(child)
+            with self._lock:
+                self._cpu, self._mem = cpu, mem
+            time.sleep(0.1)
 
 
 class SystemMonitor:
     def __init__(self, n=10000):
         self.proc = psutil.Process()
-        self.children = set()
-
         self.time = deque(maxlen=n)
         self.cpu = deque(maxlen=n)
         self.memory = deque(maxlen=n)
@@ -17,12 +62,15 @@ class SystemMonitor:
 
         self.quantities = {"cpu": self.cpu, "memory": self.memory, "time": self.time}
 
+        self.children = TrackChildren(self.proc, daemon=True)
+        self.children.start()
+
         try:
             ioc = psutil.net_io_counters()
         except Exception:
             self._collect_net_io_counters = False
         else:
-            self.last_time = time()
+            self.last_time = metrics.time()
             self.read_bytes = deque(maxlen=n)
             self.write_bytes = deque(maxlen=n)
             self.quantities["read_bytes"] = self.read_bytes
@@ -44,27 +92,11 @@ class SystemMonitor:
 
     def update(self):
         with self.proc.oneshot():
-            cpu = self.proc.cpu_percent()
-            memory = self.proc.memory_info().rss
-            children = set(self.proc.children(True))
-            # "self.children" tracks the subprocesses to calculate the CPU
-            # usage correctly. Otherwise, the computed CPU usage would always
-            # be 0 as no time interval would exist for the calculation
-            # (cf. psutil.Process.cpu_percent).
-            if children:
-                new_children = children - self.children
-                if new_children:
-                    self.children.update(new_children)
-                for child in list(self.children):
-                    # The inspected process may die during its introspection.
-                    try:
-                        with child.oneshot():
-                            cpu += child.cpu_percent()
-                            memory += child.memory_info().rss
-                    except psutil.NoSuchProcess:
-                        self.children.discard(child)
+            cpu, memory = self.children.metrics()
+            cpu += self.proc.cpu_percent()
+            memory += self.proc.memory_info().rss
 
-        now = time()
+        now = metrics.time()
 
         self.cpu.append(cpu)
         self.memory.append(memory)

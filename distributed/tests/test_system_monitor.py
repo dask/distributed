@@ -73,7 +73,6 @@ def test_subprocess():
 
     assert sm.cpu
     assert sm.memory
-    assert len(sm.children) != 0
     assert a["memory"] < b["memory"]
 
 
