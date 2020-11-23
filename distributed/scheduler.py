@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 from collections import defaultdict, deque
 from collections.abc import Mapping, Set
 from contextlib import suppress
@@ -94,6 +95,13 @@ if sys.version_info < (3, 8):
 else:
     import pickle
 
+try:
+    import line_profiler
+    profile = line_profiler.LineProfiler()
+    atexit.register(profile.dump_stats, f"prof_{os.getpid()}.lstat")
+except ImportError:
+    def profile(func):
+        return func
 
 logger = logging.getLogger(__name__)
 
@@ -4003,6 +4011,7 @@ class Scheduler(ServerNode):
         if ts in cs.wants_what:
             self.client_releases_keys(client="fire-and-forget", keys=[ts.key])
 
+    @profile
     def transition_released_waiting(self, key):
         try:
             ts = self.tasks[key]
@@ -4054,6 +4063,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_no_worker_waiting(self, key):
         try:
             ts = self.tasks[key]
@@ -4138,6 +4148,7 @@ class Scheduler(ServerNode):
 
         return worker
 
+    @profile
     def transition_waiting_processing(self, key):
         try:
             ts = self.tasks[key]
@@ -4184,6 +4195,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
         try:
             ws = self.workers[worker]
@@ -4219,6 +4231,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_processing_memory(
         self,
         key,
@@ -4326,6 +4339,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_memory_released(self, key, safe=False):
         try:
             ts = self.tasks[key]
@@ -4385,6 +4399,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_released_erred(self, key):
         try:
             ts = self.tasks[key]
@@ -4426,6 +4441,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_erred_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4460,6 +4476,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_waiting_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4496,6 +4513,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_processing_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4540,6 +4558,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_processing_erred(
         self, key, cause=None, exception=None, traceback=None, **kwargs
     ):
@@ -4609,6 +4628,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_no_worker_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4685,6 +4705,7 @@ class Scheduler(ServerNode):
                 )
         ts.who_has.clear()
 
+    @profile
     def transition_memory_forgotten(self, key):
         try:
             ts = self.tasks[key]
@@ -4725,6 +4746,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition_released_forgotten(self, key):
         try:
             ts = self.tasks[key]
@@ -4761,6 +4783,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transition(self, key, finish, *args, **kwargs):
         """Transition a key from its current state to the finish state
 
@@ -4853,6 +4876,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    @profile
     def transitions(self, recommendations):
         """Process transitions until none are left
 
@@ -5724,6 +5748,7 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         self.keys.update(keys)
 
+    @profile
     def transition(self, key, start, finish, *args, **kwargs):
         if finish == "memory" or finish == "erred":
             ts = self.scheduler.tasks.get(key)
