@@ -2,6 +2,7 @@ from dask import delayed
 
 from distributed.utils_test import gen_cluster, inc, dec
 
+
 @gen_cluster(client=True, config={"dask.optimization.fuse.active": False})
 async def test_speculative_assignment_simple(c, s, a, b):
     x = delayed(inc)(1)
@@ -23,7 +24,7 @@ async def test_spec_assign_all_dependencies(c, s, a, b):
     x1 = delayed(inc)(x1[0])
     # not spec assigned: data already present
     x2 = delayed(inc)(x2[0])
-    # not spec assigned (two dependencies)
+    # spec assigned (two dependencies on same worker)
     x1x2 = x1 + x2
     # spec assigned
     z = delayed(dec)(x1x2)
@@ -33,8 +34,9 @@ async def test_spec_assign_all_dependencies(c, s, a, b):
     assert result == 4
     assert (x1.key, "waiting", "ready") in a.story(x1.key)
     assert (x2.key, "waiting", "ready") in a.story(x2.key)
-    assert (x1x2.key, "waiting", "ready") in a.story(x1x2.key)
+    assert (x1x2.key, "speculative", "ready") in a.story(x1x2.key)
     assert (z.key, "speculative", "ready") in a.story(z.key)
+
 
 @gen_cluster(client=True, config={"dask.optimization.fuse.active": False})
 async def test_spec_assign_intermittent(c, s, a, b):
@@ -47,7 +49,7 @@ async def test_spec_assign_intermittent(c, s, a, b):
       |   |
       g   j   # both spec
        \ /
-        k     # no spec
+        k     # spec
 
     """
 
@@ -84,3 +86,8 @@ async def test_spec_assign_intermittent(c, s, a, b):
     assert (e.key, "waiting", "ready") in worker.story(e.key)
     assert (f.key, "speculative", "ready") in worker.story(f.key)
     assert (g.key, "speculative", "ready") in worker.story(g.key)
+
+    if a.story(k.key):
+        assert (k.key, "speculative", "ready") in a.story(k.key)
+    if b.story(k.key):
+        assert (k.key, "speculative", "ready") in b.story(k.key)

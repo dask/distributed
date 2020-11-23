@@ -4160,7 +4160,8 @@ class Scheduler(ServerNode):
             ts = self.tasks[key]
 
             if self.validate:
-                assert len(ts.dependencies) == 1
+                # All dependencies are on the same worker
+                assert len({dts.processing_on for dts in ts.dependencies}) == 1
 
             ws = list(ts.dependencies)[0].processing_on
 
@@ -4188,8 +4189,7 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            # spectask : if only one dependent, recommend speculative assignment
-            if len(ts.dependents) == 1 and len(list(ts.dependents)[0].dependencies) == 1:
+            if len(ts.dependents) == 1 and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1:
                 return {list(ts.dependents)[0].key: "speculative"}
 
             else:
@@ -4241,8 +4241,7 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            # spectask : if only one dependent, recommend speculative assignment
-            if len(ts.dependents) == 1 and len(list(ts.dependents)[0].dependencies) == 1:
+            if len(ts.dependents) == 1 and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1:
                 return {list(ts.dependents)[0].key: "speculative"}
 
             else:
