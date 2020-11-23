@@ -97,8 +97,15 @@ else:
 
 try:
     import line_profiler
+
     profile = line_profiler.LineProfiler()
-    atexit.register(profile.dump_stats, f"prof_{os.getpid()}.lstat")
+
+    def dump_stats(p):
+        s = p.get_stats()
+        if any(s.timings.values()):
+            profile.dump_stats(f"prof_{os.getpid()}.lstat")
+
+    atexit.register(dump_stats, profile)
 except ImportError:
     def profile(func):
         return func
