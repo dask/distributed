@@ -653,7 +653,6 @@ class TaskState:
         "exception",
         "traceback",
         "exception_blame",
-        "speculative",
         "suspicious",
         "retries",
         "nbytes",
@@ -688,7 +687,6 @@ class TaskState:
         self.group_key = key_split_group(key)
         self.group = None
         self.metadata = {}
-        self.speculative = False
 
     @property
     def state(self) -> str:
@@ -2520,8 +2518,8 @@ class Scheduler(ServerNode):
         assert ts in ws.processing
         assert not ts.who_has
         for dts in ts.dependencies:
-            assert dts.who_has or ts.speculative
-            assert ts in dts.waiters or ts.speculative
+            assert dts.who_has
+            assert ts in dts.waiters
 
     def validate_memory(self, key):
         ts = self.tasks[key]
@@ -2746,16 +2744,16 @@ class Scheduler(ServerNode):
                 msg["resource_restrictions"] = ts.resource_restrictions
             if ts.actor:
                 msg["actor"] = True
-            if ts.speculative:
+            if ts.state == "speculative":
                 msg["speculative"] = True
 
             deps = ts.dependencies
-            if deps and not ts.speculative:
+            if deps and not ts.state == "speculative":
                 msg["who_has"] = {
                     dep.key: [ws.address for ws in dep.who_has] for dep in deps
                 }
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
-            elif ts.speculative:
+            elif ts.state == "speculative":
                 msg["who_has"] = {dep.key: dep.processing_on.address for dep in deps}
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
 
@@ -4208,12 +4206,9 @@ class Scheduler(ServerNode):
 
             ws = list(ts.dependencies)[0].processing_on
 
-            worker = ws.address
-
             duration = self.get_task_duration(ts)
-            # There are no comm costs if this is speculative
-            # comm = self.get_comm_cost(ts, ws)
 
+            # There are no comm costs if this is speculative
             ws.processing[ts] = duration
             ts.processing_on = ws
             ws.occupancy += duration
@@ -4223,12 +4218,11 @@ class Scheduler(ServerNode):
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
-            ts.speculative = True
-
             for dts in ts.dependencies:
                 ts.waiting_on.add(dts)
+                dts.waiters.add(ts)
 
-            self.send_task_to_worker(worker, key)
+            self.send_task_to_worker(ws.address, key)
 
             return _recommend_speculative_assignment(ts)
 
@@ -5675,7 +5669,7 @@ def validate_task_state(ts):
             str(dts.dependents),
         )
         if ts.state in ("waiting", "processing"):
-            assert dts in ts.waiting_on or dts.who_has or ts.speculative, (
+            assert dts in ts.waiting_on or dts.who_has, (
                 "dep missing",
                 str(ts),
                 str(dts),
@@ -5683,7 +5677,7 @@ def validate_task_state(ts):
         assert dts.state != "forgotten"
 
     for dts in ts.waiters:
-        assert dts.state in ("waiting", "processing"), (
+        assert dts.state in ("waiting", "processing", "speculative"), (
             "waiter not in play",
             str(ts),
             str(dts),
@@ -5700,8 +5694,11 @@ def validate_task_state(ts):
     assert (ts.processing_on is not None) == (ts.state in ("processing", "speculative"))
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has)
 
-    if ts.state == "processing" and not ts.speculative:
-        assert all(dts.who_has for dts in ts.dependencies), (
+    if ts.state == "processing":
+        assert (
+            all(dts.who_has for dts in ts.dependencies)
+            or len({dts.processing_on for dts in ts.dependencies}) == 1
+        ), (
             "task processing without all deps",
             str(ts),
             str(ts.dependencies),
