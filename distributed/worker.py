@@ -2935,11 +2935,15 @@ class Worker(ServerNode):
                     assert dep.state is not None
                     assert ts in dep.dependents
                 for key in ts.waiting_for_data:
+                    # these are tasks that the current task (ts) needs in memory
+                    # before it can proceed. With speculative tasks, the ts_wait
+                    # can reasonably include tasks that are "ready" -- they will
+                    # be executed here (soon) and then the data will be
+                    # available.
                     ts_wait = self.tasks[key]
                     assert (
-                        ts_wait.state == "flight"
-                        or ts_wait.state == "waiting"
-                        or ts.wait.key in self._missing_dep_flight
+                        ts_wait.state in ("flight", "waiting", "ready")
+                        or ts_wait.key in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
                 if ts.state == "memory":
