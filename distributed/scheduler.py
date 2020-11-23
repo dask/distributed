@@ -114,7 +114,15 @@ DEFAULT_EXTENSIONS = [
     EventExtension,
 ]
 
-ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory", "speculative"}
+ALL_TASK_STATES = {
+    "released",
+    "waiting",
+    "no-worker",
+    "processing",
+    "erred",
+    "memory",
+    "speculative",
+}
 
 
 class ClientState:
@@ -2473,7 +2481,9 @@ class Scheduler(ServerNode):
         ts = self.tasks[key]
         # speculative doesn't update waiting_on, so ensure that all dependencies are
         # processing on the same worker if not `waiting_on`
-        assert not ts.waiting_on or len({dts.processing_on for dts in ts.waiting_on}) == 1
+        assert (
+            not ts.waiting_on or len({dts.processing_on for dts in ts.waiting_on}) == 1
+        )
         ws = ts.processing_on
         assert ws
         assert ts in ws.processing
@@ -2715,11 +2725,8 @@ class Scheduler(ServerNode):
                 }
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
             elif ts.speculative:
-                msg["who_has"] = {
-                    dep.key: dep.processing_on.address for dep in deps
-                }
+                msg["who_has"] = {dep.key: dep.processing_on.address for dep in deps}
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
-
 
             if self.validate and deps:
                 assert all(msg["who_has"].values())
@@ -3853,7 +3860,12 @@ class Scheduler(ServerNode):
         """
         # TODO: How is it possible for nbytes to be None when there's a getter that is supposed to
         # stop that from happening?
-        return sum(dts.nbytes or DEFAULT_DATA_SIZE for dts in ts.dependencies - ws.has_what) / self.bandwidth
+        return (
+            sum(
+                dts.nbytes or DEFAULT_DATA_SIZE for dts in ts.dependencies - ws.has_what
+            )
+            / self.bandwidth
+        )
 
     def get_task_duration(self, ts, default=None):
         """
@@ -4169,7 +4181,7 @@ class Scheduler(ServerNode):
 
             duration = self.get_task_duration(ts)
             # There are no comm costs if this is speculative
-            #comm = self.get_comm_cost(ts, ws)
+            # comm = self.get_comm_cost(ts, ws)
 
             ws.processing[ts] = duration
             ts.processing_on = ws
@@ -4189,7 +4201,13 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            if len(ts.dependents) == 1 and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1:
+            if (
+                len(ts.dependents) == 1
+                and len(
+                    {dts.processing_on for dts in list(ts.dependents)[0].dependencies}
+                )
+                == 1
+            ):
                 return {list(ts.dependents)[0].key: "speculative"}
 
             else:
@@ -4241,7 +4259,13 @@ class Scheduler(ServerNode):
 
             self.send_task_to_worker(worker, key)
 
-            if len(ts.dependents) == 1 and len({dts.processing_on for dts in list(ts.dependents)[0].dependencies}) == 1:
+            if (
+                len(ts.dependents) == 1
+                and len(
+                    {dts.processing_on for dts in list(ts.dependents)[0].dependencies}
+                )
+                == 1
+            ):
                 return {list(ts.dependents)[0].key: "speculative"}
 
             else:
