@@ -111,6 +111,9 @@ def test_sync_timeout(loop_in_thread):
     with pytest.raises(TimeoutError):
         sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
 
+    with pytest.raises(TimeoutError):
+        sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout="50ms")
+
 
 def test_sync_closed_loop():
     loop = IOLoop.current()
