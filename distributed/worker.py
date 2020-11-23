@@ -1539,7 +1539,6 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-
     def transition_waiting_flight(self, ts, worker=None):
         try:
             if self.validate:
