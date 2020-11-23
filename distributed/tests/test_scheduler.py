@@ -2172,16 +2172,3 @@ async def test_retire_state_change(c, s, a, b):
         step = c.compute(foo)
         c.gather(step)
     await c.retire_workers(workers=[a.address])
-
-
-@gen_cluster(client=True, config={"dask.optimization.fuse.active": False})
-async def test_speculative_assignment_simple(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
-    z = delayed(dec)(y)
-
-    zz = c.compute(z)
-    result = await zz
-    assert result == 2
-    assert (y.key, "speculative", "ready") in a.story(y.key)
-    assert (z.key, "speculative", "ready") in a.story(z.key)
