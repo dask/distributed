@@ -3558,6 +3558,35 @@ class Client:
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
+    def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic: str, list
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        Examples
+        --------
+        >>> from time import time
+        >>> client.log_event("current-time", time())
+        """
+        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
+
+    def get_events(self, topic: str = None):
+        """Retrieve structured topic logs
+
+        Parameters
+        ----------
+        topic: str, optional
+            Name of topic log to retrieve events for. If no ``topic`` is
+            provided, then logs for all topics will be returned.
+        """
+        return self.sync(self.scheduler.events, topic=topic)
+
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler
 

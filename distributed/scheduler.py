@@ -1312,6 +1312,8 @@ class Scheduler(ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
+        self.events = defaultdict(lambda: deque(maxlen=100000))
+        self.event_counts = defaultdict(int)
         self.worker_plugins = []
 
         worker_handlers = {
@@ -1324,6 +1326,7 @@ class Scheduler(ServerNode):
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
+            "log-event": self.log_worker_event,
         }
 
         client_handlers = {
@@ -1360,6 +1363,8 @@ class Scheduler(ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
+            "log_event": self.log_worker_event,
+            "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
             "add_keys": self.add_keys,
@@ -2313,7 +2318,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
-            ws.status = "closed"
+            ws.status = Status.closed
             self.total_occupancy -= ws.occupancy
 
             recommendations = {}
@@ -3753,6 +3758,9 @@ class Scheduler(ServerNode):
             finally:
                 if teardown:
                     teardown(self, state)
+
+    def log_worker_event(self, worker=None, topic=None, msg=None):
+        self.log_event(topic, msg)
 
     def subscribe_worker_status(self, comm=None):
         WorkerStatusPlugin(self, comm)
@@ -5359,6 +5367,22 @@ class Scheduler(ServerNode):
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
         return results
+
+    def log_event(self, name, msg):
+        event = (time(), msg)
+        if isinstance(name, list):
+            for n in name:
+                self.events[n].append(event)
+                self.event_counts[n] += 1
+        else:
+            self.events[name].append(event)
+            self.event_counts[name] += 1
+
+    def get_events(self, comm=None, topic=None):
+        if topic is not None:
+            return tuple(self.events[topic])
+        else:
+            return valmap(tuple, self.events)
 
     ###########
     # Cleanup #

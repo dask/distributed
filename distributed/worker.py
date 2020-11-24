@@ -758,6 +758,15 @@ class Worker(ServerNode):
     def logs(self):
         return self._deque_handler.deque
 
+    def log_event(self, topic, msg):
+        self.batched_stream.send(
+            {
+                "op": "log-event",
+                "topic": topic,
+                "msg": msg,
+            }
+        )
+
     @property
     def worker_address(self):
         """ For API compatibility with Nanny """
