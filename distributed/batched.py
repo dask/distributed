@@ -75,8 +75,8 @@ class BatchedSend:
 
     @gen.coroutine
     def _background_send(self):
-        from .scheduler import profile
-        with profile:
+        from .scheduler import profiler
+        with profiler:
             while not self.please_stop:
                 try:
                     yield self.waker.wait(self.next_deadline)
