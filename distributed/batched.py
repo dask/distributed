@@ -10,8 +10,6 @@ from tornado.ioloop import IOLoop
 from .core import CommClosedError
 from .utils import parse_timedelta
 
-from .scheduler import profile
-
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +75,7 @@ class BatchedSend:
 
     @gen.coroutine
     def _background_send(self):
+        from .scheduler import profile
         with profile:
             while not self.please_stop:
                 try:
@@ -142,7 +141,6 @@ class BatchedSend:
             self.stopped.set()
             self.abort()
 
-    @profile
     def send(self, msg):
         """Schedule a message for sending to the other side
 
