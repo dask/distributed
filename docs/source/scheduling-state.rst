@@ -46,6 +46,8 @@ The scheduler keeps internal state about several kinds of entities:
    in user code (including on any APIs explained here).
 
 
+.. _scheduler-task-state:
+
 Task State
 ----------
 
