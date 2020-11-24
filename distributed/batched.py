@@ -1,5 +1,7 @@
+import atexit
 from collections import deque
 import logging
+import os
 
 import dask
 from tornado import gen, locks
@@ -7,6 +9,21 @@ from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
 from .utils import parse_timedelta
+
+try:
+    import line_profiler
+
+    profile = line_profiler.LineProfiler()
+
+    def dump_stats(p):
+        s = p.get_stats()
+        if any(s.timings.values()):
+            profile.dump_stats(f"prof_{os.getpid()}.lstat")
+
+    atexit.register(dump_stats, profile)
+except ImportError:
+    def profile(func):
+        return func
 
 
 logger = logging.getLogger(__name__)
@@ -71,6 +88,7 @@ class BatchedSend:
 
     __str__ = __repr__
 
+    @profile
     @gen.coroutine
     def _background_send(self):
         while not self.please_stop:
@@ -137,6 +155,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
+    @profile
     def send(self, msg):
         """Schedule a message for sending to the other side
 
