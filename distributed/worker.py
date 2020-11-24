@@ -1450,6 +1450,10 @@ class Worker(ServerNode):
 
             if actor:
                 logger.warning("Actor! %s %s" % (self.address, ts))
+                if ts.key in self.actors:
+                    # already was an actor
+                    return
+                # make pristine actor
                 self.actors[ts.key] = None
                 self.data.pop(ts.key, None)
 

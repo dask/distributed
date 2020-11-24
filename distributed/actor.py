@@ -1,14 +1,16 @@
 import asyncio
 import functools
 from inspect import iscoroutinefunction
+import random
 import threading
+import time
 from queue import Queue, Empty
 
 from .client import Future, default_client
 from .protocol import to_serialize
 from .utils import thread_state, sync
 from .utils_comm import WrappedKey
-from .worker import get_worker, logger
+from .worker import get_worker
 
 
 class Actor(WrappedKey):
@@ -95,9 +97,9 @@ class Actor(WrappedKey):
             return self._client.scheduler
 
     def set_address(self):
-        print("SETTING ADDRESS from", self._address)
-        self._address, = self._sync(self._scheduler_rpc.find_actor, actor_key=self.key)
-        print(self._address)
+        (self._address,) = self._sync(
+            self._scheduler_rpc.find_actor, actor_key=self.key
+        )
         if self._client:
             if self._future:
                 self._future.result()
@@ -105,7 +107,6 @@ class Actor(WrappedKey):
                 self._future = Future(self.key)
         elif self._worker:
             pass
-        print("synced future")
 
     @property
     def _worker_rpc(self):
@@ -169,29 +170,19 @@ class Actor(WrappedKey):
             @functools.wraps(attr)
             def func(*args, **kwargs):
                 async def run_actor_function_on_worker():
-                    retry = 3
-                    while retry > 0:
-                        # warning: error and full stack can leak here
-                        try:
-                            result = await asyncio.wait_for(self._worker_rpc.actor_execute(
+                    try:
+                        result = await asyncio.wait_for(
+                            self._worker_rpc.actor_execute(
                                 function=key,
                                 actor=self.key,
                                 args=[to_serialize(arg) for arg in args],
                                 kwargs={k: to_serialize(v) for k, v in kwargs.items()},
-                            ), timeout=2)
-                            if "cannot schedule new futures after shutdown" not in str(result.get('exception', "")):
-                                break
-                        except (OSError, AssertionError) as e:
-                            # assertion error is a low-level comm validation error
-                            print("ERROR", e)
-                            result = {"exception": e}
-                            break
-                        except Exception as e:
-                            logger.debug("Actor execute retriable exception")
-                            result = {"exception": e}
-                            retry -= 1
-
-                    print(result)
+                            ),
+                            timeout=2,
+                        )
+                    except Exception as e:
+                        # assertion error is a low-level comm validation error
+                        result = {"exception": e}
 
                     return result
 
@@ -212,14 +203,15 @@ class Actor(WrappedKey):
                     async def wait_then_add_to_queue():
                         try:
                             x = await run_actor_function_on_worker()
-                            print("2", x)
                             q.put(x)
                         except Exception as e:
                             q.put({"exception": e})
 
                     self._io_loop.add_callback(wait_then_add_to_queue)
 
-                    return ActorFuture(q, self._io_loop, actor=self, defs=(attr, args, kwargs))
+                    return ActorFuture(
+                        q, self._io_loop, actor=self, defs=(key, args, kwargs)
+                    )
 
             return func
 
@@ -283,27 +275,43 @@ class ActorFuture:
     def __await__(self):
         return self.result()
 
-    def result(self, timeout=2.5):
+    def result(self, timeout=2.5, retries=2):
         try:
             if isinstance(self._cached_result, Exception):
                 raise self._cached_result
-            print("Result!", self._cached_result)
             return self._cached_result
         except AttributeError:
             pass
         try:
             out = self.q.get(timeout=timeout)
-            print("RECEIVED", out)
             if "result" in out:
                 self._cached_result = out["result"]
             else:
                 ex = out["exception"]
-                self.actor.set_address()
+                if retries > 0:
+                    self._reset()
+                    return self.result(retries=retries - 1)
+                self._cached_result = ex
         except Empty:
+            if retries > 0:
+                self._reset()
+                return self.result(retries=retries - 1)
             self._cached_result = TimeoutError()
         self.actor = None
         self.defs = None
         return self.result()
+
+    def _reset(self):
+        time.sleep(random.random())
+        self.actor.set_address()
+        attr, args, kwargs = self.defs
+        if args is not None:
+            # method
+            ac2 = getattr(self.actor, attr)(*args, **kwargs)
+        else:
+            # attribute
+            ac2 = getattr(self.actor, attr)
+        self.__dict__.update(ac2.__dict__)
 
     def __repr__(self):
         return "<ActorFuture>"

@@ -7,7 +7,7 @@ import pytest
 
 import dask
 from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import cluster, gen_cluster, wait_for
+from distributed.utils_test import cluster, gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 from distributed.metrics import time
 from distributed.worker import get_worker
@@ -21,6 +21,7 @@ class Counter:
         self.should_kill = False
 
     def increment(self):
+        print("increment!", get_worker()._address, self.n)
         self.n += 1
         return self.n
 
@@ -641,44 +642,49 @@ def test_exception():
 
 def test_actor_retire():
     # for the graceful movement of actor from one worker to another
-    import time
     with cluster(nworkers=3) as (cl, w):
         client = Client(cl["address"])
         # each actor goes to a different worker by default, but worker holding ac3
         # will also hold a reference to ac
-        ac = client.submit(Counter, actor=True, workers=[w[0]['address']]).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]['address']]).result()
-        ac3 = client.submit(UsesCounterInit, ac, actor=True, workers=[w[2]['address']]).result()
+        ac = client.submit(Counter, actor=True, workers=[w[0]["address"]]).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]["address"]]).result()
+        ac3 = client.submit(
+            UsesCounterInit, ac, actor=True, workers=[w[2]["address"]]
+        ).result()
         assert ac.increment().result() == 1
         assert ac2.do_inc(ac).result() == 2
         assert ac3.do_inc().result() == 3
 
-        client.retire_workers([ac._address])
+        to_retire = ac._address
+        client.retire_workers([to_retire])
 
-        print("START")
+        # counter value has reset to zero
         assert ac.increment().result() == 1
-        #assert ac2.do_inc(ac).result() == 2
-        #assert ac3.do_inc().result() == 3
-        print("DONE")
+        assert ac2.do_inc(ac).result() == 2
+        # on this one, the remote copy also needs to reset its address
+        assert ac3.do_inc().result() == 3
 
-        client.close()
-        cluster.close()
+        # for cleanup
+        w[:] = [_ for _ in w if _["address"] != to_retire]
+        del ac, ac2, ac3
 
 
 def test_actor_kill():
     # for the graceful movement of actor from one worker to another
-    from concurrent.futures import TimeoutError
     with cluster(nworkers=3) as (cl, w):
         # each actor goes to a different worker by default, but worker holding ac3
         # will also hold a reference to ac
-        ac = client.submit(Counter, actor=True, workers=[w[0]['address']]).result()
-        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]['address']]).result()
-        ac3 = client.submit(UsesCounterInit, ac, actor=True, workers=[w[2]['address']]).result()
+        ac = client.submit(Counter, actor=True, workers=[w[0]["address"]]).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]["address"]]).result()
+        ac3 = client.submit(
+            UsesCounterInit, ac, actor=True, workers=[w[2]["address"]]
+        ).result()
         assert ac.increment().result() == 1
         assert ac2.do_inc(ac).result() == 2
         assert ac3.do_inc().result() == 3
         assert ac.set_kill().result()
         assert ac.kill_now().result()
         import pdb
+
         pdb.set_trace()
         x = 1

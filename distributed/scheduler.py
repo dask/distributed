@@ -3759,11 +3759,13 @@ class Scheduler(ServerNode):
         assert self.tasks[actor_key].actor
         if actor_key in self.tasks:
             workers = self.tasks[actor_key].who_has
-            out = [ws.address for ws in workers
-                   if actor_key in [a.key for a in ws.actors]]
+            out = [
+                ws.address for ws in workers if actor_key in [a.key for a in ws.actors]
+            ]
             if not out:
-                worker = random.choice([ws.address for ws in self.tasks[actor_key].who_has]
-                                       or self.workers)
+                worker = random.choice(
+                    [ws.address for ws in self.tasks[actor_key].who_has] or self.workers
+                )
                 self.send_task_to_worker(worker, actor_key)
                 out = [worker]
         else:
