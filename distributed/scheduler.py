@@ -2299,7 +2299,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
-            ws.status = "closed"
+            ws.status = Status.closed
             self.total_occupancy -= ws.occupancy
 
             recommendations = {}
