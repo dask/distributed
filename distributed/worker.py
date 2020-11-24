@@ -1330,7 +1330,7 @@ class Worker(ServerNode):
                     data[k] = Actor(type(self.actors[k]), self.address, k)
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        nbytes = {k: self.tasks[k].nbytes for k in data}
+        nbytes = {k: self.tasks[k].nbytes for k in data if k in self.tasks}
         stop = time()
         if self.digests is not None:
             self.digests["get-data-load-duration"].add(stop - start)
