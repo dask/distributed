@@ -10,6 +10,21 @@ from tornado.ioloop import IOLoop
 from .core import CommClosedError
 from .utils import parse_timedelta
 
+try:
+    import line_profiler
+
+    profiler = line_profiler.LineProfiler()
+
+    def dump_stats(p):
+        s = p.get_stats()
+        if any(s.timings.values()):
+            profiler.dump_stats(f"prof_{os.getpid()}.lstat")
+
+    atexit.register(dump_stats, profiler)
+except ImportError:
+    def profile(func):
+        return func
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +90,6 @@ class BatchedSend:
 
     @gen.coroutine
     def _background_send(self):
-        from .scheduler import profiler
         with profiler:
             while not self.please_stop:
                 try:
