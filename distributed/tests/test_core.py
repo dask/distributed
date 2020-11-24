@@ -100,15 +100,6 @@ def test_server_status_assign_non_variant_raises():
             server.status = "I do not exists"
 
 
-def test_server_status_compare_non_variant_raises():
-    server = Server({})
-    # turn off warnings into error for assertion checking.
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("default")
-        with pytest.raises(AssertionError):
-            server.status == "You can't compare with me"
-
-
 def test_server_status_assign_with_variant_warns():
     server = Server({})
     with warnings.catch_warnings(record=True) as w:
@@ -117,26 +108,11 @@ def test_server_status_assign_with_variant_warns():
             server.status = "running"
 
 
-def test_server_status_compare_with_variant_warns():
-    server = Server({})
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("default")
-        with pytest.warns(PendingDeprecationWarning):
-            server.status == "running"
-
-
 def test_server_status_assign_with_variant_raises_in_tests():
     """That would be the default in user code"""
     server = Server({})
     with pytest.raises(PendingDeprecationWarning):
         server.status = "running"
-
-
-def test_server_status_compare_with_variant_raises_in_tests():
-    """That would be the default in user code"""
-    server = Server({})
-    with pytest.raises(PendingDeprecationWarning):
-        server.status == "running"
 
 
 def test_server_assign_assign_enum_is_quiet():
