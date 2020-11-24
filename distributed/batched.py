@@ -10,20 +10,7 @@ from tornado.ioloop import IOLoop
 from .core import CommClosedError
 from .utils import parse_timedelta
 
-try:
-    import line_profiler
-
-    profile = line_profiler.LineProfiler()
-
-    def dump_stats(p):
-        s = p.get_stats()
-        if any(s.timings.values()):
-            profile.dump_stats(f"prof_batched_{os.getpid()}.lstat")
-
-    atexit.register(dump_stats, profile)
-except ImportError:
-    def profile(func):
-        return func
+from .scheduler import profile
 
 
 logger = logging.getLogger(__name__)

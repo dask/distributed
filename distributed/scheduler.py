@@ -102,7 +102,7 @@ try:
     def dump_stats(p):
         s = p.get_stats()
         if any(s.timings.values()):
-            profile.dump_stats(f"prof_sched_{os.getpid()}.lstat")
+            profile.dump_stats(f"prof_{os.getpid()}.lstat")
 
     atexit.register(dump_stats, profile)
 except ImportError:
