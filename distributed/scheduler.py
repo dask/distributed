@@ -20,7 +20,6 @@ import psutil
 import sortedcontainers
 
 from tlz import (
-    frequencies,
     merge,
     pluck,
     merge_sorted,
@@ -5497,14 +5496,14 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
     if ts.actor:
-        candidates = all_workers
+        candidates = set(all_workers)
     else:
-        candidates = frequencies([ws for dts in deps for ws in dts.who_has])
+        candidates = {ws for dts in deps for ws in dts.who_has}
     if valid_workers is True:
         if not candidates:
-            candidates = all_workers
+            candidates = set(all_workers)
     else:
-        candidates = valid_workers & set(candidates)
+        candidates &= valid_workers
         if not candidates:
             candidates = valid_workers
             if not candidates:
