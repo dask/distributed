@@ -1,7 +1,5 @@
-import atexit
 from collections import deque
 import logging
-import os
 
 import dask
 from tornado import gen, locks
@@ -9,21 +7,6 @@ from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
 from .utils import parse_timedelta
-
-try:
-    import line_profiler
-
-    profiler = line_profiler.LineProfiler()
-
-    def dump_stats(p):
-        s = p.get_stats()
-        if any(s.timings.values()):
-            profiler.dump_stats(f"prof_{os.getpid()}.lstat")
-
-    atexit.register(dump_stats, profiler)
-except ImportError:
-    def profile(func):
-        return func
 
 
 logger = logging.getLogger(__name__)
@@ -90,71 +73,69 @@ class BatchedSend:
 
     @gen.coroutine
     def _background_send(self):
-        global profiler
-        with profiler:
-            while not self.please_stop:
-                try:
-                    yield self.waker.wait(self.next_deadline)
-                    self.waker.clear()
-                except gen.TimeoutError:
-                    pass
-                if not self.buffer:
-                    # Nothing to send
-                    self.next_deadline = None
-                    continue
-                if self.next_deadline is not None and self.loop.time() < self.next_deadline:
-                    # Send interval not expired yet
-                    continue
-                payload, self.buffer = self.buffer, []
-                self.batch_count += 1
-                self.next_deadline = self.loop.time() + self.interval
-                try:
-                    nbytes = yield self.comm.write(
-                        payload, serializers=self.serializers, on_error="raise"
-                    )
-                    if nbytes < 1e6:
-                        self.recent_message_log.append(payload)
+        while not self.please_stop:
+            try:
+                yield self.waker.wait(self.next_deadline)
+                self.waker.clear()
+            except gen.TimeoutError:
+                pass
+            if not self.buffer:
+                # Nothing to send
+                self.next_deadline = None
+                continue
+            if self.next_deadline is not None and self.loop.time() < self.next_deadline:
+                # Send interval not expired yet
+                continue
+            payload, self.buffer = self.buffer, []
+            self.batch_count += 1
+            self.next_deadline = self.loop.time() + self.interval
+            try:
+                nbytes = yield self.comm.write(
+                    payload, serializers=self.serializers, on_error="raise"
+                )
+                if nbytes < 1e6:
+                    self.recent_message_log.append(payload)
+                else:
+                    self.recent_message_log.append("large-message")
+                self.byte_count += nbytes
+            except CommClosedError as e:
+                # If the comm is known to be closed, we'll immediately
+                # give up.
+                logger.info("Batched Comm Closed: %s", e)
+                break
+            except Exception:
+                # In other cases we'll retry a few times.
+                # https://github.com/pangeo-data/pangeo/issues/788
+                if self._consecutive_failures <= 5:
+                    logger.warning("Error in batched write, retrying")
+                    yield gen.sleep(0.100 * 1.5 ** self._consecutive_failures)
+                    self._consecutive_failures += 1
+                    # Exponential backoff for retries.
+                    # Ensure we don't drop any messages.
+                    if self.buffer:
+                        # Someone could call send while we yielded above?
+                        self.buffer = payload + self.buffer
                     else:
-                        self.recent_message_log.append("large-message")
-                    self.byte_count += nbytes
-                except CommClosedError as e:
-                    # If the comm is known to be closed, we'll immediately
-                    # give up.
-                    logger.info("Batched Comm Closed: %s", e)
+                        self.buffer = payload
+                    continue
+                else:
+                    logger.exception("Error in batched write")
                     break
-                except Exception:
-                    # In other cases we'll retry a few times.
-                    # https://github.com/pangeo-data/pangeo/issues/788
-                    if self._consecutive_failures <= 5:
-                        logger.warning("Error in batched write, retrying")
-                        yield gen.sleep(0.100 * 1.5 ** self._consecutive_failures)
-                        self._consecutive_failures += 1
-                        # Exponential backoff for retries.
-                        # Ensure we don't drop any messages.
-                        if self.buffer:
-                            # Someone could call send while we yielded above?
-                            self.buffer = payload + self.buffer
-                        else:
-                            self.buffer = payload
-                        continue
-                    else:
-                        logger.exception("Error in batched write")
-                        break
-                finally:
-                    payload = None  # lose ref
-            else:
-                # nobreak. We've been gracefully closed.
-                self.stopped.set()
-                return
-
-            # If we've reached here, it means our comm is known to be closed or
-            # we've repeatedly failed to send a message. We can't close gracefully
-            # via `.close()` since we can't send messages. So we just abort.
-            # This means that any messages in our buffer our lost.
-            # To propagate exceptions, we rely on subsequent `BatchedSend.send`
-            # calls to raise CommClosedErrors.
+            finally:
+                payload = None  # lose ref
+        else:
+            # nobreak. We've been gracefully closed.
             self.stopped.set()
-            self.abort()
+            return
+
+        # If we've reached here, it means our comm is known to be closed or
+        # we've repeatedly failed to send a message. We can't close gracefully
+        # via `.close()` since we can't send messages. So we just abort.
+        # This means that any messages in our buffer our lost.
+        # To propagate exceptions, we rely on subsequent `BatchedSend.send`
+        # calls to raise CommClosedErrors.
+        self.stopped.set()
+        self.abort()
 
     def send(self, msg):
         """Schedule a message for sending to the other side
