@@ -3755,7 +3755,6 @@ class Scheduler(ServerNode):
             }
 
     def find_actor(self, _, actor_key=None):
-        print("FIND ACTOR CALLED", actor_key, self.tasks)
         assert self.tasks[actor_key].actor
         if actor_key in self.tasks:
             workers = self.tasks[actor_key].who_has
