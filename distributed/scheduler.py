@@ -239,6 +239,7 @@ class WorkerState:
         "bandwidth",
         "extra",
         "has_what",
+        "_hash",
         "last_seen",
         "local_directory",
         "memory_limit",
@@ -281,6 +282,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
 
+        self._hash = hash(address)
         self._status = Status.running
         self.nbytes = 0
         self.occupancy = 0
@@ -298,7 +300,7 @@ class WorkerState:
         self.extra = extra or {}
 
     def __hash__(self):
-        return hash(self.address)
+        return self._hash
 
     def __eq__(self, other):
         return type(self) == type(other) and self.address == other.address
