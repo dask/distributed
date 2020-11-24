@@ -21,7 +21,6 @@ class Counter:
         self.should_kill = False
 
     def increment(self):
-        print("increment!", get_worker()._address, self.n)
         self.n += 1
         return self.n
 
@@ -672,6 +671,7 @@ def test_actor_retire():
 def test_actor_kill():
     # for the graceful movement of actor from one worker to another
     with cluster(nworkers=3) as (cl, w):
+        client = Client(cl["address"])
         # each actor goes to a different worker by default, but worker holding ac3
         # will also hold a reference to ac
         ac = client.submit(Counter, actor=True, workers=[w[0]["address"]]).result()
@@ -682,9 +682,17 @@ def test_actor_kill():
         assert ac.increment().result() == 1
         assert ac2.do_inc(ac).result() == 2
         assert ac3.do_inc().result() == 3
+
         assert ac.set_kill().result()
         assert ac.kill_now().result()
-        import pdb
 
-        pdb.set_trace()
-        x = 1
+        # counter value has reset to zero
+        assert ac.increment().result() == 1
+        assert ac2.do_inc(ac).result() == 2
+        # on this one, the remote copy also needs to reset its address
+        print(ac3.do_inc().result())
+        print("DONE")
+
+        # for cleanup
+        w.pop(0)
+        del ac, ac2, ac3

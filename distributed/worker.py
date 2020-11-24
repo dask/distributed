@@ -1449,7 +1449,6 @@ class Worker(ServerNode):
                 self.generation -= 1
 
             if actor:
-                logger.warning("Actor! %s %s" % (self.address, ts))
                 if ts.key in self.actors:
                     # already was an actor
                     return

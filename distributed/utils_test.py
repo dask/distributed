@@ -683,14 +683,18 @@ def cluster(
                         rpc_kwargs=rpc_kwargs,
                     )
                 )
-            except concurrent.futures._base.CancelledError:
+            except Exception:
                 # when closing, may have some futures still in flight
                 pass
-            loop.run_sync(
-                lambda: disconnect(
-                    saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+            try:
+                loop.run_sync(
+                    lambda: disconnect(
+                        saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+                    )
                 )
-            )
+            except Exception:
+                # when closing, may have some futures still in flight
+                pass
 
             scheduler.terminate()
             scheduler_q.close()

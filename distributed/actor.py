@@ -302,7 +302,7 @@ class ActorFuture:
         return self.result()
 
     def _reset(self):
-        time.sleep(random.random())
+        time.sleep(random.random() + 0.1)
         self.actor.set_address()
         attr, args, kwargs = self.defs
         if args is not None:
