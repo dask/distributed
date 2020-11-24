@@ -61,32 +61,6 @@ class Status(Enum):
     undefined = None
     dont_reply = "dont-reply"
 
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status, this avoid comparison with non-existing status.
-        """
-        if isinstance(other, type(self)):
-            return self.value == other.value
-        elif isinstance(other, str) or (other is None):
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            assert other in [
-                s.value for s in type(self)
-            ], f"comparison with non-existing states {other}"
-            return other == self.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
-
 
 class RPCClosed(IOError):
     pass
