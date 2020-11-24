@@ -12,23 +12,23 @@ class TrackChildren(threading.Thread):
     def __init__(self, proc, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.name = "ThreadedTrackChildren"
-        self._proc = weakref.ref(proc)
+        self._proc = proc
         self._cpu = 0
         self._mem = 0
         self._children = set()
         self._lock = threading.Lock()
+        self._event = threading.Event()
 
     def metrics(self):
         with self._lock:
             return self._cpu, self._mem
 
+    def stop(self):
+        self._event.set()
+
     def run(self):
-        while True:
-            proc = self._proc()
-            if proc is None:
-                break
-            children = set(proc.children(True))
-            del proc
+        while not self._event.is_set():
+            children = set(self._proc.children(True))
             # "self.children" tracks the subprocesses to calculate the CPU
             # usage correctly. Otherwise, the computed CPU usage would always
             # be 0 as no time interval would exist for the calculation
@@ -49,7 +49,7 @@ class TrackChildren(threading.Thread):
                         self._children.remove(child)
             with self._lock:
                 self._cpu, self._mem = cpu, mem
-            time.sleep(0.1)
+            time.sleep(0.5)
 
 
 class SystemMonitor:
@@ -62,8 +62,9 @@ class SystemMonitor:
 
         self.quantities = {"cpu": self.cpu, "memory": self.memory, "time": self.time}
 
-        self.children = TrackChildren(self.proc, daemon=True)
-        self.children.start()
+        self.track_children = TrackChildren(self.proc, daemon=True)
+        self.track_children.start()
+        self.track_children_finalizer = weakref.finalize(self, self.track_children.stop)
 
         try:
             ioc = psutil.net_io_counters()
@@ -92,7 +93,7 @@ class SystemMonitor:
 
     def update(self):
         with self.proc.oneshot():
-            cpu, memory = self.children.metrics()
+            cpu, memory = self.track_children.metrics()
             cpu += self.proc.cpu_percent()
             memory += self.proc.memory_info().rss
 
