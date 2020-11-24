@@ -21,7 +21,6 @@ import psutil
 import sortedcontainers
 
 from tlz import (
-    frequencies,
     merge,
     pluck,
     merge_sorted,
@@ -2605,14 +2604,14 @@ class Scheduler(ServerNode):
             ts = self.tasks.get(msg["key"])
         if ts is None:
             # Notify all clients
-            comms |= set(self.client_comms.values())
+            comms.update(self.client_comms.values())
         else:
             # Notify clients interested in key
-            comms |= {
+            comms.update(
                 self.client_comms[c.client_key]
                 for c in ts.who_wants
                 if c.client_key in self.client_comms
-            }
+            )
         for c in comms:
             try:
                 c.send(msg)
@@ -5539,14 +5538,14 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
     if ts.actor:
-        candidates = all_workers
+        candidates = set(all_workers)
     else:
-        candidates = frequencies([ws for dts in deps for ws in dts.who_has])
+        candidates = {ws for dts in deps for ws in dts.who_has}
     if valid_workers is True:
         if not candidates:
-            candidates = all_workers
+            candidates = set(all_workers)
     else:
-        candidates = valid_workers & set(candidates)
+        candidates &= valid_workers
         if not candidates:
             candidates = valid_workers
             if not candidates:
