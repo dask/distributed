@@ -90,6 +90,7 @@ class BatchedSend:
 
     @gen.coroutine
     def _background_send(self):
+        global profiler
         with profiler:
             while not self.please_stop:
                 try:
