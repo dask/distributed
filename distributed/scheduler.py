@@ -106,8 +106,10 @@ try:
 
     atexit.register(dump_stats, profiler)
 except ImportError:
+
     def profile(func):
         return func
+
 
 logger = logging.getLogger(__name__)
 
