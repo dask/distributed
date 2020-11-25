@@ -1894,7 +1894,7 @@ class Scheduler(ServerNode):
             user_priority,
             actors,
             fifo_timeout,
-            annotations
+            annotations,
         )
 
     def update_graph(
@@ -2022,9 +2022,7 @@ class Scheduler(ServerNode):
 
         # Override existing taxonomy with per task annotations
         # https://stackoverflow.com/a/20308657/1611416
-        print("annotations", annotations)
         if annotations:
-            from pprint import pprint
             for k, a in annotations.items():
                 if "priority" in a:
                     priority[k] = a["priority"]
