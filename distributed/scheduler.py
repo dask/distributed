@@ -2584,18 +2584,19 @@ class Scheduler(ServerNode):
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
-        client_keys = set()
-        if client is not None:
-            client_keys.add(client)
+        client_keys = []
 
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
         if ts is None:
             # Notify all clients
-            client_keys.update(self.client_comms)
+            client_keys.extend(self.client_comms)
         else:
             # Notify clients interested in key
-            client_keys.update(c.client_key for c in ts.who_wants)
+            client_keys.extend(c.client_key for c in ts.who_wants)
+
+        if client is not None and client not in client_keys:
+            client_keys.append(client)
 
         for k in client_keys:
             try:
