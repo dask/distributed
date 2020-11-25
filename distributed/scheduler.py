@@ -2592,9 +2592,16 @@ class Scheduler(ServerNode):
             client_keys = list(self.client_comms)
         else:
             # Notify clients interested in key
-            client_keys = [c.client_key for c in ts.who_wants]
-            if client is not None and client not in client_keys:
+            client_keys = []
+            if client is not None:
                 client_keys.append(client)
+                for c in ts.who_wants:
+                    k = c.client_key
+                    if k != client:
+                        client_keys.append(k)
+            else:
+                for c in ts.who_wants:
+                    client_keys.append(c.client_key)
 
         for k in client_keys:
             try:
