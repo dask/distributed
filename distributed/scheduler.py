@@ -2598,13 +2598,9 @@ class Scheduler(ServerNode):
             comms.update(self.client_comms)
         else:
             # Notify clients interested in key
-            comms.update(
-                {
-                    c.client_key: self.client_comms[c.client_key]
-                    for c in ts.who_wants
-                    if c.client_key in self.client_comms
-                }
-            )
+            for c in ts.who_wants:
+                with suppress(KeyError):
+                    comms[c.client_key] = self.client_comms[c.client_key]
         for c in comms.values():
             try:
                 c.send(msg)
