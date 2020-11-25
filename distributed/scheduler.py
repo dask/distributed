@@ -4093,7 +4093,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_no_worker_waiting(self, key):
         try:
             ts = self.tasks[key]
@@ -4226,7 +4225,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
         try:
             ws = self.workers[worker]
@@ -4430,7 +4428,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_released_erred(self, key):
         try:
             ts = self.tasks[key]
@@ -4472,7 +4469,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_erred_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4507,7 +4503,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_waiting_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4544,7 +4539,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_processing_released(self, key):
         try:
             ts = self.tasks[key]
@@ -4589,7 +4583,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_processing_erred(
         self, key, cause=None, exception=None, traceback=None, **kwargs
     ):
@@ -4659,7 +4652,6 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    @profiler
     def transition_no_worker_released(self, key):
         try:
             ts = self.tasks[key]
