@@ -1,4 +1,5 @@
 from array import array
+from collections import deque
 from functools import partial
 import traceback
 import importlib
@@ -459,24 +460,31 @@ def extract_serialize(x):
 
 
 def _extract_serialize(x_items, x2, ser, bytestrings, path=()):
-    for k, v in x_items:
-        path_k = path + (k,)
-        typ_v = type(v)
-        if typ_v is dict:
-            v_items = v.items()
-            x2[k] = v2 = {}
-            _extract_serialize(v_items, v2, ser, bytestrings, path_k)
-        elif typ_v is list:
-            v_items = enumerate(v)
-            x2[k] = v2 = len(v) * [None]
-            _extract_serialize(v_items, v2, ser, bytestrings, path_k)
-        elif typ_v is Serialize or typ_v is Serialized:
-            ser[path_k] = v
-        elif (typ_v is bytes or typ_v is bytearray) and len(v) > 2 ** 16:
-            ser[path_k] = to_serialize(v)
-            bytestrings.add(path_k)
+    q = deque()
+    while True:
+        for k, v in x_items:
+            path_k = path + (k,)
+            typ_v = type(v)
+            if typ_v is dict:
+                v_items = v.items()
+                x2[k] = v2 = {}
+                q.append((v_items, v2, path_k))
+            elif typ_v is list:
+                v_items = enumerate(v)
+                x2[k] = v2 = len(v) * [None]
+                q.append((v_items, v2, path_k))
+            elif typ_v is Serialize or typ_v is Serialized:
+                ser[path_k] = v
+            elif (typ_v is bytes or typ_v is bytearray) and len(v) > 2 ** 16:
+                ser[path_k] = to_serialize(v)
+                bytestrings.add(path_k)
+            else:
+                x2[k] = v
+
+        if q:
+            x_items, x2, path = q.pop()
         else:
-            x2[k] = v
+            break
 
 
 def nested_deserialize(x):
