@@ -137,13 +137,20 @@ class ClientState:
 
     """
 
-    __slots__ = ("client_key", "wants_what", "last_seen", "versions")
+    __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
     def __init__(self, client, versions=None):
         self.client_key = client
+        self._hash = hash(client)
         self.wants_what = set()
         self.last_seen = time()
         self.versions = versions or {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.client_key == other.client_key
 
     def __repr__(self):
         return "<Client %r>" % (self.client_key,)
