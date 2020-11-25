@@ -637,6 +637,8 @@ class TaskState:
         "actor",
         # Key name
         "key",
+        # Hash of the key name
+        "_hash",
         # Key prefix (see key_split())
         "prefix",
         # How to run the task (None if pure data)
@@ -681,6 +683,7 @@ class TaskState:
 
     def __init__(self, key, run_spec):
         self.key = key
+        self._hash = hash(key)
         self.run_spec = run_spec
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -704,6 +707,12 @@ class TaskState:
         self.group_key = key_split_group(key)
         self.group = None
         self.metadata = {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.key == other.key
 
     @property
     def state(self) -> str:
