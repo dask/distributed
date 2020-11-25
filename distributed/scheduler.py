@@ -1861,7 +1861,7 @@ class Scheduler(ServerNode):
         fifo_timeout=0,
     ):
 
-        dsk, dependencies = highlevelgraph_unpack(hlg)
+        dsk, dependencies, annotations = highlevelgraph_unpack(hlg)
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -1894,6 +1894,7 @@ class Scheduler(ServerNode):
             user_priority,
             actors,
             fifo_timeout,
+            annotations
         )
 
     def update_graph(
@@ -1911,6 +1912,7 @@ class Scheduler(ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        annotations=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -2011,6 +2013,33 @@ class Scheduler(ServerNode):
         # Compute priorities
         if isinstance(user_priority, Number):
             user_priority = {k: user_priority for k in tasks}
+
+        annotations = annotations or {}
+        restrictions = restrictions or {}
+        loose_restrictions = loose_restrictions or []
+        resources = resources or {}
+        retries = retries or {}
+
+        # Override existing taxonomy with per task annotations
+        # https://stackoverflow.com/a/20308657/1611416
+        print("annotations", annotations)
+        if annotations:
+            from pprint import pprint
+            for k, a in annotations.items():
+                if "priority" in a:
+                    priority[k] = a["priority"]
+
+                if "worker" in a:
+                    restrictions[k] = a["worker"]
+
+                if a.get("allow_other_workers", False):
+                    loose_restriction.append(k)
+
+                if "retries" in a:
+                    retries[k] = a["retries"]
+
+                if "resources" in a:
+                    resources[k] = a["resources"]
 
         # Add actors
         if actors is True:
@@ -2115,6 +2144,7 @@ class Scheduler(ServerNode):
                     priority=priority,
                     loose_restrictions=loose_restrictions,
                     resources=resources,
+                    annotations=annotations,
                 )
             except Exception as e:
                 logger.exception(e)
