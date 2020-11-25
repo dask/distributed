@@ -150,7 +150,7 @@ class ClientState:
         return self._hash
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.client == other.client
+        return type(self) == type(other) and self.client_key == other.client_key
 
     def __repr__(self):
         return "<Client %r>" % (self.client_key,)
