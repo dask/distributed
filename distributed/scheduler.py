@@ -2588,6 +2588,7 @@ class Scheduler(ServerNode):
 
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
+
         if ts is None:
             # Notify all clients
             client_keys.extend(self.client_comms)
