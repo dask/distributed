@@ -2031,7 +2031,7 @@ class Scheduler(ServerNode):
                     restrictions[k] = a["worker"]
 
                 if a.get("allow_other_workers", False):
-                    loose_restriction.append(k)
+                    loose_restrictions.append(k)
 
                 if "retries" in a:
                     retries[k] = a["retries"]
