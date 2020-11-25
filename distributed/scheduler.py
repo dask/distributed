@@ -2601,6 +2601,7 @@ class Scheduler(ServerNode):
             for c in ts.who_wants:
                 with suppress(KeyError):
                     comms[c.client_key] = self.client_comms[c.client_key]
+
         for c in comms.values():
             try:
                 c.send(msg)
