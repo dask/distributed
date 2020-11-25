@@ -72,7 +72,7 @@ def _materialized_layer_pack(
     if annotations:
         exp_annots = {}
         for k in dsk.keys():
-            exp_annots[stringify[k]] = {
+            exp_annots[stringify(k)] = {
                 a: v(k) if callable(v) else v for a, v in annotations.items()
             }
         annotations = exp_annots
