@@ -5799,7 +5799,6 @@ class CollectTaskMetaDataPlugin(SchedulerPlugin):
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         self.keys.update(keys)
 
-    @profiler
     def transition(self, key, start, finish, *args, **kwargs):
         if finish == "memory" or finish == "erred":
             ts = self.scheduler.tasks.get(key)
