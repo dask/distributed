@@ -103,6 +103,7 @@ async def test_annotations(c, s, a, b):
         def __init__(self):
             self.correct_priorities = 0
             self.correct_resources = 0
+            self.correct_retries = 0
 
         def update_graph(
             self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs
@@ -114,6 +115,9 @@ async def test_annotations(c, s, a, b):
 
                 if "resource" in a:
                     self.correct_resources += int("widget" == a["resource"])
+
+                if "retries" in a:
+                    self.correct_retries += int(a["retries"] == 5)
 
     plugin = TestPlugin()
     s.add_plugin(plugin)
@@ -137,3 +141,29 @@ async def test_annotations(c, s, a, b):
 
     assert plugin.correct_priorities == 25
     assert plugin.correct_resources == 25
+
+    df = dd.from_pandas(
+        pd.DataFrame(
+            {"a": np.arange(10, dtype=int), "b": np.arange(10, 0, -1, dtype=float)}
+        ),
+        npartitions=5,
+    )
+    df = df.shuffle("a", shuffle="tasks", max_branch=2)
+    acol = df["a"]
+    bcol = df["b"]
+
+    with dask.annotate(retries=5):
+        df = acol + bcol
+
+    res = c.get(
+        df.__dask_graph__(),
+        list(flatten(df.__dask_keys__())),
+        optimize_graph=False,
+        sync=False,
+    )
+
+    res = await c.gather(res)
+    assert res[0].dtypes == np.float64
+    assert (res[0] == 10.0).all()
+
+    assert plugin.correct_retries == 5
