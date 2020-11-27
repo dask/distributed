@@ -431,7 +431,7 @@ class Serialized:
         return not (self == other)
 
 
-def extract_serialize(x):
+def extract_serialize(x) -> tuple:
     """Pull out Serialize objects from message
 
     This also remove large bytestrings from the message into a second
@@ -444,13 +444,15 @@ def extract_serialize(x):
     >>> extract_serialize(msg)
     ({'op': 'update'}, {('data',): <Serialize: 123>}, set())
     """
-    typ_x = type(x)
+    typ_x: type = type(x)
     if typ_x is dict:
-        x_items = x.items()
+        x_d: dict = x
+        x_items = x_d.items()
         x2 = {}
     elif typ_x is list:
-        x_items = enumerate(x)
-        x2 = len(x) * [None]
+        x_l: list = x
+        x_items = enumerate(x_l)
+        x2 = len(x_l) * [None]
 
     ser = {}
     bytestrings = set()
@@ -459,32 +461,36 @@ def extract_serialize(x):
     return x2, ser, bytestrings
 
 
-def _extract_serialize(x_items, x2, ser, bytestrings, path):
+def _extract_serialize(x_items, x2, ser: dict, bytestrings: set, path: tuple) -> None:
     for k, v in x_items:
         path_k = path + (k,)
-        typ_v = type(v)
+        typ_v: type = type(v)
         if typ_v is dict:
-            v_items = v.items()
+            v_d: dict = v
+            v_items = v_d.items()
             x2[k] = v2 = {}
             _extract_serialize(v_items, v2, ser, bytestrings, path_k)
         elif typ_v is list:
-            v_items = enumerate(v)
-            x2[k] = v2 = len(v) * [None]
+            v_l: list = v
+            v_items = enumerate(v_l)
+            x2[k] = v2 = len(v_l) * [None]
             _extract_serialize(v_items, v2, ser, bytestrings, path_k)
         elif typ_v is Serialize or typ_v is Serialized:
             ser[path_k] = v
         elif typ_v is bytes:
-            if len(v) > 2 ** 16:
-                ser[path_k] = to_serialize(v)
+            v_b: bytes = v
+            if len(v_b) > 2 ** 16:
+                ser[path_k] = to_serialize(v_b)
                 bytestrings.add(path_k)
             else:
-                x2[k] = v
+                x2[k] = v_b
         elif typ_v is bytearray:
-            if len(v) > 2 ** 16:
-                ser[path_k] = to_serialize(v)
+            v_ba: bytearray = v
+            if len(v_ba) > 2 ** 16:
+                ser[path_k] = to_serialize(v_ba)
                 bytestrings.add(path_k)
             else:
-                x2[k] = v
+                x2[k] = v_ba
         else:
             x2[k] = v
 
