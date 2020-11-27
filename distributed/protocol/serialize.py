@@ -473,12 +473,18 @@ def _extract_serialize(x_items, x2, ser, bytestrings, path):
             _extract_serialize(v_items, v2, ser, bytestrings, path_k)
         elif typ_v is Serialize or typ_v is Serialized:
             ser[path_k] = v
-        elif typ_v is bytes and len(v) > 2 ** 16:
-            ser[path_k] = to_serialize(v)
-            bytestrings.add(path_k)
-        elif typ_v is bytearray and len(v) > 2 ** 16:
-            ser[path_k] = to_serialize(v)
-            bytestrings.add(path_k)
+        elif typ_v is bytes:
+            if len(v) > 2 ** 16:
+                ser[path_k] = to_serialize(v)
+                bytestrings.add(path_k)
+            else:
+                x2[k] = v
+        elif typ_v is bytearray:
+            if len(v) > 2 ** 16:
+                ser[path_k] = to_serialize(v)
+                bytestrings.add(path_k)
+            else:
+                x2[k] = v
         else:
             x2[k] = v
 
