@@ -454,11 +454,12 @@ def extract_serialize(x):
 
     ser = {}
     bytestrings = set()
-    _extract_serialize(x_items, x2, ser, bytestrings)
+    path = ()
+    _extract_serialize(x_items, x2, ser, bytestrings, path)
     return x2, ser, bytestrings
 
 
-def _extract_serialize(x_items, x2, ser, bytestrings, path=()):
+def _extract_serialize(x_items, x2, ser, bytestrings, path):
     for k, v in x_items:
         path_k = path + (k,)
         typ_v = type(v)
