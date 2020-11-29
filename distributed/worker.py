@@ -749,17 +749,20 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-            self.__class__.__name__,
-            self.address,
-            self.name,
-            self.status,
-            len(self.data),
-            self.executing_count,
-            self.nthreads,
-            len(self.ready),
-            self.in_flight_tasks,
-            self.waiting_for_data_count,
+        return (
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            % (
+                self.__class__.__name__,
+                self.address,
+                self.name,
+                self.status,
+                len(self.data),
+                self.executing_count,
+                self.nthreads,
+                len(self.ready),
+                self.in_flight_tasks,
+                self.waiting_for_data_count,
+            )
         )
 
     @property
@@ -768,11 +771,7 @@ class Worker(ServerNode):
 
     def log_event(self, topic, msg):
         self.batched_stream.send(
-            {
-                "op": "log-event",
-                "topic": topic,
-                "msg": msg,
-            }
+            {"op": "log-event", "topic": topic, "msg": msg,}
         )
 
     @property
@@ -2046,7 +2045,9 @@ class Worker(ServerNode):
                     )
 
                 total_bytes = sum(
-                    self.tasks[key].nbytes or 0 for key in response["data"]
+                    self.tasks[key].nbytes or 0
+                    for key in response["data"]
+                    if key in self.tasks
                 )
                 duration = (stop - start) or 0.010
                 bandwidth = total_bytes / duration
@@ -2057,7 +2058,9 @@ class Worker(ServerNode):
                         "middle": (start + stop) / 2.0 + self.scheduler_delay,
                         "duration": duration,
                         "keys": {
-                            key: self.tasks[key].nbytes for key in response["data"]
+                            key: self.tasks[key].nbytes
+                            for key in response["data"]
+                            if key in self.tasks
                         },
                         "total": total_bytes,
                         "bandwidth": bandwidth,
