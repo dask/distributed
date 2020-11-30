@@ -1427,6 +1427,7 @@ class Scheduler(ServerNode):
             "id": str(self.id),
             "address": self.address,
             "services": {key: v.port for (key, v) in self.services.items()},
+            "time_started": self.time_started,
             "workers": {
                 worker.address: worker.identity() for worker in self.workers.values()
             },

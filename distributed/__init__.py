@@ -3,6 +3,14 @@ from dask.config import config
 from .actor import Actor, ActorFuture
 from .core import connect, rpc
 from .deploy import LocalCluster, Adaptive, SpecCluster, SSHCluster
+from .deploy.discovery import (
+    get_cluster,
+    list_clusters,
+    scale_cluster,
+    delete_cluster,
+    discover_cluster_names,
+    discover_clusters,
+)
 from .diagnostics.progressbar import progress
 from .diagnostics.plugin import WorkerPlugin, SchedulerPlugin
 from .client import (

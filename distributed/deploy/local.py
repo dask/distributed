@@ -1,20 +1,29 @@
+import asyncio
 import atexit
+import glob
 import logging
+import os
 import math
 import warnings
 import weakref
+from contextlib import suppress
 
 from dask.utils import factors
 from dask.system import CPU_COUNT
 import toolz
 
 from .spec import SpecCluster
+from .cluster import Cluster
+from ..core import rpc, Status, CommClosedError
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
+from ..utils import LoopRunner
 
 logger = logging.getLogger(__name__)
+
+PID_FILE_TEMPLATE = "/tmp/dask-{name}.address"  # TODO Put pid file somewhere else
 
 
 class LocalCluster(SpecCluster):
@@ -94,6 +103,7 @@ class LocalCluster(SpecCluster):
 
     def __init__(
         self,
+        name=None,
         n_workers=None,
         threads_per_worker=None,
         processes=True,
@@ -116,7 +126,7 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         if ip is not None:
             # In the future we should warn users about this move
@@ -227,6 +237,7 @@ class LocalCluster(SpecCluster):
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
+            name=name,
             scheduler=scheduler,
             workers=workers,
             worker=worker,
@@ -235,6 +246,19 @@ class LocalCluster(SpecCluster):
             silence_logs=silence_logs,
             security=security,
         )
+
+    @property
+    def pid_file(self):
+        return PID_FILE_TEMPLATE.format(name=self.name)
+
+    async def _start(self):
+        await super()._start()
+        with open(self.pid_file, "w") as fh:
+            fh.write(self.scheduler_address)
+
+    async def _close(self):
+        await super()._close()
+        os.remove(self.pid_file)
 
     def start_worker(self, *args, **kwargs):
         raise NotImplementedError(
@@ -271,6 +295,25 @@ def nprocesses_nthreads(n=CPU_COUNT):
     return (processes, threads)
 
 
+class ProxyLocalCluster(Cluster):
+    @classmethod
+    def from_name(cls, name, loop=None, asynchronous=False):
+        cluster = cls(asynchronous=asynchronous)
+        cluster.name = name
+
+        with open(PID_FILE_TEMPLATE.format(name=name), "r") as fh:
+            cluster.scheduler_comm = rpc(fh.read())
+
+        cluster._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
+        cluster.loop = cluster._loop_runner.loop
+        if not asynchronous:
+            cluster._loop_runner.start()
+
+        cluster.status = Status.starting
+        cluster.sync(cluster._start)
+        return cluster
+
+
 clusters_to_close = weakref.WeakSet()
 
 
@@ -278,3 +321,12 @@ clusters_to_close = weakref.WeakSet()
 def close_clusters():
     for cluster in list(clusters_to_close):
         cluster.close(timeout=10)
+
+
+async def discover():
+    pid_files = glob.glob(PID_FILE_TEMPLATE.format(name="*"))
+    for p in pid_files:
+        yield (
+            p.split("/")[-1].replace("dask-", "").replace(".address", ""),
+            ProxyLocalCluster,
+        )
