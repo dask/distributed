@@ -2046,7 +2046,7 @@ class Worker(ServerNode):
                     )
 
                 total_bytes = sum(
-                    self.tasks[key].nbytes or 0
+                    self.tasks[key].get_nbytes()
                     for key in response["data"]
                     if key in self.tasks
                 )
