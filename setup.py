@@ -59,7 +59,7 @@ setup(
         dask-worker=distributed.cli.dask_worker:go
         dask-cluster=distributed.cli.dask_cluster:go
         [dask_cluster_discovery]
-        localcluster=distributed.deploy.local:discover
+        proxycluster=distributed.deploy.proxy:discover
       """,
     zip_safe=False,
 )

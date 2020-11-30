@@ -2,6 +2,7 @@ from contextlib import suppress
 
 from .cluster import Cluster
 from .local import LocalCluster
+from .proxy import ProxyCluster
 from .ssh import SSHCluster
 from .spec import SpecCluster, ProcessInterface
 from .adaptive import Adaptive

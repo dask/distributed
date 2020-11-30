@@ -2,7 +2,7 @@ import pytest
 
 from typing import AsyncIterator
 
-from distributed import LocalCluster
+from distributed import LocalCluster, ProxyCluster
 from distributed.deploy.discovery import (
     discover_cluster_names,
     discover_clusters,
@@ -11,7 +11,7 @@ from distributed.deploy.discovery import (
 
 
 def test_discovery_methods():
-    assert "localcluster" in list_discovery_methods()
+    assert "proxycluster" in list_discovery_methods()
 
 
 @pytest.mark.asyncio
@@ -28,5 +28,5 @@ async def test_discover_cluster_names():
 async def test_discover_clusters():
     with LocalCluster() as cluster:
         async for discovered_cluster in discover_clusters():
-            assert cluster == discovered_cluster
-            assert cluster.scheduler_info == discovered_cluster.scheduler_info
+            if isinstance(discovered_cluster, ProxyCluster):
+                assert cluster.scheduler_info == discovered_cluster.scheduler_info

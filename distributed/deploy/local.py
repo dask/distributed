@@ -23,8 +23,6 @@ from ..utils import LoopRunner
 
 logger = logging.getLogger(__name__)
 
-PID_FILE_TEMPLATE = "/tmp/dask-{name}.address"  # TODO Put pid file somewhere else
-
 
 class LocalCluster(SpecCluster):
     """Create local Scheduler and Workers
@@ -247,19 +245,6 @@ class LocalCluster(SpecCluster):
             security=security,
         )
 
-    @property
-    def pid_file(self):
-        return PID_FILE_TEMPLATE.format(name=self.name)
-
-    async def _start(self):
-        await super()._start()
-        with open(self.pid_file, "w") as fh:
-            fh.write(self.scheduler_address)
-
-    async def _close(self):
-        await super()._close()
-        os.remove(self.pid_file)
-
     def start_worker(self, *args, **kwargs):
         raise NotImplementedError(
             "The `cluster.start_worker` function has been removed. "
@@ -295,25 +280,6 @@ def nprocesses_nthreads(n=CPU_COUNT):
     return (processes, threads)
 
 
-class ProxyLocalCluster(Cluster):
-    @classmethod
-    def from_name(cls, name, loop=None, asynchronous=False):
-        cluster = cls(asynchronous=asynchronous)
-        cluster.name = name
-
-        with open(PID_FILE_TEMPLATE.format(name=name), "r") as fh:
-            cluster.scheduler_comm = rpc(fh.read())
-
-        cluster._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
-        cluster.loop = cluster._loop_runner.loop
-        if not asynchronous:
-            cluster._loop_runner.start()
-
-        cluster.status = Status.starting
-        cluster.sync(cluster._start)
-        return cluster
-
-
 clusters_to_close = weakref.WeakSet()
 
 
@@ -321,12 +287,3 @@ clusters_to_close = weakref.WeakSet()
 def close_clusters():
     for cluster in list(clusters_to_close):
         cluster.close(timeout=10)
-
-
-async def discover():
-    pid_files = glob.glob(PID_FILE_TEMPLATE.format(name="*"))
-    for p in pid_files:
-        yield (
-            p.split("/")[-1].replace("dask-", "").replace(".address", ""),
-            ProxyLocalCluster,
-        )

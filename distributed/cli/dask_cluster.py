@@ -25,7 +25,16 @@ def cli():
 @cli.command()
 def list():
     async def _list():
-        headers = ["Name", "Type", "Workers", "Threads", "Memory", "Created", "Status"]
+        headers = [
+            "Name",
+            "Address",
+            "Type",
+            "Workers",
+            "Threads",
+            "Memory",
+            "Created",
+            "Status",
+        ]
         output = []
         async for cluster in discover_clusters():
 
@@ -51,6 +60,7 @@ def list():
             output.append(
                 [
                     cluster.name,
+                    cluster.scheduler_address,
                     type(cluster).__name__,
                     len(cluster.scheduler_info["workers"]),
                     threads,

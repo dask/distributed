@@ -2,7 +2,7 @@ from . import config
 from dask.config import config
 from .actor import Actor, ActorFuture
 from .core import connect, rpc
-from .deploy import LocalCluster, Adaptive, SpecCluster, SSHCluster
+from .deploy import LocalCluster, Adaptive, SpecCluster, SSHCluster, ProxyCluster
 from .deploy.discovery import (
     get_cluster,
     list_clusters,
