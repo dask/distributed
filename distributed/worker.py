@@ -2595,10 +2595,12 @@ class Worker(ServerNode):
                         "args:      %s\n"
                         "kwargs:    %s\n"
                         "Exception: %s\n",
+                        "Traceback: %s\n",
                         str(funcname(function))[:1000],
                         convert_args_to_str(args2, max_len=1000),
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
+                        "".join(traceback.format_tb(result["traceback"])),
                     )
                     self.transition(ts, "error")
 
