@@ -25,6 +25,7 @@ from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
 import dask
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.utils import stringify
 import dask.bag as db
 from distributed import (
     Worker,
@@ -52,13 +53,14 @@ from distributed.client import (
     default_client,
     futures_of,
     temp_default_client,
+    get_task_metadata,
 )
 from distributed.compatibility import WINDOWS
 
 from distributed.metrics import time
-from distributed.scheduler import Scheduler, KilledWorker
+from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
 from distributed.sizeof import sizeof
-from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
+from distributed.utils import mp_context, sync, tmp_text, tmpfile, is_valid_xml
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -82,6 +84,7 @@ from distributed.utils_test import (
     async_wait_for,
     pristine_loop,
     save_sys_modules,
+    TaskStateMetadataPlugin,
 )
 from distributed.utils_test import (  # noqa: F401
     client as c,
@@ -1680,6 +1683,21 @@ def test_upload_file_exception_sync(c):
     with tmp_text("myfile.py", "syntax-error!") as fn:
         with pytest.raises(SyntaxError):
             c.upload_file(fn)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_upload_file_new_worker(c, s):
+    def g():
+        import myfile
+
+        return myfile.x
+
+    with tmp_text("myfile.py", "x = 123") as fn:
+        await c.upload_file(fn)
+        async with Worker(s.address):
+            x = await c.submit(g)
+
+        assert x == 123
 
 
 @pytest.mark.skip
@@ -3404,8 +3422,12 @@ async def test_get_foo_lost_keys(c, s, u, v, w):
 )
 async def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
-    with pytest.raises(KilledWorker) as info:
-        await f
+    with captured_logger(logging.getLogger("distributed.scheduler")) as logger:
+        with pytest.raises(KilledWorker) as info:
+            await f
+
+    text = logger.getvalue()
+    assert f.key in text
 
     assert info.value.last_worker.nanny in {a.address, b.address}
     await asyncio.gather(a.close(), b.close())
@@ -3553,7 +3575,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         await wait(b4)
 
-        assert set(map(tokey, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(map(stringify, b3.__dask_keys__())).issubset(s.tasks)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3563,7 +3585,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         await wait(b4)
 
-        assert not any(tokey(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(stringify(k) in s.tasks for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3944,7 +3966,7 @@ async def test_serialize_future(s, a, b):
             with ctxman():
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
-                assert tokey(future2.key) in ci.futures
+                assert stringify(future2.key) in ci.futures
                 result2 = await future2
                 assert result == result2
 
@@ -5123,7 +5145,12 @@ async def test_call_stack_future(c, s, a, b):
     assert all(list(first(result.values())) == [future.key] for result in results)
     assert results[0] == results[1]
     result = results[0]
-    w = a if future.key in a.executing else b
+    ts = a.tasks.get(future.key)
+    if ts is not None and ts.state == "executing":
+        w = a
+    else:
+        w = b
+
     assert list(result) == [w.address]
     assert list(result[w.address]) == [future.key]
     assert "slowinc" in str(result)
@@ -5133,10 +5160,10 @@ async def test_call_stack_future(c, s, a, b):
 @gen_cluster([("127.0.0.1", 4)] * 2, client=True)
 async def test_call_stack_all(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.8)
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.01)
     result = await c.call_stack()
-    w = a if a.executing else b
+    w = a if a.executing_count else b
     assert list(result) == [w.address]
     assert list(result[w.address]) == [future.key]
     assert "slowinc" in str(result)
@@ -5146,7 +5173,7 @@ async def test_call_stack_all(c, s, a, b):
 async def test_call_stack_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack(x)
     assert result
@@ -5156,7 +5183,7 @@ async def test_call_stack_collections(c, s, a, b):
 async def test_call_stack_collections_all(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
-    while not a.executing and not b.executing:
+    while not a.executing_count and not b.executing_count:
         await asyncio.sleep(0.001)
     result = await c.call_stack()
     assert result
@@ -5562,6 +5589,7 @@ def test_client_repr_closed_sync(loop):
         c._repr_html_()
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/dask/pull/6807")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_nested_prioritization(c, s, w):
     x = delayed(inc)(1, dask_key_name=("a", 2))
@@ -5574,7 +5602,7 @@ async def test_nested_prioritization(c, s, w):
     await wait([fx, fy])
 
     assert (o[x.key] < o[y.key]) == (
-        s.tasks[tokey(fx.key)].priority < s.tasks[tokey(fy.key)].priority
+        s.tasks[stringify(fx.key)].priority < s.tasks[stringify(fy.key)].priority
     )
 
 
@@ -6127,6 +6155,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
+    assert dask.__version__ in data
 
 
 @pytest.mark.asyncio
@@ -6190,3 +6219,81 @@ async def test_futures_in_subgraphs(c, s, a, b):
     ddf["local_time"] = ddf.enter_time.dt.tz_convert("US/Central")
     ddf["day"] = ddf.enter_time.dt.day_name()
     ddf = await c.submit(dd.categorical.categorize, ddf, columns=["day"], index=False)
+
+
+@gen_cluster(client=True)
+async def test_get_task_metadata(c, s, a, b):
+
+    # Populate task metadata
+    await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+    async with get_task_metadata() as tasks:
+        f = c.submit(slowinc, 1)
+        await f
+
+    metadata = tasks.metadata
+    assert f.key in metadata
+    assert metadata[f.key] == s.tasks.get(f.key).metadata
+
+    state = tasks.state
+    assert f.key in state
+    assert state[f.key] == "memory"
+
+    assert not any(isinstance(p, CollectTaskMetaDataPlugin) for p in s.plugins)
+
+
+@gen_cluster(client=True)
+async def test_get_task_metadata_multiple(c, s, a, b):
+
+    # Populate task metadata
+    await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+    # Ensure that get_task_metadata only collects metadata for
+    # tasks which are submitted and completed within its context
+    async with get_task_metadata() as tasks1:
+        f1 = c.submit(slowinc, 1)
+        await f1
+        async with get_task_metadata() as tasks2:
+            f2 = c.submit(slowinc, 2)
+            await f2
+
+    metadata1 = tasks1.metadata
+    metadata2 = tasks2.metadata
+
+    assert len(metadata1) == 2
+    assert sorted(metadata1.keys()) == sorted([f1.key, f2.key])
+    assert metadata1[f1.key] == s.tasks.get(f1.key).metadata
+    assert metadata1[f2.key] == s.tasks.get(f2.key).metadata
+
+    assert len(metadata2) == 1
+    assert list(metadata2.keys()) == [f2.key]
+    assert metadata2[f2.key] == s.tasks.get(f2.key).metadata
+
+
+@gen_cluster(client=True)
+async def test_log_event(c, s, a, b):
+
+    # Log an event from inside a task
+    def foo():
+        get_worker().log_event("topic1", {"foo": "bar"})
+
+    assert not await c.get_events("topic1")
+    await c.submit(foo)
+    events = await c.get_events("topic1")
+    assert len(events) == 1
+    assert events[0][1] == {"foo": "bar"}
+
+    # Log an event while on the scheduler
+    def log_scheduler(dask_scheduler):
+        dask_scheduler.log_event("topic2", {"woo": "hoo"})
+
+    await c.run_on_scheduler(log_scheduler)
+    events = await c.get_events("topic2")
+    assert len(events) == 1
+    assert events[0][1] == {"woo": "hoo"}
+
+    # Log an event from the client process
+    await c.log_event("topic2", ("alice", "bob"))
+    events = await c.get_events("topic2")
+    assert len(events) == 2
+    assert events[1][1] == ("alice", "bob")

@@ -14,7 +14,8 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
 import dask
 from dask.core import flatten
-from distributed.utils import tokey, format_dashboard_link
+from dask.utils import stringify
+from distributed.utils import format_dashboard_link
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
@@ -101,7 +102,7 @@ async def test_stealing_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:  # will steal soon
+    while not b.tasks:  # will steal soon
         await asyncio.sleep(0.01)
 
     se.update()
@@ -117,7 +118,7 @@ async def test_events(c, s, a, b):
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.task_state:
+    while not b.tasks:
         await asyncio.sleep(0.01)
 
     e.update()
@@ -556,7 +557,7 @@ async def test_TaskGraph_complex(c, s, a, b):
     gp.update()
     assert set(gp.layout.index.values()) == set(range(len(gp.layout.index)))
     visible = gp.node_source.data["visible"]
-    keys = list(map(tokey, flatten(y.__dask_keys__())))
+    keys = list(map(stringify, flatten(y.__dask_keys__())))
     assert all(visible[gp.layout.index[key]] == "True" for key in keys)
 
 

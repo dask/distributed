@@ -55,6 +55,10 @@ distributed:
         - distributed.http.proxy
         - distributed.http.statics
 
+    allowed-imports:
+      - dask
+      - distributed
+
   worker:
     blocked-handlers: []
     multiprocessing-method: spawn

@@ -61,6 +61,7 @@ from .utils import (
 )
 from .worker import Worker
 from .nanny import Nanny
+from .diagnostics.plugin import WorkerPlugin
 
 try:
     import dask.array  # register config
@@ -1420,6 +1421,9 @@ def check_thread_leak():
             and "Threaded" not in v.name
             and "watch message" not in v.name
             and "TCP-Executor" not in v.name
+            # TODO: Make sure profile thread is cleaned up
+            # and remove the line below
+            and "Profile" not in v.name
         ]
         if not bad:
             break
@@ -1537,3 +1541,18 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
 def cleanup():
     with clean():
         yield
+
+
+class TaskStateMetadataPlugin(WorkerPlugin):
+    """WorkPlugin to populate TaskState.metadata"""
+
+    def setup(self, worker):
+        self.worker = worker
+
+    def transition(self, key, start, finish, **kwargs):
+        ts = self.worker.tasks[key]
+
+        if start == "ready" and finish == "executing":
+            ts.metadata["start_time"] = time()
+        elif start == "executing" and finish == "memory":
+            ts.metadata["stop_time"] = time()

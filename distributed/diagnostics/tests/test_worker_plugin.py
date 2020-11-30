@@ -53,6 +53,19 @@ async def test_create_with_client(c, s):
     assert worker._my_plugin_status == "teardown"
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_create_with_client_and_plugin_from_class(c, s):
+    await c.register_worker_plugin(MyPlugin, data=456)
+
+    worker = await Worker(s.address, loop=s.loop)
+    assert worker._my_plugin_status == "setup"
+    assert worker._my_plugin_data == 456
+
+    # Give the plugin a new name so that it registers
+    await c.register_worker_plugin(MyPlugin, name="new", data=789)
+    assert worker._my_plugin_data == 789
+
+
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
 async def test_create_on_construction(c, s, a, b):
     assert len(a.plugins) == len(b.plugins) == 1
@@ -73,7 +86,7 @@ async def test_normal_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task")
-    await async_wait_for(lambda: not w.task_state, timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -110,7 +123,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.submit(lambda x: x, 1, key="task", resources={"X": 1})
-    await async_wait_for(lambda: not w.task_state, timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
@@ -125,7 +138,6 @@ async def test_release_dep_called(c, s, w):
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "memory"},
         {"key": "dep", "state": "memory"},
-        {"dep": "dep", "state": "memory"},
         {"key": "task", "state": "memory"},
     ]
 
@@ -133,7 +145,7 @@ async def test_release_dep_called(c, s, w):
 
     await c.register_worker_plugin(plugin)
     await c.get(dsk, "task", sync=False)
-    await async_wait_for(lambda: not (w.task_state or w.dep_state), timeout=10)
+    await async_wait_for(lambda: not w.tasks, timeout=10)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

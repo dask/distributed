@@ -2,12 +2,12 @@ import asyncio
 from time import time
 
 from dask import delayed
+from dask.utils import stringify
 import pytest
 
 from distributed import Worker
 from distributed.client import wait
 from distributed.compatibility import WINDOWS
-from distributed.utils import tokey
 from distributed.utils_test import inc, gen_cluster, slowinc, slowadd
 from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
 
@@ -211,9 +211,9 @@ async def test_resources_str(c, s, a, b):
     yy = y.persist(resources={"MyRes": 1})
     await wait(yy)
 
-    ts_first = s.tasks[tokey(y.__dask_keys__()[0])]
+    ts_first = s.tasks[stringify(y.__dask_keys__()[0])]
     assert ts_first.resource_restrictions == {"MyRes": 1}
-    ts_last = s.tasks[tokey(y.__dask_keys__()[-1])]
+    ts_last = s.tasks[stringify(y.__dask_keys__()[-1])]
     assert ts_last.resource_restrictions == {"MyRes": 1}
 
 
@@ -229,8 +229,8 @@ async def test_submit_many_non_overlapping(c, s, a, b):
 
     while len(a.data) + len(b.data) < 100:
         await asyncio.sleep(0.01)
-        assert len(a.executing) <= 2
-        assert len(b.executing) <= 1
+        assert a.executing_count <= 2
+        assert b.executing_count <= 1
 
     await wait(futures)
     assert a.total_resources == a.available_resources
@@ -243,7 +243,7 @@ async def test_minimum_resource(c, s, a):
 
     while len(a.data) < 30:
         await asyncio.sleep(0.01)
-        assert len(a.executing) <= 1
+        assert a.executing_count <= 1
 
     await wait(futures)
     assert a.total_resources == a.available_resources
@@ -316,7 +316,7 @@ async def test_persist_collections(c, s, a, b):
 
     await wait([ww, yy])
 
-    assert all(tokey(key) in a.data for key in y.__dask_keys__())
+    assert all(stringify(key) in a.data for key in y.__dask_keys__())
 
 
 @pytest.mark.skip(reason="Should protect resource keys from optimization")
@@ -336,7 +336,7 @@ async def test_dont_optimize_out(c, s, a, b):
 
     await c.compute(w, resources={tuple(y.__dask_keys__()): {"A": 1}})
 
-    for key in map(tokey, y.__dask_keys__()):
+    for key in map(stringify, y.__dask_keys__()):
         assert "executing" in str(a.story(key))
 
 

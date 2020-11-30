@@ -20,7 +20,6 @@ import psutil
 import sortedcontainers
 
 from tlz import (
-    frequencies,
     merge,
     pluck,
     merge_sorted,
@@ -84,6 +83,7 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.highlevelgraph import highlevelgraph_unpack
 
 if sys.version_info < (3, 8):
     try:
@@ -137,13 +137,20 @@ class ClientState:
 
     """
 
-    __slots__ = ("client_key", "wants_what", "last_seen", "versions")
+    __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
     def __init__(self, client, versions=None):
         self.client_key = client
+        self._hash = hash(client)
         self.wants_what = set()
         self.last_seen = time()
         self.versions = versions or {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.client_key == other.client_key
 
     def __repr__(self):
         return "<Client %r>" % (self.client_key,)
@@ -239,6 +246,7 @@ class WorkerState:
         "bandwidth",
         "extra",
         "has_what",
+        "_hash",
         "last_seen",
         "local_directory",
         "memory_limit",
@@ -281,6 +289,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
 
+        self._hash = hash(address)
         self._status = Status.running
         self.nbytes = 0
         self.occupancy = 0
@@ -298,7 +307,7 @@ class WorkerState:
         self.extra = extra or {}
 
     def __hash__(self):
-        return hash(self.address)
+        return self._hash
 
     def __eq__(self, other):
         return type(self) == type(other) and self.address == other.address
@@ -593,6 +602,10 @@ class TaskState:
            into the "processing" state and be sent for execution to another
            connected worker.
 
+        .. attribute: metadata: dict
+
+           Metadata related to task.
+
         .. attribute: actor: bool
 
            Whether or not this task is an Actor.
@@ -607,6 +620,8 @@ class TaskState:
         "actor",
         # Key name
         "key",
+        # Hash of the key name
+        "_hash",
         # Key prefix (see key_split())
         "prefix",
         # How to run the task (None if pure data)
@@ -646,10 +661,12 @@ class TaskState:
         "type",
         "group_key",
         "group",
+        "metadata",
     )
 
     def __init__(self, key, run_spec):
         self.key = key
+        self._hash = hash(key)
         self.run_spec = run_spec
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -672,6 +689,13 @@ class TaskState:
         self.type = None
         self.group_key = key_split_group(key)
         self.group = None
+        self.metadata = {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.key == other.key
 
     @property
     def state(self) -> str:
@@ -1291,6 +1315,8 @@ class Scheduler(ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
+        self.events = defaultdict(lambda: deque(maxlen=100000))
+        self.event_counts = defaultdict(int)
         self.worker_plugins = []
 
         worker_handlers = {
@@ -1303,10 +1329,12 @@ class Scheduler(ServerNode):
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
+            "log-event": self.log_worker_event,
         }
 
         client_handlers = {
             "update-graph": self.update_graph,
+            "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -1338,6 +1366,8 @@ class Scheduler(ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
+            "log_event": self.log_worker_event,
+            "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
             "add_keys": self.add_keys,
@@ -1357,6 +1387,8 @@ class Scheduler(ServerNode):
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
+            "start_task_metadata": self.start_task_metadata,
+            "stop_task_metadata": self.stop_task_metadata,
         }
 
         self._transitions = {
@@ -1813,6 +1845,58 @@ class Scheduler(ServerNode):
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
 
+    def update_graph_hlg(
+        self,
+        client=None,
+        hlg=None,
+        keys=None,
+        dependencies=None,
+        restrictions=None,
+        priority=None,
+        loose_restrictions=None,
+        resources=None,
+        submitting_task=None,
+        retries=None,
+        user_priority=0,
+        actors=None,
+        fifo_timeout=0,
+    ):
+
+        dsk, dependencies = highlevelgraph_unpack(hlg)
+
+        # Remove any self-dependencies (happens on test_publish_bag() and others)
+        for k, v in dependencies.items():
+            deps = set(v)
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        if priority is None:
+            # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
+            stripped_deps = {
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
+            }
+            priority = dask.order.order(dsk, dependencies=stripped_deps)
+
+        return self.update_graph(
+            client,
+            dsk,
+            keys,
+            dependencies,
+            restrictions,
+            priority,
+            loose_restrictions,
+            resources,
+            submitting_task,
+            retries,
+            user_priority,
+            actors,
+            fifo_timeout,
+        )
+
     def update_graph(
         self,
         client=None,
@@ -1863,13 +1947,6 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
@@ -2085,6 +2162,7 @@ class Scheduler(ServerNode):
         if ts is None:
             return {}
         ws = self.workers[worker]
+        ts.metadata.update(kwargs["metadata"])
 
         if ts.state == "processing":
             recommendations = self.transition(key, "memory", worker=worker, **kwargs)
@@ -2244,7 +2322,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
-            ws.status = "closed"
+            ws.status = Status.closed
             self.total_occupancy -= ws.occupancy
 
             recommendations = {}
@@ -2262,6 +2340,12 @@ class Scheduler(ServerNode):
                         )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
+                        logger.info(
+                            "Task %s marked as failed because %d workers died"
+                            " while trying to run it",
+                            ts.key,
+                            self.allowed_failures,
+                        )
 
             for ts in ws.has_what:
                 ts.who_has.remove(ws)
@@ -2517,26 +2601,25 @@ class Scheduler(ServerNode):
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
-        comms = set()
-        if client is not None:
-            try:
-                comms.add(self.client_comms[client])
-            except KeyError:
-                pass
-
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
+
         if ts is None:
             # Notify all clients
-            comms |= set(self.client_comms.values())
-        else:
+            client_keys = list(self.client_comms)
+        elif client is None:
             # Notify clients interested in key
-            comms |= {
-                self.client_comms[c.client_key]
-                for c in ts.who_wants
-                if c.client_key in self.client_comms
-            }
-        for c in comms:
+            client_keys = [c.client_key for c in ts.who_wants]
+        else:
+            # Notify clients interested in key (including `client`)
+            client_keys = [c.client_key for c in ts.who_wants if c.client_key != client]
+            client_keys.append(client)
+
+        for k in client_keys:
+            try:
+                c = self.client_comms[k]
+            except KeyError:
+                continue
             try:
                 c.send(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
@@ -3675,6 +3758,9 @@ class Scheduler(ServerNode):
                 if teardown:
                     teardown(self, state)
 
+    def log_worker_event(self, worker=None, topic=None, msg=None):
+        self.log_event(topic, msg)
+
     def subscribe_worker_status(self, comm=None):
         WorkerStatusPlugin(self, comm)
         ident = self.identity()
@@ -3842,6 +3928,27 @@ class Scheduler(ServerNode):
         self.add_plugin(TaskStreamPlugin, idempotent=True)
         ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
         return ts.collect(start=start, stop=stop, count=count)
+
+    def start_task_metadata(self, comm=None, name=None):
+        plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
+
+        self.add_plugin(plugin)
+
+    def stop_task_metadata(self, comm=None, name=None):
+        plugins = [
+            p
+            for p in self.plugins
+            if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
+        ]
+        if len(plugins) != 1:
+            raise ValueError(
+                "Expected to find exactly one CollectTaskMetaDataPlugin "
+                f"with name {name} but found {len(plugins)}."
+            )
+
+        plugin = plugins[0]
+        self.remove_plugin(plugin)
+        return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
@@ -5149,6 +5256,7 @@ class Scheduler(ServerNode):
         bandwidth_types.update()
 
         from bokeh.models import Panel, Tabs, Div
+        import distributed
 
         # HTML
         html = """
@@ -5169,6 +5277,8 @@ class Scheduler(ServerNode):
           <li> Workers: {nworkers} </li>
           <li> Threads: {threads} </li>
           <li> Memory: {memory} </li>
+          <li> Dask Version: {dask_version} </li>
+          <li> Dask.Distributed Version: {distributed_version} </li>
         </ul>
 
         <h2> Calling Code </h2>
@@ -5184,6 +5294,8 @@ class Scheduler(ServerNode):
             threads=sum(w.nthreads for w in self.workers.values()),
             memory=format_bytes(sum(w.memory_limit for w in self.workers.values())),
             code=code,
+            dask_version=dask.__version__,
+            distributed_version=distributed.__version__,
         )
         html = Div(text=html)
 
@@ -5232,6 +5344,22 @@ class Scheduler(ServerNode):
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
         return results
+
+    def log_event(self, name, msg):
+        event = (time(), msg)
+        if isinstance(name, list):
+            for n in name:
+                self.events[n].append(event)
+                self.event_counts[n] += 1
+        else:
+            self.events[name].append(event)
+            self.event_counts[name] += 1
+
+    def get_events(self, comm=None, topic=None):
+        if topic is not None:
+            return tuple(self.events[topic])
+        else:
+            return valmap(tuple, self.events)
 
     ###########
     # Cleanup #
@@ -5410,14 +5538,14 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
     if ts.actor:
-        candidates = all_workers
+        candidates = set(all_workers)
     else:
-        candidates = frequencies([ws for dts in deps for ws in dts.who_has])
+        candidates = {ws for dts in deps for ws in dts.who_has}
     if valid_workers is True:
         if not candidates:
-            candidates = all_workers
+            candidates = set(all_workers)
     else:
-        candidates = valid_workers & set(candidates)
+        candidates &= valid_workers
         if not candidates:
             candidates = valid_workers
             if not candidates:
@@ -5624,3 +5752,23 @@ class WorkerStatusPlugin(SchedulerPlugin):
 
     def teardown(self):
         self.bcomm.close()
+
+
+class CollectTaskMetaDataPlugin(SchedulerPlugin):
+    def __init__(self, scheduler, name):
+        self.scheduler = scheduler
+        self.name = name
+        self.keys = set()
+        self.metadata = {}
+        self.state = {}
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+        self.keys.update(keys)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        if finish == "memory" or finish == "erred":
+            ts = self.scheduler.tasks.get(key)
+            if ts is not None and ts.key in self.keys:
+                self.metadata[key] = ts.metadata
+                self.state[key] = finish
+                self.keys.discard(key)
