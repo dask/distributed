@@ -17,6 +17,7 @@ import sys
 import uuid
 import warnings
 import weakref
+import traceback
 
 import dask
 from dask.core import istask
