@@ -2561,6 +2561,9 @@ class Client:
             if isinstance(dsk, HighLevelGraph):
                 for layer in dsk.layers.values():
 
+                    if layer.annotations is None:
+                        continue
+
                     if "priority" in layer.annotations:
                         if isinstance(layer.annotations["priority"], Number):
                             user_priority.update(
