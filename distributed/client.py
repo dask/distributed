@@ -2552,7 +2552,62 @@ class Client:
         fifo_timeout=0,
         actors=None,
     ):
+        restrictions = restrictions or {}
+        user_priority = user_priority or {}
+        retries = retries or {}
+
         with self._refcount_lock:
+            annotations_retries = {}
+            if isinstance(dsk, HighLevelGraph):
+                for layer in dsk.layers.values():
+
+                    if "priority" in layer.annotations:
+                        if isinstance(layer.annotations["priority"], Number):
+                            user_priority.update(
+                                {k: layer.annotations["priority"] for k in layer}
+                            )
+                        elif callable(layer.annotations["priority"]):
+                            user_priority.update(
+                                {k: layer.annotations["priority"](k[1:]) for k in layer}
+                            )
+                        elif isinstance(layer.annotations["priority"], dict):
+                            user_priority.update(layer.annotations["priority"])
+                        else:
+                            raise TypeError(
+                                "Expected priority to be a number, callable, or dict, got %s"
+                                % str(layer.annotations["priority"])
+                            )
+
+                    if "workers" in layer.annotations:
+                        if isinstance(layer.annotations["workers"], str):
+                            restrictions.update(
+                                {k: [layer.annotations["workers"]] for k in layer}
+                            )
+                        elif isinstance(
+                            layer.annotations["workers"], (list, tuple, set)
+                        ):
+                            restrictions.update(
+                                {k: list(layer.annotations["workers"]) for k in layer}
+                            )
+                        else:
+                            raise TypeError(
+                                "Expected workers to be a string or list got %s"
+                                % str(layer.annotations["workers"])
+                            )
+
+                    if "retries" in layer.annotations:
+                        if isinstance(layer.annotations["retries"], Number):
+                            annotations_retries.update(
+                                {k: layer.annotations["retries"] for k in layer}
+                            )
+                        else:
+                            raise TypeError(
+                                "Expected retries to be a numbergot %s"
+                                % str(layer.annotations["retries"])
+                            )
+                user_priority = keymap(stringify, user_priority)
+                annotations_retries = keymap(stringify, annotations_retries)
+
             if resources:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)
@@ -2563,6 +2618,8 @@ class Client:
                 retries = self._expand_retries(
                     retries, all_keys=itertools.chain(dsk, keys)
                 )
+
+            retries.update(annotations_retries)
 
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
