@@ -2590,6 +2590,7 @@ class Worker(ServerNode):
                 else:
                     ts.exception = result["exception"]
                     ts.traceback = result["traceback"]
+                    log_tb = "".join(traceback.format_tb(result["traceback"].data)) if result["traceback"] is not None else "None"
                     logger.warning(
                         " Compute Failed\n"
                         "Function:  %s\n"
@@ -2601,7 +2602,7 @@ class Worker(ServerNode):
                         convert_args_to_str(args2, max_len=1000),
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
-                        "".join(traceback.format_tb(result["traceback"].data)) if result["traceback"] is not None else "None",
+                        log_tb,
                     )
                     self.transition(ts, "error")
 
