@@ -85,6 +85,14 @@ from .stealing import WorkStealing
 from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
+try:
+    from cython import double, Py_ssize_t
+except ImportError:
+    from ctypes import (
+        c_double as double,
+        c_ssize_t as Py_ssize_t,
+    )
+
 if sys.version_info < (3, 8):
     try:
         import pickle5 as pickle
@@ -4928,7 +4936,7 @@ class Scheduler(ServerNode):
     # Assigning Tasks to Workers #
     ##############################
 
-    def check_idle_saturated(self, ws, occ=None):
+    def check_idle_saturated(self, ws, occ: double = -1.0):
         """Update the status of the idle and saturated state
 
         The scheduler keeps track of workers that are ..
@@ -4942,26 +4950,30 @@ class Scheduler(ServerNode):
 
         This is useful for load balancing and adaptivity.
         """
-        if self.total_nthreads == 0 or ws.status == Status.closed:
+        total_nthreads: Py_ssize_t = self.total_nthreads
+        if total_nthreads == 0 or ws.status == Status.closed:
             return
-        if occ is None:
+        if occ < 0:
             occ = ws.occupancy
-        nc = ws.nthreads
-        p = len(ws.processing)
 
-        avg = self.total_occupancy / self.total_nthreads
+        nc: Py_ssize_t = ws.nthreads
+        p: Py_ssize_t = len(ws.processing)
+        total_occupancy: double = self.total_occupancy
+        avg: double = total_occupancy / total_nthreads
 
+        idle = self.idle
+        saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
-            self.idle.add(ws)
-            self.saturated.discard(ws)
+            idle.add(ws)
+            saturated.discard(ws)
         else:
-            self.idle.discard(ws)
+            idle.discard(ws)
 
-            pending = occ * (p - nc) / p / nc
+            pending: double = occ * (p - nc) / p / nc
             if p > nc and pending > 0.4 and pending > 1.9 * avg:
-                self.saturated.add(ws)
+                saturated.add(ws)
             else:
-                self.saturated.discard(ws)
+                saturated.discard(ws)
 
     def valid_workers(self, ts):
         """Return set of currently valid workers for key
