@@ -1,4 +1,5 @@
 import pytest
+import prybar
 
 from typing import AsyncIterator
 

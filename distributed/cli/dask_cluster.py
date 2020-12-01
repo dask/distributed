@@ -23,7 +23,8 @@ def cli():
 
 
 @cli.command()
-def list():
+@click.argument("discovery", type=str, required=False)
+def list(discovery=None):
     async def _list():
         headers = [
             "Name",
@@ -36,7 +37,7 @@ def list():
             "Status",
         ]
         output = []
-        async for cluster in discover_clusters():
+        async for cluster in discover_clusters(discovery=discovery):
 
             threads = sum(
                 w["nthreads"] for w in cluster.scheduler_info["workers"].values()

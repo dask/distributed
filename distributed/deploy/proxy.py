@@ -1,4 +1,7 @@
 import asyncio
+import contextlib
+
+import psutil
 
 from .cluster import Cluster
 from ..core import rpc, Status, CommClosedError
@@ -36,20 +39,32 @@ class ProxyCluster(Cluster):
 
 
 async def discover():
-    open_ports = [8786]  # TODO Scan high ports for Dask schedulers
-    dask_ports = []
+    open_ports = []
 
-    for port in open_ports:
-        try:
+    try:
+        connections = psutil.net_connections()
+        for connection in connections:
+            if (
+                connection.status == "LISTEN"
+                and connection.family.name == "AF_INET"
+                and connection.laddr.port not in open_ports
+            ):
+                open_ports.append(connection.laddr.port)
+    except psutil.AccessDenied:
+        # On macOS this needs to be run as root to work but we can still try the default port
+        open_ports = [8786]
+
+    async def try_connect(port):
+        with contextlib.suppress(OSError):
             async with Client(
                 f"tcp://localhost:{port}", asynchronous=True, timeout=0.5
             ):
-                dask_ports.append(port)
-        except OSError:
-            pass
+                return port
+        return
 
-    for port in dask_ports:
-        yield (
-            f"proxycluster-{port}",
-            ProxyCluster,
-        )
+    for port in await asyncio.gather(*[try_connect(port) for port in open_ports]):
+        if port:
+            yield (
+                f"proxycluster-{port}",
+                ProxyCluster,
+            )
