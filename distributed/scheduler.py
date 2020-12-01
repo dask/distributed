@@ -4961,17 +4961,19 @@ class Scheduler(ServerNode):
         total_occupancy: double = self.total_occupancy
         avg: double = total_occupancy / total_nthreads
 
+        idle: set = self.idle
+        saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
-            self.idle.add(ws)
-            self.saturated.discard(ws)
+            idle.add(ws)
+            saturated.discard(ws)
         else:
-            self.idle.discard(ws)
+            idle.discard(ws)
 
             pending: double = occ * (p - nc) / p / nc
             if p > nc and pending > 0.4 and pending > 1.9 * avg:
-                self.saturated.add(ws)
+                saturated.add(ws)
             else:
-                self.saturated.discard(ws)
+                saturated.discard(ws)
 
     def valid_workers(self, ts):
         """Return set of currently valid workers for key
