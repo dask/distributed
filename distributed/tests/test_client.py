@@ -6297,3 +6297,17 @@ async def test_log_event(c, s, a, b):
     events = await c.get_events("topic2")
     assert len(events) == 2
     assert events[1][1] == ("alice", "bob")
+
+
+@gen_cluster(client=True)
+async def test_annotations(c, s, a, b):
+    with dask.config.set(optimization__fuse__active=False):
+        da = pytest.importorskip("dask.array")
+        with dask.annotate(priority=15, workers=[a.address], retries=2):
+            x = da.ones(10, chunks=(5,))
+
+        x = await x.persist()
+
+        assert not b.data
+        assert all("15" in str(ts.priority) for ts in s.tasks.values())
+        assert all(ts.retries == 2 for ts in s.tasks.values())
