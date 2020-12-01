@@ -1026,6 +1026,7 @@ def _legacy_client_key_set(clients):
     """
     Transform a set of client states into a set of client keys.
     """
+    cs: ClientState
     return {cs.client_key for cs in clients}
 
 
@@ -1854,6 +1855,7 @@ class Scheduler(ServerNode):
                 "worker-plugins": self.worker_plugins,
             }
 
+            cs: ClientState
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
@@ -2425,7 +2427,7 @@ class Scheduler(ServerNode):
         # TODO: this should be converted to use the transition mechanism
         ts = self.tasks.get(key)
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
@@ -2444,7 +2446,7 @@ class Scheduler(ServerNode):
             self.client_releases_keys(keys=[key], client=cs.client_key)
 
     def client_desires_keys(self, keys=None, client=None):
-        cs = self.clients.get(client)
+        cs: ClientState = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
             self.clients[client] = cs = ClientState(client)
@@ -2462,7 +2464,7 @@ class Scheduler(ServerNode):
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", client, keys)
-        cs = self.clients[client]
+        cs: ClientState = self.clients[client]
         tasks2 = set()
         for key in list(keys):
             ts = self.tasks.get(key)
@@ -2485,7 +2487,7 @@ class Scheduler(ServerNode):
 
     def client_heartbeat(self, client=None):
         """ Handle heartbeats from Client """
-        cs = self.clients[client]
+        cs: ClientState = self.clients[client]
         cs.last_seen = time()
 
     ###################
@@ -2592,6 +2594,7 @@ class Scheduler(ServerNode):
             assert ts.key == k
             self.validate_key(k, ts)
 
+        cs: ClientState
         for c, cs in self.clients.items():
             # client=None is often used in tests...
             assert c is None or type(c) == str, (type(c), c)
@@ -2629,6 +2632,7 @@ class Scheduler(ServerNode):
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
 
+        cs: ClientState
         if ts is None:
             # Notify all clients
             client_keys = list(self.client_comms)
@@ -2707,7 +2711,7 @@ class Scheduler(ServerNode):
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             # XXX is this a legitimate condition?
             pass
@@ -3037,6 +3041,7 @@ class Scheduler(ServerNode):
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
+            cs: ClientState
             for cs in self.clients.values():
                 self.client_releases_keys(
                     keys=[ts.key for ts in cs.wants_what], client=cs.client_key
@@ -4051,7 +4056,7 @@ class Scheduler(ServerNode):
         ts.type = typename
         ts.group.types.add(typename)
 
-        cs = self.clients["fire-and-forget"]
+        cs: ClientState = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
             self.client_releases_keys(client="fire-and-forget", keys=[ts.key])
 
@@ -4645,7 +4650,7 @@ class Scheduler(ServerNode):
                 }
             )
 
-            cs = self.clients["fire-and-forget"]
+            cs: ClientState = self.clients["fire-and-forget"]
             if ts in cs.wants_what:
                 self.client_releases_keys(client="fire-and-forget", keys=[key])
 
@@ -4691,6 +4696,7 @@ class Scheduler(ServerNode):
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
+        cs: ClientState
         for cs in ts.who_wants:
             cs.wants_what.remove(ts)
         ts.who_wants.clear()
@@ -5671,6 +5677,7 @@ def validate_task_state(ts):
             )
 
     if ts.who_wants:
+        cs: ClientState
         for cs in ts.who_wants:
             assert ts in cs.wants_what, (
                 "not in who_wants' wants_what",
@@ -5712,6 +5719,7 @@ def validate_state(tasks, workers, clients):
     for ws in workers.values():
         validate_worker_state(ws)
 
+    cs: ClientState
     for cs in clients.values():
         for ts in cs.wants_what:
             assert cs in ts.who_wants, (
