@@ -6313,7 +6313,9 @@ async def test_annotations(c, s, a, b):
         assert all("15" in str(ts.priority) for ts in s.tasks.values())
         assert all(ts.retries == 2 for ts in s.tasks.values())
 
-        with dask.annotate(workers=["fake"], allow_other_workers=True, resources={"GPU": 1}):
+        with dask.annotate(
+            workers=["fake"], allow_other_workers=True, resources={"GPU": 1}
+        ):
             x = da.ones(10, chunks=(5,))
 
         x = await x.persist()
