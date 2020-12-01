@@ -2460,7 +2460,8 @@ class Scheduler(ServerNode):
 
     def client_heartbeat(self, client=None):
         """ Handle heartbeats from Client """
-        self.clients[client].last_seen = time()
+        cs = self.clients[client]
+        cs.last_seen = time()
 
     ###################
     # Task Validation #
