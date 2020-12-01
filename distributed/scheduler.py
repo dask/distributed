@@ -2415,8 +2415,8 @@ class Scheduler(ServerNode):
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
         self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
-        for c in clients:
-            self.client_releases_keys(keys=[key], client=c.client_key)
+        for cs in clients:
+            self.client_releases_keys(keys=[key], client=cs.client_key)
 
     def client_desires_keys(self, keys=None, client=None):
         cs = self.clients.get(client)
@@ -2608,10 +2608,10 @@ class Scheduler(ServerNode):
             client_keys = list(self.client_comms)
         elif client is None:
             # Notify clients interested in key
-            client_keys = [c.client_key for c in ts.who_wants]
+            client_keys = [cs.client_key for cs in ts.who_wants]
         else:
             # Notify clients interested in key (including `client`)
-            client_keys = [c.client_key for c in ts.who_wants if c.client_key != client]
+            client_keys = [cs.client_key for cs in ts.who_wants if cs.client_key != client]
             client_keys.append(client)
 
         for k in client_keys:
