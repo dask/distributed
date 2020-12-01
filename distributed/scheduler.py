@@ -4928,7 +4928,7 @@ class Scheduler(ServerNode):
     # Assigning Tasks to Workers #
     ##############################
 
-    def check_idle_saturated(self, ws, occ=None):
+    def check_idle_saturated(self, ws, occ=-1):
         """Update the status of the idle and saturated state
 
         The scheduler keeps track of workers that are ..
@@ -4944,7 +4944,7 @@ class Scheduler(ServerNode):
         """
         if self.total_nthreads == 0 or ws.status == Status.closed:
             return
-        if occ is None:
+        if occ < 0:
             occ = ws.occupancy
 
         nc = ws.nthreads
