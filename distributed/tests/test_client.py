@@ -6301,8 +6301,9 @@ async def test_log_event(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_annotations(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
     with dask.config.set(optimization__fuse__active=False):
-        da = pytest.importorskip("dask.array")
         with dask.annotate(priority=15, workers=[a.address], retries=2):
             x = da.ones(10, chunks=(5,))
 
@@ -6311,3 +6312,10 @@ async def test_annotations(c, s, a, b):
         assert not b.data
         assert all("15" in str(ts.priority) for ts in s.tasks.values())
         assert all(ts.retries == 2 for ts in s.tasks.values())
+
+        with dask.annotate(workers=["fake"], allow_other_workers=True, resources={"GPU": 1}):
+            x = da.ones(10, chunks=(5,))
+
+        x = await x.persist()
+        print([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+        assert b.data or a.data
