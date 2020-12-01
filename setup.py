@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 
 import os
+import sys
 from setuptools import setup, find_packages
+from setuptools.extension import Extension
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
+setup_requires = []
 install_requires = []
 extras_require = {}
 for r in requires:
@@ -17,6 +20,33 @@ for r in requires:
         cond_reqs.append(req)
     else:
         install_requires.append(r)
+
+try:
+    sys.argv.remove("--with-cython")
+    cython = True
+except ValueError:
+    cython = False
+
+ext_modules = []
+if cython:
+    try:
+        import cython
+    except ImportError:
+        setup_requires.append("cython")
+
+    ext_modules.extend(
+        [
+            Extension(
+                "distributed.scheduler",
+                sources=["distributed/scheduler.py"],
+            ),
+            Extension(
+                "distributed.protocol.serialize",
+                sources=["distributed/protocol/serialize.py"],
+            ),
+        ]
+    )
+
 
 setup(
     name="distributed",
@@ -33,9 +63,11 @@ setup(
         "distributed": ["http/templates/*.html"],
     },
     include_package_data=True,
+    setup_requires=setup_requires,
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),
+    ext_modules=ext_modules,
     long_description=(
         open("README.rst").read() if os.path.exists("README.rst") else ""
     ),
