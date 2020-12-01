@@ -2020,25 +2020,6 @@ class Scheduler(ServerNode):
         resources = resources or {}
         retries = retries or {}
 
-        # Override existing taxonomy with per task annotations
-        # https://stackoverflow.com/a/20308657/1611416
-        if annotations:
-            for k, a in annotations.items():
-                if "priority" in a:
-                    priority[k] = a["priority"]
-
-                if "worker" in a:
-                    restrictions[k] = a["worker"]
-
-                if a.get("allow_other_workers", False):
-                    loose_restrictions.append(k)
-
-                if "retries" in a:
-                    retries[k] = a["retries"]
-
-                if "resources" in a:
-                    resources[k] = a["resources"]
-
         # Add actors
         if actors is True:
             actors = list(keys)
