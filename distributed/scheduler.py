@@ -86,7 +86,7 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import cclass, compiled, declare, double, Py_hash_t
+    from cython import cclass, double, Py_hash_t
 except ImportError:
     from ctypes import (
         c_double as double,
@@ -95,11 +95,6 @@ except ImportError:
 
     def cclass(cls):
         return cls
-
-    compiled = False
-
-    def declare(*a, **k):
-        pass
 
 
 if sys.version_info < (3, 8):
@@ -155,12 +150,11 @@ class ClientState:
 
     """
 
-    if compiled:
-        client_key = declare(str, visibility="readonly")
-        _hash = declare(Py_hash_t, visibility="readonly")
-        wants_what = declare(set, visibility="readonly")
-        last_seen = declare(double, visibility="readonly")
-        versions = declare(dict, visibility="readonly")
+    client_key: str
+    _hash: Py_hash_t
+    wants_what: set
+    last_seen: double
+    versions: dict
 
     __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
