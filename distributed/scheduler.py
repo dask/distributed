@@ -158,7 +158,7 @@ class ClientState:
 
     __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
-    def __init__(self, client, versions=None):
+    def __init__(self, client: str, versions: dict = None):
         self.client_key = client
         self._hash = hash(client)
         self.wants_what = set()
@@ -169,8 +169,11 @@ class ClientState:
         return self._hash
 
     def __eq__(self, other):
-        if type(self) == type(other):
-            return self.client_key == other.client_key
+        typ_self: type = type(self)
+        typ_other: type = type(other)
+        if typ_self == typ_other:
+            other_cs: ClientState = other
+            return self.client_key == other_cs.client_key
         else:
             return False
 
