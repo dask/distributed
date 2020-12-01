@@ -183,6 +183,18 @@ class ClientState:
     def __str__(self):
         return self._client_key
 
+    @property
+    def client_key(self):
+        return self._client_key
+
+    @property
+    def wants_what(self):
+        return self._wants_what
+
+    @property
+    def last_seen(self):
+        return self._last_seen
+
 
 class WorkerState:
     """
