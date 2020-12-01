@@ -175,7 +175,7 @@ class ClientState:
             return False
 
     def __repr__(self):
-        return "<Client %r>" % (self.client_key,)
+        return "<Client '%s'>" % self.client_key
 
     def __str__(self):
         return self.client_key
