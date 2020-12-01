@@ -196,6 +196,10 @@ class ClientState:
     def last_seen(self):
         return self._last_seen
 
+    @property
+    def versions(self):
+        return self._versions
+
 
 class WorkerState:
     """
