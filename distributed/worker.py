@@ -2601,7 +2601,9 @@ class Worker(ServerNode):
                         convert_args_to_str(args2, max_len=1000),
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
-                        "".join(traceback.format_tb(result["traceback"].data)) if result["traceback"] is not None else "None",
+                        "".join(traceback.format_tb(result["traceback"].data))
+                        if result["traceback"] is not None
+                        else "None",
                     )
                     self.transition(ts, "error")
 
