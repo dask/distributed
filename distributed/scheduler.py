@@ -85,6 +85,18 @@ from .stealing import WorkStealing
 from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
+try:
+    from cython import cclass, double, Py_hash_t
+except ImportError:
+    from ctypes import (
+        c_double as double,
+        c_ssize_t as Py_hash_t,
+    )
+
+    def cclass(cls):
+        return cls
+
+
 if sys.version_info < (3, 8):
     try:
         import pickle5 as pickle
@@ -116,6 +128,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
+@cclass
 class ClientState:
     """
     A simple object holding information about a client.
@@ -136,6 +149,12 @@ class ClientState:
        collection) gets garbage-collected.
 
     """
+
+    client_key: str
+    _hash: Py_hash_t
+    wants_what: set
+    last_seen: double
+    versions: dict
 
     __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
 
