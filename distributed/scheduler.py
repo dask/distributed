@@ -4946,9 +4946,9 @@ class Scheduler(ServerNode):
             return
         if occ is None:
             occ = ws.occupancy
+
         nc = ws.nthreads
         p = len(ws.processing)
-
         avg = self.total_occupancy / self.total_nthreads
 
         if p < nc or occ / nc < avg / 2:
