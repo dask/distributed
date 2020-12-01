@@ -2046,7 +2046,9 @@ class Worker(ServerNode):
                     )
 
                 total_bytes = sum(
-                    self.tasks[key].nbytes or 0 for key in response["data"]
+                    self.tasks[key].get_nbytes()
+                    for key in response["data"]
+                    if key in self.tasks
                 )
                 duration = (stop - start) or 0.010
                 bandwidth = total_bytes / duration
@@ -2057,7 +2059,9 @@ class Worker(ServerNode):
                         "middle": (start + stop) / 2.0 + self.scheduler_delay,
                         "duration": duration,
                         "keys": {
-                            key: self.tasks[key].nbytes for key in response["data"]
+                            key: self.tasks[key].nbytes
+                            for key in response["data"]
+                            if key in self.tasks
                         },
                         "total": total_bytes,
                         "bandwidth": bandwidth,
