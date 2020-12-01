@@ -4961,7 +4961,7 @@ class Scheduler(ServerNode):
         total_occupancy: double = self.total_occupancy
         avg: double = total_occupancy / total_nthreads
 
-        idle: set = self.idle
+        idle = self.idle
         saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
             idle.add(ws)
