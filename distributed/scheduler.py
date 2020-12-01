@@ -2569,8 +2569,8 @@ class Scheduler(ServerNode):
 
         for c, cs in self.clients.items():
             # client=None is often used in tests...
-            assert c is None or isinstance(c, str), (type(c), c)
-            assert isinstance(cs, ClientState), (type(cs), cs)
+            assert c is None or type(c) == str, (type(c), c)
+            assert type(cs) == ClientState, (type(cs), cs)
             assert cs.client_key == c
 
         a = {w: ws.nbytes for w, ws in self.workers.items()}
