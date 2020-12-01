@@ -2422,7 +2422,7 @@ class Scheduler(ServerNode):
         cs = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
-            cs = self.clients[client] = ClientState(client)
+            self.clients[client] = cs = ClientState(client)
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
