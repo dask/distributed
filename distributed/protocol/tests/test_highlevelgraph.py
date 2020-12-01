@@ -104,6 +104,7 @@ async def test_annotations(c, s, a, b):
             self.correct_priorities = 0
             self.correct_resources = 0
             self.correct_retries = 0
+            self.correct_qux = 0
 
         def update_graph(
             self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs
@@ -112,6 +113,9 @@ async def test_annotations(c, s, a, b):
                 if "priority" in a:
                     p = fn(ast.literal_eval(k))
                     self.correct_priorities += int(p == a["priority"])
+
+                if "qux" in a:
+                    self.correct_qux += int("baz" == a["qux"])
 
                 if "resource" in a:
                     self.correct_resources += int("widget" == a["resource"])
@@ -124,7 +128,7 @@ async def test_annotations(c, s, a, b):
 
     assert plugin in s.plugins
 
-    with dask.annotate(priority=fn):
+    with dask.annotate(priority=fn, qux="baz"):
         A = da.ones((10, 10), chunks=(2, 2))
 
     with dask.annotate(resource="widget"):
@@ -139,6 +143,7 @@ async def test_annotations(c, s, a, b):
     assert isinstance(B.__dask_graph__().layers[A.name], BasicLayer)
     assert isinstance(B.__dask_graph__().layers[B.name], Blockwise)
 
+    assert plugin.correct_qux == 25
     assert plugin.correct_priorities == 25
     assert plugin.correct_resources == 25
 
