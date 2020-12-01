@@ -1,25 +1,18 @@
-import asyncio
 import atexit
-import glob
 import logging
-import os
 import math
 import warnings
 import weakref
-from contextlib import suppress
 
 from dask.utils import factors
 from dask.system import CPU_COUNT
 import toolz
 
 from .spec import SpecCluster
-from .cluster import Cluster
-from ..core import rpc, Status, CommClosedError
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
-from ..utils import LoopRunner
 
 logger = logging.getLogger(__name__)
 

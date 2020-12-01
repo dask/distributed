@@ -4,7 +4,7 @@ import contextlib
 import psutil
 
 from .cluster import Cluster
-from ..core import rpc, Status, CommClosedError
+from ..core import rpc, Status
 from ..client import Client
 from ..utils import LoopRunner
 
