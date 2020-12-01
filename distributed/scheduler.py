@@ -2611,7 +2611,9 @@ class Scheduler(ServerNode):
             client_keys = [cs.client_key for cs in ts.who_wants]
         else:
             # Notify clients interested in key (including `client`)
-            client_keys = [cs.client_key for cs in ts.who_wants if cs.client_key != client]
+            client_keys = [
+                cs.client_key for cs in ts.who_wants if cs.client_key != client
+            ]
             client_keys.append(client)
 
         for k in client_keys:
