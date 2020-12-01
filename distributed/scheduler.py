@@ -2594,6 +2594,7 @@ class Scheduler(ServerNode):
             assert ts.key == k
             self.validate_key(k, ts)
 
+        c: str
         cs: ClientState
         for c, cs in self.clients.items():
             # client=None is often used in tests...
