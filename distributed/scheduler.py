@@ -2014,12 +2014,6 @@ class Scheduler(ServerNode):
         if isinstance(user_priority, Number):
             user_priority = {k: user_priority for k in tasks}
 
-        annotations = annotations or {}
-        restrictions = restrictions or {}
-        loose_restrictions = loose_restrictions or []
-        resources = resources or {}
-        retries = retries or {}
-
         # Add actors
         if actors is True:
             actors = list(keys)
