@@ -408,26 +408,20 @@ async def test_chained_error_message(c, s, a, b):
 
 
 @pytest.mark.asyncio
-async def test_plugin_exception():
-    class MyException(Exception):
-        def __init__(self, msg):
-            self.msg = msg
-
-        def __str__(self):
-            return "MyException(%s)" % self.msg
-
+async def test_plugin_exception(cleanup):
     class MyPlugin:
         def setup(self, worker=None):
-            raise MyException("Foo")
+            raise ValueError("Setup failed")
 
-    s = await Scheduler(port=8007)
-    with pytest.raises(MyException):
-        await Worker(
-            s.address,
-            plugins={
-                MyPlugin(),
-            },
-        )
+    async with Scheduler(port=0) as s:
+        with pytest.raises(ValueError, match="Setup failed"):
+            async with Worker(
+                s.address,
+                plugins={
+                    MyPlugin(),
+                },
+            ) as w:
+                pass
 
 
 @gen_cluster()
