@@ -422,7 +422,12 @@ async def test_plugin_exception():
 
     s = await Scheduler(port=8007)
     with pytest.raises(MyException):
-        await Worker(s.address, plugins={MyPlugin(),})
+        await Worker(
+            s.address,
+            plugins={
+                MyPlugin(),
+            },
+        )
 
 
 @gen_cluster()
