@@ -143,7 +143,7 @@ async def test_array_annotations(c, s, a, b):
 
     assert_array_equal(result, 2)
 
-    # There're annotation matches per array chunk (i.e. task)
+    # There are annotation matches per array chunk (i.e. task)
     assert plugin.qux_matches == A.npartitions
     assert plugin.priority_matches == A.npartitions
     assert plugin.resource_matches == B.npartitions
@@ -176,5 +176,5 @@ async def test_dataframe_annotations(c, s, a, b):
     assert rdf.dtypes == np.float64
     assert (rdf == 10.0).all()
 
-    # There's an annotation match per partition (i.e. task)
+    # There is an annotation match per partition (i.e. task)
     assert plugin.retry_matches == df.npartitions
