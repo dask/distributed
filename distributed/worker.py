@@ -14,6 +14,7 @@ from pickle import PicklingError
 import random
 import threading
 import sys
+import tarfile
 import uuid
 import warnings
 import weakref
@@ -977,8 +978,10 @@ class Worker(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
-    async def upload_file(self, comm, filename=None, data=None, load=True):
+    async def upload_file(self, comm, filename=None, data=None, load=True, is_dir=False, remote_path=""):
         out_filename = os.path.join(self.local_directory, filename)
+        out_dir = os.path.join(self.local_directory, os.path.splitext(filename)[0])
+        print(out_filename, out_dir)
 
         def func(data):
             if isinstance(data, str):
@@ -986,6 +989,9 @@ class Worker(ServerNode):
             with open(out_filename, "wb") as f:
                 f.write(data)
                 f.flush()
+            if is_dir:
+                with tarfile.open(out_filename, mode="r:gz") as tar:
+                    tar.extractall(path=out_dir)
             return data
 
         if len(data) < 10000:
@@ -995,7 +1001,8 @@ class Worker(ServerNode):
 
         if load:
             try:
-                import_file(out_filename)
+                path = out_dir if is_dir else out_filename
+                import_file(path, is_dir=is_dir, remote_path=remote_path)
                 cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)

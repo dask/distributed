@@ -1,8 +1,11 @@
+import io
 import logging
 import os
 import socket
 import subprocess
 import sys
+import tarfile
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -290,5 +293,46 @@ class UploadFile(WorkerPlugin):
     async def setup(self, worker):
         response = await worker.upload_file(
             comm=None, filename=self.filename, data=self.data, load=True
+        )
+        assert len(self.data) == response["nbytes"]
+
+
+class UploadDir(WorkerPlugin):
+    """A WorkerPlugin to upload a local directory to workers.
+
+    Parameters
+    ----------
+    dir_path: str
+        A path to the directory to upload
+
+    remote_path: str
+        The remote path under which to store the contents of the directory
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadDir
+
+    >>> client.register_worker_plugin(UploadDir("/path/to/dir"))  # doctest: +SKIP
+    """
+
+    name = "upload_dir"
+
+    def __init__(self, dir_path, remote_path=""):
+        """
+        Initialize the plugin by tar-ing and reading in the data from the directory.
+        """
+        # Add trailing slash if it doesn't exist so dirname works correctly
+        base_dirname = os.path.basename(os.path.dirname(os.path.join(dir_path, '')))
+        self.filename = base_dirname + ".tgz"
+        self.remote_path = remote_path
+
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w:gz") as tar:
+            tar.add(dir_path, arcname=remote_path)
+        self.data = data.getvalue()
+
+    async def setup(self, worker):
+        response = await worker.upload_file(
+            comm=None, filename=self.filename, data=self.data, load=True, is_dir=True, remote_path=self.remote_path
         )
         assert len(self.data) == response["nbytes"]

@@ -1393,18 +1393,21 @@ def gen_tls_cluster(**kwargs):
 
 @contextmanager
 def save_sys_modules():
-    old_modules = sys.modules
-    old_path = sys.path
+    old_modules = sys.modules.copy()
+    old_path = sys.path.copy()
     try:
         yield
     finally:
         for i, elem in enumerate(sys.path):
             if elem not in old_path:
                 del sys.path[i]
-        for elem in sys.modules.keys():
-            if elem not in old_modules:
-                del sys.modules[elem]
 
+        # Avoid "dictionary changed size during iteration" error
+        modules_to_delete = {
+            elem for elem in sys.modules.keys() if elem not in old_modules
+        }
+        for module in modules_to_delete:
+            del sys.modules[module]
 
 @contextmanager
 def check_thread_leak():

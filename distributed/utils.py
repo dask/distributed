@@ -1026,8 +1026,8 @@ def open_port(host=""):
     return port
 
 
-def import_file(path):
-    """ Loads modules for a file (.py, .zip, .egg) """
+def import_file(path, is_dir=False, remote_path=""):
+    """ Loads modules for a file (.py, .zip, .egg) or a directory """
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
     names_to_import = []
@@ -1041,10 +1041,17 @@ def import_file(path):
         cache_file = cache_from_source(path)
         with suppress(OSError):
             os.remove(cache_file)
-    if ext in (".egg", ".zip", ".pyz"):
+    if ext in (".egg", ".zip", ".pyz") or is_dir:
+        logger.info("In is_dir branch with path %s", path)
         if path not in sys.path:
+            logger.info("Path was not in sys.path")
             sys.path.insert(0, path)
-        names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
+        logger.info(f"{[s for s in sys.modules if 'src' in s]}")
+        names = [mod_info.name for mod_info in pkgutil.iter_modules([path])]
+        if is_dir and remote_path:
+            prefix = remote_path.replace("/", ".").replace("\\", ".").split(".")[0] + "."
+            names += [m for m in sys.modules if m.startswith(prefix)]
+        logger.info(f"Names: {list(names)}")
         names_to_import.extend(names)
 
     loaded = []

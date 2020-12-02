@@ -1691,12 +1691,247 @@ async def test_upload_file_new_worker(c, s):
 
         return myfile.x
 
-    with tmp_text("myfile.py", "x = 123") as fn:
-        await c.upload_file(fn)
-        async with Worker(s.address):
-            x = await c.submit(g)
+    with save_sys_modules():
+        with tmp_text("myfile.py", "x = 123") as fn:
+            await c.upload_file(fn)
+            async with Worker(s.address):
+                x = await c.submit(g)
 
-        assert x == 123
+            assert x == 123
+
+
+@gen_cluster(client=True)
+async def test_upload_dir(c, s, a, b):
+    def g():
+        import myfile1, myfile2
+
+        return myfile1.f1(), myfile2.f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+
+                await c.upload_dir(dirname)
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path(c, s, a, b):
+    def g():
+        from src.pkg.myfile1 import f1
+        from src.pkg.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+
+                await c.upload_dir(dirname, remote_path="src/pkg/")
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path_no_slash(c, s, a, b):
+    def g():
+        from src.pkg.myfile1 import f1
+        from src.pkg.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+
+                await c.upload_dir(dirname, remote_path="src/pkg")
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path_slashes(c, s, a, b):
+    def g():
+        from src.pkg.myfile1 import f1
+        from src.pkg.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+
+                await c.upload_dir(dirname + "/", remote_path="src/pkg/")
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path_init(c, s, a, b):
+    def g():
+        from src.pkg.myfile1 import f1
+        from src.pkg.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+                with open(os.path.join(dirname, "__init__.py"), "w") as f:
+                    f.write("")
+
+                await c.upload_dir(dirname, remote_path="src/pkg/")
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path_subfolders(c, s, a, b):
+    def g():
+        from src.pkg.test1.myfile1 import f1
+        from src.pkg.test2.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                test1 = os.path.join(dirname, "test1")
+                test2 = os.path.join(dirname, "test2")
+                os.mkdir(test1)
+                os.mkdir(test2)
+                with open(os.path.join(test1, "myfile1.py"), "w") as f:
+                    f.write("def f1():\n    return {}".format(value))
+                with open(os.path.join(test2, "myfile2.py"), "w") as f:
+                    f.write("def f2():\n    return {}".format(value))
+                with open(os.path.join(dirname, "__init__.py"), "w") as f:
+                    f.write("")
+
+                await c.upload_dir(dirname, remote_path="src/pkg/")
+
+                x = c.submit(g, pure=False)
+                result = await x
+                assert result == (value, value)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_refresh_delayed(c, s, a, b):
+    with save_sys_modules():
+        for value in [123, 456]:
+            with tmpfile() as dirname:
+                os.mkdir(dirname)
+                with open(os.path.join(dirname, "myfile.py"), "w") as f:
+                    f.write("def f():\n    return {}".format(value))
+                await c.upload_dir(dirname)
+
+            sys.path.append(os.path.dirname(dirname))
+            from myfile import f
+
+            b = delayed(f)()
+            bb = c.compute(b, sync=False)
+            result = await c.gather(bb)
+            assert result == value
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_path_new_worker(c, s, a, b):
+    def g():
+        from src.pkg.myfile1 import f1
+        from src.pkg.myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        with tmpfile() as dirname:
+            os.mkdir(dirname)
+            with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                f.write("def f1():\n    return {}".format(123))
+            with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                f.write("def f2():\n    return {}".format(123))
+
+            await c.upload_dir(dirname, remote_path="src/pkg/")
+
+            async with Worker(s.address):
+                x = await c.submit(g)
+
+            assert x == (123, 123)
+
+
+def test_upload_dir_sync(c):
+    def g():
+        from myfile1 import f1
+        from myfile2 import f2
+
+        return f1(), f2()
+
+    with save_sys_modules():
+        with tmpfile() as dirname:
+            os.mkdir(dirname)
+            with open(os.path.join(dirname, "myfile1.py"), "w") as f:
+                f.write("def f1():\n    return {}".format(123))
+            with open(os.path.join(dirname, "myfile2.py"), "w") as f:
+                f.write("def f2():\n    return {}".format(123))
+            c.upload_dir(dirname)
+            x = c.submit(g)
+            assert x.result() == (123, 123)
+
+
+@gen_cluster(client=True)
+async def test_upload_dir_exception(c, s, a, b):
+    with save_sys_modules():
+        with tmpfile() as dirname:
+            os.mkdir(dirname)
+            with open(os.path.join(dirname, "myfile.py"), "w") as f:
+                f.write("syntax-error!")
+            with pytest.raises(SyntaxError):
+                await c.upload_dir(dirname)
+
+
+def test_upload_dir_exception_sync(c):
+    with save_sys_modules():
+        with tmpfile() as dirname:
+            os.mkdir(dirname)
+            with open(os.path.join(dirname, "myfile.py"), "w") as f:
+                f.write("syntax-error!")
+            with pytest.raises(SyntaxError):
+                c.upload_dir(dirname)
 
 
 @pytest.mark.skip
