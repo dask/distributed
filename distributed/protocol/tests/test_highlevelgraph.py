@@ -1,9 +1,6 @@
 import ast
 
 import dask
-from dask.highlevelgraph import BasicLayer
-from dask.blockwise import Blockwise
-from dask.core import flatten
 
 import dask.array as da
 import dask.dataframe as dd
@@ -94,46 +91,51 @@ async def test_shuffle(c, s, a, b):
     assert (res == 10.0).all()
 
 
-def annotate_fn(k):
-    return k[1] * 5 + k[2]
-
-
 class TestAnnotationPlugin(SchedulerPlugin):
-    def __init__(self):
-        self.correct_priorities = 0
-        self.correct_resources = 0
-        self.correct_retries = 0
-        self.correct_qux = 0
+    def __init__(self, priority_fn=None, qux="", resource="", retries=0):
+        self.priority_fn = priority_fn or (lambda k: 0)
+        self.qux = qux
+        self.resource = resource
+        self.retries = retries
 
-    def update_graph(
-        self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs
-    ):
+        self.priority_matches = 0
+        self.resource_matches = 0
+        self.retry_matches = 0
+        self.qux_matches = 0
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         for k, a in kwargs["annotations"].items():
             if "priority" in a:
-                p = annotate_fn(ast.literal_eval(k))
-                self.correct_priorities += int(p == a["priority"])
+                p = self.priority_fn(ast.literal_eval(k))
+                self.priority_matches += int(p == a["priority"])
 
             if "qux" in a:
-                self.correct_qux += int("baz" == a["qux"])
+                self.qux_matches += int(self.qux == a["qux"])
 
             if "custom_resource" in a:
-                self.correct_resources += int("widget" == a["custom_resource"])
+                self.resource_matches += int(self.resource == a["custom_resource"])
 
             if "retries" in a:
-                self.correct_retries += int(a["retries"] == 5)
+                self.retry_matches += int(self.retries == a["retries"])
 
 
 @gen_cluster(client=True)
 async def test_array_annotations(c, s, a, b):
-    plugin = TestAnnotationPlugin()
+    def fn(k):
+        return k[1] * 5 + k[2]
+
+    qux = "bax"
+    resource = "widget"
+
+    plugin = TestAnnotationPlugin(priority_fn=fn, qux=qux, resource=resource)
     s.add_plugin(plugin)
 
     assert plugin in s.plugins
 
-    with dask.annotate(priority=annotate_fn, qux="baz"):
+    with dask.annotate(priority=fn, qux=qux):
         A = da.ones((10, 10), chunks=(2, 2))
 
-    with dask.annotate(custom_resource="widget"):
+    with dask.annotate(custom_resource=resource):
         B = A + 1
 
     with dask.config.set(optimization__fuse__active=False):
@@ -141,14 +143,16 @@ async def test_array_annotations(c, s, a, b):
 
     assert_array_equal(result, 2)
 
-    assert plugin.correct_qux == 25
-    assert plugin.correct_priorities == 25
-    assert plugin.correct_resources == 25
+    # There're annotation matches per array chunk (i.e. task)
+    assert plugin.qux_matches == A.npartitions
+    assert plugin.priority_matches == A.npartitions
+    assert plugin.resource_matches == B.npartitions
 
 
 @gen_cluster(client=True)
 async def test_dataframe_annotations(c, s, a, b):
-    plugin = TestAnnotationPlugin()
+    retries = 5
+    plugin = TestAnnotationPlugin(retries=retries)
     s.add_plugin(plugin)
 
     assert plugin in s.plugins
@@ -163,13 +167,14 @@ async def test_dataframe_annotations(c, s, a, b):
     acol = df["a"]
     bcol = df["b"]
 
-    with dask.annotate(retries=5):
+    with dask.annotate(retries=retries):
         df = acol + bcol
 
     with dask.config.set(optimization__fuse__active=False):
-        df = await c.compute(df)
+        rdf = await c.compute(df)
 
-    assert df.dtypes == np.float64
-    assert (df == 10.0).all()
+    assert rdf.dtypes == np.float64
+    assert (rdf == 10.0).all()
 
-    assert plugin.correct_retries == 5
+    # There's an annotation match per partition (i.e. task)
+    assert plugin.retry_matches == df.npartitions
