@@ -386,7 +386,7 @@ class WorkerState:
             nanny=self.nanny,
             extra=self.extra,
         )
-        ws.processing = {ts.key for ts in self.processing}
+        ws.processing = {ts.key: cost for ts, cost in self.processing.items()}
         return ws
 
     def __repr__(self):
