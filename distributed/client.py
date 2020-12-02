@@ -2552,86 +2552,7 @@ class Client:
         fifo_timeout=0,
         actors=None,
     ):
-        user_priority = user_priority or {}
-        restrictions = restrictions or {}
-        loose_restrictions = loose_restrictions or []
-        retries = retries or {}
-        resources = resources or {}
-
         with self._refcount_lock:
-            annotation_retries = {}
-            annotation_restrictions = {}
-            annotation_loose_restrictions = []
-            annotation_resources = {}
-
-            if isinstance(dsk, HighLevelGraph):
-                for layer in dsk.layers.values():
-
-                    if layer.annotations is None:
-                        continue
-
-                    layer_priority = layer.annotations.get("priority", False)
-
-                    if layer_priority is not False:
-                        if isinstance(layer_priority, Number):
-                            for k in layer:
-                                user_priority[stringify(k)] = layer_priority
-                        elif callable(layer_priority):
-                            for k in layer:
-                                user_priority[stringify(k)] = layer_priority(k)
-                        else:
-                            raise TypeError(
-                                "Expected priority to be a number or callable got %s"
-                                % str(layer_priority)
-                            )
-
-                    layer_workers = layer.annotations.get("workers", False)
-
-                    if layer_workers is not False:
-                        if isinstance(layer_workers, str):
-                            layer_workers = [layer_workers]
-                            for k in layer:
-                                annotation_restrictions[stringify(k)] = layer_workers
-                        elif isinstance(layer_workers, (list, tuple, set)):
-                            layer_workers = list(layer_workers)
-                            for k in layer:
-                                annotation_restrictions[stringify(k)] = layer_workers
-                        else:
-                            raise TypeError(
-                                "Expected workers to be a string or list got %s"
-                                % str(layer_workers)
-                            )
-
-                    layer_loose_restrictions = layer.annotations.get(
-                        "allow_other_workers", False
-                    )
-
-                    if layer_loose_restrictions is True:
-                        annotation_loose_restrictions.extend(
-                            stringify(k) for k in layer
-                        )
-
-                    layer_retries = layer.annotations.get("retries", False)
-
-                    if layer_retries is not False:
-                        if isinstance(layer_retries, Number):
-                            for k in layer:
-                                annotation_retries[stringify(k)] = layer_retries
-                        else:
-                            raise TypeError(
-                                "Expected retries to be a number got %s"
-                                % str(layer_retries)
-                            )
-
-                    layer_resources = layer.annotations.get("resources", False)
-
-                    if layer_resources:
-                        if isinstance(layer_resources, dict):
-                            for k in layer:
-                                annotation_resources[stringify(k)] = layer_resources
-                        else:
-                            raise TypeError("Expected resources to be a dict")
-
             if resources:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)
@@ -2652,11 +2573,6 @@ class Client:
 
             if loose_restrictions is not None:
                 loose_restrictions = list(map(stringify, loose_restrictions))
-
-            retries.update(annotation_retries)
-            resources.update(annotation_resources)
-            restrictions.update(annotation_restrictions)
-            loose_restrictions.extend(annotation_loose_restrictions)
 
             keyset = set(keys)
 
