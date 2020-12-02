@@ -94,58 +94,64 @@ async def test_shuffle(c, s, a, b):
     assert (res == 10.0).all()
 
 
+def annotate_fn(k):
+    return k[1] * 5 + k[2]
+
+
+class TestAnnotationPlugin(SchedulerPlugin):
+    def __init__(self):
+        self.correct_priorities = 0
+        self.correct_resources = 0
+        self.correct_retries = 0
+        self.correct_qux = 0
+
+    def update_graph(
+        self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs
+    ):
+        for k, a in kwargs["annotations"].items():
+            if "priority" in a:
+                p = annotate_fn(ast.literal_eval(k))
+                self.correct_priorities += int(p == a["priority"])
+
+            if "qux" in a:
+                self.correct_qux += int("baz" == a["qux"])
+
+            if "custom_resource" in a:
+                self.correct_resources += int("widget" == a["custom_resource"])
+
+            if "retries" in a:
+                self.correct_retries += int(a["retries"] == 5)
+
+
 @gen_cluster(client=True)
-async def test_annotations(c, s, a, b):
-    def fn(k):
-        return k[1] * 5 + k[2]
-
-    class TestPlugin(SchedulerPlugin):
-        def __init__(self):
-            self.correct_priorities = 0
-            self.correct_resources = 0
-            self.correct_retries = 0
-            self.correct_qux = 0
-
-        def update_graph(
-            self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs
-        ):
-            for k, a in kwargs["annotations"].items():
-                if "priority" in a:
-                    p = fn(ast.literal_eval(k))
-                    self.correct_priorities += int(p == a["priority"])
-
-                if "qux" in a:
-                    self.correct_qux += int("baz" == a["qux"])
-
-                if "resource" in a:
-                    self.correct_resources += int("widget" == a["resource"])
-
-                if "retries" in a:
-                    self.correct_retries += int(a["retries"] == 5)
-
-    plugin = TestPlugin()
+async def test_array_annotations(c, s, a, b):
+    plugin = TestAnnotationPlugin()
     s.add_plugin(plugin)
 
     assert plugin in s.plugins
 
-    with dask.annotate(priority=fn, qux="baz"):
+    with dask.annotate(priority=annotate_fn, qux="baz"):
         A = da.ones((10, 10), chunks=(2, 2))
 
-    with dask.annotate(resource="widget"):
+    with dask.annotate(custom_resource="widget"):
         B = A + 1
 
-    # TODO: replace with client.compute when it correctly supports HLG transmission
-    ret = c.get(B.__dask_graph__(), list(flatten(B.__dask_keys__())), sync=False)
+    with dask.config.set(optimization__fuse__active=False):
+        result = await c.compute(B)
 
-    for r in await c.gather(ret):
-        assert_array_equal(r, 2)
-
-    assert isinstance(B.__dask_graph__().layers[A.name], BasicLayer)
-    assert isinstance(B.__dask_graph__().layers[B.name], Blockwise)
+    assert_array_equal(result, 2)
 
     assert plugin.correct_qux == 25
     assert plugin.correct_priorities == 25
     assert plugin.correct_resources == 25
+
+
+@gen_cluster(client=True)
+async def test_dataframe_annotations(c, s, a, b):
+    plugin = TestAnnotationPlugin()
+    s.add_plugin(plugin)
+
+    assert plugin in s.plugins
 
     df = dd.from_pandas(
         pd.DataFrame(
@@ -160,15 +166,10 @@ async def test_annotations(c, s, a, b):
     with dask.annotate(retries=5):
         df = acol + bcol
 
-    res = c.get(
-        df.__dask_graph__(),
-        list(flatten(df.__dask_keys__())),
-        optimize_graph=False,
-        sync=False,
-    )
+    with dask.config.set(optimization__fuse__active=False):
+        df = await c.compute(df)
 
-    res = await c.gather(res)
-    assert res[0].dtypes == np.float64
-    assert (res[0] == 10.0).all()
+    assert df.dtypes == np.float64
+    assert (df == 10.0).all()
 
     assert plugin.correct_retries == 5
