@@ -1691,13 +1691,12 @@ async def test_upload_file_new_worker(c, s):
 
         return myfile.x
 
-    with save_sys_modules():
-        with tmp_text("myfile.py", "x = 123") as fn:
-            await c.upload_file(fn)
-            async with Worker(s.address):
-                x = await c.submit(g)
+    with tmp_text("myfile.py", "x = 123") as fn:
+        await c.upload_file(fn)
+        async with Worker(s.address):
+            x = await c.submit(g)
 
-            assert x == 123
+        assert x == 123
 
 
 @gen_cluster(client=True)

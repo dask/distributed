@@ -983,7 +983,6 @@ class Worker(ServerNode):
     ):
         out_filename = os.path.join(self.local_directory, filename)
         out_dir = os.path.join(self.local_directory, os.path.splitext(filename)[0])
-        print(out_filename, out_dir)
 
         def func(data):
             if isinstance(data, str):
