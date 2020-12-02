@@ -67,7 +67,7 @@ def _materialized_layer_pack(
         for k, deps in dependencies.items()
     }
 
-    annotations = layer.expand_annotations()
+    annotations = layer.pack_annotations()
     all_keys = all_keys.union(dsk)
     dsk = {stringify(k): stringify(v, exclusive=all_keys) for k, v in dsk.items()}
     dsk = valmap(dumps_task, dsk)
@@ -115,7 +115,9 @@ def _materialized_layer_unpack(state, dsk, dependencies, annotations):
         dependencies[k] = list(set(dependencies.get(k, ())) | set(v))
 
     if state["annotations"]:
-        annotations.update(state["annotations"])
+        annotations.update(
+            Layer.expand_annotations(state["annotations"], state["dsk"].keys())
+        )
 
 
 def highlevelgraph_unpack(dumped_hlg):
@@ -123,6 +125,7 @@ def highlevelgraph_unpack(dumped_hlg):
     hlg = msgpack.loads(
         dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
     )
+
     dsk = {}
     deps = {}
     annotations = {}

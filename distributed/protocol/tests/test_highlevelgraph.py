@@ -104,19 +104,26 @@ class TestAnnotationPlugin(SchedulerPlugin):
         self.qux_matches = 0
 
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
-        for k, a in kwargs["annotations"].items():
-            if "priority" in a:
-                p = self.priority_fn(ast.literal_eval(k))
-                self.priority_matches += int(p == a["priority"])
+        annots = kwargs["annotations"]
 
-            if "qux" in a:
-                self.qux_matches += int(self.qux == a["qux"])
+        if "priority" in annots:
+            self.priority_matches = sum(
+                int(self.priority_fn(ast.literal_eval(k)) == p)
+                for k, p in annots["priority"].items()
+            )
 
-            if "custom_resource" in a:
-                self.resource_matches += int(self.resource == a["custom_resource"])
+        if "qux" in annots:
+            self.qux_matches = sum(int(self.qux == v) for v in annots["qux"].values())
 
-            if "retries" in a:
-                self.retry_matches += int(self.retries == a["retries"])
+        if "custom_resource" in annots:
+            self.resource_matches = sum(
+                int(self.resource == v) for v in annots["custom_resource"].values()
+            )
+
+        if "retries" in annots:
+            self.retry_matches = sum(
+                int(self.retries == v) for v in annots["retries"].values()
+            )
 
 
 @gen_cluster(client=True)
@@ -124,7 +131,7 @@ async def test_array_annotations(c, s, a, b):
     def fn(k):
         return k[1] * 5 + k[2]
 
-    qux = "bax"
+    qux = "baz"
     resource = "widget"
 
     plugin = TestAnnotationPlugin(priority_fn=fn, qux=qux, resource=resource)
