@@ -67,7 +67,7 @@ def _materialized_layer_pack(
         for k, deps in dependencies.items()
     }
 
-    annotations = layer.expand_annotations(string_keys=True)
+    annotations = layer.expand_annotations()
     all_keys = all_keys.union(dsk)
     dsk = {stringify(k): stringify(v, exclusive=all_keys) for k, v in dsk.items()}
     dsk = valmap(dumps_task, dsk)
