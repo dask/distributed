@@ -7,6 +7,7 @@ dependencies:
   - bokeh!=2.0.0
   - click
   - cloudpickle
+  - cython
   - dask
   - lz4
   - ipykernel
