@@ -3,15 +3,12 @@ from tlz import valmap
 
 from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph, Layer
+from dask.utils import stringify
 
 from ..utils_comm import unpack_remotedata, subs_multiple
 from ..worker import dumps_task
 
-from ..utils import (
-    str_graph,
-    tokey,
-    CancelledError,
-)
+from ..utils import CancelledError
 
 from .utils import (
     msgpack_opts,
@@ -27,9 +24,8 @@ def _materialized_layer_pack(
     layer: Layer,
     all_keys,
     known_key_dependencies,
+    client,
     client_keys,
-    allowed_client,
-    allowed_futures,
 ):
     from ..client import Future
 
@@ -43,16 +39,16 @@ def _materialized_layer_pack(
     if values:
         dsk = subs_multiple(dsk, values)
 
-    # Unpack remote data re record its dependencies
+    # Unpack remote data and record its dependencies
     dsk = {k: unpack_remotedata(v, byte_keys=True) for k, v in layer.items()}
     unpacked_futures = set.union(*[v[1] for v in dsk.values()]) if dsk else set()
     for future in unpacked_futures:
-        if future.client is not allowed_client:
+        if future.client is not client:
             raise ValueError(
                 "Inputs contain futures that were created by another client."
             )
-        if tokey(future.key) not in allowed_futures:
-            raise CancelledError(tokey(future.key))
+        if stringify(future.key) not in client.futures:
+            raise CancelledError(stringify(future.key))
     unpacked_futures_deps = {}
     for k, v in dsk.items():
         if len(v[1]):
@@ -69,22 +65,22 @@ def _materialized_layer_pack(
 
     # The scheduler expect all keys to be strings
     dependencies = {
-        tokey(k): [tokey(dep) for dep in deps] for k, deps in dependencies.items()
+        stringify(k): [stringify(dep) for dep in deps]
+        for k, deps in dependencies.items()
     }
-    dsk = str_graph(dsk, extra_values=all_keys)
+    all_keys = all_keys.union(dsk)
+    dsk = {stringify(k): stringify(v, exclusive=all_keys) for k, v in dsk.items()}
     dsk = valmap(dumps_task, dsk)
     return {"dsk": dsk, "dependencies": dependencies}
 
 
-def highlevelgraph_pack(
-    hlg: HighLevelGraph, client_keys, allowed_client, allowed_futures
-):
+def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
     layers = []
 
     # Dump each layer (in topological order)
     for layer in (hlg.layers[name] for name in hlg._toposort_layers()):
         if not layer.is_materialized():
-            state = layer.__dask_distributed_pack__()
+            state = layer.__dask_distributed_pack__(client)
             if state is not None:
                 layers.append(
                     {
@@ -104,9 +100,8 @@ def highlevelgraph_pack(
                     layer,
                     hlg.get_all_external_keys(),
                     hlg.key_dependencies,
+                    client,
                     client_keys,
-                    allowed_client,
-                    allowed_futures,
                 ),
             }
         )

@@ -25,6 +25,7 @@ from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
 import dask
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.utils import stringify
 import dask.bag as db
 from distributed import (
     Worker,
@@ -59,7 +60,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
 from distributed.sizeof import sizeof
-from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
+from distributed.utils import mp_context, sync, tmp_text, tmpfile, is_valid_xml
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -3574,7 +3575,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         await wait(b4)
 
-        assert set(map(tokey, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(map(stringify, b3.__dask_keys__())).issubset(s.tasks)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3584,7 +3585,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         await wait(b4)
 
-        assert not any(tokey(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(stringify(k) in s.tasks for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3965,7 +3966,7 @@ async def test_serialize_future(s, a, b):
             with ctxman():
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
-                assert tokey(future2.key) in ci.futures
+                assert stringify(future2.key) in ci.futures
                 result2 = await future2
                 assert result == result2
 
@@ -5601,7 +5602,7 @@ async def test_nested_prioritization(c, s, w):
     await wait([fx, fy])
 
     assert (o[x.key] < o[y.key]) == (
-        s.tasks[tokey(fx.key)].priority < s.tasks[tokey(fy.key)].priority
+        s.tasks[stringify(fx.key)].priority < s.tasks[stringify(fy.key)].priority
     )
 
 
@@ -6154,6 +6155,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
+    assert dask.__version__ in data
 
 
 @pytest.mark.asyncio
@@ -6266,3 +6268,32 @@ async def test_get_task_metadata_multiple(c, s, a, b):
     assert len(metadata2) == 1
     assert list(metadata2.keys()) == [f2.key]
     assert metadata2[f2.key] == s.tasks.get(f2.key).metadata
+
+
+@gen_cluster(client=True)
+async def test_log_event(c, s, a, b):
+
+    # Log an event from inside a task
+    def foo():
+        get_worker().log_event("topic1", {"foo": "bar"})
+
+    assert not await c.get_events("topic1")
+    await c.submit(foo)
+    events = await c.get_events("topic1")
+    assert len(events) == 1
+    assert events[0][1] == {"foo": "bar"}
+
+    # Log an event while on the scheduler
+    def log_scheduler(dask_scheduler):
+        dask_scheduler.log_event("topic2", {"woo": "hoo"})
+
+    await c.run_on_scheduler(log_scheduler)
+    events = await c.get_events("topic2")
+    assert len(events) == 1
+    assert events[0][1] == {"woo": "hoo"}
+
+    # Log an event from the client process
+    await c.log_event("topic2", ("alice", "bob"))
+    events = await c.get_events("topic2")
+    assert len(events) == 2
+    assert events[1][1] == ("alice", "bob")

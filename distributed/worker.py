@@ -88,6 +88,10 @@ DEFAULT_METRICS = {}
 
 DEFAULT_STARTUP_INFORMATION = {}
 
+DEFAULT_DATA_SIZE = parse_bytes(
+    dask.config.get("distributed.scheduler.default-data-size")
+)
+
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
@@ -132,6 +136,8 @@ class TaskState:
     * **metadata**: ``dict``
         Metadata related to task. Stored metadata should be msgpack
         serializable (e.g. int, string, list, dict).
+    * **nbytes**: ``int``
+        The size of a particular piece of data
 
     Parameters
     ----------
@@ -165,9 +171,14 @@ class TaskState:
         self.start_time = None
         self.stop_time = None
         self.metadata = {}
+        self.nbytes = None
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
+
+    def get_nbytes(self) -> int:
+        nbytes = self.nbytes
+        return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
 
 class Worker(ServerNode):
@@ -267,8 +278,6 @@ class Worker(ServerNode):
         dependencies we expect from those connections
     * **comm_bytes**: ``int``
         The total number of bytes in flight
-    * **nbytes**: ``{key: int}``
-        The size of a particular piece of data
     * **threads**: ``{key: int}``
         The ID of the thread on which the task ran
     * **active_threads**: ``{int: key}``
@@ -403,7 +412,6 @@ class Worker(ServerNode):
         self.comm_nbytes = 0
         self._missing_dep_flight = set()
 
-        self.nbytes = dict()
         self.threads = dict()
 
         self.active_threads_lock = threading.Lock()
@@ -758,6 +766,15 @@ class Worker(ServerNode):
     def logs(self):
         return self._deque_handler.deque
 
+    def log_event(self, topic, msg):
+        self.batched_stream.send(
+            {
+                "op": "log-event",
+                "topic": topic,
+                "msg": msg,
+            }
+        )
+
     @property
     def worker_address(self):
         """ For API compatibility with Nanny """
@@ -847,7 +864,7 @@ class Worker(ServerNode):
                         keys=list(self.data),
                         nthreads=self.nthreads,
                         name=self.name,
-                        nbytes=self.nbytes,
+                        nbytes={ts.key: ts.get_nbytes() for ts in self.tasks.values()},
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
@@ -1313,7 +1330,7 @@ class Worker(ServerNode):
                     data[k] = Actor(type(self.actors[k]), self.address, k)
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
-        nbytes = {k: self.nbytes.get(k) for k in data}
+        nbytes = {k: self.tasks[k].nbytes for k in data if k in self.tasks}
         stop = time()
         if self.digests is not None:
             self.digests["get-data-load-duration"].add(stop - start)
@@ -1455,9 +1472,6 @@ class Worker(ServerNode):
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
 
-            if nbytes is not None:
-                self.nbytes.update(nbytes)
-
             who_has = who_has or {}
 
             for dependency, workers in who_has.items():
@@ -1485,6 +1499,10 @@ class Worker(ServerNode):
                     if dep_ts.state != "memory":
                         self.pending_data_per_worker[worker].append(dep_ts.key)
 
+            if nbytes is not None:
+                for key, value in nbytes.items():
+                    self.tasks[key].nbytes = value
+
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
             else:
@@ -1492,7 +1510,6 @@ class Worker(ServerNode):
             if self.validate:
                 if who_has:
                     assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
-                    assert all(dep in self.nbytes for dep in who_has)
                     assert all(self.tasks[dep.key] for dep in ts.dependencies)
                     for dependency in ts.dependencies:
                         self.validate_task(dependency)
@@ -1878,14 +1895,13 @@ class Worker(ServerNode):
 
     def send_task_state_to_scheduler(self, ts):
         if ts.key in self.data or self.actors.get(ts.key):
-            nbytes = self.nbytes.get(ts.key)
             typ = ts.type
-            if nbytes is None or typ is None:
+            if ts.nbytes is None or typ is None:
                 try:
                     value = self.data[ts.key]
                 except KeyError:
                     value = self.actors[ts.key]
-                nbytes = self.nbytes[ts.key] = sizeof(value)
+                nbytes = ts.nbytes = sizeof(value)
                 typ = ts.type = type(value)
                 del value
             try:
@@ -1898,7 +1914,7 @@ class Worker(ServerNode):
                 "op": "task-finished",
                 "status": "OK",
                 "key": ts.key,
-                "nbytes": nbytes,
+                "nbytes": ts.nbytes,
                 "thread": self.threads.get(ts.key),
                 "type": typ_serialized,
                 "typename": typename(typ),
@@ -1939,8 +1955,8 @@ class Worker(ServerNode):
                     {"action": "disk-write", "start": start, "stop": stop}
                 )
 
-        if ts.key not in self.nbytes:
-            self.nbytes[ts.key] = sizeof(value)
+        if ts.nbytes is None:
+            ts.nbytes = sizeof(value)
 
         ts.type = type(value)
 
@@ -1959,7 +1975,7 @@ class Worker(ServerNode):
         assert isinstance(dep, str)
         deps = {dep}
 
-        total_bytes = self.nbytes[dep]
+        total_bytes = self.tasks[dep].get_nbytes()
         L = self.pending_data_per_worker[worker]
 
         while L:
@@ -1967,10 +1983,10 @@ class Worker(ServerNode):
             ts = self.tasks.get(d)
             if ts is None or ts.state != "waiting":
                 continue
-            if total_bytes + self.nbytes[d] > self.target_message_size:
+            if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
             deps.add(d)
-            total_bytes += self.nbytes[d]
+            total_bytes += ts.get_nbytes()
 
         return deps, total_bytes
 
@@ -2029,7 +2045,11 @@ class Worker(ServerNode):
                         }
                     )
 
-                total_bytes = sum(self.nbytes.get(key, 0) for key in response["data"])
+                total_bytes = sum(
+                    self.tasks[key].get_nbytes()
+                    for key in response["data"]
+                    if key in self.tasks
+                )
                 duration = (stop - start) or 0.010
                 bandwidth = total_bytes / duration
                 self.incoming_transfer_log.append(
@@ -2039,7 +2059,9 @@ class Worker(ServerNode):
                         "middle": (start + stop) / 2.0 + self.scheduler_delay,
                         "duration": duration,
                         "keys": {
-                            key: self.nbytes.get(key, None) for key in response["data"]
+                            key: self.tasks[key].nbytes
+                            for key in response["data"]
+                            if key in self.tasks
                         },
                         "total": total_bytes,
                         "bandwidth": bandwidth,
@@ -2234,10 +2256,8 @@ class Worker(ServerNode):
                     del self.data[key]
                 except FileNotFoundError:
                     logger.error("Tried to delete %s but no file found", exc_info=True)
-                del self.nbytes[key]
             if key in self.actors and not ts.dependents:
                 del self.actors[key]
-                del self.nbytes[key]
 
             # for any dependencies of key we are releasing remove task as dependent
             for dependency in ts.dependencies:
@@ -2560,7 +2580,7 @@ class Worker(ServerNode):
             self.threads[ts.key] = result["thread"]
 
             if result["op"] == "task-finished":
-                self.nbytes[ts.key] = result["nbytes"]
+                ts.nbytes = result["nbytes"]
                 ts.type = result["type"]
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
@@ -2842,7 +2862,7 @@ class Worker(ServerNode):
 
     def validate_task_memory(self, ts):
         assert ts.key in self.data or ts.key in self.actors
-        assert ts.key in self.nbytes
+        assert ts.nbytes is not None
         assert not ts.waiting_for_data
         assert ts.key not in self.ready
         assert ts.state == "memory"
@@ -2922,7 +2942,7 @@ class Worker(ServerNode):
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
                 if ts.state == "memory":
-                    assert isinstance(self.nbytes[ts.key], int)
+                    assert isinstance(ts.nbytes, int)
                     assert not ts.waiting_for_data
                     assert ts.key in self.data or ts.key in self.actors
 
@@ -2953,7 +2973,7 @@ class Worker(ServerNode):
             else:
                 return self._get_client()
 
-    def _get_client(self, timeout=3):
+    def _get_client(self, timeout=None):
         """Get local client attached to this worker
 
         If no such client exists, create one
@@ -2962,6 +2982,12 @@ class Worker(ServerNode):
         --------
         get_client
         """
+
+        if timeout is None:
+            timeout = dask.config.get("distributed.comm.timeouts.connect")
+
+        timeout = parse_timedelta(timeout, "s")
+
         try:
             from .client import default_client
 
@@ -2992,6 +3018,7 @@ class Worker(ServerNode):
             )
             if not asynchronous:
                 assert self._client.status == "running"
+
         return self._client
 
     def get_current_task(self):
@@ -3043,7 +3070,7 @@ def get_worker():
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=3, resolve_address=True):
+def get_client(address=None, timeout=None, resolve_address=True):
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -3053,8 +3080,9 @@ def get_client(address=None, timeout=3, resolve_address=True):
     address : str, optional
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
-    timeout : int, default 3
-        Timeout (in seconds) for getting the Client
+    timeout : int or str
+        Timeout (in seconds) for getting the Client. Defaults to the
+        ``distributed.comm.timeouts.connect`` configuration value.
     resolve_address : bool, default True
         Whether to resolve `address` to its canonical form.
 
@@ -3065,7 +3093,7 @@ def get_client(address=None, timeout=3, resolve_address=True):
     Examples
     --------
     >>> def f():
-    ...     client = get_client()
+    ...     client = get_client(timeout="10s")
     ...     futures = client.map(lambda x: x + 1, range(10))  # spawn many tasks
     ...     results = client.gather(futures)
     ...     return sum(results)
@@ -3080,6 +3108,12 @@ def get_client(address=None, timeout=3, resolve_address=True):
     worker_client
     secede
     """
+
+    if timeout is None:
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
+
+    timeout = parse_timedelta(timeout, "s")
+
     if address and resolve_address:
         address = comm.resolve_address(address)
     try:
