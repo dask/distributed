@@ -34,18 +34,24 @@ if cython:
     except ImportError:
         setup_requires.append("cython")
 
-    ext_modules.extend(
-        [
-            Extension(
-                "distributed.scheduler",
-                sources=["distributed/scheduler.py"],
-            ),
-            Extension(
-                "distributed.protocol.serialize",
-                sources=["distributed/protocol/serialize.py"],
-            ),
-        ]
-    )
+    cyext_modules = [
+        Extension(
+            "distributed.scheduler",
+            sources=["distributed/scheduler.py"],
+        ),
+        Extension(
+            "distributed.protocol.serialize",
+            sources=["distributed/protocol/serialize.py"],
+        ),
+    ]
+    for e in cyext_modules:
+        e.cython_directives = {
+            "annotation_typing": True,
+            "binding": False,
+            "embedsignature": True,
+            "language_level": 3,
+        }
+    ext_modules.extend(cyext_modules)
 
 
 setup(
