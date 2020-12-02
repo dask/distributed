@@ -1139,9 +1139,12 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [%s]" % self.address)
 
-        await asyncio.gather(
+        plugins_msgs = await asyncio.gather(
             *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
         )
+        for msg in plugins_msgs:
+            if msg["status"] != "OK":
+                raise msg["exception"].data
         self._pending_plugins = ()
 
         await self._register_with_scheduler()
