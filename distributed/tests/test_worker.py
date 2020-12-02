@@ -407,6 +407,24 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
+@pytest.mark.asyncio
+async def test_plugin_exception():
+    class MyException(Exception):
+        def __init__(self, msg):
+            self.msg = msg
+
+        def __str__(self):
+            return "MyException(%s)" % self.msg
+
+    class MyPlugin:
+        def setup(self, worker=None):
+            raise MyException("Foo")
+
+    s = await Scheduler(port=8007)
+    with pytest.raises(MyException):
+        await Worker(s.address, plugins={MyPlugin(),})
+
+
 @gen_cluster()
 async def test_gather(s, a, b):
     b.data["x"] = 1
