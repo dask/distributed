@@ -1042,16 +1042,16 @@ def import_file(path, is_dir=False, remote_path=""):
         with suppress(OSError):
             os.remove(cache_file)
     if ext in (".egg", ".zip", ".pyz") or is_dir:
-        logger.info("In is_dir branch with path %s", path)
         if path not in sys.path:
-            logger.info("Path was not in sys.path")
             sys.path.insert(0, path)
-        logger.info(f"{[s for s in sys.modules if 'src' in s]}")
         names = [mod_info.name for mod_info in pkgutil.iter_modules([path])]
         if is_dir and remote_path:
-            prefix = remote_path.replace("/", ".").replace("\\", ".").split(".")[0] + "."
+            # Because iter_modules won't search recursively
+            # Convert remote path into Python module (e.g. src/mypkg -> src.mypkg)
+            # Then find imported modules starting with that initial package
+            prefix = remote_path.replace("/", ".").replace("\\", ".").split(".")[0]
+            prefix += "."  # Make sure prefix is the entire initial package name
             names += [m for m in sys.modules if m.startswith(prefix)]
-        logger.info(f"Names: {list(names)}")
         names_to_import.extend(names)
 
     loaded = []

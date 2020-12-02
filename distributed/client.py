@@ -3088,6 +3088,9 @@ class Client:
         This sends a local directory up to all worker nodes. This directory is placed
         into a temporary directory on Python's system path.
 
+        If no remote path is specified, the contents of the directory are directly
+        added to Python's system path.
+
         Parameters
         ----------
         dir_path: string
@@ -3097,8 +3100,8 @@ class Client:
 
         Examples
         --------
-        >>> client.upload_dir('mylibrary/', dir_prefix='mylibrary')  # doctest: +SKIP
-        >>> from mylibrary.foo import myfunc  # doctest: +SKIP
+        >>> client.upload_dir('mylibrary', remote_path='src/mypkg')  # doctest: +SKIP
+        >>> from src.mypkg.foo import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
         return self.register_worker_plugin(
