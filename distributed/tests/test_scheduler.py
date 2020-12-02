@@ -579,7 +579,7 @@ async def test_coerce_address():
         s = await Scheduler(validate=True, port=0)
         print("scheduler:", s.address, s.listen_address)
         a = Worker(s.address, name="alice")
-        b = Worker(s.address, name=123)
+        b = Worker(s.address, name="123")
         c = Worker("127.0.0.1", s.port, name="charlie")
         await asyncio.gather(a, b, c)
 
@@ -598,12 +598,12 @@ async def test_coerce_address():
         assert s.coerce_address(a.address) == a.address
         # Aliases
         assert s.coerce_address("alice") == a.address
-        assert s.coerce_address(123) == b.address
+        assert s.coerce_address("123") == b.address
         assert s.coerce_address("charlie") == c.address
 
         assert s.coerce_hostname("127.0.0.1") == "127.0.0.1"
         assert s.coerce_hostname("alice") == a.ip
-        assert s.coerce_hostname(123) == b.ip
+        assert s.coerce_hostname("123") == b.ip
         assert s.coerce_hostname("charlie") == c.ip
         assert s.coerce_hostname("jimmy") == "jimmy"
 

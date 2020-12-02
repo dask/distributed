@@ -787,7 +787,7 @@ async def start_cluster(
         Worker(
             s.address,
             nthreads=ncore[1],
-            name=i,
+            name=str(i),
             security=security,
             loop=loop,
             validate=True,
