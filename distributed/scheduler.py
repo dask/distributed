@@ -86,12 +86,17 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import double, Py_ssize_t
+    from cython import cclass, double, Py_hash_t, Py_ssize_t
 except ImportError:
     from ctypes import (
         c_double as double,
+        c_ssize_t as Py_hash_t,
         c_ssize_t as Py_ssize_t,
     )
+
+    def cclass(cls):
+        return cls
+
 
 if sys.version_info < (3, 8):
     try:
@@ -124,6 +129,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
+@cclass
 class ClientState:
     """
     A simple object holding information about a client.
@@ -145,26 +151,54 @@ class ClientState:
 
     """
 
-    __slots__ = ("client_key", "_hash", "wants_what", "last_seen", "versions")
+    _client_key: str
+    _hash: Py_hash_t
+    _wants_what: set
+    _last_seen: double
+    _versions: dict
 
-    def __init__(self, client, versions=None):
-        self.client_key = client
+    __slots__ = ("_client_key", "_hash", "_wants_what", "_last_seen", "_versions")
+
+    def __init__(self, client: str, versions: dict = None):
+        self._client_key = client
         self._hash = hash(client)
-        self.wants_what = set()
-        self.last_seen = time()
-        self.versions = versions or {}
+        self._wants_what = set()
+        self._last_seen = time()
+        self._versions = versions or {}
 
     def __hash__(self):
         return self._hash
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.client_key == other.client_key
+        typ_self: type = type(self)
+        typ_other: type = type(other)
+        if typ_self == typ_other:
+            other_cs: ClientState = other
+            return self._client_key == other_cs._client_key
+        else:
+            return False
 
     def __repr__(self):
-        return "<Client %r>" % (self.client_key,)
+        return "<Client '%s'>" % self._client_key
 
     def __str__(self):
-        return self.client_key
+        return self._client_key
+
+    @property
+    def client_key(self):
+        return self._client_key
+
+    @property
+    def wants_what(self):
+        return self._wants_what
+
+    @property
+    def last_seen(self):
+        return self._last_seen
+
+    @property
+    def versions(self):
+        return self._versions
 
 
 class WorkerState:
@@ -1009,7 +1043,8 @@ def _legacy_client_key_set(clients):
     """
     Transform a set of client states into a set of client keys.
     """
-    return {cs.client_key for cs in clients}
+    cs: ClientState
+    return {cs._client_key for cs in clients}
 
 
 def _legacy_worker_key_set(workers):
@@ -1837,11 +1872,12 @@ class Scheduler(ServerNode):
                 "worker-plugins": self.worker_plugins,
             }
 
+            cs: ClientState
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
                     {w: ws.versions for w, ws in self.workers.items()},
-                    {c: cs.versions for c, cs in self.clients.items() if cs.versions},
+                    {c: cs._versions for c, cs in self.clients.items() if cs._versions},
                 ),
                 versions,
                 client_name="This Worker",
@@ -2408,7 +2444,7 @@ class Scheduler(ServerNode):
         # TODO: this should be converted to use the transition mechanism
         ts = self.tasks.get(key)
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
@@ -2423,21 +2459,21 @@ class Scheduler(ServerNode):
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
         self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
-        for c in clients:
-            self.client_releases_keys(keys=[key], client=c.client_key)
+        for cs in clients:
+            self.client_releases_keys(keys=[key], client=cs._client_key)
 
     def client_desires_keys(self, keys=None, client=None):
-        cs = self.clients.get(client)
+        cs: ClientState = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
-            cs = self.clients[client] = ClientState(client)
+            self.clients[client] = cs = ClientState(client)
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
                 # For publish, queues etc.
                 ts = self.new_task(k, None, "released")
             ts.who_wants.add(cs)
-            cs.wants_what.add(ts)
+            cs._wants_what.add(ts)
 
             if ts.state in ("memory", "erred"):
                 self.report_on_key(k, client=client)
@@ -2445,12 +2481,12 @@ class Scheduler(ServerNode):
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", client, keys)
-        cs = self.clients[client]
+        cs: ClientState = self.clients[client]
         tasks2 = set()
         for key in list(keys):
             ts = self.tasks.get(key)
-            if ts is not None and ts in cs.wants_what:
-                cs.wants_what.remove(ts)
+            if ts is not None and ts in cs._wants_what:
+                cs._wants_what.remove(ts)
                 s = ts.who_wants
                 s.remove(cs)
                 if not s:
@@ -2468,7 +2504,8 @@ class Scheduler(ServerNode):
 
     def client_heartbeat(self, client=None):
         """ Handle heartbeats from Client """
-        self.clients[client].last_seen = time()
+        cs: ClientState = self.clients[client]
+        cs._last_seen = time()
 
     ###################
     # Task Validation #
@@ -2574,11 +2611,13 @@ class Scheduler(ServerNode):
             assert ts.key == k
             self.validate_key(k, ts)
 
+        c: str
+        cs: ClientState
         for c, cs in self.clients.items():
             # client=None is often used in tests...
-            assert c is None or isinstance(c, str), (type(c), c)
-            assert isinstance(cs, ClientState), (type(cs), cs)
-            assert cs.client_key == c
+            assert c is None or type(c) == str, (type(c), c)
+            assert type(cs) == ClientState, (type(cs), cs)
+            assert cs._client_key == c
 
         a = {w: ws.nbytes for w, ws in self.workers.items()}
         b = {
@@ -2611,15 +2650,18 @@ class Scheduler(ServerNode):
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
 
+        cs: ClientState
         if ts is None:
             # Notify all clients
             client_keys = list(self.client_comms)
         elif client is None:
             # Notify clients interested in key
-            client_keys = [c.client_key for c in ts.who_wants]
+            client_keys = [cs._client_key for cs in ts.who_wants]
         else:
             # Notify clients interested in key (including `client`)
-            client_keys = [c.client_key for c in ts.who_wants if c.client_key != client]
+            client_keys = [
+                cs._client_key for cs in ts.who_wants if cs._client_key != client
+            ]
             client_keys.append(client)
 
         for k in client_keys:
@@ -2687,13 +2729,13 @@ class Scheduler(ServerNode):
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             # XXX is this a legitimate condition?
             pass
         else:
             self.client_releases_keys(
-                keys=[ts.key for ts in cs.wants_what], client=cs.client_key
+                keys=[ts.key for ts in cs._wants_what], client=cs._client_key
             )
             del self.clients[client]
 
@@ -3017,9 +3059,10 @@ class Scheduler(ServerNode):
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
+            cs: ClientState
             for cs in self.clients.values():
                 self.client_releases_keys(
-                    keys=[ts.key for ts in cs.wants_what], client=cs.client_key
+                    keys=[ts.key for ts in cs._wants_what], client=cs._client_key
                 )
 
             nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
@@ -4031,8 +4074,8 @@ class Scheduler(ServerNode):
         ts.type = typename
         ts.group.types.add(typename)
 
-        cs = self.clients["fire-and-forget"]
-        if ts in cs.wants_what:
+        cs: ClientState = self.clients["fire-and-forget"]
+        if ts in cs._wants_what:
             self.client_releases_keys(client="fire-and-forget", keys=[ts.key])
 
     def transition_released_waiting(self, key):
@@ -4625,8 +4668,8 @@ class Scheduler(ServerNode):
                 }
             )
 
-            cs = self.clients["fire-and-forget"]
-            if ts in cs.wants_what:
+            cs: ClientState = self.clients["fire-and-forget"]
+            if ts in cs._wants_what:
                 self.client_releases_keys(client="fire-and-forget", keys=[key])
 
             if self.validate:
@@ -4671,8 +4714,9 @@ class Scheduler(ServerNode):
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
+        cs: ClientState
         for cs in ts.who_wants:
-            cs.wants_what.remove(ts)
+            cs._wants_what.remove(ts)
         ts.who_wants.clear()
         ts.processing_on = None
         ts.exception_blame = ts.exception = ts.traceback = None
@@ -5655,12 +5699,13 @@ def validate_task_state(ts):
             )
 
     if ts.who_wants:
+        cs: ClientState
         for cs in ts.who_wants:
-            assert ts in cs.wants_what, (
+            assert ts in cs._wants_what, (
                 "not in who_wants' wants_what",
                 str(ts),
                 str(cs),
-                str(cs.wants_what),
+                str(cs._wants_what),
             )
 
     if ts.actor:
@@ -5696,8 +5741,9 @@ def validate_state(tasks, workers, clients):
     for ws in workers.values():
         validate_worker_state(ws)
 
+    cs: ClientState
     for cs in clients.values():
-        for ts in cs.wants_what:
+        for ts in cs._wants_what:
             assert cs in ts.who_wants, (
                 "not in wants_what' who_wants",
                 str(cs),
