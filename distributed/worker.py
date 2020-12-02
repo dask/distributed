@@ -978,7 +978,9 @@ class Worker(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
-    async def upload_file(self, comm, filename=None, data=None, load=True, is_dir=False, remote_path=""):
+    async def upload_file(
+        self, comm, filename=None, data=None, load=True, is_dir=False, remote_path=""
+    ):
         out_filename = os.path.join(self.local_directory, filename)
         out_dir = os.path.join(self.local_directory, os.path.splitext(filename)[0])
         print(out_filename, out_dir)

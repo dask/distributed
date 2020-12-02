@@ -322,7 +322,7 @@ class UploadDir(WorkerPlugin):
         Initialize the plugin by tar-ing and reading in the data from the directory.
         """
         # Add trailing slash if it doesn't exist so dirname works correctly
-        base_dirname = os.path.basename(os.path.dirname(os.path.join(dir_path, '')))
+        base_dirname = os.path.basename(os.path.dirname(os.path.join(dir_path, "")))
         self.filename = base_dirname + ".tgz"
         self.remote_path = remote_path
 
@@ -333,6 +333,11 @@ class UploadDir(WorkerPlugin):
 
     async def setup(self, worker):
         response = await worker.upload_file(
-            comm=None, filename=self.filename, data=self.data, load=True, is_dir=True, remote_path=self.remote_path
+            comm=None,
+            filename=self.filename,
+            data=self.data,
+            load=True,
+            is_dir=True,
+            remote_path=self.remote_path,
         )
         assert len(self.data) == response["nbytes"]
