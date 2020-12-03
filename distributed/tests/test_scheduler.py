@@ -598,7 +598,7 @@ async def test_coerce_address():
         assert s.coerce_address(a.address) == a.address
         # Aliases
         assert s.coerce_address("alice") == a.address
-        assert s.coerce_address(123) == b.address
+        assert s.coerce_address("123") == b.address
         assert s.coerce_address("charlie") == c.address
 
         assert s.coerce_hostname("127.0.0.1") == "127.0.0.1"
