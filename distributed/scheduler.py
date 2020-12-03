@@ -3575,7 +3575,7 @@ class Scheduler(ServerNode):
             total = sum(group_bytes.values())
 
             def _key(group):
-                is_idle = not any(ws.processing for ws in groups[group])
+                is_idle = not any(wws.processing for wws in groups[group])
                 bytes = -group_bytes[group]
                 return (is_idle, bytes)
 
