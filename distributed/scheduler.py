@@ -4006,7 +4006,8 @@ class Scheduler(ServerNode):
             }
         else:
             return {
-                key: [ws._address for ws in ts.who_has] for key, ts in self.tasks.items()
+                key: [ws._address for ws in ts.who_has]
+                for key, ts in self.tasks.items()
             }
 
     def get_has_what(self, comm=None, workers=None):
@@ -4020,7 +4021,9 @@ class Scheduler(ServerNode):
                 for w in workers
             }
         else:
-            return {w: [ts.key for ts in ws._has_what] for w, ws in self.workers.items()}
+            return {
+                w: [ts.key for ts in ws._has_what] for w, ws in self.workers.items()
+            }
 
     def get_ncores(self, comm=None, workers=None):
         ws: WorkerState
@@ -4082,7 +4085,9 @@ class Scheduler(ServerNode):
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        return sum(dts.nbytes for dts in ts.dependencies - ws._has_what) / self.bandwidth
+        return (
+            sum(dts.nbytes for dts in ts.dependencies - ws._has_what) / self.bandwidth
+        )
 
     def get_task_duration(self, ts, default=None):
         """
