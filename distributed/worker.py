@@ -610,6 +610,8 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
+        if executor == "offload":
+            from distributed.utils import _offload_executor as executor
         self.executor = executor or ThreadPoolExecutor(
             self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
         )
