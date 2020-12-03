@@ -3686,7 +3686,7 @@ class Scheduler(ServerNode):
 
         ws: WorkerState
         with log_errors():
-            if not n and all(ws._processing for ws in self.workers.values()):
+            if not n and all([ws._processing for ws in self.workers.values()]):
                 return []
 
             if key is None:
@@ -3699,16 +3699,16 @@ class Scheduler(ServerNode):
             groups = groupby(key, self.workers.values())
 
             limit_bytes = {
-                k: sum(ws._memory_limit for ws in v) for k, v in groups.items()
+                k: sum([ws._memory_limit for ws in v]) for k, v in groups.items()
             }
-            group_bytes = {k: sum(ws._nbytes for ws in v) for k, v in groups.items()}
+            group_bytes = {k: sum([ws._nbytes for ws in v]) for k, v in groups.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
 
             def _key(group):
                 wws: WorkerState
-                is_idle = not any(wws._processing for wws in groups[group])
+                is_idle = not any([wws._processing for wws in groups[group]])
                 bytes = -group_bytes[group]
                 return (is_idle, bytes)
 
@@ -3719,7 +3719,7 @@ class Scheduler(ServerNode):
 
             while idle:
                 group = idle.pop()
-                if n is None and any(ws._processing for ws in groups[group]):
+                if n is None and any([ws._processing for ws in groups[group]]):
                     break
 
                 if minimum and n_remain - len(groups[group]) < minimum:
@@ -5697,7 +5697,7 @@ class Scheduler(ServerNode):
 
     def check_idle(self):
         ws: WorkerState
-        if any(ws._processing for ws in self.workers.values()) or self.unrunnable:
+        if any([ws._processing for ws in self.workers.values()]) or self.unrunnable:
             self.idle_since = None
             return
         elif not self.idle_since:
