@@ -3088,7 +3088,8 @@ class Client:
         into a temporary directory on Python's system path.
 
         If no remote path is specified, the contents of the directory are directly
-        added to Python's system path.
+        added to Python's system path. In this case, it would work similarly to calling
+        `upload_file` for all files in the directory.
 
         Parameters
         ----------
