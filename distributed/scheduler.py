@@ -283,54 +283,54 @@ class WorkerState:
 
     # XXX need a state field to signal active/removed?
 
-    actors: set
-    address: str
-    bandwidth: double
-    extra: dict
-    has_what: set
+    _actors: set
+    _address: str
+    _bandwidth: double
+    _extra: dict
+    _has_what: set
     _hash: Py_hash_t
-    last_seen: double
-    local_directory: str
-    memory_limit: Py_ssize_t
-    metrics: dict
-    name: str
-    nanny: str
-    nbytes: Py_ssize_t
-    nthreads: Py_ssize_t
-    occupancy: double
-    pid: Py_ssize_t
-    processing: dict
-    resources: dict
-    services: dict
+    _last_seen: double
+    _local_directory: str
+    _memory_limit: Py_ssize_t
+    _metrics: dict
+    _name: str
+    _nanny: str
+    _nbytes: Py_ssize_t
+    _nthreads: Py_ssize_t
+    _occupancy: double
+    _pid: Py_ssize_t
+    _processing: dict
+    _resources: dict
+    _services: dict
     _status: Status
-    time_delay: double
-    used_resources: dict
-    versions: dict
+    _time_delay: double
+    _used_resources: dict
+    _versions: dict
 
     __slots__ = (
-        "actors",
-        "address",
-        "bandwidth",
-        "extra",
-        "has_what",
+        "_actors",
+        "_address",
+        "_bandwidth",
+        "_extra",
+        "_has_what",
         "_hash",
-        "last_seen",
-        "local_directory",
-        "memory_limit",
-        "metrics",
-        "name",
-        "nanny",
-        "nbytes",
-        "nthreads",
-        "occupancy",
-        "pid",
-        "processing",
-        "resources",
-        "services",
+        "_last_seen",
+        "_local_directory",
+        "_memory_limit",
+        "_metrics",
+        "_name",
+        "_nanny",
+        "_nbytes",
+        "_nthreads",
+        "_occupancy",
+        "_pid",
+        "_processing",
+        "_resources",
+        "_services",
         "_status",
-        "time_delay",
-        "used_resources",
-        "versions",
+        "_time_delay",
+        "_used_resources",
+        "_versions",
     )
 
     def __init__(
@@ -346,34 +346,34 @@ class WorkerState:
         nanny: str = None,
         extra: dict = None,
     ):
-        self.address = address
-        self.pid = pid
-        self.name = name
-        self.nthreads = nthreads
-        self.memory_limit = memory_limit
-        self.local_directory = local_directory
-        self.services = services or {}
-        self.versions = versions or {}
-        self.nanny = nanny
+        self._address = address
+        self._pid = pid
+        self._name = name
+        self._nthreads = nthreads
+        self._memory_limit = memory_limit
+        self._local_directory = local_directory
+        self._services = services or {}
+        self._versions = versions or {}
+        self._nanny = nanny
 
         self._hash = hash(address)
         self._status = Status.running
-        self.nbytes = 0
-        self.occupancy = 0
-        self.metrics = {}
-        self.last_seen = 0
-        self.time_delay = 0
-        self.bandwidth = float(
+        self._nbytes = 0
+        self._occupancy = 0
+        self._metrics = {}
+        self._last_seen = 0
+        self._time_delay = 0
+        self._bandwidth = float(
             parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         )
 
-        self.actors = set()
-        self.has_what = set()
-        self.processing = {}
-        self.resources = {}
-        self.used_resources = {}
+        self._actors = set()
+        self._has_what = set()
+        self._processing = {}
+        self._resources = {}
+        self._used_resources = {}
 
-        self.extra = extra or {}
+        self._extra = extra or {}
 
     def __hash__(self):
         return self._hash
@@ -403,48 +403,48 @@ class WorkerState:
     def clean(self):
         """ Return a version of this object that is appropriate for serialization """
         ws: WorkerState = WorkerState(
-            address=self.address,
-            pid=self.pid,
-            name=self.name,
-            nthreads=self.nthreads,
-            memory_limit=self.memory_limit,
-            local_directory=self.local_directory,
-            services=self.services,
-            nanny=self.nanny,
-            extra=self.extra,
+            address=self._address,
+            pid=self._pid,
+            name=self._name,
+            nthreads=self._nthreads,
+            memory_limit=self._memory_limit,
+            local_directory=self._local_directory,
+            services=self._services,
+            nanny=self._nanny,
+            extra=self._extra,
         )
-        ws.processing = {ts.key: cost for ts, cost in self.processing.items()}
+        ws._processing = {ts.key: cost for ts, cost in self._processing.items()}
         return ws
 
     def __repr__(self):
         return "<Worker %r, name: %s, memory: %d, processing: %d>" % (
-            self.address,
-            self.name,
-            len(self.has_what),
-            len(self.processing),
+            self._address,
+            self._name,
+            len(self._has_what),
+            len(self._processing),
         )
 
     def identity(self):
         return {
             "type": "Worker",
-            "id": self.name,
+            "id": self._name,
             "host": self.host,
-            "resources": self.resources,
-            "local_directory": self.local_directory,
-            "name": self.name,
-            "nthreads": self.nthreads,
-            "memory_limit": self.memory_limit,
-            "last_seen": self.last_seen,
-            "services": self.services,
-            "metrics": self.metrics,
-            "nanny": self.nanny,
-            **self.extra,
+            "resources": self._resources,
+            "local_directory": self._local_directory,
+            "name": self._name,
+            "nthreads": self._nthreads,
+            "memory_limit": self._memory_limit,
+            "last_seen": self._last_seen,
+            "services": self._services,
+            "metrics": self._metrics,
+            "nanny": self._nanny,
+            **self._extra,
         }
 
     @property
     def ncores(self):
         warnings.warn("WorkerState.ncores has moved to WorkerState.nthreads")
-        return self.nthreads
+        return self._nthreads
 
 
 class TaskState:
@@ -803,7 +803,7 @@ class TaskState:
         self.group.nbytes_in_memory += diff
         ws: WorkerState
         for ws in self.who_has:
-            ws.nbytes += diff
+            ws._nbytes += diff
         self.nbytes = nbytes
 
     def __repr__(self):
@@ -1086,7 +1086,7 @@ def _legacy_worker_key_set(workers):
     Transform a set of worker states into a set of worker keys.
     """
     ws: WorkerState
-    return {ws.address for ws in workers}
+    return {ws._address for ws in workers}
 
 
 def _legacy_task_key_dict(task_dict):
@@ -1558,12 +1558,12 @@ class Scheduler(ServerNode):
             or just a (host, port) pair
         """
         ws: WorkerState = self.workers[worker]
-        port = ws.services.get(service_name)
+        port = ws._services.get(service_name)
         if port is None:
             return None
         elif protocol:
             return "%(protocol)s://%(host)s:%(port)d" % {
-                "protocol": ws.address.split("://")[0],
+                "protocol": ws._address.split("://")[0],
                 "host": ws.host,
                 "port": port,
             }
@@ -1706,7 +1706,7 @@ class Scheduler(ServerNode):
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
             ws: WorkerState = self.workers[worker]
-            nanny_addr = ws.nanny
+            nanny_addr = ws._nanny
             address = nanny_addr or worker
 
             self.worker_send(worker, {"op": "close", "report": False})
@@ -1761,16 +1761,16 @@ class Scheduler(ServerNode):
 
         ws: WorkerState = self.workers[address]
 
-        ws.last_seen = time()
+        ws._last_seen = time()
 
         if metrics:
-            ws.metrics = metrics
+            ws._metrics = metrics
 
         if host_info:
             self.host_info[host].update(host_info)
 
         delay = time() - now
-        ws.time_delay = delay
+        ws._time_delay = delay
 
         if resources:
             self.add_resources(worker=address, resources=resources)
@@ -1864,7 +1864,7 @@ class Scheduler(ServerNode):
 
             self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
-            if ws.nthreads > len(ws.processing):
+            if ws._nthreads > len(ws._processing):
                 self.idle.add(ws)
 
             for plugin in self.plugins[:]:
@@ -1912,7 +1912,7 @@ class Scheduler(ServerNode):
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
-                    {w: ws.versions for w, ws in self.workers.items()},
+                    {w: ws._versions for w, ws in self.workers.items()},
                     {c: cs._versions for c, cs in self.clients.items() if cs._versions},
                 ),
                 versions,
@@ -2342,8 +2342,8 @@ class Scheduler(ServerNode):
             if cts is not None and cts.state == "memory":  # couldn't find this
                 ws: WorkerState
                 for ws in cts.who_has:  # TODO: this behavior is extreme
-                    ws.has_what.remove(cts)
-                    ws.nbytes -= cts.get_nbytes()
+                    ws._has_what.remove(cts)
+                    ws._nbytes -= cts.get_nbytes()
                 cts.who_has.clear()
                 recommendations[cause] = "released"
 
@@ -2411,7 +2411,7 @@ class Scheduler(ServerNode):
                 {
                     "action": "remove-worker",
                     "worker": address,
-                    "processing-tasks": dict(ws.processing),
+                    "processing-tasks": dict(ws._processing),
                 },
             )
             logger.info("Remove worker %s", ws)
@@ -2421,25 +2421,25 @@ class Scheduler(ServerNode):
 
             self.remove_resources(address)
 
-            self.host_info[host]["nthreads"] -= ws.nthreads
+            self.host_info[host]["nthreads"] -= ws._nthreads
             self.host_info[host]["addresses"].remove(address)
-            self.total_nthreads -= ws.nthreads
+            self.total_nthreads -= ws._nthreads
 
             if not self.host_info[host]["addresses"]:
                 del self.host_info[host]
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            del self.aliases[ws.name]
+            del self.aliases[ws._name]
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
             ws.status = Status.closed
-            self.total_occupancy -= ws.occupancy
+            self.total_occupancy -= ws._occupancy
 
             recommendations = {}
 
-            for ts in list(ws.processing):
+            for ts in list(ws._processing):
                 k = ts.key
                 recommendations[k] = "released"
                 if not safe:
@@ -2459,14 +2459,14 @@ class Scheduler(ServerNode):
                             self.allowed_failures,
                         )
 
-            for ts in ws.has_what:
+            for ts in ws._has_what:
                 ts.who_has.remove(ws)
                 if not ts.who_has:
                     if ts.run_spec:
                         recommendations[ts.key] = "released"
                     else:  # pure data
                         recommendations[ts.key] = "forgotten"
-            ws.has_what.clear()
+            ws._has_what.clear()
 
             self.transitions(recommendations)
 
@@ -2606,7 +2606,7 @@ class Scheduler(ServerNode):
         assert not ts.waiting_on
         ws: WorkerState = ts.processing_on
         assert ws
-        assert ts in ws.processing
+        assert ts in ws._processing
         assert not ts.who_has
         for dts in ts.dependencies:
             assert dts.who_has
@@ -2671,9 +2671,9 @@ class Scheduler(ServerNode):
         for w, ws in self.workers.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
-            assert ws.address == w
-            if not ws.processing:
-                assert not ws.occupancy
+            assert ws._address == w
+            if not ws._processing:
+                assert not ws._occupancy
                 assert ws in self.idle
 
         for k, ts in self.tasks.items():
@@ -2689,17 +2689,17 @@ class Scheduler(ServerNode):
             assert type(cs) == ClientState, (type(cs), cs)
             assert cs._client_key == c
 
-        a = {w: ws.nbytes for w, ws in self.workers.items()}
+        a = {w: ws._nbytes for w, ws in self.workers.items()}
         b = {
-            w: sum(ts.get_nbytes() for ts in ws.has_what)
+            w: sum(ts.get_nbytes() for ts in ws._has_what)
             for w, ws in self.workers.items()
         }
         assert a == b, (a, b)
 
         actual_total_occupancy = 0
         for worker, ws in self.workers.items():
-            assert abs(sum(ws.processing.values()) - ws.occupancy) < 1e-8
-            actual_total_occupancy += ws.occupancy
+            assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8
+            actual_total_occupancy += ws._occupancy
 
         assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, (
             actual_total_occupancy,
@@ -2771,7 +2771,7 @@ class Scheduler(ServerNode):
             ws: WorkerState
             version_warning = version_module.error_message(
                 version_module.get_versions(),
-                {w: ws.versions for w, ws in self.workers.items()},
+                {w: ws._versions for w, ws in self.workers.items()},
                 versions,
             )
             msg.update(version_warning)
@@ -2846,7 +2846,7 @@ class Scheduler(ServerNode):
             if deps:
                 ws: WorkerState
                 msg["who_has"] = {
-                    dep.key: [ws.address for ws in dep.who_has] for dep in deps
+                    dep.key: [ws._address for ws in dep.who_has] for dep in deps
                 }
                 msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
 
@@ -2903,8 +2903,8 @@ class Scheduler(ServerNode):
             ws: WorkerState = self.workers[errant_worker]
             if ws in ts.who_has:
                 ts.who_has.remove(ws)
-                ws.has_what.remove(ts)
-                ws.nbytes -= ts.get_nbytes()
+                ws._has_what.remove(ts)
+                ws._nbytes -= ts.get_nbytes()
         if not ts.who_has:
             if ts.run_spec:
                 self.transitions({key: "released"})
@@ -2914,12 +2914,12 @@ class Scheduler(ServerNode):
     def release_worker_data(self, comm=None, keys=None, worker=None):
         ws: WorkerState = self.workers[worker]
         tasks = {self.tasks[k] for k in keys}
-        removed_tasks = tasks & ws.has_what
-        ws.has_what -= removed_tasks
+        removed_tasks = tasks & ws._has_what
+        ws._has_what -= removed_tasks
 
         recommendations = {}
         for ts in removed_tasks:
-            ws.nbytes -= ts.get_nbytes()
+            ws._nbytes -= ts.get_nbytes()
             wh = ts.who_has
             wh.remove(ws)
             if not wh:
@@ -2952,9 +2952,9 @@ class Scheduler(ServerNode):
 
             ts.prefix.duration_average = avg_duration
 
-        ws.occupancy -= ws.processing[ts]
-        self.total_occupancy -= ws.processing[ts]
-        ws.processing[ts] = 0
+        ws._occupancy -= ws._processing[ts]
+        self.total_occupancy -= ws._processing[ts]
+        ws._processing[ts] = 0
         self.check_idle_saturated(ws)
 
     async def handle_worker(self, comm=None, worker=None):
@@ -3034,7 +3034,7 @@ class Scheduler(ServerNode):
 
         if workers is None:
             ws: WorkerState
-            nthreads = {w: ws.nthreads for w, ws in self.workers.items()}
+            nthreads = {w: ws._nthreads for w, ws in self.workers.items()}
         else:
             workers = [self.coerce_address(w) for w in workers]
             nthreads = {w: self.workers[w].nthreads for w in workers}
@@ -3067,7 +3067,7 @@ class Scheduler(ServerNode):
         for key in keys:
             ts = self.tasks.get(key)
             if ts is not None:
-                who_has[key] = [ws.address for ws in ts.who_has]
+                who_has[key] = [ws._address for ws in ts.who_has]
             else:
                 who_has[key] = []
 
@@ -3110,10 +3110,10 @@ class Scheduler(ServerNode):
                         continue
                     for worker in workers:
                         ws = self.workers.get(worker)
-                        if ws is not None and ts in ws.has_what:
-                            ws.has_what.remove(ts)
+                        if ws is not None and ts in ws._has_what:
+                            ws._has_what.remove(ts)
                             ts.who_has.remove(ws)
-                            ws.nbytes -= ts.get_nbytes()
+                            ws._nbytes -= ts.get_nbytes()
                             self.transitions({key: "released"})
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
@@ -3140,7 +3140,7 @@ class Scheduler(ServerNode):
                 )
 
             ws: WorkerState
-            nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
+            nannies = {addr: ws._nanny for addr, ws in self.workers.items()}
 
             for addr in list(self.workers):
                 try:
@@ -3268,11 +3268,11 @@ class Scheduler(ServerNode):
 
         ws: WorkerState = self.workers[worker_address]
         tasks = {self.tasks[key] for key in keys}
-        ws.has_what -= tasks
+        ws._has_what -= tasks
         for ts in tasks:
             ts.who_has.remove(ws)
-            ws.nbytes -= ts.get_nbytes()
-        self.log_event(ws.address, {"action": "remove-worker-data", "keys": keys})
+            ws._nbytes -= ts.get_nbytes()
+        self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
     async def rebalance(self, comm=None, keys=None, workers=None):
         """Rebalance keys so that each worker stores roughly equal bytes
@@ -3464,7 +3464,7 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        self._delete_worker_data(ws.address, [t.key for t in tasks])
+                        self._delete_worker_data(ws._address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
                     )
                 )
@@ -3487,8 +3487,8 @@ class Scheduler(ServerNode):
                     assert count > 0
 
                     for ws in random.sample(workers - ts.who_has, count):
-                        gathers[ws.address][ts.key] = [
-                            wws.address for wws in ts.who_has
+                        gathers[ws._address][ts.key] = [
+                            wws._address for wws in ts.who_has
                         ]
 
                 results = await asyncio.gather(
@@ -3594,7 +3594,7 @@ class Scheduler(ServerNode):
 
         ws: WorkerState
         with log_errors():
-            if not n and all(ws.processing for ws in self.workers.values()):
+            if not n and all(ws._processing for ws in self.workers.values()):
                 return []
 
             if key is None:
@@ -3607,16 +3607,16 @@ class Scheduler(ServerNode):
             groups = groupby(key, self.workers.values())
 
             limit_bytes = {
-                k: sum(ws.memory_limit for ws in v) for k, v in groups.items()
+                k: sum(ws._memory_limit for ws in v) for k, v in groups.items()
             }
-            group_bytes = {k: sum(ws.nbytes for ws in v) for k, v in groups.items()}
+            group_bytes = {k: sum(ws._nbytes for ws in v) for k, v in groups.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
 
             def _key(group):
                 wws: WorkerState
-                is_idle = not any(wws.processing for wws in groups[group])
+                is_idle = not any(wws._processing for wws in groups[group])
                 bytes = -group_bytes[group]
                 return (is_idle, bytes)
 
@@ -3627,7 +3627,7 @@ class Scheduler(ServerNode):
 
             while idle:
                 group = idle.pop()
-                if n is None and any(ws.processing for ws in groups[group]):
+                if n is None and any(ws._processing for ws in groups[group]):
                     break
 
                 if minimum and n_remain - len(groups[group]) < minimum:
@@ -3697,9 +3697,9 @@ class Scheduler(ServerNode):
                         logger.info("Retire worker names %s", names)
                     names = set(map(str, names))
                     workers = [
-                        ws.address
+                        ws._address
                         for ws in self.workers.values()
-                        if str(ws.name) in names
+                        if str(ws._name) in names
                     ]
                 if workers is None:
                     while True:
@@ -3730,7 +3730,7 @@ class Scheduler(ServerNode):
                         logger.info("Moving %d keys to other workers", len(keys))
                         await self.replicate(
                             keys=keys,
-                            workers=[ws.address for ws in other_workers],
+                            workers=[ws._address for ws in other_workers],
                             n=1,
                             delete=False,
                             lock=False,
@@ -3738,7 +3738,7 @@ class Scheduler(ServerNode):
                     else:
                         return []
 
-                worker_keys = {ws.address: ws.identity() for ws in workers}
+                worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers and worker_keys:
                     await asyncio.gather(
                         *[self.close_worker(worker=w, safe=True) for w in worker_keys]
@@ -3773,9 +3773,9 @@ class Scheduler(ServerNode):
         for key in keys:
             ts = self.tasks.get(key)
             if ts is not None and ts.state == "memory":
-                if ts not in ws.has_what:
-                    ws.nbytes += ts.get_nbytes()
-                    ws.has_what.add(ts)
+                if ts not in ws._has_what:
+                    ws._nbytes += ts.get_nbytes()
+                    ws._has_what.add(ts)
                     ts.who_has.add(ws)
             else:
                 self.worker_send(
@@ -3809,9 +3809,9 @@ class Scheduler(ServerNode):
                     ts.set_nbytes(nbytes[key])
                 for w in workers:
                     ws: WorkerState = self.workers[w]
-                    if ts not in ws.has_what:
-                        ws.nbytes += ts.get_nbytes()
-                        ws.has_what.add(ts)
+                    if ts not in ws._has_what:
+                        ws._nbytes += ts.get_nbytes()
+                        ws._has_what.add(ts)
                         ts.who_has.add(ws)
                 self.report(
                     {"op": "key-in-memory", "key": key, "workers": list(workers)}
@@ -3908,21 +3908,21 @@ class Scheduler(ServerNode):
             return {w: [ts.key for ts in self.workers[w].processing] for w in workers}
         else:
             return {
-                w: [ts.key for ts in ws.processing] for w, ws in self.workers.items()
+                w: [ts.key for ts in ws._processing] for w, ws in self.workers.items()
             }
 
     def get_who_has(self, comm=None, keys=None):
         ws: WorkerState
         if keys is not None:
             return {
-                k: [ws.address for ws in self.tasks[k].who_has]
+                k: [ws._address for ws in self.tasks[k].who_has]
                 if k in self.tasks
                 else []
                 for k in keys
             }
         else:
             return {
-                key: [ws.address for ws in ts.who_has] for key, ts in self.tasks.items()
+                key: [ws._address for ws in ts.who_has] for key, ts in self.tasks.items()
             }
 
     def get_has_what(self, comm=None, workers=None):
@@ -3936,7 +3936,7 @@ class Scheduler(ServerNode):
                 for w in workers
             }
         else:
-            return {w: [ts.key for ts in ws.has_what] for w, ws in self.workers.items()}
+            return {w: [ts.key for ts in ws._has_what] for w, ws in self.workers.items()}
 
     def get_ncores(self, comm=None, workers=None):
         ws: WorkerState
@@ -3944,7 +3944,7 @@ class Scheduler(ServerNode):
             workers = map(self.coerce_address, workers)
             return {w: self.workers[w].nthreads for w in workers if w in self.workers}
         else:
-            return {w: ws.nthreads for w, ws in self.workers.items()}
+            return {w: ws._nthreads for w, ws in self.workers.items()}
 
     async def get_call_stack(self, comm=None, keys=None):
         if keys is not None:
@@ -3993,13 +3993,12 @@ class Scheduler(ServerNode):
 
             return result
 
-    def get_comm_cost(self, ts, ws):
+    def get_comm_cost(self, ts, ws: WorkerState):
         """
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        ws: WorkerState
-        return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
+        return sum(dts.nbytes for dts in ts.dependencies - ws._has_what) / self.bandwidth
 
     def get_task_duration(self, ts, default=None):
         """
@@ -4106,15 +4105,15 @@ class Scheduler(ServerNode):
         """
         ws: WorkerState = ts.processing_on
         ts.processing_on = None
-        w = ws.address
+        w = ws._address
         if w in self.workers:  # may have been removed
-            duration = ws.processing.pop(ts)
-            if not ws.processing:
-                self.total_occupancy -= ws.occupancy
-                ws.occupancy = 0
+            duration = ws._processing.pop(ts)
+            if not ws._processing:
+                self.total_occupancy -= ws._occupancy
+                ws._occupancy = 0
             else:
                 self.total_occupancy -= duration
-                ws.occupancy -= duration
+                ws._occupancy -= duration
             self.check_idle_saturated(ws)
             self.release_resources(ts, ws)
             if send_worker_msg:
@@ -4127,11 +4126,11 @@ class Scheduler(ServerNode):
         Add *ts* to the set of in-memory tasks.
         """
         if self.validate:
-            assert ts not in ws.has_what
+            assert ts not in ws._has_what
 
         ts.who_has.add(ws)
-        ws.has_what.add(ts)
-        ws.nbytes += ts.get_nbytes()
+        ws._has_what.add(ts)
+        ws._nbytes += ts.get_nbytes()
 
         deps = ts.dependents
         if len(deps) > 1:
@@ -4316,14 +4315,14 @@ class Scheduler(ServerNode):
             ws: WorkerState = self.decide_worker(ts)
             if ws is None:
                 return {}
-            worker = ws.address
+            worker = ws._address
 
             duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
 
-            ws.processing[ts] = duration + comm
+            ws._processing[ts] = duration + comm
             ts.processing_on = ws
-            ws.occupancy += duration + comm
+            ws._occupancy += duration + comm
             self.total_occupancy += duration + comm
             ts.state = "processing"
             self.consume_resources(ts, ws)
@@ -4331,7 +4330,7 @@ class Scheduler(ServerNode):
             self.n_tasks += 1
 
             if ts.actor:
-                ws.actors.add(ts)
+                ws._actors.add(ts)
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
@@ -4401,7 +4400,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert ts.processing_on
                 ws = ts.processing_on
-                assert ts in ws.processing
+                assert ts in ws._processing
                 assert not ts.waiting_on
                 assert not ts.who_has, (ts, ts.who_has)
                 assert not ts.exception_blame
@@ -4444,7 +4443,7 @@ class Scheduler(ServerNode):
             #############################
             # Update Timing Information #
             #############################
-            if compute_start and ws.processing.get(ts, True):
+            if compute_start and ws._processing.get(ts, True):
                 # Update average task duration for worker
                 old_duration = ts.prefix.duration_average or 0
                 new_duration = compute_stop - compute_start
@@ -4459,10 +4458,10 @@ class Scheduler(ServerNode):
                 for tts in self.unknown_durations.pop(ts.prefix.name, ()):
                     if tts.processing_on:
                         wws = tts.processing_on
-                        old = wws.processing[tts]
+                        old = wws._processing[tts]
                         comm = self.get_comm_cost(tts, wws)
-                        wws.processing[tts] = avg_duration + comm
-                        wws.occupancy += avg_duration + comm - old
+                        wws._processing[tts] = avg_duration + comm
+                        wws._occupancy += avg_duration + comm - old
                         self.total_occupancy += avg_duration + comm - old
 
             ############################
@@ -4503,7 +4502,7 @@ class Scheduler(ServerNode):
 
             if ts.actor:
                 for ws in ts.who_has:
-                    ws.actors.discard(ts)
+                    ws._actors.discard(ts)
                 if ts.who_wants:
                     ts.exception_blame = ts
                     ts.exception = "Worker holding Actor was lost"
@@ -4519,11 +4518,11 @@ class Scheduler(ServerNode):
 
             # XXX factor this out?
             for ws in ts.who_has:
-                ws.has_what.remove(ts)
-                ws.nbytes -= ts.get_nbytes()
+                ws._has_what.remove(ts)
+                ws._nbytes -= ts.get_nbytes()
                 ts.group.nbytes_in_memory -= ts.get_nbytes()
                 self.worker_send(
-                    ws.address, {"op": "delete-data", "keys": [key], "report": False}
+                    ws._address, {"op": "delete-data", "keys": [key], "report": False}
                 )
             ts.who_has.clear()
 
@@ -4720,7 +4719,7 @@ class Scheduler(ServerNode):
 
             if ts.actor:
                 ws = ts.processing_on
-                ws.actors.remove(ts)
+                ws._actors.remove(ts)
 
             self._remove_from_processing(ts)
 
@@ -4842,10 +4841,11 @@ class Scheduler(ServerNode):
         if ts.who_has:
             ts.group.nbytes_in_memory -= ts.get_nbytes()
 
+        ws: WorkerState
         for ws in ts.who_has:
-            ws.has_what.remove(ts)
-            ws.nbytes -= ts.get_nbytes()
-            w = ws.address
+            ws._has_what.remove(ts)
+            ws._nbytes -= ts.get_nbytes()
+            w = ws._address
             if w in self.workers:  # in case worker has died
                 self.worker_send(
                     w, {"op": "delete-data", "keys": [key], "report": False}
@@ -4877,7 +4877,7 @@ class Scheduler(ServerNode):
 
             if ts.actor:
                 for ws in ts.who_has:
-                    ws.actors.discard(ts)
+                    ws._actors.discard(ts)
 
             self._propagate_forgotten(ts, recommendations)
 
@@ -5090,10 +5090,10 @@ class Scheduler(ServerNode):
         if total_nthreads == 0 or ws.status == Status.closed:
             return
         if occ < 0:
-            occ = ws.occupancy
+            occ = ws._occupancy
 
-        nc: Py_ssize_t = ws.nthreads
-        p: Py_ssize_t = len(ws.processing)
+        nc: Py_ssize_t = ws._nthreads
+        p: Py_ssize_t = len(ws._processing)
         total_occupancy: double = self.total_occupancy
         avg: double = total_occupancy / total_nthreads
 
@@ -5163,12 +5163,12 @@ class Scheduler(ServerNode):
     def consume_resources(self, ts, ws: WorkerState):
         if ts.resource_restrictions:
             for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] += required
+                ws._used_resources[r] += required
 
     def release_resources(self, ts, ws: WorkerState):
         if ts.resource_restrictions:
             for r, required in ts.resource_restrictions.items():
-                ws.used_resources[r] -= required
+                ws._used_resources[r] -= required
 
     #####################
     # Utility functions #
@@ -5177,16 +5177,16 @@ class Scheduler(ServerNode):
     def add_resources(self, comm=None, worker=None, resources=None):
         ws: WorkerState = self.workers[worker]
         if resources:
-            ws.resources.update(resources)
-        ws.used_resources = {}
-        for resource, quantity in ws.resources.items():
-            ws.used_resources[resource] = 0
+            ws._resources.update(resources)
+        ws._used_resources = {}
+        for resource, quantity in ws._resources.items():
+            ws._used_resources[resource] = 0
             self.resources[resource][worker] = quantity
         return "OK"
 
     def remove_resources(self, worker):
         ws: WorkerState = self.workers[worker]
-        for resource, quantity in ws.resources.items():
+        for resource, quantity in ws._resources.items():
             del self.resources[resource][worker]
 
     def coerce_address(self, addr, resolve=True):
@@ -5260,13 +5260,13 @@ class Scheduler(ServerNode):
         comm_bytes = sum(
             [dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has]
         )
-        stack_time = ws.occupancy / ws.nthreads
+        stack_time = ws._occupancy / ws._nthreads
         start_time = comm_bytes / self.bandwidth + stack_time
 
         if ts.actor:
-            return (len(ws.actors), start_time, ws.nbytes)
+            return (len(ws._actors), start_time, ws._nbytes)
         else:
-            return (start_time, ws.nbytes)
+            return (start_time, ws._nbytes)
 
     async def get_profile(
         self,
@@ -5439,8 +5439,8 @@ class Scheduler(ServerNode):
             tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
-            threads=sum(ws.nthreads for ws in self.workers.values()),
-            memory=format_bytes(sum(ws.memory_limit for ws in self.workers.values())),
+            threads=sum(ws._nthreads for ws in self.workers.values()),
+            memory=format_bytes(sum(ws._memory_limit for ws in self.workers.values())),
             code=code,
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
@@ -5542,7 +5542,7 @@ class Scheduler(ServerNode):
                     ws: WorkerState = workers[worker_index % len(workers)]
                     worker_index += 1
                     try:
-                        if ws is None or not ws.processing:
+                        if ws is None or not ws._processing:
                             continue
                         self._reevaluate_occupancy_worker(ws)
                     finally:
@@ -5563,24 +5563,24 @@ class Scheduler(ServerNode):
 
     def _reevaluate_occupancy_worker(self, ws: WorkerState):
         """ See reevaluate_occupancy """
-        old = ws.occupancy
+        old = ws._occupancy
 
         new = 0
         nbytes = 0
-        for ts in ws.processing:
+        for ts in ws._processing:
             duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
-            ws.processing[ts] = duration + comm
+            ws._processing[ts] = duration + comm
             new += duration + comm
 
-        ws.occupancy = new
+        ws._occupancy = new
         self.total_occupancy += new - old
         self.check_idle_saturated(ws)
 
         # significant increase in duration
         if (new > old * 1.3) and ("stealing" in self.extensions):
             steal = self.extensions["stealing"]
-            for ts in ws.processing:
+            for ts in ws._processing:
                 steal.remove_key_from_stealable(ts)
                 steal.put_key_in_stealable(ts)
 
@@ -5588,19 +5588,19 @@ class Scheduler(ServerNode):
         ws: WorkerState
         now = time()
         for ws in self.workers.values():
-            if (ws.last_seen < now - self.worker_ttl) and (
-                ws.last_seen < now - 10 * heartbeat_interval(len(self.workers))
+            if (ws._last_seen < now - self.worker_ttl) and (
+                ws._last_seen < now - 10 * heartbeat_interval(len(self.workers))
             ):
                 logger.warning(
                     "Worker failed to heartbeat within %s seconds. Closing: %s",
                     self.worker_ttl,
                     ws,
                 )
-                await self.remove_worker(address=ws.address)
+                await self.remove_worker(address=ws._address)
 
     def check_idle(self):
         ws: WorkerState
-        if any(ws.processing for ws in self.workers.values()) or self.unrunnable:
+        if any(ws._processing for ws in self.workers.values()) or self.unrunnable:
             self.idle_since = None
             return
         elif not self.idle_since:
@@ -5642,7 +5642,7 @@ class Scheduler(ServerNode):
         ws: WorkerState
         tasks_processing = 0
         for ws in self.workers.values():
-            tasks_processing += len(ws.processing)
+            tasks_processing += len(ws._processing)
 
             if tasks_processing > cpu:
                 break
@@ -5653,8 +5653,8 @@ class Scheduler(ServerNode):
             cpu = max(1, cpu)
 
         # Memory
-        limit_bytes = {addr: ws.memory_limit for addr, ws in self.workers.items()}
-        worker_bytes = [ws.nbytes for ws in self.workers.values()]
+        limit_bytes = {addr: ws._memory_limit for addr, ws in self.workers.items()}
+        worker_bytes = [ws._nbytes for ws in self.workers.values()]
         limit = sum(limit_bytes.values())
         total = sum(worker_bytes)
         if total > 0.6 * limit:
@@ -5790,11 +5790,11 @@ def validate_task_state(ts):
             assert isinstance(ts.type, str)
         assert not any(ts in dts.waiting_on for dts in ts.dependents)
         for ws in ts.who_has:
-            assert ts in ws.has_what, (
+            assert ts in ws._has_what, (
                 "not in who_has' has_what",
                 str(ts),
                 str(ws),
-                str(ws.has_what),
+                str(ws._has_what),
             )
 
     if ts.who_wants:
@@ -5809,13 +5809,13 @@ def validate_task_state(ts):
 
     if ts.actor:
         if ts.state == "memory":
-            assert sum([ts in ws.actors for ws in ts.who_has]) == 1
+            assert sum([ts in ws._actors for ws in ts.who_has]) == 1
         if ts.state == "processing":
             assert ts in ts.processing_on.actors
 
 
 def validate_worker_state(ws: WorkerState):
-    for ts in ws.has_what:
+    for ts in ws._has_what:
         assert ws in ts.who_has, (
             "not in has_what' who_has",
             str(ws),
@@ -5823,7 +5823,7 @@ def validate_worker_state(ws: WorkerState):
             str(ts.who_has),
         )
 
-    for ts in ws.actors:
+    for ts in ws._actors:
         assert ts.state in ("memory", "processing")
 
 
