@@ -1678,7 +1678,8 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            nanny_addr = self.workers[worker].nanny
+            ws = self.workers[worker]
+            nanny_addr = ws.nanny
             address = nanny_addr or worker
 
             self.worker_send(worker, {"op": "close", "report": False})
