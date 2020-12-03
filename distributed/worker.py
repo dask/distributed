@@ -1139,12 +1139,9 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [%s]" % self.address)
 
-        plugins_msgs = await asyncio.gather(
+        await asyncio.gather(
             *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
         )
-        for msg in plugins_msgs:
-            if msg["status"] != "OK":
-                raise msg["exception"].data
         self._pending_plugins = ()
 
         await self._register_with_scheduler()
@@ -2392,13 +2389,9 @@ class Worker(ServerNode):
 
                 logger.info("Starting Worker plugin %s" % name)
                 if hasattr(plugin, "setup"):
-                    try:
-                        result = plugin.setup(worker=self)
-                        if isawaitable(result):
-                            result = await result
-                    except Exception as e:
-                        msg = error_message(e)
-                        return msg
+                    result = plugin.setup(worker=self)
+                    if isawaitable(result):
+                        result = await result
 
                 return {"status": "OK"}
 
