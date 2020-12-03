@@ -6300,6 +6300,21 @@ async def test_log_event(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_annotations_task_state(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(qux="bar", priority=100):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(
+        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
+    )
+
+
+@gen_cluster(client=True)
 async def test_annotations_priorities(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
