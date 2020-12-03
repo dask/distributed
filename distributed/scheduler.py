@@ -382,6 +382,82 @@ class WorkerState:
         return type(self) == type(other) and self.address == other.address
 
     @property
+    def actors(self):
+        return self._actors
+
+    @property
+    def address(self):
+        return self._address
+
+    @property
+    def bandwidth(self):
+        return self._bandwidth
+
+    @property
+    def extra(self):
+        return self._extra
+
+    @property
+    def has_what(self):
+        return self._has_what
+
+    @property
+    def host(self):
+        return get_address_host(self.address)
+
+    @property
+    def last_seen(self):
+        return self._last_seen
+
+    @property
+    def local_directory(self):
+        return self._local_directory
+
+    @property
+    def memory_limit(self):
+        return self._memory_limit
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def nanny(self):
+        return self._nanny
+
+    @property
+    def nbytes(self):
+        return self._nbytes
+
+    @property
+    def nthreads(self):
+        return self._nthreads
+
+    @property
+    def occupancy(self):
+        return self._occupancy
+
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
+    def processing(self):
+        return self._processing
+
+    @property
+    def resources(self):
+        return self._resources
+
+    @property
+    def services(self):
+        return self._services
+
+    @property
     def status(self):
         return self._status
 
@@ -397,8 +473,16 @@ class WorkerState:
             raise TypeError(f"expected Status or str, got {new_status}")
 
     @property
-    def host(self):
-        return get_address_host(self.address)
+    def time_delay(self):
+        return self._time_delay
+
+    @property
+    def used_resources(self):
+        return self._used_resources
+
+    @property
+    def versions(self):
+        return self._versions
 
     def clean(self):
         """ Return a version of this object that is appropriate for serialization """
