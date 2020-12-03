@@ -201,11 +201,12 @@ class ClientState:
         return self._versions
 
 
+@cclass
 class WorkerState:
     """
     A simple object holding information about a worker.
 
-    .. attribute:: address
+    .. attribute:: address: str
 
        This worker's unique key.  This can be its connected address
        (such as ``'tcp://127.0.0.1:8891'``) or an alias (such as ``'alice'``).
@@ -253,7 +254,7 @@ class WorkerState:
        The numbers in this dictionary can only be less or equal than
        those in this worker's :attr:`resources`.
 
-    .. attribute:: occupancy: Number
+    .. attribute:: occupancy: double
 
        The total expected runtime, in seconds, of all tasks currently
        processing on this worker.  This is the sum of all the costs in
@@ -267,7 +268,7 @@ class WorkerState:
 
        Address of the associated Nanny, if present
 
-    .. attribute:: last_seen: Number
+    .. attribute:: last_seen: Py_ssize_t
 
        The last time we received a heartbeat from this worker, in local
        scheduler time.
@@ -281,6 +282,30 @@ class WorkerState:
     """
 
     # XXX need a state field to signal active/removed?
+
+    actors: set
+    address: str
+    bandwidth: double
+    extra: dict
+    has_what: set
+    _hash: Py_hash_t
+    last_seen: double
+    local_directory: str
+    memory_limit: Py_ssize_t
+    metrics: dict
+    name: str
+    nanny: str
+    nbytes: Py_ssize_t
+    nthreads: Py_ssize_t
+    occupancy: double
+    pid: Py_ssize_t
+    processing: dict
+    resources: dict
+    services: dict
+    _status: Status
+    time_delay: double
+    used_resources: dict
+    versions: dict
 
     __slots__ = (
         "actors",
@@ -310,16 +335,16 @@ class WorkerState:
 
     def __init__(
         self,
-        address=None,
-        pid=0,
-        name=None,
-        nthreads=0,
-        memory_limit=0,
-        local_directory=None,
-        services=None,
-        versions=None,
-        nanny=None,
-        extra=None,
+        address: str = None,
+        pid: Py_ssize_t = 0,
+        name: str = None,
+        nthreads: Py_ssize_t = 0,
+        memory_limit: Py_ssize_t = 0,
+        local_directory: str = None,
+        services: dict = None,
+        versions: dict = None,
+        nanny: str = None,
+        extra: dict = None,
     ):
         self.address = address
         self.pid = pid
