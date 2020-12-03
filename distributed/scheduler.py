@@ -338,7 +338,9 @@ class WorkerState:
         self.metrics = {}
         self.last_seen = 0
         self.time_delay = 0
-        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth = float(
+            parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        )
 
         self.actors = set()
         self.has_what = set()
