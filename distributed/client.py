@@ -353,7 +353,11 @@ class Future(WrappedKey):
     def release(self, _in_destructor=False):
         # NOTE: this method can be called from different threads
         # (see e.g. Client.get() or Future.__del__())
-        if not self._cleared and self.client.generation == self._generation:
+        if (
+            not self._cleared
+            and self.client.generation == self._generation
+            and self.client.scheduler is not None
+        ):
             self._cleared = True
             try:
                 self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
