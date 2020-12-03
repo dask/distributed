@@ -433,6 +433,10 @@ class WorkerState:
     def nbytes(self):
         return self._nbytes
 
+    @nbytes.setter
+    def nbytes(self, v: Py_ssize_t):
+        self._nbytes = v
+
     @property
     def nthreads(self):
         return self._nthreads
@@ -440,6 +444,10 @@ class WorkerState:
     @property
     def occupancy(self):
         return self._occupancy
+
+    @occupancy.setter
+    def occupancy(self, v: double):
+        self._occupancy = v
 
     @property
     def pid(self):
