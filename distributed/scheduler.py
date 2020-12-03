@@ -293,7 +293,7 @@ class WorkerState:
     _local_directory: str
     _memory_limit: Py_ssize_t
     _metrics: dict
-    _name: str
+    _name: object
     _nanny: str
     _nbytes: Py_ssize_t
     _nthreads: Py_ssize_t
@@ -337,7 +337,7 @@ class WorkerState:
         self,
         address: str = None,
         pid: Py_ssize_t = 0,
-        name: str = None,
+        name: object = None,
         nthreads: Py_ssize_t = 0,
         memory_limit: Py_ssize_t = 0,
         local_directory: str = None,
