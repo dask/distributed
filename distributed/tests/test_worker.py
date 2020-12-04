@@ -1721,69 +1721,6 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
 
 @pytest.mark.asyncio
-async def test_outlier_timings(cleanup):
-    """Test adaptive duration estimates for outliers (defined as tasks running
-    2x average duration).
-    """
-    async with await Scheduler() as s:
-        async with await Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                # error tolerance on estimated duration (needed cause exec times
-                # depend on worker heartbeats)
-                tolerance = 0.2
-                ws = s.workers[w.address]
-                # initialize a task to set initial duration average to 0.1
-                r = c.submit(slowinc, 2.2, delay=0.1)
-                await r
-                # sleep times for some tasks with a shifting average duration
-                times = [5.0] * 3 + [11.0] * 3 + [15.0]
-                # Store expected task duration after t seconds
-                # (NOTE t is the _sum_ of sleep times).
-                # at any t:
-                #   - if t < 2 * cur_avg then duration = cur_avg
-                #   - if t > 2 * cur_avg then duration = 2 * t
-                # the cur_avg will depend on tasks that already completed by t
-                sleep2duration = [
-                    # avg at this point will be 0.1
-                    (0.13, 0.1),
-                    # we're in the outlier regime
-                    (1, 2),  # 1s
-                    (1, 4),  # 2s
-                    (2, 8),  # 4s
-                    # the new average is ~4.5 so no longer an outlier
-                    (3, 5.0),  # 7s
-                    # we're an outlier again so expect 2x time
-                    (3.5, 21),  # 10.5s
-                    # back to average
-                    (1.5, 11.0),  # 12s
-                    (3, 11.0),  # 15s
-                ]
-                key2time = dict()
-                # start a bunch of tasks with different sleep intervals
-                for n, td in enumerate(times):
-                    r = c.submit(slowinc, n, delay=td)
-                    key2time[r.key] = (td, r)
-                t0 = time()
-                # every time we wait up we check that any running tasks have
-                # apporpriate durations
-                for (sleep_time, exp_avg) in sleep2duration:
-                    await asyncio.sleep(sleep_time)
-                    # transition any finished tasks so their averages get
-                    # updated in the scheduler
-                    for key, (td, r) in key2time.items():
-                        if td < sleep_time:
-                            await r
-                    for ts in ws.processing:
-                        # logger.info(f"***************************************************************")
-                        # logger.info(f"TIMES ***  {time() - t0}  t={sleep_time}, avg[{ts}] = {ws.processing[ts]}")
-                        # logger.info(f"***************************************************************")
-                        expected_duration = ws.processing[ts]
-                        # expected duraction should be close to d0
-                        assert expected_duration > (1 - tolerance) * exp_avg
-                        assert expected_duration < (1 + tolerance) * exp_avg
-
-
-@pytest.mark.asyncio
 async def test_bad_local_directory(cleanup):
     async with await Scheduler() as s:
         try:
