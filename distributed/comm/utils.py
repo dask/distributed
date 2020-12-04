@@ -13,11 +13,10 @@ from ..utils import get_ip, get_ipv6, nbytes, offload
 logger = logging.getLogger(__name__)
 
 
-def get_offload_threshold():
-    offload_threshold = dask.config.get("distributed.comm.offload")
-    if isinstance(offload_threshold, str):
-        offload_threshold = parse_bytes(offload_threshold)
-    return offload_threshold
+# Offload (de)serializing large frames to improve event loop responsiveness.
+OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
+if isinstance(OFFLOAD_THRESHOLD, str):
+    OFFLOAD_THRESHOLD = parse_bytes(OFFLOAD_THRESHOLD)
 
 
 async def to_frames(
@@ -39,9 +38,7 @@ async def to_frames(
             logger.exception(e)
             raise
 
-    # Offload serializing large frames to improve event loop responsiveness.
-    offload_threshold = get_offload_threshold()
-    if offload_threshold and allow_offload:
+    if OFFLOAD_THRESHOLD and allow_offload:
         try:
             msg_size = sizeof(msg)
         except RecursionError:
@@ -49,7 +46,7 @@ async def to_frames(
     else:
         msg_size = 0
 
-    if allow_offload and offload_threshold and msg_size > offload_threshold:
+    if allow_offload and OFFLOAD_THRESHOLD and msg_size > OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
     else:
         return _to_frames()
@@ -75,11 +72,9 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
             logger.error("truncated data stream (%d bytes): %s", size, datastr)
             raise
 
-    # Offload deserializing large frames to improve event loop responsiveness.
-    offload_threshold = get_offload_threshold()
-    if allow_offload and deserialize and offload_threshold:
+    if allow_offload and deserialize and OFFLOAD_THRESHOLD:
         size = sum(map(nbytes, frames))
-    if allow_offload and deserialize and offload_threshold and size > offload_threshold:
+    if allow_offload and deserialize and OFFLOAD_THRESHOLD and size > OFFLOAD_THRESHOLD:
         res = await offload(_from_frames)
     else:
         res = _from_frames()

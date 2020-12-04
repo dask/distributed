@@ -1759,7 +1759,7 @@ async def test_taskstate_metadata(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_executor_offload(cleanup):
+async def test_executor_offload(cleanup, monkeypatch):
     class SameThreadClass:
         def __getstate__(self):
             return ()
@@ -1768,17 +1768,18 @@ async def test_executor_offload(cleanup):
             self._thread_ident = threading.get_ident()
             return self
 
-    with dask.config.set(distributed__comm__offload=1):
-        async with Scheduler() as s:
-            async with Worker(s.address, executor="offload") as w:
-                from distributed.utils import _offload_executor
+    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
 
-                assert w.executor is _offload_executor
+    async with Scheduler() as s:
+        async with Worker(s.address, executor="offload") as w:
+            from distributed.utils import _offload_executor
 
-                async with Client(s.address, asynchronous=True) as c:
-                    x = SameThreadClass()
+            assert w.executor is _offload_executor
 
-                    def f(x):
-                        return threading.get_ident() == x._thread_ident
+            async with Client(s.address, asynchronous=True) as c:
+                x = SameThreadClass()
 
-                    assert await c.submit(f, x)
+                def f(x):
+                    return threading.get_ident() == x._thread_ident
+
+                assert await c.submit(f, x)

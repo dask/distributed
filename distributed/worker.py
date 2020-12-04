@@ -32,7 +32,7 @@ from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
-from .comm.utils import get_offload_threshold
+from .comm.utils import OFFLOAD_THRESHOLD
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .http import get_handlers
@@ -2453,8 +2453,7 @@ class Worker(ServerNode):
         try:
             start = time()
             # Offload deserializing large tasks
-            offload_threshold = get_offload_threshold()
-            if sizeof(ts.runspec) > offload_threshold:
+            if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
                 from distributed.utils import _offload_executor
 
                 function, args, kwargs = _offload_executor.submit(
