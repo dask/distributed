@@ -27,7 +27,7 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.diagnostics.plugin import PipInstall, WorkerPlugin
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -53,6 +53,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     a,
     b,
+    TaskStateMetadataPlugin,
 )
 
 
@@ -572,7 +573,6 @@ async def test_clean(c, s, a, b):
     collections = [
         a.tasks,
         a.data,
-        a.nbytes,
         a.threads,
     ]
     for c in collections:
@@ -666,7 +666,11 @@ async def test_clean_nbytes(c, s, a, b):
     await wait(future)
 
     await asyncio.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    assert (
+        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        == 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
@@ -1692,6 +1696,7 @@ async def test_heartbeat_executing(cleanup):
                 assert f.key in ws.metrics["executing"]
                 await f
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reconnect", [True, False])
 async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
@@ -1714,6 +1719,7 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
                     assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
 
+
 @pytest.mark.asyncio
 async def test_outlier_timings(cleanup):
     """Test adaptive duration estimates for outliers (defined as tasks running
@@ -1730,51 +1736,51 @@ async def test_outlier_timings(cleanup):
                 r = c.submit(slowinc, 2.2, delay=0.1)
                 await r
                 # sleep times for some tasks with a shifting average duration
-                times = [5.]*3 + [11.]*3 + [15.]
-                # Store expected task duration after t seconds 
+                times = [5.0] * 3 + [11.0] * 3 + [15.0]
+                # Store expected task duration after t seconds
                 # (NOTE t is the _sum_ of sleep times).
                 # at any t:
                 #   - if t < 2 * cur_avg then duration = cur_avg
                 #   - if t > 2 * cur_avg then duration = 2 * t
                 # the cur_avg will depend on tasks that already completed by t
                 sleep2duration = [
-                        # avg at this point will be 0.1
-                        (0.13, 0.1), 
-                        # we're in the outlier regime
-                        (1, 2), # 1s
-                        (1, 4), # 2s
-                        (2, 8), # 4s
-                        # the new average is ~4.5 so no longer an outlier
-                        (3, 5.), # 7s
-                        # we're an outlier again so expect 2x time
-                        (3.5, 21), # 10.5s
-                        # back to average
-                        (1.5, 11.), # 12s
-                        (3, 11.), # 15s
-                        ]
-                key2time=dict()
+                    # avg at this point will be 0.1
+                    (0.13, 0.1),
+                    # we're in the outlier regime
+                    (1, 2),  # 1s
+                    (1, 4),  # 2s
+                    (2, 8),  # 4s
+                    # the new average is ~4.5 so no longer an outlier
+                    (3, 5.0),  # 7s
+                    # we're an outlier again so expect 2x time
+                    (3.5, 21),  # 10.5s
+                    # back to average
+                    (1.5, 11.0),  # 12s
+                    (3, 11.0),  # 15s
+                ]
+                key2time = dict()
                 # start a bunch of tasks with different sleep intervals
-                for n,td in enumerate(times):
+                for n, td in enumerate(times):
                     r = c.submit(slowinc, n, delay=td)
-                    key2time[r.key] = (td,r)
-                t0=time()
+                    key2time[r.key] = (td, r)
+                t0 = time()
                 # every time we wait up we check that any running tasks have
                 # apporpriate durations
                 for (sleep_time, exp_avg) in sleep2duration:
                     await asyncio.sleep(sleep_time)
                     # transition any finished tasks so their averages get
                     # updated in the scheduler
-                    for key,(td,r) in key2time.items():
+                    for key, (td, r) in key2time.items():
                         if td < sleep_time:
                             await r
                     for ts in ws.processing:
-                        #logger.info(f"***************************************************************")
-                        #logger.info(f"TIMES ***  {time() - t0}  t={sleep_time}, avg[{ts}] = {ws.processing[ts]}")
-                        #logger.info(f"***************************************************************")
+                        # logger.info(f"***************************************************************")
+                        # logger.info(f"TIMES ***  {time() - t0}  t={sleep_time}, avg[{ts}] = {ws.processing[ts]}")
+                        # logger.info(f"***************************************************************")
                         expected_duration = ws.processing[ts]
                         # expected duraction should be close to d0
-                        assert expected_duration > (1-tolerance) * exp_avg
-                        assert expected_duration < (1+tolerance) * exp_avg
+                        assert expected_duration > (1 - tolerance) * exp_avg
+                        assert expected_duration < (1 + tolerance) * exp_avg
 
 
 @pytest.mark.asyncio
@@ -1796,24 +1802,11 @@ async def test_bad_local_directory(cleanup):
 
 @pytest.mark.asyncio
 async def test_taskstate_metadata(cleanup):
-    class MyPlugin(WorkerPlugin):
-        """WorkPlugin to populate TaskState.metadata"""
-
-        def setup(self, worker):
-            self.worker = worker
-
-        def transition(self, key, start, finish, **kwargs):
-            ts = self.worker.tasks[key]
-
-            if start == "ready" and finish == "executing":
-                ts.metadata["start_time"] = time()
-            elif start == "executing" and finish == "memory":
-                ts.metadata["stop_time"] = time()
 
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
-                await c.register_worker_plugin(MyPlugin())
+                await c.register_worker_plugin(TaskStateMetadataPlugin())
 
                 f = c.submit(inc, 1)
                 await f

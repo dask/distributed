@@ -20,7 +20,6 @@ import psutil
 import sortedcontainers
 
 from tlz import (
-    frequencies,
     merge,
     pluck,
     merge_sorted,
@@ -84,6 +83,20 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.highlevelgraph import highlevelgraph_unpack
+
+try:
+    from cython import cclass, double, Py_hash_t, Py_ssize_t
+except ImportError:
+    from ctypes import (
+        c_double as double,
+        c_ssize_t as Py_hash_t,
+        c_ssize_t as Py_ssize_t,
+    )
+
+    def cclass(cls):
+        return cls
+
 
 if sys.version_info < (3, 8):
     try:
@@ -116,6 +129,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
+@cclass
 class ClientState:
     """
     A simple object holding information about a client.
@@ -137,19 +151,54 @@ class ClientState:
 
     """
 
-    __slots__ = ("client_key", "wants_what", "last_seen", "versions")
+    _client_key: str
+    _hash: Py_hash_t
+    _wants_what: set
+    _last_seen: double
+    _versions: dict
 
-    def __init__(self, client, versions=None):
-        self.client_key = client
-        self.wants_what = set()
-        self.last_seen = time()
-        self.versions = versions or {}
+    __slots__ = ("_client_key", "_hash", "_wants_what", "_last_seen", "_versions")
+
+    def __init__(self, client: str, versions: dict = None):
+        self._client_key = client
+        self._hash = hash(client)
+        self._wants_what = set()
+        self._last_seen = time()
+        self._versions = versions or {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        typ_self: type = type(self)
+        typ_other: type = type(other)
+        if typ_self == typ_other:
+            other_cs: ClientState = other
+            return self._client_key == other_cs._client_key
+        else:
+            return False
 
     def __repr__(self):
-        return "<Client %r>" % (self.client_key,)
+        return "<Client '%s'>" % self._client_key
 
     def __str__(self):
-        return self.client_key
+        return self._client_key
+
+    @property
+    def client_key(self):
+        return self._client_key
+
+    @property
+    def wants_what(self):
+        return self._wants_what
+
+    @property
+    def last_seen(self):
+        return self._last_seen
+
+    @property
+    def versions(self):
+        return self._versions
 
 
 class WorkerState:
@@ -239,6 +288,7 @@ class WorkerState:
         "bandwidth",
         "extra",
         "has_what",
+        "_hash",
         "last_seen",
         "local_directory",
         "memory_limit",
@@ -281,6 +331,7 @@ class WorkerState:
         self.versions = versions or {}
         self.nanny = nanny
 
+        self._hash = hash(address)
         self._status = Status.running
         self.nbytes = 0
         self.occupancy = 0
@@ -298,7 +349,7 @@ class WorkerState:
         self.extra = extra or {}
 
     def __hash__(self):
-        return hash(self.address)
+        return self._hash
 
     def __eq__(self, other):
         return type(self) == type(other) and self.address == other.address
@@ -335,7 +386,7 @@ class WorkerState:
             nanny=self.nanny,
             extra=self.extra,
         )
-        ws.processing = {ts.key for ts in self.processing}
+        ws.processing = {ts.key: cost for ts, cost in self.processing.items()}
         return ws
 
     def __repr__(self):
@@ -371,239 +422,243 @@ class WorkerState:
 
 class TaskState:
     """
-        A simple object holding information about a task.
+    A simple object holding information about a task.
 
-        .. attribute:: key: str
+    .. attribute:: key: str
 
-           The key is the unique identifier of a task, generally formed
-           from the name of the function, followed by a hash of the function
-           and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
+       The key is the unique identifier of a task, generally formed
+       from the name of the function, followed by a hash of the function
+       and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
 
-        .. attribute:: prefix: TaskPrefix
+    .. attribute:: prefix: TaskPrefix
 
-           The broad class of tasks to which this task belongs like "inc" or
-           "read_csv"
+       The broad class of tasks to which this task belongs like "inc" or
+       "read_csv"
 
-        .. attribute:: run_spec: object
+    .. attribute:: run_spec: object
 
-           A specification of how to run the task.  The type and meaning of this
-           value is opaque to the scheduler, as it is only interpreted by the
-           worker to which the task is sent for executing.
+       A specification of how to run the task.  The type and meaning of this
+       value is opaque to the scheduler, as it is only interpreted by the
+       worker to which the task is sent for executing.
 
-           As a special case, this attribute may also be ``None``, in which case
-           the task is "pure data" (such as, for example, a piece of data loaded
-           in the scheduler using :meth:`Client.scatter`).  A "pure data" task
-           cannot be computed again if its value is lost.
+       As a special case, this attribute may also be ``None``, in which case
+       the task is "pure data" (such as, for example, a piece of data loaded
+       in the scheduler using :meth:`Client.scatter`).  A "pure data" task
+       cannot be computed again if its value is lost.
 
-        .. attribute:: priority: tuple
+    .. attribute:: priority: tuple
 
-           The priority provides each task with a relative ranking which is used
-           to break ties when many tasks are being considered for execution.
+       The priority provides each task with a relative ranking which is used
+       to break ties when many tasks are being considered for execution.
 
-           This ranking is generally a 2-item tuple.  The first (and dominant)
-           item corresponds to when it was submitted.  Generally, earlier tasks
-           take precedence.  The second item is determined by the client, and is
-           a way to prioritize tasks within a large graph that may be important,
-           such as if they are on the critical path, or good to run in order to
-           release many dependencies.  This is explained further in
-           :doc:`Scheduling Policy <scheduling-policies>`.
+       This ranking is generally a 2-item tuple.  The first (and dominant)
+       item corresponds to when it was submitted.  Generally, earlier tasks
+       take precedence.  The second item is determined by the client, and is
+       a way to prioritize tasks within a large graph that may be important,
+       such as if they are on the critical path, or good to run in order to
+       release many dependencies.  This is explained further in
+       :doc:`Scheduling Policy <scheduling-policies>`.
 
-        .. attribute:: state: str
+    .. attribute:: state: str
 
-           This task's current state.  Valid states include ``released``,
-           ``waiting``, ``no-worker``, ``processing``, ``memory``, ``erred``
-           and ``forgotten``.  If it is ``forgotten``, the task isn't stored
-           in the ``tasks`` dictionary anymore and will probably disappear
-           soon from memory.
+       This task's current state.  Valid states include ``released``,
+       ``waiting``, ``no-worker``, ``processing``, ``memory``, ``erred``
+       and ``forgotten``.  If it is ``forgotten``, the task isn't stored
+       in the ``tasks`` dictionary anymore and will probably disappear
+       soon from memory.
 
-        .. attribute:: dependencies: {TaskState}
+    .. attribute:: dependencies: {TaskState}
 
-           The set of tasks this task depends on for proper execution.  Only
-           tasks still alive are listed in this set.  If, for whatever reason,
-           this task also depends on a forgotten task, the
-           :attr:`has_lost_dependencies` flag is set.
+       The set of tasks this task depends on for proper execution.  Only
+       tasks still alive are listed in this set.  If, for whatever reason,
+       this task also depends on a forgotten task, the
+       :attr:`has_lost_dependencies` flag is set.
 
-           A task can only be executed once all its dependencies have already
-           been successfully executed and have their result stored on at least
-           one worker.  This is tracked by progressively draining the
-           :attr:`waiting_on` set.
+       A task can only be executed once all its dependencies have already
+       been successfully executed and have their result stored on at least
+       one worker.  This is tracked by progressively draining the
+       :attr:`waiting_on` set.
 
-        .. attribute:: dependents: {TaskState}
+    .. attribute:: dependents: {TaskState}
 
-           The set of tasks which depend on this task.  Only tasks still alive
-           are listed in this set.
+       The set of tasks which depend on this task.  Only tasks still alive
+       are listed in this set.
 
-           This is the reverse mapping of :attr:`dependencies`.
+       This is the reverse mapping of :attr:`dependencies`.
 
-        .. attribute:: has_lost_dependencies: bool
+    .. attribute:: has_lost_dependencies: bool
 
-           Whether any of the dependencies of this task has been forgotten.
-           For memory consumption reasons, forgotten tasks are not kept in
-           memory even though they may have dependent tasks.  When a task is
-           forgotten, therefore, each of its dependents has their
-           :attr:`has_lost_dependencies` attribute set to ``True``.
+       Whether any of the dependencies of this task has been forgotten.
+       For memory consumption reasons, forgotten tasks are not kept in
+       memory even though they may have dependent tasks.  When a task is
+       forgotten, therefore, each of its dependents has their
+       :attr:`has_lost_dependencies` attribute set to ``True``.
 
-           If :attr:`has_lost_dependencies` is true, this task cannot go
-           into the "processing" state anymore.
+       If :attr:`has_lost_dependencies` is true, this task cannot go
+       into the "processing" state anymore.
 
-        .. attribute:: waiting_on: {TaskState}
+    .. attribute:: waiting_on: {TaskState}
 
-           The set of tasks this task is waiting on *before* it can be executed.
-           This is always a subset of :attr:`dependencies`.  Each time one of the
-           dependencies has finished processing, it is removed from the
-           :attr:`waiting_on` set.
+       The set of tasks this task is waiting on *before* it can be executed.
+       This is always a subset of :attr:`dependencies`.  Each time one of the
+       dependencies has finished processing, it is removed from the
+       :attr:`waiting_on` set.
 
-           Once :attr:`waiting_on` becomes empty, this task can move from the
-           "waiting" state to the "processing" state (unless one of the
-           dependencies errored out, in which case this task is instead
-           marked "erred").
+       Once :attr:`waiting_on` becomes empty, this task can move from the
+       "waiting" state to the "processing" state (unless one of the
+       dependencies errored out, in which case this task is instead
+       marked "erred").
 
-        .. attribute:: waiters: {TaskState}
+    .. attribute:: waiters: {TaskState}
 
-           The set of tasks which need this task to remain alive.  This is always
-           a subset of :attr:`dependents`.  Each time one of the dependents
-           has finished processing, it is removed from the :attr:`waiters`
-           set.
+       The set of tasks which need this task to remain alive.  This is always
+       a subset of :attr:`dependents`.  Each time one of the dependents
+       has finished processing, it is removed from the :attr:`waiters`
+       set.
 
-           Once both :attr:`waiters` and :attr:`who_wants` become empty, this
-           task can be released (if it has a non-empty :attr:`run_spec`) or
-           forgotten (otherwise) by the scheduler, and by any workers
-           in :attr:`who_has`.
+       Once both :attr:`waiters` and :attr:`who_wants` become empty, this
+       task can be released (if it has a non-empty :attr:`run_spec`) or
+       forgotten (otherwise) by the scheduler, and by any workers
+       in :attr:`who_has`.
 
-           .. note:: Counter-intuitively, :attr:`waiting_on` and
-              :attr:`waiters` are not reverse mappings of each other.
+       .. note:: Counter-intuitively, :attr:`waiting_on` and
+          :attr:`waiters` are not reverse mappings of each other.
 
-        .. attribute:: who_wants: {ClientState}
+    .. attribute:: who_wants: {ClientState}
 
-           The set of clients who want this task's result to remain alive.
-           This is the reverse mapping of :attr:`ClientState.wants_what`.
+       The set of clients who want this task's result to remain alive.
+       This is the reverse mapping of :attr:`ClientState.wants_what`.
 
-           When a client submits a graph to the scheduler it also specifies
-           which output tasks it desires, such that their results are not released
-           from memory.
+       When a client submits a graph to the scheduler it also specifies
+       which output tasks it desires, such that their results are not released
+       from memory.
 
-           Once a task has finished executing (i.e. moves into the "memory"
-           or "erred" state), the clients in :attr:`who_wants` are notified.
+       Once a task has finished executing (i.e. moves into the "memory"
+       or "erred" state), the clients in :attr:`who_wants` are notified.
 
-           Once both :attr:`waiters` and :attr:`who_wants` become empty, this
-           task can be released (if it has a non-empty :attr:`run_spec`) or
-           forgotten (otherwise) by the scheduler, and by any workers
-           in :attr:`who_has`.
+       Once both :attr:`waiters` and :attr:`who_wants` become empty, this
+       task can be released (if it has a non-empty :attr:`run_spec`) or
+       forgotten (otherwise) by the scheduler, and by any workers
+       in :attr:`who_has`.
 
-        .. attribute:: who_has: {WorkerState}
+    .. attribute:: who_has: {WorkerState}
 
-           The set of workers who have this task's result in memory.
-           It is non-empty iff the task is in the "memory" state.  There can be
-           more than one worker in this set if, for example, :meth:`Client.scatter`
-           or :meth:`Client.replicate` was used.
+       The set of workers who have this task's result in memory.
+       It is non-empty iff the task is in the "memory" state.  There can be
+       more than one worker in this set if, for example, :meth:`Client.scatter`
+       or :meth:`Client.replicate` was used.
 
-           This is the reverse mapping of :attr:`WorkerState.has_what`.
+       This is the reverse mapping of :attr:`WorkerState.has_what`.
 
-        .. attribute:: processing_on: WorkerState (or None)
+    .. attribute:: processing_on: WorkerState (or None)
 
-           If this task is in the "processing" state, which worker is currently
-           processing it.  Otherwise this is ``None``.
+       If this task is in the "processing" state, which worker is currently
+       processing it.  Otherwise this is ``None``.
 
-           This attribute is kept in sync with :attr:`WorkerState.processing`.
+       This attribute is kept in sync with :attr:`WorkerState.processing`.
 
-        .. attribute:: retries: int
+    .. attribute:: retries: int
 
-           The number of times this task can automatically be retried in case
-           of failure.  If a task fails executing (the worker returns with
-           an error), its :attr:`retries` attribute is checked.  If it is
-           equal to 0, the task is marked "erred".  If it is greater than 0,
-           the :attr:`retries` attribute is decremented and execution is
-           attempted again.
+       The number of times this task can automatically be retried in case
+       of failure.  If a task fails executing (the worker returns with
+       an error), its :attr:`retries` attribute is checked.  If it is
+       equal to 0, the task is marked "erred".  If it is greater than 0,
+       the :attr:`retries` attribute is decremented and execution is
+       attempted again.
 
-        .. attribute:: nbytes: int (or None)
+    .. attribute:: nbytes: int (or None)
 
-           The number of bytes, as determined by ``sizeof``, of the result
-           of a finished task.  This number is used for diagnostics and to
-           help prioritize work.
+       The number of bytes, as determined by ``sizeof``, of the result
+       of a finished task.  This number is used for diagnostics and to
+       help prioritize work.
 
-        .. attribute:: type: str
+    .. attribute:: type: str
 
-           The type of the object as a string.  Only present for tasks that have
-           been computed.
+       The type of the object as a string.  Only present for tasks that have
+       been computed.
 
-        .. attribute:: exception: object
+    .. attribute:: exception: object
 
-           If this task failed executing, the exception object is stored here.
-           Otherwise this is ``None``.
+       If this task failed executing, the exception object is stored here.
+       Otherwise this is ``None``.
 
-        .. attribute:: traceback: object
+    .. attribute:: traceback: object
 
-           If this task failed executing, the traceback object is stored here.
-           Otherwise this is ``None``.
+       If this task failed executing, the traceback object is stored here.
+       Otherwise this is ``None``.
 
-        .. attribute:: exception_blame: TaskState (or None)
+    .. attribute:: exception_blame: TaskState (or None)
 
-           If this task or one of its dependencies failed executing, the
-           failed task is stored here (possibly itself).  Otherwise this
-           is ``None``.
+       If this task or one of its dependencies failed executing, the
+       failed task is stored here (possibly itself).  Otherwise this
+       is ``None``.
 
-        .. attribute:: suspicious: int
+    .. attribute:: suspicious: int
 
-           The number of times this task has been involved in a worker death.
+       The number of times this task has been involved in a worker death.
 
-           Some tasks may cause workers to die (such as calling ``os._exit(0)``).
-           When a worker dies, all of the tasks on that worker are reassigned
-           to others.  This combination of behaviors can cause a bad task to
-           catastrophically destroy all workers on the cluster, one after
-           another.  Whenever a worker dies, we mark each task currently
-           processing on that worker (as recorded by
-           :attr:`WorkerState.processing`) as suspicious.
+       Some tasks may cause workers to die (such as calling ``os._exit(0)``).
+       When a worker dies, all of the tasks on that worker are reassigned
+       to others.  This combination of behaviors can cause a bad task to
+       catastrophically destroy all workers on the cluster, one after
+       another.  Whenever a worker dies, we mark each task currently
+       processing on that worker (as recorded by
+       :attr:`WorkerState.processing`) as suspicious.
 
-           If a task is involved in three deaths (or some other fixed constant)
-           then we mark the task as ``erred``.
+       If a task is involved in three deaths (or some other fixed constant)
+       then we mark the task as ``erred``.
 
-        .. attribute:: host_restrictions: {hostnames}
+    .. attribute:: host_restrictions: {hostnames}
 
-           A set of hostnames where this task can be run (or ``None`` if empty).
-           Usually this is empty unless the task has been specifically restricted
-           to only run on certain hosts.  A hostname may correspond to one or
-           several connected workers.
+       A set of hostnames where this task can be run (or ``None`` if empty).
+       Usually this is empty unless the task has been specifically restricted
+       to only run on certain hosts.  A hostname may correspond to one or
+       several connected workers.
 
-        .. attribute:: worker_restrictions: {worker addresses}
+    .. attribute:: worker_restrictions: {worker addresses}
 
-           A set of complete worker addresses where this can be run (or ``None``
-           if empty).  Usually this is empty unless the task has been specifically
-           restricted to only run on certain workers.
+       A set of complete worker addresses where this can be run (or ``None``
+       if empty).  Usually this is empty unless the task has been specifically
+       restricted to only run on certain workers.
 
-           Note this is tracking worker addresses, not worker states, since
-           the specific workers may not be connected at this time.
+       Note this is tracking worker addresses, not worker states, since
+       the specific workers may not be connected at this time.
 
-        .. attribute:: resource_restrictions: {resource: quantity}
+    .. attribute:: resource_restrictions: {resource: quantity}
 
-           Resources required by this task, such as ``{'gpu': 1}`` or
-           ``{'memory': 1e9}`` (or ``None`` if empty).  These are user-defined
-           names and are matched against the contents of each
-           :attr:`WorkerState.resources` dictionary.
+       Resources required by this task, such as ``{'gpu': 1}`` or
+       ``{'memory': 1e9}`` (or ``None`` if empty).  These are user-defined
+       names and are matched against the contents of each
+       :attr:`WorkerState.resources` dictionary.
 
-        .. attribute:: loose_restrictions: bool
+    .. attribute:: loose_restrictions: bool
 
-           If ``False``, each of :attr:`host_restrictions`,
-           :attr:`worker_restrictions` and :attr:`resource_restrictions` is
-           a hard constraint: if no worker is available satisfying those
-           restrictions, the task cannot go into the "processing" state and
-           will instead go into the "no-worker" state.
+       If ``False``, each of :attr:`host_restrictions`,
+       :attr:`worker_restrictions` and :attr:`resource_restrictions` is
+       a hard constraint: if no worker is available satisfying those
+       restrictions, the task cannot go into the "processing" state and
+       will instead go into the "no-worker" state.
 
-           If ``True``, the above restrictions are mere preferences: if no worker
-           is available satisfying those restrictions, the task can still go
-           into the "processing" state and be sent for execution to another
-           connected worker.
+       If ``True``, the above restrictions are mere preferences: if no worker
+       is available satisfying those restrictions, the task can still go
+       into the "processing" state and be sent for execution to another
+       connected worker.
 
-        .. attribute: metadata: dict
+    .. attribute: metadata: dict
 
-           Metadata related to task.
+       Metadata related to task.
 
-        .. attribute: actor: bool
+    .. attribute: actor: bool
 
-           Whether or not this task is an Actor.
+       Whether or not this task is an Actor.
 
-        .. attribute: group: TaskGroup
+    .. attribute: group: TaskGroup
 
-    :      The group of tasks to which this one belongs.
+        The group of tasks to which this one belongs.
+
+    .. attribute: annotations: dict
+
+        Task annotations
     """
 
     __slots__ = (
@@ -611,6 +666,8 @@ class TaskState:
         "actor",
         # Key name
         "key",
+        # Hash of the key name
+        "_hash",
         # Key prefix (see key_split())
         "prefix",
         # How to run the task (None if pure data)
@@ -651,10 +708,12 @@ class TaskState:
         "group_key",
         "group",
         "metadata",
+        "annotations",
     )
 
     def __init__(self, key, run_spec):
         self.key = key
+        self._hash = hash(key)
         self.run_spec = run_spec
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -678,6 +737,13 @@ class TaskState:
         self.group_key = key_split_group(key)
         self.group = None
         self.metadata = {}
+        self.annotations = {}
+
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.key == other.key
 
     @property
     def state(self) -> str:
@@ -983,7 +1049,8 @@ def _legacy_client_key_set(clients):
     """
     Transform a set of client states into a set of client keys.
     """
-    return {cs.client_key for cs in clients}
+    cs: ClientState
+    return {cs._client_key for cs in clients}
 
 
 def _legacy_worker_key_set(workers):
@@ -1297,6 +1364,8 @@ class Scheduler(ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
+        self.events = defaultdict(lambda: deque(maxlen=100000))
+        self.event_counts = defaultdict(int)
         self.worker_plugins = []
 
         worker_handlers = {
@@ -1309,10 +1378,12 @@ class Scheduler(ServerNode):
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
+            "log-event": self.log_worker_event,
         }
 
         client_handlers = {
             "update-graph": self.update_graph,
+            "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
             "report-key": self.report_on_key,
@@ -1344,6 +1415,8 @@ class Scheduler(ServerNode):
             "get_logs": self.get_logs,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
+            "log_event": self.log_worker_event,
+            "events": self.get_events,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
             "add_keys": self.add_keys,
@@ -1363,6 +1436,8 @@ class Scheduler(ServerNode):
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
+            "start_task_metadata": self.start_task_metadata,
+            "stop_task_metadata": self.stop_task_metadata,
         }
 
         self._transitions = {
@@ -1803,11 +1878,12 @@ class Scheduler(ServerNode):
                 "worker-plugins": self.worker_plugins,
             }
 
+            cs: ClientState
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
                     {w: ws.versions for w, ws in self.workers.items()},
-                    {c: cs.versions for c, cs in self.clients.items() if cs.versions},
+                    {c: cs._versions for c, cs in self.clients.items() if cs._versions},
                 ),
                 versions,
                 client_name="This Worker",
@@ -1817,6 +1893,59 @@ class Scheduler(ServerNode):
             if comm:
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
+
+    def update_graph_hlg(
+        self,
+        client=None,
+        hlg=None,
+        keys=None,
+        dependencies=None,
+        restrictions=None,
+        priority=None,
+        loose_restrictions=None,
+        resources=None,
+        submitting_task=None,
+        retries=None,
+        user_priority=0,
+        actors=None,
+        fifo_timeout=0,
+    ):
+
+        dsk, dependencies, annotations = highlevelgraph_unpack(hlg)
+
+        # Remove any self-dependencies (happens on test_publish_bag() and others)
+        for k, v in dependencies.items():
+            deps = set(v)
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        if priority is None:
+            # Removing all non-local keys before calling order()
+            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
+            stripped_deps = {
+                k: v.intersection(dsk_keys)
+                for k, v in dependencies.items()
+                if k in dsk_keys
+            }
+            priority = dask.order.order(dsk, dependencies=stripped_deps)
+
+        return self.update_graph(
+            client,
+            dsk,
+            keys,
+            dependencies,
+            restrictions,
+            priority,
+            loose_restrictions,
+            resources,
+            submitting_task,
+            retries,
+            user_priority,
+            actors,
+            fifo_timeout,
+            annotations,
+        )
 
     def update_graph(
         self,
@@ -1833,6 +1962,7 @@ class Scheduler(ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        annotations=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -1868,13 +1998,6 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({"op": "cancelled-key", "key": k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
-
-        # Remove any self-dependencies (happens on test_publish_bag() and others)
-        for k, v in dependencies.items():
-            deps = set(v)
-            if k in deps:
-                deps.remove(k)
-            dependencies[k] = deps
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
@@ -1940,6 +2063,35 @@ class Scheduler(ServerNode):
         # Compute priorities
         if isinstance(user_priority, Number):
             user_priority = {k: user_priority for k in tasks}
+
+        annotations = annotations or {}
+        restrictions = restrictions or {}
+        loose_restrictions = loose_restrictions or []
+        resources = resources or {}
+        retries = retries or {}
+
+        # Override existing taxonomy with per task annotations
+        if annotations:
+            if "priority" in annotations:
+                priority.update(annotations["priority"])
+
+            if "workers" in annotations:
+                restrictions.update(annotations["workers"])
+
+            if "allow_other_workers" in annotations:
+                loose_restrictions.extend(
+                    k for k, v in annotations["allow_other_workers"].items() if v
+                )
+
+            if "retries" in annotations:
+                retries.update(annotations["retries"])
+
+            if "resources" in annotations:
+                resources.update(annotations["resources"])
+
+            for a, kv in annotations.items():
+                for k, v in kv.items():
+                    self.tasks[k].annotations[a] = v
 
         # Add actors
         if actors is True:
@@ -2044,6 +2196,7 @@ class Scheduler(ServerNode):
                     priority=priority,
                     loose_restrictions=loose_restrictions,
                     resources=resources,
+                    annotations=annotations,
                 )
             except Exception as e:
                 logger.exception(e)
@@ -2250,7 +2403,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
-            ws.status = "closed"
+            ws.status = Status.closed
             self.total_occupancy -= ws.occupancy
 
             recommendations = {}
@@ -2329,7 +2482,7 @@ class Scheduler(ServerNode):
         # TODO: this should be converted to use the transition mechanism
         ts = self.tasks.get(key)
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
@@ -2344,21 +2497,21 @@ class Scheduler(ServerNode):
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
         self.report({"op": "cancelled-key", "key": key})
         clients = list(ts.who_wants) if force else [cs]
-        for c in clients:
-            self.client_releases_keys(keys=[key], client=c.client_key)
+        for cs in clients:
+            self.client_releases_keys(keys=[key], client=cs._client_key)
 
     def client_desires_keys(self, keys=None, client=None):
-        cs = self.clients.get(client)
+        cs: ClientState = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
-            cs = self.clients[client] = ClientState(client)
+            self.clients[client] = cs = ClientState(client)
         for k in keys:
             ts = self.tasks.get(k)
             if ts is None:
                 # For publish, queues etc.
                 ts = self.new_task(k, None, "released")
             ts.who_wants.add(cs)
-            cs.wants_what.add(ts)
+            cs._wants_what.add(ts)
 
             if ts.state in ("memory", "erred"):
                 self.report_on_key(k, client=client)
@@ -2366,12 +2519,12 @@ class Scheduler(ServerNode):
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", client, keys)
-        cs = self.clients[client]
+        cs: ClientState = self.clients[client]
         tasks2 = set()
         for key in list(keys):
             ts = self.tasks.get(key)
-            if ts is not None and ts in cs.wants_what:
-                cs.wants_what.remove(ts)
+            if ts is not None and ts in cs._wants_what:
+                cs._wants_what.remove(ts)
                 s = ts.who_wants
                 s.remove(cs)
                 if not s:
@@ -2389,7 +2542,8 @@ class Scheduler(ServerNode):
 
     def client_heartbeat(self, client=None):
         """ Handle heartbeats from Client """
-        self.clients[client].last_seen = time()
+        cs: ClientState = self.clients[client]
+        cs._last_seen = time()
 
     ###################
     # Task Validation #
@@ -2495,11 +2649,13 @@ class Scheduler(ServerNode):
             assert ts.key == k
             self.validate_key(k, ts)
 
+        c: str
+        cs: ClientState
         for c, cs in self.clients.items():
             # client=None is often used in tests...
-            assert c is None or isinstance(c, str), (type(c), c)
-            assert isinstance(cs, ClientState), (type(cs), cs)
-            assert cs.client_key == c
+            assert c is None or type(c) == str, (type(c), c)
+            assert type(cs) == ClientState, (type(cs), cs)
+            assert cs._client_key == c
 
         a = {w: ws.nbytes for w, ws in self.workers.items()}
         b = {
@@ -2529,26 +2685,28 @@ class Scheduler(ServerNode):
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
-        comms = set()
-        if client is not None:
-            try:
-                comms.add(self.client_comms[client])
-            except KeyError:
-                pass
-
         if ts is None and "key" in msg:
             ts = self.tasks.get(msg["key"])
+
+        cs: ClientState
         if ts is None:
             # Notify all clients
-            comms |= set(self.client_comms.values())
-        else:
+            client_keys = list(self.client_comms)
+        elif client is None:
             # Notify clients interested in key
-            comms |= {
-                self.client_comms[c.client_key]
-                for c in ts.who_wants
-                if c.client_key in self.client_comms
-            }
-        for c in comms:
+            client_keys = [cs._client_key for cs in ts.who_wants]
+        else:
+            # Notify clients interested in key (including `client`)
+            client_keys = [
+                cs._client_key for cs in ts.who_wants if cs._client_key != client
+            ]
+            client_keys.append(client)
+
+        for k in client_keys:
+            try:
+                c = self.client_comms[k]
+            except KeyError:
+                continue
             try:
                 c.send(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
@@ -2609,13 +2767,13 @@ class Scheduler(ServerNode):
             logger.info("Remove client %s", client)
         self.log_event(["all", client], {"action": "remove-client", "client": client})
         try:
-            cs = self.clients[client]
+            cs: ClientState = self.clients[client]
         except KeyError:
             # XXX is this a legitimate condition?
             pass
         else:
             self.client_releases_keys(
-                keys=[ts.key for ts in cs.wants_what], client=cs.client_key
+                keys=[ts.key for ts in cs._wants_what], client=cs._client_key
             )
             del self.clients[client]
 
@@ -2939,9 +3097,10 @@ class Scheduler(ServerNode):
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
+            cs: ClientState
             for cs in self.clients.values():
                 self.client_releases_keys(
-                    keys=[ts.key for ts in cs.wants_what], client=cs.client_key
+                    keys=[ts.key for ts in cs._wants_what], client=cs._client_key
                 )
 
             nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
@@ -3687,6 +3846,9 @@ class Scheduler(ServerNode):
                 if teardown:
                     teardown(self, state)
 
+    def log_worker_event(self, worker=None, topic=None, msg=None):
+        self.log_event(topic, msg)
+
     def subscribe_worker_status(self, comm=None):
         WorkerStatusPlugin(self, comm)
         ident = self.identity()
@@ -3855,6 +4017,27 @@ class Scheduler(ServerNode):
         ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
         return ts.collect(start=start, stop=stop, count=count)
 
+    def start_task_metadata(self, comm=None, name=None):
+        plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
+
+        self.add_plugin(plugin)
+
+    def stop_task_metadata(self, comm=None, name=None):
+        plugins = [
+            p
+            for p in self.plugins
+            if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
+        ]
+        if len(plugins) != 1:
+            raise ValueError(
+                "Expected to find exactly one CollectTaskMetaDataPlugin "
+                f"with name {name} but found {len(plugins)}."
+            )
+
+        plugin = plugins[0]
+        self.remove_plugin(plugin)
+        return {"metadata": plugin.metadata, "state": plugin.state}
+
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append({"plugin": plugin, "name": name})
@@ -3929,8 +4112,8 @@ class Scheduler(ServerNode):
         ts.type = typename
         ts.group.types.add(typename)
 
-        cs = self.clients["fire-and-forget"]
-        if ts in cs.wants_what:
+        cs: ClientState = self.clients["fire-and-forget"]
+        if ts in cs._wants_what:
             self.client_releases_keys(client="fire-and-forget", keys=[ts.key])
 
     def transition_released_waiting(self, key):
@@ -4083,11 +4266,11 @@ class Scheduler(ServerNode):
         comm = self.get_comm_cost(ts, ws)
         new_duration = duration + comm
         exec_time = -1
-        if 'executing' in ws.metrics and ts.key in ws.metrics['executing']:
-            exec_time = ws.metrics['executing'][ts.key]
+        if "executing" in ws.metrics and ts.key in ws.metrics["executing"]:
+            exec_time = ws.metrics["executing"][ts.key]
         if support_outliers and exec_time > threshold * duration:
             new_duration = 2 * exec_time
-        ws.processing[ts] = new_duration 
+        ws.processing[ts] = new_duration
         return ws.processing[ts]
 
     def transition_waiting_processing(self, key):
@@ -4542,8 +4725,8 @@ class Scheduler(ServerNode):
                 }
             )
 
-            cs = self.clients["fire-and-forget"]
-            if ts in cs.wants_what:
+            cs: ClientState = self.clients["fire-and-forget"]
+            if ts in cs._wants_what:
                 self.client_releases_keys(client="fire-and-forget", keys=[key])
 
             if self.validate:
@@ -4588,8 +4771,9 @@ class Scheduler(ServerNode):
         ts = self.tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
+        cs: ClientState
         for cs in ts.who_wants:
-            cs.wants_what.remove(ts)
+            cs._wants_what.remove(ts)
         ts.who_wants.clear()
         ts.processing_on = None
         ts.exception_blame = ts.exception = ts.traceback = None
@@ -4853,7 +5037,7 @@ class Scheduler(ServerNode):
     # Assigning Tasks to Workers #
     ##############################
 
-    def check_idle_saturated(self, ws, occ=None):
+    def check_idle_saturated(self, ws, occ: double = -1.0):
         """Update the status of the idle and saturated state
 
         The scheduler keeps track of workers that are ..
@@ -4867,26 +5051,30 @@ class Scheduler(ServerNode):
 
         This is useful for load balancing and adaptivity.
         """
-        if self.total_nthreads == 0 or ws.status == Status.closed:
+        total_nthreads: Py_ssize_t = self.total_nthreads
+        if total_nthreads == 0 or ws.status == Status.closed:
             return
-        if occ is None:
+        if occ < 0:
             occ = ws.occupancy
-        nc = ws.nthreads
-        p = len(ws.processing)
 
-        avg = self.total_occupancy / self.total_nthreads
+        nc: Py_ssize_t = ws.nthreads
+        p: Py_ssize_t = len(ws.processing)
+        total_occupancy: double = self.total_occupancy
+        avg: double = total_occupancy / total_nthreads
 
+        idle = self.idle
+        saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
-            self.idle.add(ws)
-            self.saturated.discard(ws)
+            idle.add(ws)
+            saturated.discard(ws)
         else:
-            self.idle.discard(ws)
+            idle.discard(ws)
 
-            pending = occ * (p - nc) / p / nc
+            pending: double = occ * (p - nc) / p / nc
             if p > nc and pending > 0.4 and pending > 1.9 * avg:
-                self.saturated.add(ws)
+                saturated.add(ws)
             else:
-                self.saturated.discard(ws)
+                saturated.discard(ws)
 
     def valid_workers(self, ts):
         """Return set of currently valid workers for key
@@ -5180,6 +5368,7 @@ class Scheduler(ServerNode):
         bandwidth_types.update()
 
         from bokeh.models import Panel, Tabs, Div
+        import distributed
 
         # HTML
         html = """
@@ -5200,6 +5389,8 @@ class Scheduler(ServerNode):
           <li> Workers: {nworkers} </li>
           <li> Threads: {threads} </li>
           <li> Memory: {memory} </li>
+          <li> Dask Version: {dask_version} </li>
+          <li> Dask.Distributed Version: {distributed_version} </li>
         </ul>
 
         <h2> Calling Code </h2>
@@ -5215,6 +5406,8 @@ class Scheduler(ServerNode):
             threads=sum(w.nthreads for w in self.workers.values()),
             memory=format_bytes(sum(w.memory_limit for w in self.workers.values())),
             code=code,
+            dask_version=dask.__version__,
+            distributed_version=distributed.__version__,
         )
         html = Div(text=html)
 
@@ -5263,6 +5456,22 @@ class Scheduler(ServerNode):
             msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
         return results
+
+    def log_event(self, name, msg):
+        event = (time(), msg)
+        if isinstance(name, list):
+            for n in name:
+                self.events[n].append(event)
+                self.event_counts[n] += 1
+        else:
+            self.events[name].append(event)
+            self.event_counts[name] += 1
+
+    def get_events(self, comm=None, topic=None):
+        if topic is not None:
+            return tuple(self.events[topic])
+        else:
+            return valmap(tuple, self.events)
 
     ###########
     # Cleanup #
@@ -5438,14 +5647,14 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
     if ts.actor:
-        candidates = all_workers
+        candidates = set(all_workers)
     else:
-        candidates = frequencies([ws for dts in deps for ws in dts.who_has])
+        candidates = {ws for dts in deps for ws in dts.who_has}
     if valid_workers is True:
         if not candidates:
-            candidates = all_workers
+            candidates = set(all_workers)
     else:
-        candidates = valid_workers & set(candidates)
+        candidates &= valid_workers
         if not candidates:
             candidates = valid_workers
             if not candidates:
@@ -5544,12 +5753,13 @@ def validate_task_state(ts):
             )
 
     if ts.who_wants:
+        cs: ClientState
         for cs in ts.who_wants:
-            assert ts in cs.wants_what, (
+            assert ts in cs._wants_what, (
                 "not in who_wants' wants_what",
                 str(ts),
                 str(cs),
-                str(cs.wants_what),
+                str(cs._wants_what),
             )
 
     if ts.actor:
@@ -5585,8 +5795,9 @@ def validate_state(tasks, workers, clients):
     for ws in workers.values():
         validate_worker_state(ws)
 
+    cs: ClientState
     for cs in clients.values():
-        for ts in cs.wants_what:
+        for ts in cs._wants_what:
             assert cs in ts.who_wants, (
                 "not in wants_what' who_wants",
                 str(cs),
@@ -5611,9 +5822,6 @@ def heartbeat_interval(n):
     else:
         # no more than 200 hearbeats a second scaled by workers
         return n / 200 + 1
-
-
-
 
 
 class KilledWorker(Exception):
@@ -5655,3 +5863,23 @@ class WorkerStatusPlugin(SchedulerPlugin):
 
     def teardown(self):
         self.bcomm.close()
+
+
+class CollectTaskMetaDataPlugin(SchedulerPlugin):
+    def __init__(self, scheduler, name):
+        self.scheduler = scheduler
+        self.name = name
+        self.keys = set()
+        self.metadata = {}
+        self.state = {}
+
+    def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
+        self.keys.update(keys)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        if finish == "memory" or finish == "erred":
+            ts = self.scheduler.tasks.get(key)
+            if ts is not None and ts.key in self.keys:
+                self.metadata[key] = ts.metadata
+                self.state[key] = finish
+                self.keys.discard(key)
