@@ -539,6 +539,170 @@ class WorkerState:
         return self._nthreads
 
 
+class TaskGroup:
+    """Collection tracking all tasks within a group
+
+    Keys often have a structure like ``("x-123", 0)``
+    A group takes the first section, like ``"x-123"``
+
+    .. attribute:: name: str
+
+       The name of a group of tasks.
+       For a task like ``("x-123", 0)`` this is the text ``"x-123"``
+
+    .. attribute:: states: Dict[str, int]
+
+       The number of tasks in each state,
+       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+
+    .. attribute:: dependencies: Set[TaskGroup]
+
+       The other TaskGroups on which this one depends
+
+    .. attribute:: nbytes_total: int
+
+       The total number of bytes that this task group has produced
+
+    .. attribute:: nbytes_in_memory: int
+
+       The number of bytes currently stored by this TaskGroup
+
+    .. attribute:: duration: float
+
+       The total amount of time spent on all tasks in this TaskGroup
+
+    .. attribute:: types: Set[str]
+
+       The result types of this TaskGroup
+
+    See also
+    --------
+    TaskPrefix
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.states = {state: 0 for state in ALL_TASK_STATES}
+        self.states["forgotten"] = 0
+        self.dependencies = set()
+        self.nbytes_total = 0
+        self.nbytes_in_memory = 0
+        self.duration = 0
+        self.types = set()
+
+    def add(self, ts):
+        self.states[ts.state] += 1
+        ts.group = self
+
+    def __repr__(self):
+        return (
+            "<"
+            + (self.name or "no-group")
+            + ": "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
+
+    def __len__(self):
+        return sum(self.states.values())
+
+
+class TaskPrefix:
+    """Collection tracking all tasks within a group
+
+    Keys often have a structure like ``("x-123", 0)``
+    A group takes the first section, like ``"x"``
+
+    .. attribute:: name: str
+
+       The name of a group of tasks.
+       For a task like ``("x-123", 0)`` this is the text ``"x"``
+
+    .. attribute:: states: Dict[str, int]
+
+       The number of tasks in each state,
+       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+
+    .. attribute:: duration_average: float
+
+       An exponentially weighted moving average duration of all tasks with this prefix
+
+    .. attribute:: suspicious: int
+
+       Numbers of times a task was marked as suspicious with this prefix
+
+
+    See Also
+    --------
+    TaskGroup
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.groups = []
+
+        # store timings for each prefix-action
+        self.all_durations = defaultdict(float)
+
+        if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
+            self.duration_average = parse_timedelta(
+                dask.config.get("distributed.scheduler.default-task-durations")[
+                    self.name
+                ]
+            )
+        else:
+            self.duration_average = None
+        self.suspicious = 0
+
+    @property
+    def states(self):
+        return merge_with(sum, [g.states for g in self.groups])
+
+    @property
+    def active(self):
+        return [
+            g
+            for g in self.groups
+            if any(v != 0 for k, v in g.states.items() if k != "forgotten")
+        ]
+
+    @property
+    def active_states(self):
+        return merge_with(sum, [g.states for g in self.active])
+
+    def __repr__(self):
+        return (
+            "<"
+            + self.name
+            + ": "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
+
+    @property
+    def nbytes_in_memory(self):
+        return sum(tg.nbytes_in_memory for tg in self.groups)
+
+    @property
+    def nbytes_total(self):
+        return sum(tg.nbytes_total for tg in self.groups)
+
+    def __len__(self):
+        return sum(map(len, self.groups))
+
+    @property
+    def duration(self):
+        return sum(tg.duration for tg in self.groups)
+
+    @property
+    def types(self):
+        return set().union(*[tg.types for tg in self.groups])
+
+
 class TaskState:
     """
     A simple object holding information about a task.
@@ -918,170 +1082,6 @@ class TaskState:
                 import pdb
 
                 pdb.set_trace()
-
-
-class TaskGroup:
-    """Collection tracking all tasks within a group
-
-    Keys often have a structure like ``("x-123", 0)``
-    A group takes the first section, like ``"x-123"``
-
-    .. attribute:: name: str
-
-       The name of a group of tasks.
-       For a task like ``("x-123", 0)`` this is the text ``"x-123"``
-
-    .. attribute:: states: Dict[str, int]
-
-       The number of tasks in each state,
-       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-
-    .. attribute:: dependencies: Set[TaskGroup]
-
-       The other TaskGroups on which this one depends
-
-    .. attribute:: nbytes_total: int
-
-       The total number of bytes that this task group has produced
-
-    .. attribute:: nbytes_in_memory: int
-
-       The number of bytes currently stored by this TaskGroup
-
-    .. attribute:: duration: float
-
-       The total amount of time spent on all tasks in this TaskGroup
-
-    .. attribute:: types: Set[str]
-
-       The result types of this TaskGroup
-
-    See also
-    --------
-    TaskPrefix
-    """
-
-    def __init__(self, name):
-        self.name = name
-        self.states = {state: 0 for state in ALL_TASK_STATES}
-        self.states["forgotten"] = 0
-        self.dependencies = set()
-        self.nbytes_total = 0
-        self.nbytes_in_memory = 0
-        self.duration = 0
-        self.types = set()
-
-    def add(self, ts):
-        self.states[ts.state] += 1
-        ts.group = self
-
-    def __repr__(self):
-        return (
-            "<"
-            + (self.name or "no-group")
-            + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
-            + ">"
-        )
-
-    def __len__(self):
-        return sum(self.states.values())
-
-
-class TaskPrefix:
-    """Collection tracking all tasks within a group
-
-    Keys often have a structure like ``("x-123", 0)``
-    A group takes the first section, like ``"x"``
-
-    .. attribute:: name: str
-
-       The name of a group of tasks.
-       For a task like ``("x-123", 0)`` this is the text ``"x"``
-
-    .. attribute:: states: Dict[str, int]
-
-       The number of tasks in each state,
-       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
-
-    .. attribute:: duration_average: float
-
-       An exponentially weighted moving average duration of all tasks with this prefix
-
-    .. attribute:: suspicious: int
-
-       Numbers of times a task was marked as suspicious with this prefix
-
-
-    See Also
-    --------
-    TaskGroup
-    """
-
-    def __init__(self, name):
-        self.name = name
-        self.groups = []
-
-        # store timings for each prefix-action
-        self.all_durations = defaultdict(float)
-
-        if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
-            self.duration_average = parse_timedelta(
-                dask.config.get("distributed.scheduler.default-task-durations")[
-                    self.name
-                ]
-            )
-        else:
-            self.duration_average = None
-        self.suspicious = 0
-
-    @property
-    def states(self):
-        return merge_with(sum, [g.states for g in self.groups])
-
-    @property
-    def active(self):
-        return [
-            g
-            for g in self.groups
-            if any(v != 0 for k, v in g.states.items() if k != "forgotten")
-        ]
-
-    @property
-    def active_states(self):
-        return merge_with(sum, [g.states for g in self.active])
-
-    def __repr__(self):
-        return (
-            "<"
-            + self.name
-            + ": "
-            + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-            )
-            + ">"
-        )
-
-    @property
-    def nbytes_in_memory(self):
-        return sum(tg.nbytes_in_memory for tg in self.groups)
-
-    @property
-    def nbytes_total(self):
-        return sum(tg.nbytes_total for tg in self.groups)
-
-    def __len__(self):
-        return sum(map(len, self.groups))
-
-    @property
-    def duration(self):
-        return sum(tg.duration for tg in self.groups)
-
-    @property
-    def types(self):
-        return set().union(*[tg.types for tg in self.groups])
 
 
 class _StateLegacyMapping(Mapping):
