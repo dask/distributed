@@ -13,6 +13,13 @@ from ..utils import get_ip, get_ipv6, nbytes, offload
 logger = logging.getLogger(__name__)
 
 
+def get_offload_threshold():
+    offload_threshold = dask.config.get("distributed.comm.offload")
+    if isinstance(offload_threshold, str):
+        offload_threshold = parse_bytes(offload_threshold)
+    return offload_threshold
+
+
 async def to_frames(
     msg, serializers=None, on_error="message", context=None, allow_offload=True
 ):
@@ -33,10 +40,8 @@ async def to_frames(
             raise
 
     # Offload serializing large frames to improve event loop responsiveness.
-    frame_offload_threshold = dask.config.get("distributed.comm.offload")
-    if isinstance(frame_offload_threshold, str):
-        frame_offload_threshold = parse_bytes(frame_offload_threshold)
-    if frame_offload_threshold and allow_offload:
+    offload_threshold = get_offload_threshold()
+    if offload_threshold and allow_offload:
         try:
             msg_size = sizeof(msg)
         except RecursionError:
@@ -44,7 +49,7 @@ async def to_frames(
     else:
         msg_size = 0
 
-    if allow_offload and frame_offload_threshold and msg_size > frame_offload_threshold:
+    if allow_offload and offload_threshold and msg_size > offload_threshold:
         return await offload(_to_frames)
     else:
         return _to_frames()
@@ -71,17 +76,10 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
             raise
 
     # Offload deserializing large frames to improve event loop responsiveness.
-    frame_offload_threshold = dask.config.get("distributed.comm.offload")
-    if isinstance(frame_offload_threshold, str):
-        frame_offload_threshold = parse_bytes(frame_offload_threshold)
-    if allow_offload and deserialize and frame_offload_threshold:
+    offload_threshold = get_offload_threshold()
+    if allow_offload and deserialize and offload_threshold:
         size = sum(map(nbytes, frames))
-    if (
-        allow_offload
-        and deserialize
-        and frame_offload_threshold
-        and size > frame_offload_threshold
-    ):
+    if allow_offload and deserialize and offload_threshold and size > offload_threshold:
         res = await offload(_from_frames)
     else:
         res = _from_frames()
