@@ -623,7 +623,6 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
     msg = kwargs
     msg["reply"] = reply
     please_close = kwargs.get("close")
-    force_close = False
     if deserializers is None:
         deserializers = serializers
     if deserializers is not None:
@@ -635,15 +634,15 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except EnvironmentError:
-        # On communication errors, we should simply close the communication
-        force_close = True
-        raise
+    except Exception as exc:
+        # If an exception occured we will need to close the comm, if possible.
+        # Otherwise the other end might wait for a reply while this end is
+        # reusing the comm for something else.
+        comm.abort()
+        raise exc
     finally:
         if please_close:
             await comm.close()
-        elif force_close:
-            comm.abort()
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:

@@ -1943,17 +1943,15 @@ class FatallySerializedObject:
 async def test_badly_serialized_input(c, s, a, b):
     o = BadlySerializedObject()
 
-    future = c.submit(inc, o)
+    future = c.submit(inc, o, key="broken")
     futures = c.map(inc, range(10))
 
     L = await c.gather(futures)
     assert list(L) == list(map(inc, range(10)))
     assert future.status == "error"
 
-    with pytest.raises(Exception) as info:
+    with pytest.raises(TypeError, match="hello!"):
         await future
-
-    assert "hello!" in str(info.value)
 
 
 @pytest.mark.skipif("True", reason="")

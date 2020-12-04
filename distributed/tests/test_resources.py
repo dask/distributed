@@ -249,7 +249,11 @@ async def test_minimum_resource(c, s, a):
     assert a.total_resources == a.available_resources
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})])
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})],
+    active_rpc_timeout=10,
+)
 async def test_prefer_constrained(c, s, a):
     futures = c.map(slowinc, range(1000), delay=0.1)
     constrained = c.map(inc, range(10), resources={"A": 1})

@@ -386,7 +386,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     result = await c.submit(sum, futures, workers=a.address)
     deps = [dep for dep in a.tasks.values() if dep.key not in a.data_needed]
     for dep in deps:
-        a.release_key(dep.key, report=True)
+        a.release_key(dep.key, report=True, reason="test")
 
     n_worker_address = n.worker_address
     with suppress(CommClosedError):
@@ -404,6 +404,21 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     await n.close()
 
 
+@gen_cluster(client=True)
+async def test_worker_release_key_recovers(c, s, a, b):
+    futs = c.map(slowinc, range(2), delay=0.1)
+
+    await wait(futs)
+
+    assert len(a.tasks) > 0
+    for ts in list(a.tasks.values()):
+        a.release_key(ts.key, reason="test")
+
+    res = await c.submit(sum, futs)
+
+    assert res == 3
+
+
 @pytest.mark.slow
 @gen_cluster(client=True, timeout=60, Worker=Nanny, nthreads=[("127.0.0.1", 1)])
 async def test_restart_timeout_on_long_running_task(c, s, a):
@@ -416,7 +431,6 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     assert "timeout" not in text.lower()
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
 async def test_worker_time_to_live(c, s, a, b):
     from distributed.scheduler import heartbeat_interval
@@ -434,4 +448,33 @@ async def test_worker_time_to_live(c, s, a, b):
         await asyncio.sleep(interval)
         assert time() < start + interval + 0.1
 
-    set(s.workers) == {b.address}
+    assert set(s.workers) == {b.address}
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_get_data_faulty_dep(c, s, a, b):
+    """This test creates a broken dependency and forces serialization by
+    requiring it to be submitted to another worker. The computation should
+    eventually finish by flagging the dep as bad and raise an appropriate
+    exception.
+    """
+
+    class BrokenDeserialization:
+        def __setstate__(self, *state):
+            raise AttributeError()
+
+        def __getstate__(self, *args):
+            return ""
+
+    def create():
+        return BrokenDeserialization()
+
+    def collect(*args):
+        return args
+
+    fut1 = c.submit(create, workers=[a.name])
+
+    fut2 = c.submit(collect, fut1, workers=[b.name])
+
+    with pytest.raises(RuntimeError, match="Could not find dependencies for collect-"):
+        await fut2.result()
