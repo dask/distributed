@@ -5,8 +5,9 @@ from timeit import default_timer
 
 from tlz import groupby, valmap
 
+from dask.utils import stringify
 from .plugin import SchedulerPlugin
-from ..utils import key_split, key_split_group, log_errors, tokey
+from ..utils import key_split, key_split_group, log_errors
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ class Progress(SchedulerPlugin):
 
     def __init__(self, keys, scheduler, minimum=0, dt=0.1, complete=False):
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.keys = {tokey(k) for k in self.keys}
+        self.keys = {stringify(k) for k in self.keys}
         self.scheduler = scheduler
         self.complete = complete
         self._minimum = minimum

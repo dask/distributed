@@ -573,7 +573,6 @@ async def test_clean(c, s, a, b):
     collections = [
         a.tasks,
         a.data,
-        a.nbytes,
         a.threads,
     ]
     for c in collections:
@@ -667,7 +666,11 @@ async def test_clean_nbytes(c, s, a, b):
     await wait(future)
 
     await asyncio.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    assert (
+        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        == 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)

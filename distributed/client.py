@@ -29,7 +29,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes, funcname
+from dask.utils import ensure_dict, format_bytes, funcname, stringify
 from dask.highlevelgraph import HighLevelGraph
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
@@ -73,7 +73,6 @@ from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
-    tokey,
     log_errors,
     key_split,
     thread_state,
@@ -170,7 +169,7 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = tokey(key)
+        tkey = stringify(key)
         self.client = client or Client.current()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
@@ -184,7 +183,7 @@ class Future(WrappedKey):
             self.client._send_to_scheduler(
                 {
                     "op": "client-desires-keys",
-                    "keys": [tokey(key)],
+                    "keys": [stringify(key)],
                     "client": self.client.id,
                 }
             )
@@ -357,7 +356,7 @@ class Future(WrappedKey):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
-                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+                self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
             except TypeError:
                 pass  # Shutting down, add_callback may be None
 
@@ -375,7 +374,7 @@ class Future(WrappedKey):
             {
                 "op": "update-graph",
                 "tasks": {},
-                "keys": [tokey(self.key)],
+                "keys": [stringify(self.key)],
                 "client": c.id,
             }
         )
@@ -1553,7 +1552,7 @@ class Client:
             else:
                 key = funcname(func) + "-" + str(uuid.uuid4())
 
-        skey = tokey(key)
+        skey = stringify(key)
 
         with self._refcount_lock:
             if skey in self.futures:
@@ -1798,14 +1797,14 @@ class Client:
         )
         logger.debug("map(%s, ...)", funcname(func))
 
-        return [futures[tokey(k)] for k in keys]
+        return [futures[stringify(k)] for k in keys]
 
     def find_actor(self, ac):
         return self.sync(self.scheduler.find_actor, actor_key=ac.key)
 
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
-        keys = [tokey(future.key) for future in future_set]
+        keys = [stringify(future.key) for future in future_set]
         bad_data = dict()
         data = {}
 
@@ -2012,8 +2011,8 @@ class Client:
         if isinstance(data, dict) and not all(
             isinstance(k, (bytes, str)) for k in data
         ):
-            d = await self._scatter(keymap(tokey, data), workers, broadcast)
-            return {k: d[tokey(k)] for k in data}
+            d = await self._scatter(keymap(stringify, data), workers, broadcast)
+            return {k: d[stringify(k)] for k in data}
 
         if isinstance(data, type(range(0))):
             data = list(data)
@@ -2202,7 +2201,7 @@ class Client:
         )
 
     async def _cancel(self, futures, force=False):
-        keys = list({tokey(f.key) for f in futures_of(futures)})
+        keys = list({stringify(f.key) for f in futures_of(futures)})
         await self.scheduler.cancel(keys=keys, client=self.id, force=force)
         for k in keys:
             st = self.futures.pop(k, None)
@@ -2226,7 +2225,7 @@ class Client:
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
     async def _retry(self, futures):
-        keys = list({tokey(f.key) for f in futures_of(futures)})
+        keys = list({stringify(f.key) for f in futures_of(futures)})
         response = await self.scheduler.retry(keys=keys, client=self.id)
         for key in response:
             st = self.futures[key]
@@ -2247,7 +2246,7 @@ class Client:
             coroutines = []
 
             def add_coro(name, data):
-                keys = [tokey(f.key) for f in futures_of(data)]
+                keys = [stringify(f.key) for f in futures_of(data)]
                 coroutines.append(
                     self.scheduler.publish_put(
                         keys=keys,
@@ -2561,7 +2560,7 @@ class Client:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)
                 )
-                resources = {tokey(k): v for k, v in resources.items()}
+                resources = {stringify(k): v for k, v in resources.items()}
 
             if retries:
                 retries = self._expand_retries(
@@ -2572,11 +2571,11 @@ class Client:
                 actors = list(self._expand_key(actors))
 
             if restrictions:
-                restrictions = keymap(tokey, restrictions)
+                restrictions = keymap(stringify, restrictions)
                 restrictions = valmap(list, restrictions)
 
             if loose_restrictions is not None:
-                loose_restrictions = list(map(tokey, loose_restrictions))
+                loose_restrictions = list(map(stringify, loose_restrictions))
 
             keyset = set(keys)
 
@@ -2595,7 +2594,7 @@ class Client:
                 {
                     "op": "update-graph-hlg",
                     "hlg": dsk,
-                    "keys": list(map(tokey, keys)),
+                    "keys": list(map(stringify, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
                     "priority": priority,
@@ -2699,7 +2698,7 @@ class Client:
         with self._refcount_lock:
             changed = False
             for key in list(dsk):
-                if tokey(key) in self.futures:
+                if stringify(key) in self.futures:
                     if not changed:
                         changed = True
                         dsk = ensure_dict(dsk)
@@ -3087,7 +3086,7 @@ class Client:
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
-        keys = list({tokey(f.key) for f in self.futures_of(futures)})
+        keys = list({stringify(f.key) for f in self.futures_of(futures)})
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
             raise ValueError(
@@ -3118,7 +3117,7 @@ class Client:
     async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
         futures = self.futures_of(futures)
         await _wait(futures)
-        keys = {tokey(f.key) for f in futures}
+        keys = {stringify(f.key) for f in futures}
         await self.scheduler.replicate(
             keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
         )
@@ -3228,7 +3227,7 @@ class Client:
         """
         if futures is not None:
             futures = self.futures_of(futures)
-            keys = list(map(tokey, {f.key for f in futures}))
+            keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
         return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
@@ -3352,7 +3351,7 @@ class Client:
         keys = keys or []
         if futures is not None:
             futures = self.futures_of(futures)
-            keys += list(map(tokey, {f.key for f in futures}))
+            keys += list(map(stringify, {f.key for f in futures}))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -3561,6 +3560,35 @@ class Client:
         Logs are returned in reversed order (newest first)
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
+
+    def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic: str, list
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        Examples
+        --------
+        >>> from time import time
+        >>> client.log_event("current-time", time())
+        """
+        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
+
+    def get_events(self, topic: str = None):
+        """Retrieve structured topic logs
+
+        Parameters
+        ----------
+        topic: str, optional
+            Name of topic log to retrieve events for. If no ``topic`` is
+            provided, then logs for all topics will be returned.
+        """
+        return self.sync(self.scheduler.events, topic=topic)
 
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler
@@ -3844,9 +3872,9 @@ class Client:
         for kk in k:
             if dask.is_dask_collection(kk):
                 for kkk in kk.__dask_keys__():
-                    yield tokey(kkk)
+                    yield stringify(kkk)
             else:
-                yield tokey(kk)
+                yield stringify(kk)
 
     @classmethod
     def _expand_retries(cls, retries, all_keys):
@@ -3867,7 +3895,7 @@ class Client:
             raise TypeError(
                 "`retries` should be an integer or dict, got %r" % (type(retries))
             )
-        return keymap(tokey, result)
+        return keymap(stringify, result)
 
     def _expand_resources(cls, resources, all_keys):
         """
@@ -4609,7 +4637,7 @@ def fire_and_forget(obj):
         future.client._send_to_scheduler(
             {
                 "op": "client-desires-keys",
-                "keys": [tokey(future.key)],
+                "keys": [stringify(future.key)],
                 "client": "fire-and-forget",
             }
         )

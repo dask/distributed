@@ -240,15 +240,15 @@ class TCP(Comm):
         )
 
         try:
+            nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
-            length_bytes = [struct.pack("Q", len(frames))] + [
-                struct.pack("Q", x) for x in lengths
-            ]
+            length_bytes = struct.pack(f"Q{nframes}Q", nframes, *lengths)
             if sum(lengths) < 2 ** 17:  # 128kiB
-                b = b"".join(length_bytes + frames)  # small enough, send in one go
-                stream.write(b)
+                # small enough, send in one go
+                stream.write(b"".join([length_bytes, *frames]))
             else:
-                stream.write(b"".join(length_bytes))  # avoid large memcpy, send in many
+                # avoid large memcpy, send in many
+                stream.write(length_bytes)
 
                 for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
@@ -410,7 +410,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         deserialize=True,
         allow_offload=True,
         default_port=0,
-        **connection_args
+        **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
@@ -471,6 +471,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
             await self.on_connection(comm)
         except CommClosedError:
             logger.info("Connection closed before handshake completed")
+            return
 
         await self.comm_handler(comm)
 
