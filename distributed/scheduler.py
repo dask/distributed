@@ -3751,7 +3751,7 @@ class Scheduler(ServerNode):
         names=None,
         lock=True,
         **kwargs,
-    ):
+    ) -> dict:
         """Gracefully retire workers from cluster
 
         Parameters
@@ -3809,7 +3809,7 @@ class Scheduler(ServerNode):
                             pass
                 workers = {self.workers[w] for w in workers if w in self.workers}
                 if not workers:
-                    return []
+                    return {}
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
@@ -3828,7 +3828,7 @@ class Scheduler(ServerNode):
                             lock=False,
                         )
                     else:
-                        return []
+                        return {}
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers and worker_keys:
