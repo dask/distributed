@@ -1755,3 +1755,28 @@ async def test_taskstate_metadata(cleanup):
 
                 # Check that Scheduler TaskState.metadata was also updated
                 assert s.tasks[f.key].metadata == ts.metadata
+
+
+@gen_cluster(client=True)
+async def test_get_data(c, s, a, b):
+    class BrokenDeserialization:
+        def __setstate__(self, *state):
+            raise AttributeError()
+
+        def __getstate__(self, *args):
+            return ""
+
+    def create():
+        return BrokenDeserialization()
+
+    def collect(*args):
+        return args
+
+    fut1 = c.submit(create, workers=[a.name])
+    from distributed.client import wait
+
+    await wait(fut1)
+    fut2 = c.submit(collect, fut1, workers=[b.name])
+    # with pytest.raises(AttributeError):
+    args = await fut2.result()
+    assert args

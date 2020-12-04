@@ -1339,6 +1339,10 @@ class Worker(ServerNode):
 
         try:
             compressed = await comm.write(msg, serializers=serializers)
+            # XXX 4 This never receives its actual response but is waiting... in
+            # the meantime the other end is recycling this comm and sends
+            # another request which is supposed to be handled by the handler...
+            # still not sure why and how
             response = await comm.read(deserializers=serializers)
             assert response == "OK", response
         except EnvironmentError:
@@ -3250,6 +3254,9 @@ async def get_data_from_worker(
             except KeyError:
                 raise ValueError("Unexpected response", response)
             else:
+                # XXX 3 Since the above send_recv raises an exception which is
+                # not handled here, this never returns, even though the other
+                # end waits for an answer
                 if status == "OK":
                     await comm.write("OK")
             return response

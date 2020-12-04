@@ -649,9 +649,15 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
     try:
         await comm.write(msg, serializers=serializers, on_error="raise")
         if reply:
+            # XXX 1 This raises an exception
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
+    except Exception as exc:
+        # XXX 2 The exception is not handled and bubbles up. Therefore no
+        # response is ever sent (yes the other end expects a response,
+        # surprise!)
+        raise exc
     except EnvironmentError:
         # On communication errors, we should simply close the communication
         force_close = True
