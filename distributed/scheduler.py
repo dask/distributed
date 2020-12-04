@@ -225,6 +225,12 @@ class WorkerState:
 
        This attribute is kept in sync with :attr:`TaskState.processing_on`.
 
+    .. attribute:: executing: {TaskState: duration}
+
+       A dictionary of tasks that are currently being run on this worker.
+       Each task state is asssociated with the duration in seconds which
+       the task has been running.
+
     .. attribute:: has_what: {TaskState}
 
        The set of tasks which currently reside on this worker.
@@ -287,6 +293,7 @@ class WorkerState:
         "address",
         "bandwidth",
         "extra",
+        "executing",
         "has_what",
         "_hash",
         "last_seen",
@@ -320,6 +327,7 @@ class WorkerState:
         versions=None,
         nanny=None,
         extra=None,
+        executing=None,
     ):
         self.address = address
         self.pid = pid
@@ -347,6 +355,7 @@ class WorkerState:
         self.used_resources = {}
 
         self.extra = extra or {}
+        self.executing = executing or {}
 
     def __hash__(self):
         return self._hash
@@ -387,6 +396,7 @@ class WorkerState:
             extra=self.extra,
         )
         ws.processing = {ts.key: cost for ts, cost in self.processing.items()}
+        ws.executing = {ts.key: duration for ts, duration in self.executing.items()}
         return ws
 
     def __repr__(self):
@@ -1695,6 +1705,7 @@ class Scheduler(ServerNode):
         resources=None,
         host_info=None,
         metrics=None,
+        executing=None,
     ):
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
@@ -1732,6 +1743,11 @@ class Scheduler(ServerNode):
         ws = self.workers[address]
 
         ws.last_seen = time()
+
+        if executing is not None:
+            ws.executing = {
+                self.tasks[key]: duration for key, duration in executing.items()
+            }
 
         if metrics:
             ws.metrics = metrics
@@ -4258,19 +4274,14 @@ class Scheduler(ServerNode):
         estimate the task duration to be 2x current-runtime, otherwise we set it
         to be the average duration.
         """
-        # we might want to pull these vars from settings?
-        support_outliers = True
-        threshold = 2
-
         duration = self.get_task_duration(ts)
         comm = self.get_comm_cost(ts, ws)
-        new_duration = duration + comm
-        exec_time = -1
-        if "executing" in ws.metrics and ts.key in ws.metrics["executing"]:
-            exec_time = ws.metrics["executing"][ts.key]
-        if support_outliers and exec_time > threshold * duration:
-            new_duration = 2 * exec_time
-        ws.processing[ts] = new_duration
+        total_duration = duration + comm
+        if ts in ws.executing:
+            exec_time = ws.executing[ts]
+            if exec_time > 2 * duration:
+                total_duration = 2 * exec_time
+        ws.processing[ts] = total_duration
         return ws.processing[ts]
 
     def transition_waiting_processing(self, key):
