@@ -1147,6 +1147,7 @@ def error_message(e, status="error"):
     e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb, protocol=4)
+        protocol.pickle.loads(tb2)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
