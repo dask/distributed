@@ -379,7 +379,13 @@ class WorkerState:
         return self._hash
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.address == other.address
+        typ_self: type = type(self)
+        typ_other: type = type(other)
+        if typ_self == typ_other:
+            other_ws: WorkerState = other
+            return self._address == other_ws._address
+        else:
+            return False
 
     @property
     def actors(self):
