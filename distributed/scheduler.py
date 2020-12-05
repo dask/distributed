@@ -1888,7 +1888,7 @@ class Scheduler(ServerNode):
         now=None,
         resources=None,
         host_info=None,
-        memory_limit=None,
+        memory_limit=0,
         metrics=None,
         pid=0,
         services=None,
