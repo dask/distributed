@@ -3555,10 +3555,10 @@ class Scheduler(ServerNode):
                             del_worker_tasks[ws].add(ts)
 
                 await asyncio.gather(
-                    *(
+                    *[
                         self._delete_worker_data(ws._address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
-                    )
+                    ]
                 )
 
             # Copy not-yet-filled data
@@ -5536,8 +5536,10 @@ class Scheduler(ServerNode):
             tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(self.workers),
-            threads=sum(ws._nthreads for ws in self.workers.values()),
-            memory=format_bytes(sum(ws._memory_limit for ws in self.workers.values())),
+            threads=sum([ws._nthreads for ws in self.workers.values()]),
+            memory=format_bytes(
+                sum([ws._memory_limit for ws in self.workers.values()])
+            ),
             code=code,
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
