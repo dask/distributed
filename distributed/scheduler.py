@@ -4416,7 +4416,7 @@ class Scheduler(ServerNode):
 
         return worker
 
-    def set_duration_estimate(self, ts, ws):
+    def set_duration_estimate(self, ts: TaskState, ws: WorkerState):
         """Estimate task duration using worker state and task state.
 
         If a task takes longer than twice the current average duration we
@@ -4426,12 +4426,12 @@ class Scheduler(ServerNode):
         duration = self.get_task_duration(ts)
         comm = self.get_comm_cost(ts, ws)
         total_duration = duration + comm
-        if ts in ws.executing:
-            exec_time = ws.executing[ts]
+        if ts in ws._executing:
+            exec_time = ws._executing[ts]
             if exec_time > 2 * duration:
                 total_duration = 2 * exec_time
-        ws.processing[ts] = total_duration
-        return ws.processing[ts]
+        ws._processing[ts] = total_duration
+        return ws._processing[ts]
 
     def transition_waiting_processing(self, key):
         try:
