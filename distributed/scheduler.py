@@ -4423,11 +4423,11 @@ class Scheduler(ServerNode):
         estimate the task duration to be 2x current-runtime, otherwise we set it
         to be the average duration.
         """
-        duration = self.get_task_duration(ts)
-        comm = self.get_comm_cost(ts, ws)
-        total_duration = duration + comm
+        duration: double = self.get_task_duration(ts)
+        comm: double = self.get_comm_cost(ts, ws)
+        total_duration: double = duration + comm
         if ts in ws._executing:
-            exec_time = ws._executing[ts]
+            exec_time: double = ws._executing[ts]
             if exec_time > 2 * duration:
                 total_duration = 2 * exec_time
         ws._processing[ts] = total_duration
