@@ -2685,7 +2685,7 @@ class Scheduler(ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
-        assert not any(ts in dts.waiters for dts in ts.dependencies)
+        assert not any([ts in dts.waiters for dts in ts.dependencies])
         assert ts not in self.unrunnable
 
     def validate_waiting(self, key):
@@ -4055,7 +4055,7 @@ class Scheduler(ServerNode):
                 key = stack.pop()
                 ts = self.tasks[key]
                 if ts.state == "waiting":
-                    stack.extend(dts.key for dts in ts.dependencies)
+                    stack.extend([dts.key for dts in ts.dependencies])
                 elif ts.state == "processing":
                     processing.add(ts)
 
@@ -4100,7 +4100,7 @@ class Scheduler(ServerNode):
         on the given worker.
         """
         return (
-            sum(dts.nbytes for dts in ts.dependencies - ws._has_what) / self.bandwidth
+            sum([dts.nbytes for dts in ts.dependencies - ws._has_what]) / self.bandwidth
         )
 
     def get_task_duration(self, ts, default=None):
@@ -4276,7 +4276,7 @@ class Scheduler(ServerNode):
                 assert not ts.waiting_on
                 assert not ts.who_has
                 assert not ts.processing_on
-                assert not any(dts.state == "forgotten" for dts in ts.dependencies)
+                assert not any([dts.state == "forgotten" for dts in ts.dependencies])
 
             if ts.has_lost_dependencies:
                 return {key: "forgotten"}
@@ -4413,7 +4413,7 @@ class Scheduler(ServerNode):
                 assert not ts.processing_on
                 assert not ts.has_lost_dependencies
                 assert ts not in self.unrunnable
-                assert all(dts.who_has for dts in ts.dependencies)
+                assert all([dts.who_has for dts in ts.dependencies])
 
             ws: WorkerState = self.decide_worker(ts)
             if ws is None:
@@ -4699,7 +4699,7 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert all(dts.state != "erred" for dts in ts.dependencies)
+                    assert all([dts.state != "erred" for dts in ts.dependencies])
                     assert ts.exception_blame
                     assert not ts.who_has
                     assert not ts.waiting_on
@@ -5792,7 +5792,7 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     *objective* function.
     """
     deps = ts.dependencies
-    assert all(dts.who_has for dts in deps)
+    assert all([dts.who_has for dts in deps])
     if ts.actor:
         candidates = set(all_workers)
     else:
@@ -5877,7 +5877,7 @@ def validate_task_state(ts):
     assert bool(ts.who_has) == (ts.state == "memory"), (ts, ts.who_has)
 
     if ts.state == "processing":
-        assert all(dts.who_has for dts in ts.dependencies), (
+        assert all([dts.who_has for dts in ts.dependencies]), (
             "task processing without all deps",
             str(ts),
             str(ts.dependencies),
@@ -5893,7 +5893,7 @@ def validate_task_state(ts):
         if ts.run_spec:  # was computed
             assert ts.type
             assert isinstance(ts.type, str)
-        assert not any(ts in dts.waiting_on for dts in ts.dependents)
+        assert not any([ts in dts.waiting_on for dts in ts.dependents])
         for ws in ts.who_has:
             assert ts in ws._has_what, (
                 "not in who_has' has_what",
