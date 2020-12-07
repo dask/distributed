@@ -619,10 +619,12 @@ class TaskPrefix:
 
     @property
     def states(self):
+        tg: TaskGroup
         return merge_with(sum, [tg.states for tg in self._groups])
 
     @property
     def active(self):
+        tg: TaskGroup
         return [
             tg
             for tg in self._groups
@@ -646,10 +648,12 @@ class TaskPrefix:
 
     @property
     def nbytes_in_memory(self):
+        tg: TaskGroup
         return sum([tg.nbytes_in_memory for tg in self._groups])
 
     @property
     def nbytes_total(self):
+        tg: TaskGroup
         return sum([tg.nbytes_total for tg in self._groups])
 
     def __len__(self):
@@ -657,10 +661,12 @@ class TaskPrefix:
 
     @property
     def duration(self):
+        tg: TaskGroup
         return sum([tg.duration for tg in self._groups])
 
     @property
     def types(self):
+        tg: TaskGroup
         return set().union(*[tg.types for tg in self._groups])
 
 
@@ -2550,6 +2556,7 @@ class Scheduler(ServerNode):
         """ Create a new task, and associated states """
         ts: TaskState = TaskState(key, spec)
         tp: TaskPrefix
+        tg: TaskGroup
         ts._state = state
         prefix_key = key_split(key)
         try:
@@ -5370,7 +5377,7 @@ class Scheduler(ServerNode):
 
             if ts.state == "forgotten" and ts._group.name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
-                tg = ts._group
+                tg: TaskGroup = ts._group
                 if not any(tg.states.get(s) for s in ALL_TASK_STATES):
                     ts._prefix._groups.remove(tg)
                     del self.task_groups[tg.name]
