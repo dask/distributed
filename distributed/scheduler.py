@@ -1242,9 +1242,9 @@ class TaskState:
         nbytes = self._nbytes
         return nbytes if nbytes >= 0 else DEFAULT_DATA_SIZE
 
-    def set_nbytes(self, nbytes: int):
-        diff = nbytes
-        old_nbytes = self._nbytes
+    def set_nbytes(self, nbytes: Py_ssize_t):
+        diff: Py_ssize_t = nbytes
+        old_nbytes: Py_ssize_t = self._nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
         self._group.nbytes_total += diff
