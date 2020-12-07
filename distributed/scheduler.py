@@ -1007,7 +1007,7 @@ class TaskState:
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
         self.suspicious = self.retries = 0
-        self.nbytes = None
+        self.nbytes = -1
         self.priority = None
         self.who_wants = set()
         self.dependencies = set()
@@ -1056,11 +1056,13 @@ class TaskState:
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
-        return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
+        return nbytes if nbytes >= 0 else DEFAULT_DATA_SIZE
 
     def set_nbytes(self, nbytes: int):
+        diff = nbytes
         old_nbytes = self.nbytes
-        diff = nbytes - (old_nbytes or 0)
+        if old_nbytes >= 0:
+            diff -= old_nbytes
         self.group.nbytes_total += diff
         self.group.nbytes_in_memory += diff
         ws: WorkerState
@@ -4081,9 +4083,7 @@ class Scheduler(ServerNode):
                 result = {k: self.tasks[k].nbytes for k in keys}
             else:
                 result = {
-                    k: ts.nbytes
-                    for k, ts in self.tasks.items()
-                    if ts.nbytes is not None
+                    k: ts.nbytes for k, ts in self.tasks.items() if ts.nbytes >= 0
                 }
 
             if summary:
