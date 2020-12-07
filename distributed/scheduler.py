@@ -715,7 +715,7 @@ class TaskGroup:
     duration: double
     types: set
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.states = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
