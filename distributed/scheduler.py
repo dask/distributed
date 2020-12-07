@@ -3985,7 +3985,7 @@ class Scheduler(ServerNode):
                 return []
 
             if key is None:
-                key = lambda ws: ws.address
+                key = operator.attrgetter("address")
             if isinstance(key, bytes) and dask.config.get(
                 "distributed.scheduler.pickle"
             ):
