@@ -717,6 +717,7 @@ class TaskGroup:
 
     def __init__(self, name: str):
         self.name = name
+        self.prefix = None
         self.states = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
         self.dependencies = set()
