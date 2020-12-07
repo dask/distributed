@@ -646,18 +646,18 @@ class TaskPrefix:
 
     @property
     def nbytes_in_memory(self):
-        return sum(tg.nbytes_in_memory for tg in self._groups)
+        return sum([tg.nbytes_in_memory for tg in self._groups])
 
     @property
     def nbytes_total(self):
-        return sum(tg.nbytes_total for tg in self._groups)
+        return sum([tg.nbytes_total for tg in self._groups])
 
     def __len__(self):
         return sum(map(len, self._groups))
 
     @property
     def duration(self):
-        return sum(tg.duration for tg in self._groups)
+        return sum([tg.duration for tg in self._groups])
 
     @property
     def types(self):
