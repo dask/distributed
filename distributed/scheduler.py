@@ -587,7 +587,7 @@ class TaskPrefix:
         if self.name in task_durations:
             self.duration_average = parse_timedelta(task_durations[self.name])
         else:
-            self.duration_average = None
+            self.duration_average = -1
         self.suspicious = 0
 
     @property
@@ -3222,9 +3222,9 @@ class Scheduler(ServerNode):
             return
 
         if compute_duration:
-            old_duration = ts._prefix.duration_average or 0
+            old_duration = ts._prefix.duration_average
             new_duration = compute_duration
-            if not old_duration:
+            if old_duration < 0:
                 avg_duration = new_duration
             else:
                 avg_duration = 0.5 * old_duration + 0.5 * new_duration
@@ -4307,7 +4307,7 @@ class Scheduler(ServerNode):
         (not including any communication cost).
         """
         duration = ts._prefix.duration_average
-        if duration is None:
+        if duration < 0:
             self.unknown_durations[ts._prefix.name].add(ts)
             if default is None:
                 default = parse_timedelta(
@@ -4757,9 +4757,9 @@ class Scheduler(ServerNode):
             #############################
             if compute_start and ws._processing.get(ts, True):
                 # Update average task duration for worker
-                old_duration = ts._prefix.duration_average or 0
+                old_duration = ts._prefix.duration_average
                 new_duration = compute_stop - compute_start
-                if not old_duration:
+                if old_duration < 0:
                     avg_duration = new_duration
                 else:
                     avg_duration = 0.5 * old_duration + 0.5 * new_duration
