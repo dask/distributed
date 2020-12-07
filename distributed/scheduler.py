@@ -619,19 +619,19 @@ class TaskPrefix:
 
     @property
     def states(self):
-        return merge_with(sum, [g.states for g in self._groups])
+        return merge_with(sum, [tg.states for tg in self._groups])
 
     @property
     def active(self):
         return [
-            g
-            for g in self._groups
-            if any(v != 0 for k, v in g.states.items() if k != "forgotten")
+            tg
+            for tg in self._groups
+            if any(v != 0 for k, v in tg.states.items() if k != "forgotten")
         ]
 
     @property
     def active_states(self):
-        return merge_with(sum, [g.states for g in self.active])
+        return merge_with(sum, [tg.states for tg in self.active])
 
     def __repr__(self):
         return (
