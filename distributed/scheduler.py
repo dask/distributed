@@ -2944,9 +2944,9 @@ class Scheduler(ServerNode):
             if deps:
                 ws: WorkerState
                 msg["who_has"] = {
-                    dep.key: [ws._address for ws in dep.who_has] for dep in deps
+                    dts.key: [ws._address for ws in dts.who_has] for dts in deps
                 }
-                msg["nbytes"] = {dep.key: dep.nbytes for dep in deps}
+                msg["nbytes"] = {dts.key: dts.nbytes for dts in deps}
 
             if self.validate and deps:
                 assert all(msg["who_has"].values())
@@ -4711,9 +4711,9 @@ class Scheduler(ServerNode):
             ts.exception_blame = None
             ts.traceback = None
 
-            for dep in ts.dependents:
-                if dep.state == "erred":
-                    recommendations[dep.key] = "waiting"
+            for dts in ts.dependents:
+                if dts.state == "erred":
+                    recommendations[dts.key] = "waiting"
 
             self.report({"op": "task-retried", "key": key})
             ts.state = "released"
