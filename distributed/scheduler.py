@@ -1075,18 +1075,130 @@ class TaskState:
             return False
 
     @property
-    def state(self) -> str:
-        return self._state
+    def key(self):
+        return self._key
 
     @property
-    def prefix_key(self):
-        return self._prefix.name
+    def prefix(self):
+        return self._prefix
+
+    @property
+    def run_spec(self):
+        return self._run_spec
+
+    @property
+    def priority(self):
+        return self._priority
+
+    @property
+    def state(self) -> str:
+        return self._state
 
     @state.setter
     def state(self, value: str):
         self._group.states[self._state] -= 1
         self._group.states[value] += 1
         self._state = value
+
+    @property
+    def dependencies(self):
+        return self._dependencies
+
+    @property
+    def dependents(self):
+        return self._dependents
+
+    @property
+    def has_lost_dependencies(self):
+        return self._has_lost_dependencies
+
+    @property
+    def waiting_on(self):
+        return self._waiting_on
+
+    @property
+    def waiters(self):
+        return self._waiters
+
+    @property
+    def who_wants(self):
+        return self._who_wants
+
+    @property
+    def who_has(self):
+        return self._who_has
+
+    @property
+    def processing_on(self):
+        return self._processing_on
+
+    @property
+    def retries(self):
+        return self._retries
+
+    @property
+    def nbytes(self):
+        return self._nbytes
+
+    @property
+    def type(self):
+        return self._type
+
+    @property
+    def exception(self):
+        return self._exception
+
+    @property
+    def traceback(self):
+        return self._traceback
+
+    @property
+    def exception_blame(self):
+        return self._exception_blame
+
+    @property
+    def suspicious(self):
+        return self._suspicious
+
+    @property
+    def host_restrictions(self):
+        return self._host_restrictions
+
+    @property
+    def worker_restrictions(self):
+        return self._worker_restrictions
+
+    @property
+    def resource_restrictions(self):
+        return self._resource_restrictions
+
+    @property
+    def loose_restrictions(self):
+        return self._loose_restrictions
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @property
+    def annotations(self):
+        return self._annotations
+
+    @property
+    def actor(self):
+        return self._actor
+
+    @property
+    def group(self):
+        return self._group
+
+    @property
+    def group_key(self):
+        return self._group_key
+
+    @property
+    def prefix_key(self):
+        return self._prefix.name
 
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
