@@ -709,6 +709,7 @@ class TaskGroup:
         return sum(self.states.values())
 
 
+@cclass
 class TaskState:
     """
     A simple object holding information about a task.
@@ -950,6 +951,37 @@ class TaskState:
         Task annotations
     """
 
+    key: str
+    _hash: Py_hash_t
+    prefix: TaskPrefix
+    run_spec: object
+    priority: tuple
+    _state: str
+    dependencies: set
+    dependents: set
+    has_lost_dependencies: bool
+    waiting_on: set
+    waiters: set
+    who_wants: set
+    who_has: set
+    processing_on: WorkerState
+    retries: Py_ssize_t
+    nbytes: Py_ssize_t
+    type: str
+    exception: object
+    traceback: object
+    exception_blame: object
+    suspicious: Py_ssize_t
+    host_restrictions: set
+    worker_restrictions: set
+    resource_restrictions: dict
+    loose_restrictions: bool
+    metadata: dict
+    annotations: dict
+    actor: bool
+    group: TaskGroup
+    group_key: str
+
     __slots__ = (
         # === General description ===
         "actor",
@@ -1000,7 +1032,7 @@ class TaskState:
         "annotations",
     )
 
-    def __init__(self, key, run_spec):
+    def __init__(self, key: str, run_spec: object):
         self.key = key
         self._hash = hash(key)
         self.run_spec = run_spec
