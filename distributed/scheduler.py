@@ -3810,7 +3810,9 @@ class Scheduler(ServerNode):
                                     close_workers=close_workers,
                                     lock=False,
                                 )
-                            return workers
+                                return workers
+                            else:
+                                return {}
                         except KeyError:  # keys left during replicate
                             pass
                 workers = {self.workers[w] for w in workers if w in self.workers}
