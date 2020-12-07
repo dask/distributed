@@ -4165,8 +4165,8 @@ class Scheduler(ServerNode):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         self.add_plugin(TaskStreamPlugin, idempotent=True)
-        ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
-        return ts.collect(start=start, stop=stop, count=count)
+        tsp = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
+        return tsp.collect(start=start, stop=stop, count=count)
 
     def start_task_metadata(self, comm=None, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
