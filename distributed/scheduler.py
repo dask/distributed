@@ -732,6 +732,38 @@ class TaskGroup:
         self._duration = 0
         self._types = set()
 
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def prefix(self):
+        return self._prefix
+
+    @property
+    def states(self):
+        return self._states
+
+    @property
+    def dependencies(self):
+        return self._dependencies
+
+    @property
+    def nbytes_total(self):
+        return self._nbytes_total
+
+    @property
+    def nbytes_in_memory(self):
+        return self._nbytes_in_memory
+
+    @property
+    def duration(self):
+        return self._duration
+
+    @property
+    def types(self):
+        return self._types
+
     def add(self, o):
         ts: TaskState = o
         self._states[ts.state] += 1
