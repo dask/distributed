@@ -546,6 +546,7 @@ class WorkerState:
         return self._nthreads
 
 
+@cclass
 class TaskPrefix:
     """Collection tracking all tasks within a group
 
@@ -575,6 +576,12 @@ class TaskPrefix:
     --------
     TaskGroup
     """
+
+    name: str
+    all_durations: object
+    duration_average: double
+    suspicious: Py_ssize_t
+    groups: list
 
     def __init__(self, name):
         self.name = name
