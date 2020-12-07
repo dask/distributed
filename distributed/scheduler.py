@@ -598,6 +598,26 @@ class TaskPrefix:
         self._suspicious = 0
 
     @property
+    def name(self):
+        return self._name
+
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def duration_average(self):
+        return self._duration_average
+
+    @property
+    def suspicious(self):
+        return self._suspicious
+
+    @property
+    def groups(self):
+        return self._groups
+
+    @property
     def states(self):
         return merge_with(sum, [g.states for g in self._groups])
 
