@@ -583,12 +583,9 @@ class TaskPrefix:
         # store timings for each prefix-action
         self.all_durations = defaultdict(float)
 
-        if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
-            self.duration_average = parse_timedelta(
-                dask.config.get("distributed.scheduler.default-task-durations")[
-                    self.name
-                ]
-            )
+        task_durations = dask.config.get("distributed.scheduler.default-task-durations")
+        if self.name in task_durations:
+            self.duration_average = parse_timedelta(task_durations[self.name])
         else:
             self.duration_average = None
         self.suspicious = 0
