@@ -1479,7 +1479,6 @@ class TaskGraph(DashboardComponent):
                     container.data = {col: [] for col in container.column_names}
             else:
                 # occasionally reset the column data source to remove old nodes
-                self.subtitle.text = " "
                 if self.invisible_count > len(self.node_source.data["x"]) / 2:
                     self.layout.reset_index()
                     self.invisible_count = 0
@@ -1497,6 +1496,8 @@ class TaskGraph(DashboardComponent):
 
                 if len(self.scheduler.tasks) == 0:
                     self.subtitle.text = "Scheduler is empty."
+                else:
+                    self.subtitle.text = " "
 
     @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
