@@ -583,7 +583,7 @@ class TaskPrefix:
     suspicious: Py_ssize_t
     groups: list
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         self.name = name
         self.groups = []
 
