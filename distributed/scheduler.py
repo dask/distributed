@@ -2518,6 +2518,7 @@ class Scheduler(ServerNode):
     def new_task(self, key, spec, state):
         """ Create a new task, and associated states """
         ts: TaskState = TaskState(key, spec)
+        tp: TaskPrefix
         ts._state = state
         prefix_key = key_split(key)
         try:
