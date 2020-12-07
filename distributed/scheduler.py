@@ -1132,6 +1132,10 @@ class TaskState:
     def processing_on(self):
         return self._processing_on
 
+    @processing_on.setter
+    def processing_on(self, v: WorkerState):
+        self._processing_on = v
+
     @property
     def retries(self):
         return self._retries
@@ -1139,6 +1143,10 @@ class TaskState:
     @property
     def nbytes(self):
         return self._nbytes
+
+    @nbytes.setter
+    def nbytes(self, v: Py_ssize_t):
+        self._nbytes = v
 
     @property
     def type(self):
