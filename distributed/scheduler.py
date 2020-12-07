@@ -2351,7 +2351,10 @@ class Scheduler(ServerNode):
         # Compute recommendations
         recommendations = {}
 
-        for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
+        def _priority(ets: TaskState):
+            return ets.priority
+
+        for ts in sorted(runnables, key=_priority, reverse=True):
             if ts.state == "released" and ts.run_spec:
                 recommendations[ts.key] = "waiting"
 
@@ -4315,9 +4318,12 @@ class Scheduler(ServerNode):
         ws._has_what.add(ts)
         ws._nbytes += ts.get_nbytes()
 
+        def _priority(ets: TaskState):
+            return ets.priority
+
         deps = ts.dependents
         if len(deps) > 1:
-            deps = sorted(deps, key=operator.attrgetter("priority"), reverse=True)
+            deps = sorted(deps, key=_priority, reverse=True)
         dts: TaskState
         for dts in deps:
             s = dts.waiting_on
