@@ -353,11 +353,7 @@ class Future(WrappedKey):
     def release(self, _in_destructor=False):
         # NOTE: this method can be called from different threads
         # (see e.g. Client.get() or Future.__del__())
-        if (
-            not self._cleared
-            and self.client.generation == self._generation
-            and self.client.scheduler is not None
-        ):
+        if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
                 self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
@@ -386,6 +382,10 @@ class Future(WrappedKey):
     def __del__(self):
         try:
             self.release()
+        except AttributeError:
+            # Ocassionally we see this error when shutting down the client
+            # https://github.com/dask/distributed/issues/4305
+            pass
         except RuntimeError:  # closed event loop
             pass
 
