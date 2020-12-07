@@ -38,10 +38,12 @@ if cython:
         Extension(
             "distributed.scheduler",
             sources=["distributed/scheduler.py"],
+            define_macros=[("CYTHON_TRACE", 1)],
         ),
         Extension(
             "distributed.protocol.serialize",
             sources=["distributed/protocol/serialize.py"],
+            define_macros=[("CYTHON_TRACE", 1)],
         ),
     ]
     for e in cyext_modules:
@@ -50,6 +52,8 @@ if cython:
             "binding": False,
             "embedsignature": True,
             "language_level": 3,
+            "profile": True,
+            "linetrace": True,
         }
     ext_modules.extend(cyext_modules)
 
