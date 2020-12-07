@@ -664,6 +664,7 @@ class TaskPrefix:
         return set().union(*[tg.types for tg in self._groups])
 
 
+@cclass
 class TaskGroup:
     """Collection tracking all tasks within a group
 
@@ -704,6 +705,15 @@ class TaskGroup:
     --------
     TaskPrefix
     """
+
+    name: str
+    prefix: TaskPrefix
+    states: dict
+    dependencies: set
+    nbytes_total: Py_ssize_t
+    nbytes_in_memory: Py_ssize_t
+    duration: double
+    types: set
 
     def __init__(self, name):
         self.name = name
