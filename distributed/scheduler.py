@@ -620,7 +620,7 @@ class TaskPrefix:
     @property
     def states(self):
         tg: TaskGroup
-        return merge_with(sum, [tg.states for tg in self._groups])
+        return merge_with(sum, [tg._states for tg in self._groups])
 
     @property
     def active(self):
@@ -628,12 +628,12 @@ class TaskPrefix:
         return [
             tg
             for tg in self._groups
-            if any(v != 0 for k, v in tg.states.items() if k != "forgotten")
+            if any(v != 0 for k, v in tg._states.items() if k != "forgotten")
         ]
 
     @property
     def active_states(self):
-        return merge_with(sum, [tg.states for tg in self.active])
+        return merge_with(sum, [tg._states for tg in self.active])
 
     def __repr__(self):
         return (
@@ -649,12 +649,12 @@ class TaskPrefix:
     @property
     def nbytes_in_memory(self):
         tg: TaskGroup
-        return sum([tg.nbytes_in_memory for tg in self._groups])
+        return sum([tg._nbytes_in_memory for tg in self._groups])
 
     @property
     def nbytes_total(self):
         tg: TaskGroup
-        return sum([tg.nbytes_total for tg in self._groups])
+        return sum([tg._nbytes_total for tg in self._groups])
 
     def __len__(self):
         return sum(map(len, self._groups))
@@ -662,12 +662,12 @@ class TaskPrefix:
     @property
     def duration(self):
         tg: TaskGroup
-        return sum([tg.duration for tg in self._groups])
+        return sum([tg._duration for tg in self._groups])
 
     @property
     def types(self):
         tg: TaskGroup
-        return set().union(*[tg.types for tg in self._groups])
+        return set().union(*[tg._types for tg in self._groups])
 
 
 @cclass
@@ -712,44 +712,44 @@ class TaskGroup:
     TaskPrefix
     """
 
-    name: str
-    prefix: TaskPrefix
-    states: dict
-    dependencies: set
-    nbytes_total: Py_ssize_t
-    nbytes_in_memory: Py_ssize_t
-    duration: double
-    types: set
+    _name: str
+    _prefix: TaskPrefix
+    _states: dict
+    _dependencies: set
+    _nbytes_total: Py_ssize_t
+    _nbytes_in_memory: Py_ssize_t
+    _duration: double
+    _types: set
 
     def __init__(self, name: str):
-        self.name = name
-        self.prefix = None
-        self.states = {state: 0 for state in ALL_TASK_STATES}
-        self.states["forgotten"] = 0
-        self.dependencies = set()
-        self.nbytes_total = 0
-        self.nbytes_in_memory = 0
-        self.duration = 0
-        self.types = set()
+        self._name = name
+        self._prefix = None
+        self._states = {state: 0 for state in ALL_TASK_STATES}
+        self._states["forgotten"] = 0
+        self._dependencies = set()
+        self._nbytes_total = 0
+        self._nbytes_in_memory = 0
+        self._duration = 0
+        self._types = set()
 
     def add(self, o):
         ts: TaskState = o
-        self.states[ts.state] += 1
+        self._states[ts.state] += 1
         ts._group = self
 
     def __repr__(self):
         return (
             "<"
-            + (self.name or "no-group")
+            + (self._name or "no-group")
             + ": "
             + ", ".join(
-                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+                "%s: %d" % (k, v) for (k, v) in sorted(self._states.items()) if v
             )
             + ">"
         )
 
     def __len__(self):
-        return sum(self.states.values())
+        return sum(self._states.values())
 
 
 @cclass
@@ -1137,8 +1137,8 @@ class TaskState:
 
     @state.setter
     def state(self, value: str):
-        self._group.states[self._state] -= 1
-        self._group.states[value] += 1
+        self._group._states[self._state] -= 1
+        self._group._states[value] += 1
         self._state = value
 
     @property
@@ -1252,7 +1252,7 @@ class TaskState:
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
         self._dependencies.add(other)
-        self._group.dependencies.add(other._group)
+        self._group._dependencies.add(other._group)
         other._dependents.add(self)
 
     def get_nbytes(self) -> int:
@@ -1264,8 +1264,8 @@ class TaskState:
         old_nbytes: Py_ssize_t = self._nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
-        self._group.nbytes_total += diff
-        self._group.nbytes_in_memory += diff
+        self._group._nbytes_total += diff
+        self._group._nbytes_in_memory += diff
         ws: WorkerState
         for ws in self._who_has:
             ws._nbytes += diff
@@ -2570,7 +2570,7 @@ class Scheduler(ServerNode):
             tg = self.task_groups[group_key]
         except KeyError:
             self.task_groups[group_key] = tg = TaskGroup(group_key)
-            tg.prefix = tp
+            tg._prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
         self.tasks[key] = ts
@@ -4512,7 +4512,7 @@ class Scheduler(ServerNode):
 
         ts.state = "memory"
         ts._type = typename
-        ts._group.types.add(typename)
+        ts._group._types.add(typename)
 
         cs: ClientState = self.clients["fire-and-forget"]
         if ts in cs._wants_what:
@@ -4811,7 +4811,7 @@ class Scheduler(ServerNode):
                     avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
                 ts._prefix._duration_average = avg_duration
-                ts._group.duration += new_duration
+                ts._group._duration += new_duration
 
                 tts: TaskState
                 for tts in self.unknown_durations.pop(ts._prefix._name, ()):
@@ -4880,7 +4880,7 @@ class Scheduler(ServerNode):
             for ws in ts._who_has:
                 ws._has_what.remove(ts)
                 ws._nbytes -= ts.get_nbytes()
-                ts._group.nbytes_in_memory -= ts.get_nbytes()
+                ts._group._nbytes_in_memory -= ts.get_nbytes()
                 self.worker_send(
                     ws._address, {"op": "delete-data", "keys": [key], "report": False}
                 )
@@ -5208,7 +5208,7 @@ class Scheduler(ServerNode):
         ts._waiting_on.clear()
 
         if ts._who_has:
-            ts._group.nbytes_in_memory -= ts.get_nbytes()
+            ts._group._nbytes_in_memory -= ts.get_nbytes()
 
         ws: WorkerState
         for ws in ts._who_has:
@@ -5375,12 +5375,12 @@ class Scheduler(ServerNode):
                 if ts.state == "forgotten":
                     del self.tasks[ts._key]
 
-            if ts.state == "forgotten" and ts._group.name in self.task_groups:
+            if ts.state == "forgotten" and ts._group._name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg: TaskGroup = ts._group
-                if not any(tg.states.get(s) for s in ALL_TASK_STATES):
+                if not any(tg._states.get(s) for s in ALL_TASK_STATES):
                     ts._prefix._groups.remove(tg)
-                    del self.task_groups[tg.name]
+                    del self.task_groups[tg._name]
 
             return recommendations
         except Exception as e:
