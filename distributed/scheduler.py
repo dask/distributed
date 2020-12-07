@@ -2551,7 +2551,7 @@ class Scheduler(ServerNode):
         try:
             tg = self.task_groups[group_key]
         except KeyError:
-            tg = self.task_groups[group_key] = TaskGroup(group_key)
+            self.task_groups[group_key] = tg = TaskGroup(group_key)
             tg.prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
