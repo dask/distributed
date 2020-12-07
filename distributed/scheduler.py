@@ -953,114 +953,114 @@ class TaskState:
         Task annotations
     """
 
-    key: str
+    _key: str
     _hash: Py_hash_t
-    prefix: TaskPrefix
-    run_spec: object
-    priority: tuple
+    _prefix: TaskPrefix
+    _run_spec: object
+    _priority: tuple
     _state: str
-    dependencies: set
-    dependents: set
-    has_lost_dependencies: bool
-    waiting_on: set
-    waiters: set
-    who_wants: set
-    who_has: set
-    processing_on: WorkerState
-    retries: Py_ssize_t
-    nbytes: Py_ssize_t
-    type: str
-    exception: object
-    traceback: object
-    exception_blame: object
-    suspicious: Py_ssize_t
-    host_restrictions: set
-    worker_restrictions: set
-    resource_restrictions: dict
-    loose_restrictions: bool
-    metadata: dict
-    annotations: dict
-    actor: bool
-    group: TaskGroup
-    group_key: str
+    _dependencies: set
+    _dependents: set
+    _has_lost_dependencies: bool
+    _waiting_on: set
+    _waiters: set
+    _who_wants: set
+    _who_has: set
+    _processing_on: WorkerState
+    _retries: Py_ssize_t
+    _nbytes: Py_ssize_t
+    _type: str
+    _exception: object
+    _traceback: object
+    _exception_blame: object
+    _suspicious: Py_ssize_t
+    _host_restrictions: set
+    _worker_restrictions: set
+    _resource_restrictions: dict
+    _loose_restrictions: bool
+    _metadata: dict
+    _annotations: dict
+    _actor: bool
+    _group: TaskGroup
+    _group_key: str
 
     __slots__ = (
         # === General description ===
-        "actor",
+        "_actor",
         # Key name
-        "key",
+        "_key",
         # Hash of the key name
         "_hash",
         # Key prefix (see key_split())
-        "prefix",
+        "_prefix",
         # How to run the task (None if pure data)
-        "run_spec",
+        "_run_spec",
         # Alive dependents and dependencies
-        "dependencies",
-        "dependents",
+        "_dependencies",
+        "_dependents",
         # Compute priority
-        "priority",
+        "_priority",
         # Restrictions
-        "host_restrictions",
-        "worker_restrictions",  # not WorkerStates but addresses
-        "resource_restrictions",
-        "loose_restrictions",
+        "_host_restrictions",
+        "_worker_restrictions",  # not WorkerStates but addresses
+        "_resource_restrictions",
+        "_loose_restrictions",
         # === Task state ===
         "_state",
         # Whether some dependencies were forgotten
-        "has_lost_dependencies",
+        "_has_lost_dependencies",
         # If in 'waiting' state, which tasks need to complete
         # before we can run
-        "waiting_on",
+        "_waiting_on",
         # If in 'waiting' or 'processing' state, which tasks needs us
         # to complete before they can run
-        "waiters",
+        "_waiters",
         # In in 'processing' state, which worker we are processing on
-        "processing_on",
+        "_processing_on",
         # If in 'memory' state, Which workers have us
-        "who_has",
+        "_who_has",
         # Which clients want us
-        "who_wants",
-        "exception",
-        "traceback",
-        "exception_blame",
-        "suspicious",
-        "retries",
-        "nbytes",
-        "type",
-        "group_key",
-        "group",
-        "metadata",
-        "annotations",
+        "_who_wants",
+        "_exception",
+        "_traceback",
+        "_exception_blame",
+        "_suspicious",
+        "_retries",
+        "_nbytes",
+        "_type",
+        "_group_key",
+        "_group",
+        "_metadata",
+        "_annotations",
     )
 
     def __init__(self, key: str, run_spec: object):
-        self.key = key
+        self._key = key
         self._hash = hash(key)
-        self.run_spec = run_spec
+        self._run_spec = run_spec
         self._state = None
-        self.exception = self.traceback = self.exception_blame = None
-        self.suspicious = self.retries = 0
-        self.nbytes = -1
-        self.priority = None
-        self.who_wants = set()
-        self.dependencies = set()
-        self.dependents = set()
-        self.waiting_on = set()
-        self.waiters = set()
-        self.who_has = set()
-        self.processing_on = None
-        self.has_lost_dependencies = False
-        self.host_restrictions = None
-        self.worker_restrictions = None
-        self.resource_restrictions = None
-        self.loose_restrictions = False
-        self.actor = None
-        self.type = None
-        self.group_key = key_split_group(key)
-        self.group = None
-        self.metadata = {}
-        self.annotations = {}
+        self._exception = self._traceback = self._exception_blame = None
+        self._suspicious = self._retries = 0
+        self._nbytes = -1
+        self._priority = None
+        self._who_wants = set()
+        self._dependencies = set()
+        self._dependents = set()
+        self._waiting_on = set()
+        self._waiters = set()
+        self._who_has = set()
+        self._processing_on = None
+        self._has_lost_dependencies = False
+        self._host_restrictions = None
+        self._worker_restrictions = None
+        self._resource_restrictions = None
+        self._loose_restrictions = False
+        self._actor = None
+        self._type = None
+        self._group_key = key_split_group(key)
+        self._group = None
+        self._metadata = {}
+        self._annotations = {}
 
     def __hash__(self):
         return self._hash
@@ -1070,7 +1070,7 @@ class TaskState:
         typ_other: type = type(other)
         if typ_self == typ_other:
             other_ts: TaskState = other
-            return self.key == other_ts.key
+            return self._key == other_ts._key
         else:
             return False
 
@@ -1080,49 +1080,49 @@ class TaskState:
 
     @property
     def prefix_key(self):
-        return self.prefix.name
+        return self._prefix.name
 
     @state.setter
     def state(self, value: str):
-        self.group.states[self._state] -= 1
-        self.group.states[value] += 1
+        self._group.states[self._state] -= 1
+        self._group.states[value] += 1
         self._state = value
 
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
-        self.dependencies.add(other)
-        self.group.dependencies.add(other.group)
-        other.dependents.add(self)
+        self._dependencies.add(other)
+        self._group.dependencies.add(other._group)
+        other._dependents.add(self)
 
     def get_nbytes(self) -> int:
-        nbytes = self.nbytes
+        nbytes = self._nbytes
         return nbytes if nbytes >= 0 else DEFAULT_DATA_SIZE
 
     def set_nbytes(self, nbytes: int):
         diff = nbytes
-        old_nbytes = self.nbytes
+        old_nbytes = self._nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
-        self.group.nbytes_total += diff
-        self.group.nbytes_in_memory += diff
+        self._group.nbytes_total += diff
+        self._group.nbytes_in_memory += diff
         ws: WorkerState
-        for ws in self.who_has:
+        for ws in self._who_has:
             ws._nbytes += diff
-        self.nbytes = nbytes
+        self._nbytes = nbytes
 
     def __repr__(self):
-        return "<Task %r %s>" % (self.key, self.state)
+        return "<Task %r %s>" % (self._key, self._state)
 
     def validate(self):
         try:
-            for cs in self.who_wants:
-                assert isinstance(cs, ClientState), (repr(cs), self.who_wants)
-            for ws in self.who_has:
-                assert isinstance(ws, WorkerState), (repr(ws), self.who_has)
-            for ts in self.dependencies:
-                assert isinstance(ts, TaskState), (repr(ts), self.dependencies)
-            for ts in self.dependents:
-                assert isinstance(ts, TaskState), (repr(ts), self.dependents)
+            for cs in self._who_wants:
+                assert isinstance(cs, ClientState), (repr(cs), self._who_wants)
+            for ws in self._who_has:
+                assert isinstance(ws, WorkerState), (repr(ws), self._who_has)
+            for ts in self._dependencies:
+                assert isinstance(ts, TaskState), (repr(ts), self._dependencies)
+            for ts in self._dependents:
+                assert isinstance(ts, TaskState), (repr(ts), self._dependents)
             validate_task_state(self)
         except Exception as e:
             logger.exception(e)
