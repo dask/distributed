@@ -2519,7 +2519,7 @@ class Scheduler(ServerNode):
         try:
             tp = self.task_prefixes[prefix_key]
         except KeyError:
-            tp = self.task_prefixes[prefix_key] = TaskPrefix(prefix_key)
+            self.task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
         ts._prefix = tp
 
         group_key = ts._group_key
