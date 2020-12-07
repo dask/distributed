@@ -577,35 +577,35 @@ class TaskPrefix:
     TaskGroup
     """
 
-    name: str
-    all_durations: object
-    duration_average: double
-    suspicious: Py_ssize_t
-    groups: list
+    _name: str
+    _all_durations: object
+    _duration_average: double
+    _suspicious: Py_ssize_t
+    _groups: list
 
     def __init__(self, name: str):
-        self.name = name
-        self.groups = []
+        self._name = name
+        self._groups = []
 
         # store timings for each prefix-action
-        self.all_durations = defaultdict(float)
+        self._all_durations = defaultdict(float)
 
         task_durations = dask.config.get("distributed.scheduler.default-task-durations")
-        if self.name in task_durations:
-            self.duration_average = parse_timedelta(task_durations[self.name])
+        if self._name in task_durations:
+            self._duration_average = parse_timedelta(task_durations[self._name])
         else:
-            self.duration_average = -1
-        self.suspicious = 0
+            self._duration_average = -1
+        self._suspicious = 0
 
     @property
     def states(self):
-        return merge_with(sum, [g.states for g in self.groups])
+        return merge_with(sum, [g.states for g in self._groups])
 
     @property
     def active(self):
         return [
             g
-            for g in self.groups
+            for g in self._groups
             if any(v != 0 for k, v in g.states.items() if k != "forgotten")
         ]
 
@@ -616,7 +616,7 @@ class TaskPrefix:
     def __repr__(self):
         return (
             "<"
-            + self.name
+            + self._name
             + ": "
             + ", ".join(
                 "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
@@ -626,22 +626,22 @@ class TaskPrefix:
 
     @property
     def nbytes_in_memory(self):
-        return sum(tg.nbytes_in_memory for tg in self.groups)
+        return sum(tg.nbytes_in_memory for tg in self._groups)
 
     @property
     def nbytes_total(self):
-        return sum(tg.nbytes_total for tg in self.groups)
+        return sum(tg.nbytes_total for tg in self._groups)
 
     def __len__(self):
-        return sum(map(len, self.groups))
+        return sum(map(len, self._groups))
 
     @property
     def duration(self):
-        return sum(tg.duration for tg in self.groups)
+        return sum(tg.duration for tg in self._groups)
 
     @property
     def types(self):
-        return set().union(*[tg.types for tg in self.groups])
+        return set().union(*[tg.types for tg in self._groups])
 
 
 class TaskGroup:
@@ -1210,7 +1210,7 @@ class TaskState:
 
     @property
     def prefix_key(self):
-        return self._prefix.name
+        return self._prefix._name
 
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
@@ -2533,7 +2533,7 @@ class Scheduler(ServerNode):
         except KeyError:
             tg = self.task_groups[group_key] = TaskGroup(group_key)
             tg.prefix = tp
-            tp.groups.append(tg)
+            tp._groups.append(tg)
         tg.add(ts)
         self.tasks[key] = ts
         return ts
@@ -2719,7 +2719,7 @@ class Scheduler(ServerNode):
                 recommendations[k] = "released"
                 if not safe:
                     ts._suspicious += 1
-                    ts._prefix.suspicious += 1
+                    ts._prefix._suspicious += 1
                     if ts._suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(
@@ -3230,14 +3230,14 @@ class Scheduler(ServerNode):
             return
 
         if compute_duration:
-            old_duration = ts._prefix.duration_average
+            old_duration = ts._prefix._duration_average
             new_duration = compute_duration
             if old_duration < 0:
                 avg_duration = new_duration
             else:
                 avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
-            ts._prefix.duration_average = avg_duration
+            ts._prefix._duration_average = avg_duration
 
         ws._occupancy -= ws._processing[ts]
         self.total_occupancy -= ws._processing[ts]
@@ -4314,9 +4314,9 @@ class Scheduler(ServerNode):
         Get the estimated computation cost of the given task
         (not including any communication cost).
         """
-        duration = ts._prefix.duration_average
+        duration = ts._prefix._duration_average
         if duration < 0:
-            self.unknown_durations[ts._prefix.name].add(ts)
+            self.unknown_durations[ts._prefix._name].add(ts)
             if default is None:
                 default = parse_timedelta(
                     dask.config.get("distributed.scheduler.unknown-task-duration")
@@ -4751,7 +4751,7 @@ class Scheduler(ServerNode):
 
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
-                    ts._prefix.all_durations[action] += stop - start
+                    ts._prefix._all_durations[action] += stop - start
 
                 if len(L) > 0:
                     compute_start, compute_stop = L[0]
@@ -4765,18 +4765,18 @@ class Scheduler(ServerNode):
             #############################
             if compute_start and ws._processing.get(ts, True):
                 # Update average task duration for worker
-                old_duration = ts._prefix.duration_average
+                old_duration = ts._prefix._duration_average
                 new_duration = compute_stop - compute_start
                 if old_duration < 0:
                     avg_duration = new_duration
                 else:
                     avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
-                ts._prefix.duration_average = avg_duration
+                ts._prefix._duration_average = avg_duration
                 ts._group.duration += new_duration
 
                 tts: TaskState
-                for tts in self.unknown_durations.pop(ts._prefix.name, ()):
+                for tts in self.unknown_durations.pop(ts._prefix._name, ()):
                     if tts._processing_on:
                         wws = tts._processing_on
                         old = wws._processing[tts]
@@ -5341,7 +5341,7 @@ class Scheduler(ServerNode):
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg = ts._group
                 if not any(tg.states.get(s) for s in ALL_TASK_STATES):
-                    ts._prefix.groups.remove(tg)
+                    ts._prefix._groups.remove(tg)
                     del self.task_groups[tg.name]
 
             return recommendations
