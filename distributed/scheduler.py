@@ -2132,8 +2132,10 @@ class Scheduler(ServerNode):
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
         for k, v in dependencies.items():
-            if v and k in self.tasks and self.tasks[k].state in ("memory", "erred"):
-                already_in_memory.add(k)
+            if v and k in self.tasks:
+                ts = self.tasks[k]
+                if ts.state in ("memory", "erred"):
+                    already_in_memory.add(k)
 
         if already_in_memory:
             dependents = dask.core.reverse_dict(dependencies)
@@ -2221,13 +2223,15 @@ class Scheduler(ServerNode):
 
             for a, kv in annotations.items():
                 for k, v in kv.items():
-                    self.tasks[k].annotations[a] = v
+                    ts = self.tasks[k]
+                    ts.annotations[a] = v
 
         # Add actors
         if actors is True:
             actors = list(keys)
         for actor in actors or []:
-            self.tasks[actor].actor = True
+            ts = self.tasks[actor]
+            ts.actor = True
 
         priority = priority or dask.order.order(
             tasks
@@ -2468,9 +2472,8 @@ class Scheduler(ServerNode):
         while stack:
             key = stack.pop()
             seen.add(key)
-            erred_deps = [
-                dts.key for dts in self.tasks[key].dependencies if dts.state == "erred"
-            ]
+            ts = self.tasks[key]
+            erred_deps = [dts.key for dts in ts.dependencies if dts.state == "erred"]
             if erred_deps:
                 stack.extend(erred_deps)
             else:
