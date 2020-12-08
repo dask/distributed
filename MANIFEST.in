@@ -9,7 +9,6 @@ recursive-include distributed *.yaml
 recursive-include docs *.rst
 
 recursive-exclude distributed *.c
-recursive-exclude distributed *.pxd
 recursive-exclude distributed *.pyx
 
 include setup.py
