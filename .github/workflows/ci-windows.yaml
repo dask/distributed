@@ -43,9 +43,9 @@ jobs:
         shell: bash -l {0}
         run: |
           if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
-            python -m pip install -q --no-deps --install-option="--with-cython" -e .
+            python -m pip install -q --no-deps --install-option="--with-cython" .
           else
-            python -m pip install -q --no-deps -e .
+            python -m pip install -q --no-deps .
           fi
 
       - name: List packages in environment
