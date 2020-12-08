@@ -36,12 +36,20 @@ if cython:
         print("Please install Cython to build extensions.")
         sys.exit(1)
 
+    to_remove = set()
     modules = [
         ("distributed", "scheduler"),
         ("distributed", "protocol", "serialize"),
     ]
     cyext_modules = []
     for m in modules:
+        d = "."
+        for e in m[:-1]:
+            d = os.path.join(d, e)
+            fn = os.path.join(d, "__init__.pxd")
+            to_remove.add(fn)
+            with open(fn, "w+") as fh:
+                fh.write("")
         p_py = os.path.join(*m) + os.extsep + "py"
         p_pyx = p_py + "x"
         m = ".".join(m)
@@ -55,6 +63,8 @@ if cython:
             "language_level": 3,
         }
         cyext_modules.append(e)
+    for fn in to_remove:
+        atexit.register(os.remove, fn)
     ext_modules.extend(cyext_modules)
 
 
