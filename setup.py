@@ -38,7 +38,6 @@ if cython:
 
     modules = [
         ("distributed", "scheduler"),
-        ("distributed", "protocol", "serialize"),
     ]
     cyext_modules = []
     for m in modules:
