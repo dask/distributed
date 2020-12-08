@@ -2225,7 +2225,7 @@ class Scheduler(ServerNode):
 
             recommendations = {}
             for ts in list(self.unrunnable):
-                valid = self.valid_workers(ts)
+                valid: set = self.valid_workers(ts)
                 if valid is None or ws in valid:
                     recommendations[ts._key] = "waiting"
 
@@ -4655,7 +4655,7 @@ class Scheduler(ServerNode):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
-        valid_workers = self.valid_workers(ts)
+        valid_workers: set = self.valid_workers(ts)
 
         if (
             valid_workers is not None
@@ -5521,7 +5521,7 @@ class Scheduler(ServerNode):
             else:
                 saturated.discard(ws)
 
-    def valid_workers(self, ts: TaskState):
+    def valid_workers(self, ts: TaskState) -> set:
         """Return set of currently valid workers for key
 
         If all workers are valid then this returns ``None``.
@@ -5531,7 +5531,7 @@ class Scheduler(ServerNode):
         *  host_restrictions
         *  resource_restrictions
         """
-        s = None
+        s: set = None
 
         if ts._worker_restrictions:
             s = {w for w in ts._worker_restrictions if w in self.workers}
@@ -6084,7 +6084,7 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
-def decide_worker(ts: TaskState, all_workers, valid_workers, objective):
+def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
     """
     Decide which worker should take task *ts*.
 
