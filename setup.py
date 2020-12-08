@@ -21,6 +21,7 @@ for r in requires:
     else:
         install_requires.append(r)
 
+
 try:
     sys.argv.remove("--with-cython")
     cython = True
