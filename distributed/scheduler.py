@@ -4396,10 +4396,11 @@ class Scheduler(ServerNode):
         on the given worker.
         """
         dts: TaskState
-        return (
-            sum([dts._nbytes for dts in ts._dependencies - ws._has_what])
-            / self.bandwidth
-        )
+        deps: set = ts._dependencies - ws._has_what
+        nbytes: Py_ssize_t = 0
+        for dts in deps:
+            nbytes += dts._nbytes
+        return nbytes / self.bandwidth
 
     def get_task_duration(self, ts: TaskState, default=None):
         """
@@ -5246,9 +5247,7 @@ class Scheduler(ServerNode):
         ts._who_wants.clear()
         ts._processing_on = None
         ts._exception_blame = ts._exception = ts._traceback = None
-
-        if key in self.task_metadata:
-            del self.task_metadata[key]
+        self.task_metadata.pop(key, None)
 
     def _propagate_forgotten(self, ts: TaskState, recommendations):
         ts.state = "forgotten"
