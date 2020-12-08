@@ -2457,11 +2457,7 @@ class Worker(ServerNode):
             start = time()
             # Offload deserializing large tasks
             if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
-                from distributed.utils import _offload_executor
-
-                function, args, kwargs = await _offload_executor.submit(
-                    _deserialize, *ts.runspec
-                )
+                function, args, kwargs = await offload(_deserialize, *ts.runspec)
             else:
                 function, args, kwargs = _deserialize(*ts.runspec)
             stop = time()
@@ -2486,7 +2482,10 @@ class Worker(ServerNode):
         try:
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
-                ts = self.tasks[key]
+                try:
+                    ts = self.tasks[key]
+                except KeyError:
+                    continue
                 if ts.state != "constrained":
                     self.constrained.popleft()
                     continue
