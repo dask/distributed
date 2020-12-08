@@ -3188,7 +3188,7 @@ class Scheduler(ServerNode):
             ts: TaskState = self.tasks[key]
             dts: TaskState
 
-            msg = {
+            msg: dict = {
                 "op": "compute-task",
                 "key": key,
                 "priority": ts._priority,
@@ -3199,7 +3199,7 @@ class Scheduler(ServerNode):
             if ts._actor:
                 msg["actor"] = True
 
-            deps = ts._dependencies
+            deps: set = ts._dependencies
             if deps:
                 msg["who_has"] = {
                     dts._key: [ws._address for ws in dts._who_has] for dts in deps
