@@ -3181,11 +3181,10 @@ class Scheduler(ServerNode):
         )
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
-    def send_task_to_worker(self, worker, key):
+    def send_task_to_worker(self, worker, ts: TaskState):
         """ Send a single computational task to a worker """
         try:
             ws: WorkerState
-            ts: TaskState = self.tasks[key]
             dts: TaskState
 
             msg: dict = {
@@ -4727,7 +4726,7 @@ class Scheduler(ServerNode):
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            self.send_task_to_worker(worker, key)
+            self.send_task_to_worker(worker, ts)
 
             return {}
         except Exception as e:
