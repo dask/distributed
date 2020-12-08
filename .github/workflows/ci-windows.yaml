@@ -41,7 +41,7 @@ jobs:
 
       - name: Install distributed from source
         shell: bash -l {0}
-        run: python -m pip install -q --no-deps -e .
+        run: python -m pip install -q --no-deps .
 
       - name: List packages in environment
         shell: bash -l {0}
