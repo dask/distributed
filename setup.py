@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import atexit
 import os
 import sys
 from setuptools import setup, find_packages
@@ -41,9 +42,12 @@ if cython:
     ]
     cyext_modules = []
     for m in modules:
-        p = os.path.join(*m) + os.extsep + "py"
+        p_py = os.path.join(*m) + os.extsep + "py"
+        p_pyx = p_py + "x"
         m = ".".join(m)
-        e = Extension(m, sources=[p])
+        os.replace(p_py, p_pyx)
+        atexit.register(os.replace, p_pyx, p_py)
+        e = Extension(m, sources=[p_pyx])
         e.cython_directives = {
             "annotation_typing": True,
             "binding": False,

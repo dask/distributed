@@ -8,6 +8,9 @@ recursive-include distributed *.ico
 recursive-include distributed *.yaml
 recursive-include docs *.rst
 
+recursive-exclude distributed *.c
+recursive-exclude distributed *.pyx
+
 include setup.py
 include README.rst
 include LICENSE.txt
