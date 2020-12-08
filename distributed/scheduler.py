@@ -5544,7 +5544,7 @@ class Scheduler(ServerNode):
                 s |= ss
 
         if ts._resource_restrictions:
-            w = {
+            dw = {
                 resource: {
                     w
                     for w, supplied in self.resources[resource].items()
@@ -5553,7 +5553,7 @@ class Scheduler(ServerNode):
                 for resource, required in ts._resource_restrictions.items()
             }
 
-            ww = set.intersection(*w.values())
+            ww = set.intersection(*dw.values())
             if s is True:
                 s = ww
             else:
