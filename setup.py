@@ -35,23 +35,22 @@ if cython:
         print("Please install Cython to build extensions.")
         sys.exit(1)
 
-    cyext_modules = [
-        Extension(
-            "distributed.scheduler",
-            sources=["distributed/scheduler.py"],
-        ),
-        Extension(
-            "distributed.protocol.serialize",
-            sources=["distributed/protocol/serialize.py"],
-        ),
+    modules = [
+        ("distributed", "scheduler"),
+        ("distributed", "protocol", "serialize"),
     ]
-    for e in cyext_modules:
+    cyext_modules = []
+    for m in modules:
+        p = os.path.join(*m) + os.extsep + "py"
+        m = ".".join(m)
+        e = Extension(m, sources=[p])
         e.cython_directives = {
             "annotation_typing": True,
             "binding": False,
             "embedsignature": True,
             "language_level": 3,
         }
+        cyext_modules.append(e)
     ext_modules.extend(cyext_modules)
 
 
