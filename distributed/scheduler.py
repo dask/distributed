@@ -3206,8 +3206,8 @@ class Scheduler(ServerNode):
                 }
                 msg["nbytes"] = {dts._key: dts._nbytes for dts in deps}
 
-            if self.validate and deps:
-                assert all(msg["who_has"].values())
+                if self.validate:
+                    assert all(msg["who_has"].values())
 
             task = ts._run_spec
             if type(task) is dict:
