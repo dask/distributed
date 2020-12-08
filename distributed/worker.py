@@ -214,6 +214,9 @@ class Worker(ServerNode):
         Number of nthreads used by this worker process
     * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
         Executor used to perform computation
+        This can also be the string "offload" in which case this uses the same
+        thread pool used for offloading communications.  This results in the
+        same thread being used for deserialization and computation.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
@@ -752,17 +755,20 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-            self.__class__.__name__,
-            self.address,
-            self.name,
-            self.status,
-            len(self.data),
-            self.executing_count,
-            self.nthreads,
-            len(self.ready),
-            self.in_flight_tasks,
-            self.waiting_for_data_count,
+        return (
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            % (
+                self.__class__.__name__,
+                self.address,
+                self.name,
+                self.status,
+                len(self.data),
+                self.executing_count,
+                self.nthreads,
+                len(self.ready),
+                self.in_flight_tasks,
+                self.waiting_for_data_count,
+            )
         )
 
     @property
@@ -771,11 +777,7 @@ class Worker(ServerNode):
 
     def log_event(self, topic, msg):
         self.batched_stream.send(
-            {
-                "op": "log-event",
-                "topic": topic,
-                "msg": msg,
-            }
+            {"op": "log-event", "topic": topic, "msg": msg,}
         )
 
     @property
