@@ -2226,7 +2226,7 @@ class Scheduler(ServerNode):
             recommendations = {}
             for ts in list(self.unrunnable):
                 valid = self.valid_workers(ts)
-                if valid is True or ws in valid:
+                if valid is None or ws in valid:
                     recommendations[ts._key] = "waiting"
 
             if recommendations:
@@ -4657,12 +4657,17 @@ class Scheduler(ServerNode):
         """
         valid_workers = self.valid_workers(ts)
 
-        if not valid_workers and not ts._loose_restrictions and self.workers:
+        if (
+            valid_workers is not None
+            and not valid_workers
+            and not ts._loose_restrictions
+            and self.workers
+        ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
             return None
 
-        if ts._dependencies or valid_workers is not True:
+        if ts._dependencies or valid_workers is not None:
             worker = decide_worker(
                 ts,
                 self.workers.values(),
@@ -5519,14 +5524,14 @@ class Scheduler(ServerNode):
     def valid_workers(self, ts: TaskState):
         """Return set of currently valid workers for key
 
-        If all workers are valid then this returns ``True``.
+        If all workers are valid then this returns ``None``.
         This checks tracks the following state:
 
         *  worker_restrictions
         *  host_restrictions
         *  resource_restrictions
         """
-        s = True
+        s = None
 
         if ts._worker_restrictions:
             s = {w for w in ts._worker_restrictions if w in self.workers}
@@ -5540,7 +5545,7 @@ class Scheduler(ServerNode):
                 self.host_info[h]["addresses"] for h in hr if h in self.host_info
             ]
             ss: set = set.union(*sl) if sl else set()
-            if s is True:
+            if s is None:
                 s = ss
             else:
                 s |= ss
@@ -5556,12 +5561,12 @@ class Scheduler(ServerNode):
             }
 
             ww: set = set.intersection(*dw.values())
-            if s is True:
+            if s is None:
                 s = ww
             else:
                 s &= ww
 
-        if s is True:
+        if s is None:
             return s
         else:
             return {self.workers[w] for w in s}
@@ -6088,7 +6093,7 @@ def decide_worker(ts: TaskState, all_workers, valid_workers, objective):
     If several workers have dependencies then we choose the less-busy worker.
 
     Optionally provide *valid_workers* of where jobs are allowed to occur
-    (if all workers are allowed to take the task, pass True instead).
+    (if all workers are allowed to take the task, pass None instead).
 
     If the task requires data communication because no eligible worker has
     all the dependencies already, then we choose to minimize the number
@@ -6103,7 +6108,7 @@ def decide_worker(ts: TaskState, all_workers, valid_workers, objective):
     else:
         ws: WorkerState
         candidates = {ws for dts in deps for ws in dts._who_has}
-    if valid_workers is True:
+    if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
     else:
@@ -6112,7 +6117,7 @@ def decide_worker(ts: TaskState, all_workers, valid_workers, objective):
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    return decide_worker(ts, all_workers, True, objective)
+                    return decide_worker(ts, all_workers, None, objective)
                 else:
                     return None
     if not candidates:
