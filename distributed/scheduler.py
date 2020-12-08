@@ -525,8 +525,8 @@ class WorkerState:
             extra=self._extra,
         )
         ts: TaskState
-        ws._processing = {ts.key: cost for ts, cost in self._processing.items()}
-        ws._executing = {ts.key: duration for ts, duration in self._executing.items()}
+        ws._processing = {ts._key: cost for ts, cost in self._processing.items()}
+        ws._executing = {ts._key: duration for ts, duration in self._executing.items()}
         return ws
 
     def __repr__(self):
