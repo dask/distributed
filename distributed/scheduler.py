@@ -5534,17 +5534,19 @@ class Scheduler(ServerNode):
         if ts._host_restrictions:
             # Resolve the alias here rather than early, for the worker
             # may not be connected when host_restrictions is populated
-            hr = [self.coerce_hostname(h) for h in ts._host_restrictions]
+            hr: list = [self.coerce_hostname(h) for h in ts._host_restrictions]
             # XXX need HostState?
-            sl = [self.host_info[h]["addresses"] for h in hr if h in self.host_info]
-            ss = set.union(*sl) if sl else set()
+            sl: list = [
+                self.host_info[h]["addresses"] for h in hr if h in self.host_info
+            ]
+            ss: set = set.union(*sl) if sl else set()
             if s is True:
                 s = ss
             else:
                 s |= ss
 
         if ts._resource_restrictions:
-            dw = {
+            dw: dict = {
                 resource: {
                     w
                     for w, supplied in self.resources[resource].items()
@@ -5553,7 +5555,7 @@ class Scheduler(ServerNode):
                 for resource, required in ts._resource_restrictions.items()
             }
 
-            ww = set.intersection(*dw.values())
+            ww: set = set.intersection(*dw.values())
             if s is True:
                 s = ww
             else:
