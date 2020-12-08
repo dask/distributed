@@ -5536,8 +5536,8 @@ class Scheduler(ServerNode):
             # may not be connected when host_restrictions is populated
             hr = [self.coerce_hostname(h) for h in ts._host_restrictions]
             # XXX need HostState?
-            ss = [self.host_info[h]["addresses"] for h in hr if h in self.host_info]
-            ss = set.union(*ss) if ss else set()
+            sl = [self.host_info[h]["addresses"] for h in hr if h in self.host_info]
+            ss = set.union(*sl) if sl else set()
             if s is True:
                 s = ss
             else:
