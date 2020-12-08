@@ -7,7 +7,6 @@ from setuptools.extension import Extension
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
-setup_requires = []
 install_requires = []
 extras_require = {}
 for r in requires:
@@ -33,7 +32,8 @@ if cython:
     try:
         import cython
     except ImportError:
-        setup_requires.append("cython")
+        print("Please install Cython to build extensions.")
+        sys.exit(1)
 
     cyext_modules = [
         Extension(
@@ -70,7 +70,6 @@ setup(
         "distributed": ["http/templates/*.html"],
     },
     include_package_data=True,
-    setup_requires=setup_requires,
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),
