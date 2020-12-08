@@ -1767,7 +1767,7 @@ class Worker(ServerNode):
                 }
             )
 
-            self.ensure_computing()
+            self.io_loop.add_callback(self.ensure_computing)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2132,7 +2132,7 @@ class Worker(ServerNode):
                 if self.validate:
                     self.validate_state()
 
-                self.ensure_computing()
+                await self.ensure_computing()
 
                 if not busy:
                     self.repetitively_busy = 0
@@ -2450,7 +2450,7 @@ class Worker(ServerNode):
 
         return True
 
-    def _maybe_deserialize_task(self, ts):
+    async def _maybe_deserialize_task(self, ts):
         if not isinstance(ts.runspec, SerializedTask):
             return ts.runspec
         try:
@@ -2459,9 +2459,9 @@ class Worker(ServerNode):
             if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
                 from distributed.utils import _offload_executor
 
-                function, args, kwargs = _offload_executor.submit(
+                function, args, kwargs = await _offload_executor.submit(
                     _deserialize, *ts.runspec
-                ).result()
+                )
             else:
                 function, args, kwargs = _deserialize(*ts.runspec)
             stop = time()
@@ -2480,7 +2480,7 @@ class Worker(ServerNode):
             self.log.append((ts.key, "deserialize-error"))
             raise
 
-    def ensure_computing(self):
+    async def ensure_computing(self):
         if self.paused:
             return
         try:
@@ -2494,7 +2494,7 @@ class Worker(ServerNode):
                     self.constrained.popleft()
                     try:
                         # Ensure task is deserialized prior to execution
-                        ts.runspec = self._maybe_deserialize_task(ts)
+                        ts.runspec = await self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(ts, "executing")
@@ -2513,7 +2513,7 @@ class Worker(ServerNode):
                 elif ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
-                        ts.runspec = self._maybe_deserialize_task(ts)
+                        ts.runspec = await self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(ts, "executing")
@@ -2627,7 +2627,7 @@ class Worker(ServerNode):
                 assert ts.state != "executing"
                 assert not ts.waiting_for_data
 
-            self.ensure_computing()
+            await self.ensure_computing()
             self.ensure_communicating()
         except Exception as e:
             if executor_error is e:
@@ -2660,7 +2660,7 @@ class Worker(ServerNode):
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
-        def check_pause(memory):
+        async def check_pause(memory):
             frac = memory / self.memory_limit
             # Pause worker threads if above 80% memory use
             if self.memory_pause_fraction and frac > self.memory_pause_fraction:
@@ -2688,9 +2688,9 @@ class Worker(ServerNode):
                     else "None",
                 )
                 self.paused = False
-                self.ensure_computing()
+                await self.ensure_computing()
 
-        check_pause(memory)
+        await check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
@@ -2732,7 +2732,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
-            check_pause(memory)
+            await check_pause(memory)
             if count:
                 logger.debug(
                     "Moved %d pieces of data data and %s to disk",
