@@ -3184,6 +3184,7 @@ class Scheduler(ServerNode):
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
         try:
+            ws: WorkerState
             ts: TaskState = self.tasks[key]
             dts: TaskState
 
@@ -3200,7 +3201,6 @@ class Scheduler(ServerNode):
 
             deps = ts._dependencies
             if deps:
-                ws: WorkerState
                 msg["who_has"] = {
                     dts._key: [ws._address for ws in dts._who_has] for dts in deps
                 }
