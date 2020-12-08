@@ -3190,7 +3190,7 @@ class Scheduler(ServerNode):
 
             msg: dict = {
                 "op": "compute-task",
-                "key": key,
+                "key": ts._key,
                 "priority": ts._priority,
                 "duration": self.get_task_duration(ts),
             }
