@@ -4712,11 +4712,12 @@ class Scheduler(ServerNode):
 
             duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
+            occupancy = duration + comm
 
-            ws._processing[ts] = duration + comm
+            ws._processing[ts] = occupancy
             ts._processing_on = ws
-            ws._occupancy += duration + comm
-            self.total_occupancy += duration + comm
+            ws._occupancy += occupancy
+            self.total_occupancy += occupancy
             ts.state = "processing"
             self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
