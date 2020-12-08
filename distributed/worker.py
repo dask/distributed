@@ -2482,11 +2482,8 @@ class Worker(ServerNode):
         try:
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
-                try:
-                    ts = self.tasks[key]
-                except KeyError:
-                    continue
-                if ts.state != "constrained":
+                ts = self.tasks.get(key, None)
+                if ts is None or ts.state != "constrained":
                     self.constrained.popleft()
                     continue
                 if self.meets_resource_constraints(key):
