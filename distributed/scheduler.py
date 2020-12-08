@@ -5212,9 +5212,7 @@ class Scheduler(ServerNode):
         ts._who_wants.clear()
         ts._processing_on = None
         ts._exception_blame = ts._exception = ts._traceback = None
-
-        if key in self.task_metadata:
-            del self.task_metadata[key]
+        self.task_metadata.pop(key, None)
 
     def _propagate_forgotten(self, ts: TaskState, recommendations):
         ts.state = "forgotten"
