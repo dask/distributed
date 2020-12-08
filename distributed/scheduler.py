@@ -5554,7 +5554,6 @@ class Scheduler(ServerNode):
             }
 
             ww = set.intersection(*w.values())
-
             if s is True:
                 s = ww
             else:
