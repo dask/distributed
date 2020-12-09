@@ -4204,9 +4204,8 @@ class Scheduler(ServerNode):
         assert (key is None) != (ts is None), (key, ts)
         if ts is None:
             tasks: dict = self.tasks
-            try:
-                ts = tasks[key]
-            except KeyError:
+            ts = tasks.get(key)
+            if ts is None:
                 self.report({"op": "cancelled-key", "key": key}, client=client)
                 return
         else:
