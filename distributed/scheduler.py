@@ -3066,7 +3066,7 @@ class Scheduler(ServerNode):
     # Manage Messages #
     ###################
 
-    def report(self, msg, ts: TaskState = None, client=None):
+    def report(self, msg: dict, ts: TaskState = None, client: str = None):
         """
         Publish updates to all listening Queues and Comms
 
