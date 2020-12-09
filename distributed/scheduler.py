@@ -6127,9 +6127,10 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
         return None
 
     if len(candidates) == 1:
-        return first(candidates)
-
-    return min(candidates, key=objective)
+        ws = first(candidates)
+    else:
+        ws = min(candidates, key=objective)
+    return ws
 
 
 def validate_task_state(ts: TaskState):
