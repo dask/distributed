@@ -4676,18 +4676,12 @@ class Scheduler(ServerNode):
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
-        elif self.idle:
-            if len(self.idle) < 20:  # smart but linear in small case
-                worker = min(self.idle, key=operator.attrgetter("occupancy"))
-            else:  # dumb but fast in large case
-                worker = self.idle[self.n_tasks % len(self.idle)]
         else:
-            if len(self.workers) < 20:  # smart but linear in small case
-                worker = min(
-                    self.workers.values(), key=operator.attrgetter("occupancy")
-                )
+            worker_pool = self.idle or self.workers.values()
+            if len(worker_pool) < 20:  # smart but linear in small case
+                worker = min(worker_pool, key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                worker = self.workers.values()[self.n_tasks % len(self.workers)]
+                worker = worker_pool[self.n_tasks % len(worker_pool)]
 
         if self.validate:
             assert worker is None or isinstance(worker, WorkerState), (
