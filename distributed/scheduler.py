@@ -5986,8 +5986,9 @@ class Scheduler(ServerNode):
         for ts in ws._processing:
             duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
-            ws._processing[ts] = duration + comm
-            new += duration + comm
+            occupancy = duration + comm
+            ws._processing[ts] = occupancy
+            new += occupancy
 
         ws._occupancy = new
         self.total_occupancy += new - old
