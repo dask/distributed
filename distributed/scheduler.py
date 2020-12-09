@@ -6127,7 +6127,8 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
         return None
 
     if len(candidates) == 1:
-        ws = first(candidates)
+        for ws in candidates:
+            break
     else:
         ws = min(candidates, key=objective)
     return ws
