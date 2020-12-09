@@ -1026,7 +1026,7 @@ class TaskState:
         Task annotations
     """
 
-    _key: str
+    _key: object
     _hash: Py_hash_t
     _prefix: TaskPrefix
     _run_spec: object
@@ -1107,7 +1107,7 @@ class TaskState:
         "_annotations",
     )
 
-    def __init__(self, key: str, run_spec: object):
+    def __init__(self, key: object, run_spec: object):
         self._key = key
         self._hash = hash(key)
         self._run_spec = run_spec
