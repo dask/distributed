@@ -1467,20 +1467,22 @@ class Worker(ServerNode):
 
             who_has = who_has or {}
 
-            for dependency, workers in who_has.items():
+            for dependency_key, workers in who_has.items():
                 assert workers
-                if dependency not in self.tasks:
-                    self.tasks[dependency] = dep_ts = TaskState(key=dependency)
+                if dependency_key not in self.tasks:
+                    self.tasks[dependency_key] = dep_ts = TaskState(key=dependency_key)
                     dep_ts.state = (
-                        "waiting" if dependency not in self.data else "memory"
+                        "waiting" if dependency_key not in self.data else "memory"
                     )
 
-                dep_ts = self.tasks[dependency]
-                self.log.append((dependency, "new-dep", dep_ts.state))
+                dep_ts = self.tasks[dependency_key]
+                self.log.append((dependency_key, "new-dep", dep_ts.state))
 
                 if dep_ts.state != "memory":
                     ts.waiting_for_data.add(dep_ts.key)
                     self.waiting_for_data_count += 1
+                elif dep_ts.state == "memory":
+                    dep_ts.nbytes = sizeof(self.data[dep_ts.key])
 
                 dep_ts.who_has.update(workers)
 
@@ -1494,7 +1496,8 @@ class Worker(ServerNode):
 
             if nbytes is not None:
                 for key, value in nbytes.items():
-                    self.tasks[key].nbytes = value
+                    # TODO: sometimes `value` is `None`, which is probably due to being mis-set somewhere else
+                    self.tasks[key].nbytes = value or DEFAULT_DATA_SIZE
 
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
@@ -2948,7 +2951,7 @@ class Worker(ServerNode):
                     # available.
                     ts_wait = self.tasks[key]
                     assert (
-                        ts_wait.state in ("flight", "waiting", "ready")
+                        ts_wait.state in ("flight", "waiting", "ready", "executing", "speculative")
                         or ts_wait.key in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
