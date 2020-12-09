@@ -4670,7 +4670,7 @@ class Scheduler(ServerNode):
             return None
 
         if ts._dependencies or valid_workers is not None:
-            worker = decide_worker(
+            ws = decide_worker(
                 ts,
                 self.workers.values(),
                 valid_workers,
@@ -4680,18 +4680,18 @@ class Scheduler(ServerNode):
             worker_pool = self.idle or self.workers.values()
             n_workers = len(worker_pool)
             if n_workers < 20:  # smart but linear in small case
-                worker = min(worker_pool, key=operator.attrgetter("occupancy"))
+                ws = min(worker_pool, key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                worker = worker_pool[self.n_tasks % n_workers]
+                ws = worker_pool[self.n_tasks % n_workers]
 
         if self.validate:
-            assert worker is None or isinstance(worker, WorkerState), (
-                type(worker),
-                worker,
+            assert ws is None or isinstance(ws, WorkerState), (
+                type(ws),
+                ws,
             )
-            assert worker.address in self.workers
+            assert ws.address in self.workers
 
-        return worker
+        return ws
 
     def transition_waiting_processing(self, key):
         try:
