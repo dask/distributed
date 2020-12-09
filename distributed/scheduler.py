@@ -4657,6 +4657,7 @@ class Scheduler(ServerNode):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
+        ws: WorkerState
         valid_workers: set = self.valid_workers(ts)
 
         if (
