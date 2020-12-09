@@ -3181,33 +3181,35 @@ class Scheduler(ServerNode):
         )
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
-    def send_task_to_worker(self, worker, key):
+    def send_task_to_worker(self, worker, ts: TaskState, duration=None):
         """ Send a single computational task to a worker """
         try:
-            ts: TaskState = self.tasks[key]
+            ws: WorkerState
             dts: TaskState
 
-            msg = {
+            if duration is None:
+                duration = self.get_task_duration(ts)
+
+            msg: dict = {
                 "op": "compute-task",
-                "key": key,
+                "key": ts._key,
                 "priority": ts._priority,
-                "duration": self.get_task_duration(ts),
+                "duration": duration,
             }
             if ts._resource_restrictions:
                 msg["resource_restrictions"] = ts._resource_restrictions
             if ts._actor:
                 msg["actor"] = True
 
-            deps = ts._dependencies
+            deps: set = ts._dependencies
             if deps:
-                ws: WorkerState
                 msg["who_has"] = {
                     dts._key: [ws._address for ws in dts._who_has] for dts in deps
                 }
                 msg["nbytes"] = {dts._key: dts._nbytes for dts in deps}
 
-            if self.validate and deps:
-                assert all(msg["who_has"].values())
+                if self.validate:
+                    assert all(msg["who_has"].values())
 
             task = ts._run_spec
             if type(task) is dict:
@@ -4733,7 +4735,7 @@ class Scheduler(ServerNode):
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            self.send_task_to_worker(worker, key)
+            self.send_task_to_worker(worker, ts, duration)
 
             return {}
         except Exception as e:
