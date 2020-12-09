@@ -4657,7 +4657,7 @@ class Scheduler(ServerNode):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
-        ws: WorkerState
+        ws: WorkerState = None
         valid_workers: set = self.valid_workers(ts)
 
         if (
@@ -4668,7 +4668,7 @@ class Scheduler(ServerNode):
         ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
-            return None
+            return ws
 
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
