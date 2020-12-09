@@ -3095,6 +3095,7 @@ class Scheduler(ServerNode):
             ]
             client_keys.append(client)
 
+        k: str
         for k in client_keys:
             try:
                 c = client_comms[k]
