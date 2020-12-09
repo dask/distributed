@@ -592,7 +592,10 @@ class Server:
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
-                    func()
+                    if is_coroutine_function(func):
+                        self.loop.add_callback(func)
+                    else:
+                        func()
 
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
