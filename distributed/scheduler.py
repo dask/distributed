@@ -3076,7 +3076,8 @@ class Scheduler(ServerNode):
         if ts is None:
             msg_key = msg.get("key")
             if msg_key is not None:
-                ts = self.tasks.get(msg_key)
+                tasks: dict = self.tasks
+                ts = tasks.get(msg_key)
 
         cs: ClientState
         if ts is None:
