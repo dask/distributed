@@ -3073,8 +3073,10 @@ class Scheduler(ServerNode):
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
-        if ts is None and "key" in msg:
-            ts = self.tasks.get(msg["key"])
+        if ts is None:
+            msg_key = msg.get("key")
+            if msg_key is not None:
+                ts = self.tasks.get(msg_key)
 
         cs: ClientState
         if ts is None:
