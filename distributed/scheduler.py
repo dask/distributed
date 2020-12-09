@@ -3080,6 +3080,7 @@ class Scheduler(ServerNode):
                 ts = tasks.get(msg_key)
 
         cs: ClientState
+        client_keys: list
         if ts is None:
             # Notify all clients
             client_keys = list(self.client_comms)
