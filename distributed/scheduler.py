@@ -86,13 +86,15 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import cclass, double, Py_hash_t, Py_ssize_t
+    from cython import bint, cclass, double, Py_hash_t, Py_ssize_t
 except ImportError:
     from ctypes import (
         c_double as double,
         c_ssize_t as Py_hash_t,
         c_ssize_t as Py_ssize_t,
     )
+
+    bint = bool
 
     def cclass(cls):
         return cls
@@ -1034,7 +1036,7 @@ class TaskState:
     _state: str
     _dependencies: set
     _dependents: set
-    _has_lost_dependencies: bool
+    _has_lost_dependencies: bint
     _waiting_on: set
     _waiters: set
     _who_wants: set
@@ -1050,10 +1052,10 @@ class TaskState:
     _host_restrictions: set
     _worker_restrictions: set
     _resource_restrictions: dict
-    _loose_restrictions: bool
+    _loose_restrictions: bint
     _metadata: dict
     _annotations: dict
-    _actor: bool
+    _actor: bint
     _group: TaskGroup
     _group_key: str
 
@@ -1128,7 +1130,7 @@ class TaskState:
         self._worker_restrictions = None
         self._resource_restrictions = None
         self._loose_restrictions = False
-        self._actor = None
+        self._actor = False
         self._type = None
         self._group_key = key_split_group(key)
         self._group = None
