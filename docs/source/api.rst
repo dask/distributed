@@ -16,6 +16,7 @@ API
    Client.gather
    Client.get
    Client.get_dataset
+   Client.get_events
    Client.get_executor
    Client.get_metadata
    Client.get_scheduler_logs
@@ -23,6 +24,7 @@ API
    Client.get_task_stream
    Client.has_what
    Client.list_datasets
+   Client.log_event
    Client.map
    Client.nthreads
    Client.persist

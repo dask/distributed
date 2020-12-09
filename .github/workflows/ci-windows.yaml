@@ -47,6 +47,13 @@ jobs:
         shell: bash -l {0}
         run: conda list
 
+      - name: Optionally Cythonize
+        shell: bash -l {0}
+        run: |
+          if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
+            python setup.py build_ext --with-cython
+          fi
+
       - name: Run tests
         shell: bash -l {0}
         env:
