@@ -1128,7 +1128,7 @@ class TaskState:
         self._worker_restrictions = None
         self._resource_restrictions = None
         self._loose_restrictions = False
-        self._actor = None
+        self._actor = False
         self._type = None
         self._group_key = key_split_group(key)
         self._group = None
