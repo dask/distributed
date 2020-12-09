@@ -3080,10 +3080,11 @@ class Scheduler(ServerNode):
                 ts = tasks.get(msg_key)
 
         cs: ClientState
+        client_comms: dict = self.client_comms
         client_keys: list
         if ts is None:
             # Notify all clients
-            client_keys = list(self.client_comms)
+            client_keys = list(client_comms)
         elif client is None:
             # Notify clients interested in key
             client_keys = [cs._client_key for cs in ts._who_wants]
@@ -3096,7 +3097,7 @@ class Scheduler(ServerNode):
 
         for k in client_keys:
             try:
-                c = self.client_comms[k]
+                c = client_comms[k]
             except KeyError:
                 continue
             try:
