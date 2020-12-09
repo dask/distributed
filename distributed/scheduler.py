@@ -6102,6 +6102,7 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+    ws: WorkerState
     dts: TaskState
     deps: set = ts._dependencies
     candidates: set
@@ -6109,7 +6110,6 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
     if ts._actor:
         candidates = set(all_workers)
     else:
-        ws: WorkerState
         candidates = {ws for dts in deps for ws in dts._who_has}
     if valid_workers is None:
         if not candidates:
