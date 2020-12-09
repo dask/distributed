@@ -3097,9 +3097,8 @@ class Scheduler(ServerNode):
 
         k: str
         for k in client_keys:
-            try:
-                c = client_comms[k]
-            except KeyError:
+            c = client_comms.get(k)
+            if c is None:
                 continue
             try:
                 c.send(msg)
