@@ -592,7 +592,10 @@ class Server:
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
-                    func()
+                    if is_coroutine_function(func):
+                        self.loop.add_callback(func)
+                    else:
+                        func()
 
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
@@ -1147,6 +1150,7 @@ def error_message(e, status="error"):
     e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb, protocol=4)
+        protocol.pickle.loads(tb2)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
