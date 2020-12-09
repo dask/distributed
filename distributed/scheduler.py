@@ -4653,7 +4653,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    def decide_worker(self, ts: TaskState):
+    def decide_worker(self, ts: TaskState) -> WorkerState:
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
@@ -6082,7 +6082,9 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
-def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
+def decide_worker(
+    ts: TaskState, all_workers, valid_workers: set, objective
+) -> WorkerState:
     """
     Decide which worker should take task *ts*.
 
