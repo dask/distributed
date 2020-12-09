@@ -3363,8 +3363,9 @@ class Scheduler(ServerNode):
         This also handles connection failures by adding a callback to remove
         the worker on the next cycle.
         """
+        stream_comms: dict = self.stream_comms
         try:
-            self.stream_comms[worker].send(msg)
+            stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self.loop.add_callback(self.remove_worker, address=worker)
 
