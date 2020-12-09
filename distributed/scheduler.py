@@ -4200,7 +4200,7 @@ class Scheduler(ServerNode):
             if client:
                 self.client_desires_keys(keys=list(who_has), client=client)
 
-    def report_on_key(self, key=None, ts: TaskState = None, client=None):
+    def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         assert (key is None) + (ts is None) == 1, (key, ts)
         if ts is None:
             try:
