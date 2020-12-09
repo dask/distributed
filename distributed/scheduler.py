@@ -4678,10 +4678,11 @@ class Scheduler(ServerNode):
             )
         else:
             worker_pool = self.idle or self.workers.values()
-            if len(worker_pool) < 20:  # smart but linear in small case
+            n_workers = len(worker_pool)
+            if n_workers < 20:  # smart but linear in small case
                 worker = min(worker_pool, key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                worker = worker_pool[self.n_tasks % len(worker_pool)]
+                worker = worker_pool[self.n_tasks % n_workers]
 
         if self.validate:
             assert worker is None or isinstance(worker, WorkerState), (
