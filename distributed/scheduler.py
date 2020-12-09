@@ -6104,6 +6104,7 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
     """
     dts: TaskState
     deps: set = ts._dependencies
+    candidates: set
     assert all([dts._who_has for dts in deps])
     if ts._actor:
         candidates = set(all_workers)
