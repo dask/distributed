@@ -2153,6 +2153,9 @@ class Scheduler(ServerNode):
                 raise ValueError("Worker already exists %s" % ws)
 
             if name in self.aliases:
+                logger.warning(
+                    "Worker tried to connect with a duplicate name: %s", name
+                )
                 msg = {
                     "status": "error",
                     "message": "name taken, %s" % name,
