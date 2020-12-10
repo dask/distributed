@@ -11,10 +11,9 @@ import errno
 from functools import partial
 import html
 import inspect
-import itertools
 import json
 import logging
-from numbers import Number, Integral
+from numbers import Number
 import os
 import sys
 import uuid
@@ -2543,8 +2542,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         priority=None,
         user_priority=0,
         resources=None,
@@ -2553,26 +2552,8 @@ class Client:
         actors=None,
     ):
         with self._refcount_lock:
-            if resources:
-                resources = self._expand_resources(
-                    resources, all_keys=itertools.chain(dsk, keys)
-                )
-                resources = {stringify(k): v for k, v in resources.items()}
-
-            if retries:
-                retries = self._expand_retries(
-                    retries, all_keys=itertools.chain(dsk, keys)
-                )
-
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
-            if restrictions:
-                restrictions = keymap(stringify, restrictions)
-                restrictions = valmap(list, restrictions)
-
-            if loose_restrictions is not None:
-                loose_restrictions = list(map(stringify, loose_restrictions))
 
             keyset = set(keys)
 
@@ -2582,8 +2563,19 @@ class Client:
 
             dsk = highlevelgraph_pack(dsk, self, keyset)
 
-            if isinstance(retries, Number) and retries > 0:
-                retries = {k: retries for k in dsk}
+            annotations = {}
+            if user_priority:
+                annotations["priority"] = user_priority
+            if workers:
+                if not isinstance(workers, (list, tuple, set)):
+                    workers = [workers]
+                annotations["workers"] = workers
+            if retries:
+                annotations["retries"] = retries
+            if allow_other_workers:
+                annotations["allow_other_workers"] = allow_other_workers
+            if resources:
+                annotations["resources"] = resources
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
@@ -2592,14 +2584,10 @@ class Client:
                     "op": "update-graph-hlg",
                     "hlg": dsk,
                     "keys": list(map(stringify, keys)),
-                    "restrictions": restrictions or {},
-                    "loose_restrictions": loose_restrictions,
                     "priority": priority,
-                    "user_priority": user_priority,
-                    "resources": resources,
                     "submitting_task": getattr(thread_state, "key", None),
-                    "retries": retries,
                     "fifo_timeout": fifo_timeout,
+                    "annotations": annotations,
                     "actors": actors,
                 }
             )
@@ -2849,10 +2837,6 @@ class Client:
             else:
                 dsk2[name] = (func, keys) + extra_args
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
@@ -2870,8 +2854,8 @@ class Client:
         futures_dict = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -3872,90 +3856,6 @@ class Client:
                     yield stringify(kkk)
             else:
                 yield stringify(kk)
-
-    @classmethod
-    def _expand_retries(cls, retries, all_keys):
-        """
-        Expand the user-provided "retries" specification
-        to a {task key: Integral} dictionary.
-        """
-        if retries and isinstance(retries, dict):
-            result = {
-                name: value
-                for key, value in retries.items()
-                for name in cls._expand_key(key)
-            }
-        elif isinstance(retries, Integral):
-            # Each task unit may potentially fail, allow retrying all of them
-            result = {name: retries for name in all_keys}
-        else:
-            raise TypeError(
-                "`retries` should be an integer or dict, got %r" % (type(retries))
-            )
-        return keymap(stringify, result)
-
-    def _expand_resources(cls, resources, all_keys):
-        """
-        Expand the user-provided "resources" specification
-        to a {task key: {resource name: Number}} dictionary.
-        """
-        # Resources can either be a single dict such as {'GPU': 2},
-        # indicating a requirement for all keys, or a nested dict
-        # such as {'x': {'GPU': 1}, 'y': {'SSD': 4}} indicating
-        # per-key requirements
-        if not isinstance(resources, dict):
-            raise TypeError("`resources` should be a dict, got %r" % (type(resources)))
-
-        per_key_reqs = {}
-        global_reqs = {}
-        all_keys = list(all_keys)
-        for k, v in resources.items():
-            if isinstance(v, dict):
-                # It's a per-key requirement
-                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
-            else:
-                # It's a global requirement
-                global_reqs.update((kk, {k: v}) for kk in all_keys)
-
-        if global_reqs and per_key_reqs:
-            raise ValueError(
-                "cannot have both per-key and all-key requirements "
-                "in resources dict %r" % (resources,)
-            )
-        return global_reqs or per_key_reqs
-
-    @classmethod
-    def get_restrictions(cls, collections, workers, allow_other_workers):
-        """ Get restrictions from inputs to compute/persist """
-        if isinstance(workers, (str, tuple, list)):
-            workers = {tuple(collections): workers}
-        if isinstance(workers, dict):
-            restrictions = {}
-            for colls, ws in workers.items():
-                if isinstance(ws, str):
-                    ws = [ws]
-                if dask.is_dask_collection(colls):
-                    keys = flatten(colls.__dask_keys__())
-                elif isinstance(colls, str):
-                    keys = [colls]
-                else:
-                    keys = list(
-                        {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
-                    )
-                restrictions.update({k: ws for k in keys})
-        else:
-            restrictions = {}
-
-        if allow_other_workers is True:
-            loose_restrictions = list(restrictions)
-        elif allow_other_workers:
-            loose_restrictions = list(
-                {k for c in flatten(allow_other_workers) for k in c.__dask_keys__()}
-            )
-        else:
-            loose_restrictions = []
-
-        return restrictions, loose_restrictions
 
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):

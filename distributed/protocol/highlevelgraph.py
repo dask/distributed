@@ -120,7 +120,7 @@ def _materialized_layer_unpack(state, dsk, dependencies, annotations):
         )
 
 
-def highlevelgraph_unpack(dumped_hlg):
+def highlevelgraph_unpack(dumped_hlg, annotations: dict):
     # Notice, we set `use_list=False`, which makes msgpack convert lists to tuples
     hlg = msgpack.loads(
         dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
@@ -128,13 +128,17 @@ def highlevelgraph_unpack(dumped_hlg):
 
     dsk = {}
     deps = {}
-    annotations = {}
+    out_annotations = {}
     for layer in hlg["layers"]:
+        if annotations:
+            if layer["state"]["annotations"] is None:
+                layer["state"]["annotations"] = {}
+            layer["state"]["annotations"].update(annotations)
         if layer["__module__"] is None:  # Default implementation
             unpack_func = _materialized_layer_unpack
         else:
             mod = import_allowed_module(layer["__module__"])
             unpack_func = getattr(mod, layer["__name__"]).__dask_distributed_unpack__
-        unpack_func(layer["state"], dsk, deps, annotations)
+        unpack_func(layer["state"], dsk, deps, out_annotations)
 
-    return dsk, deps, annotations
+    return dsk, deps, out_annotations

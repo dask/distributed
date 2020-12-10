@@ -2279,9 +2279,10 @@ class Scheduler(ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        annotations=None,
     ):
 
-        dsk, dependencies, annotations = highlevelgraph_unpack(hlg)
+        dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():

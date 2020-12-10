@@ -6397,3 +6397,12 @@ async def test_annotations_loose_restrictions(c, s, a, b):
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(client=True)
+async def test_workers_collection_restriction(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    future = c.compute(da.arange(10), workers=a.address)
+    await future
+    assert a.data and not b.data
