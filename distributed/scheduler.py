@@ -4541,6 +4541,7 @@ class Scheduler(ServerNode):
         if len(deps) > 1:
             deps = sorted(deps, key=operator.attrgetter("priority"), reverse=True)
         dts: TaskState
+        s: set
         for dts in deps:
             s = dts._waiting_on
             if ts in s:
@@ -4557,7 +4558,7 @@ class Scheduler(ServerNode):
         if not ts._waiters and not ts._who_wants:
             recommendations[ts._key] = "released"
         else:
-            msg = {"op": "key-in-memory", "key": ts._key}
+            msg: dict = {"op": "key-in-memory", "key": ts._key}
             if type is not None:
                 msg["type"] = type
             self.report(msg)
