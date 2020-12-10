@@ -2215,6 +2215,7 @@ class Scheduler(ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
+            recommendations: dict
             if nbytes:
                 for key in nbytes:
                     ts: TaskState = self.tasks.get(key)
@@ -2547,7 +2548,7 @@ class Scheduler(ServerNode):
                 ts._retries = v
 
         # Compute recommendations
-        recommendations = {}
+        recommendations: dict = {}
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts.state == "released" and ts._run_spec:
@@ -2623,6 +2624,7 @@ class Scheduler(ServerNode):
         ws: WorkerState = self.workers[worker]
         ts._metadata.update(kwargs["metadata"])
 
+        recommendations: dict
         if ts.state == "processing":
             recommendations = self.transition(key, "memory", worker=worker, **kwargs)
 
@@ -2653,6 +2655,7 @@ class Scheduler(ServerNode):
         if ts is None:
             return {}
 
+        recommendations: dict
         if ts.state == "processing":
             retries = ts._retries
             if retries > 0:
@@ -2685,7 +2688,7 @@ class Scheduler(ServerNode):
                 return {}
             cts: TaskState = self.tasks.get(cause)
 
-            recommendations = {}
+            recommendations: dict = {}
 
             if cts is not None and cts.state == "memory":  # couldn't find this
                 ws: WorkerState
@@ -2725,7 +2728,7 @@ class Scheduler(ServerNode):
             else:
                 roots.append(key)
 
-        recommendations = {key: "waiting" for key in roots}
+        recommendations: dict = {key: "waiting" for key in roots}
         self.transitions(recommendations)
 
         if self.validate:
@@ -2786,7 +2789,7 @@ class Scheduler(ServerNode):
             ws.status = Status.closed
             self.total_occupancy -= ws._occupancy
 
-            recommendations = {}
+            recommendations: dict = {}
 
             ts: TaskState
             for ts in list(ws._processing):
@@ -2914,7 +2917,7 @@ class Scheduler(ServerNode):
                 if not s:
                     tasks2.add(ts)
 
-        recommendations = {}
+        recommendations: dict = {}
         for ts in tasks2:
             if not ts._dependents:
                 # No live dependents, can forget
@@ -3286,7 +3289,7 @@ class Scheduler(ServerNode):
         ws._has_what -= removed_tasks
 
         ts: TaskState
-        recommendations = {}
+        recommendations: dict = {}
         for ts in removed_tasks:
             ws._nbytes -= ts.get_nbytes()
             wh = ts._who_has
@@ -4518,7 +4521,7 @@ class Scheduler(ServerNode):
         self,
         ts: TaskState,
         ws: WorkerState,
-        recommendations,
+        recommendations: dict,
         type=None,
         typename=None,
         **kwargs,
@@ -4583,7 +4586,7 @@ class Scheduler(ServerNode):
 
             ts.state = "waiting"
 
-            recommendations = {}
+            recommendations: dict = {}
 
             dts: TaskState
             for dts in ts._dependencies:
@@ -4635,7 +4638,7 @@ class Scheduler(ServerNode):
             if ts._has_lost_dependencies:
                 return {key: "forgotten"}
 
-            recommendations = {}
+            recommendations: dict = {}
 
             for dts in ts._dependencies:
                 dep = dts._key
@@ -4770,7 +4773,7 @@ class Scheduler(ServerNode):
 
             self.check_idle_saturated(ws)
 
-            recommendations = {}
+            recommendations: dict = {}
 
             self._add_to_memory(ts, ws, recommendations, **kwargs)
 
@@ -4879,7 +4882,7 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
 
-            recommendations = {}
+            recommendations: dict = {}
 
             self._remove_from_processing(ts)
 
@@ -4918,7 +4921,7 @@ class Scheduler(ServerNode):
                     ts._exception = "Worker holding Actor was lost"
                     return {ts._key: "erred"}  # don't try to recreate
 
-            recommendations = {}
+            recommendations: dict = {}
 
             for dts in ts._waiters:
                 if dts.state in ("no-worker", "processing"):
@@ -4972,7 +4975,7 @@ class Scheduler(ServerNode):
                     assert not ts._waiting_on
                     assert not ts._waiters
 
-            recommendations = {}
+            recommendations: dict = {}
 
             failing_ts = ts._exception_blame
 
@@ -5015,7 +5018,7 @@ class Scheduler(ServerNode):
                     assert not ts._waiting_on
                     assert not ts._waiters
 
-            recommendations = {}
+            recommendations: dict = {}
 
             ts._exception = None
             ts._exception_blame = None
@@ -5045,7 +5048,7 @@ class Scheduler(ServerNode):
                 assert not ts._who_has
                 assert not ts._processing_on
 
-            recommendations = {}
+            recommendations: dict = {}
 
             dts: TaskState
             for dts in ts._dependencies:
@@ -5091,7 +5094,7 @@ class Scheduler(ServerNode):
 
             ts.state = "released"
 
-            recommendations = {}
+            recommendations: dict = {}
 
             if ts._has_lost_dependencies:
                 recommendations[key] = "forgotten"
@@ -5150,7 +5153,7 @@ class Scheduler(ServerNode):
             else:
                 failing_ts = ts._exception_blame
 
-            recommendations = {}
+            recommendations: dict = {}
 
             for dts in ts._dependents:
                 dts._exception_blame = failing_ts
@@ -5230,7 +5233,7 @@ class Scheduler(ServerNode):
         ts._exception_blame = ts._exception = ts._traceback = None
         self.task_metadata.pop(key, None)
 
-    def _propagate_forgotten(self, ts: TaskState, recommendations):
+    def _propagate_forgotten(self, ts: TaskState, recommendations: dict):
         ts.state = "forgotten"
         key: str = ts._key
         dts: TaskState
@@ -5290,7 +5293,7 @@ class Scheduler(ServerNode):
                 else:
                     assert 0, (ts,)
 
-            recommendations = {}
+            recommendations: dict = {}
 
             if ts._actor:
                 for ws in ts._who_has:
@@ -5331,7 +5334,7 @@ class Scheduler(ServerNode):
                 else:
                     assert 0, (ts,)
 
-            recommendations = {}
+            recommendations: dict = {}
             self._propagate_forgotten(ts, recommendations)
 
             self.report_on_key(ts=ts)
@@ -5376,6 +5379,7 @@ class Scheduler(ServerNode):
                 dependents = set(ts._dependents)
                 dependencies = set(ts._dependencies)
 
+            recommendations: dict = {}
             if (start, finish) in self._transitions:
                 func = self._transitions[start, finish]
                 recommendations = func(key, *args, **kwargs)
@@ -5439,7 +5443,7 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transitions(self, recommendations):
+    def transitions(self, recommendations: dict):
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
