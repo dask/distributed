@@ -4777,7 +4777,7 @@ class Scheduler(ServerNode):
                 ts.waiting_on.add(dts)
                 dts.waiters.add(ts)
 
-            self.send_task_to_worker(ws.address, key)
+            self.send_task_to_worker(ws.address, ts)
 
             return _recommend_speculative_assignment(ts)
 
