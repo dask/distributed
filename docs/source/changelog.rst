@@ -9,11 +9,11 @@ Released on December 10, 2020
 Highlights
 ^^^^^^^^^^
 
+- Switched to `CalVer <https://calver.org/>`_ for versioning scheme.
 - The scheduler can now receives Dask ``HighLevelGraph`` s instead of raw dictionary task graphs.
   This allows for a much more efficient communication of task graphs from the client to the scheduler.
 - Added support for using custom ``Layer``-level annotations like ``priority``, ``retries``,
   etc. with the ``dask.annotations`` context manager.
-- Switched to `CalVer <https://calver.org/>`_ for versioning scheme.
 - Updated minimum supported version of Dask to 2020.12.0.
 - Added many type annotations and updates to allow for gradually Cythonizing the scheduler.
 
