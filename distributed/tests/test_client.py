@@ -6165,3 +6165,12 @@ async def test_mixed_compression(cleanup):
                     x = da.ones((10000, 10000))
                     y = x + x.T
                     await c.compute(y.sum())
+
+
+@gen_cluster(client=True)
+async def test_da_error(c, s, a, b):
+    import dask.array as da
+
+    y = da.random.random(10)
+    w = min(c.scheduler_info()["workers"])
+    c.compute([y], workers=w)
