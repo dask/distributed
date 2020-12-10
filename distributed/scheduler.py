@@ -5575,10 +5575,10 @@ class Scheduler(ServerNode):
             else:
                 s &= ww
 
-        if s is None:
-            return s
-        else:
-            return {self.workers[w] for w in s}
+        if s is not None:
+            s = {self.workers[w] for w in s}
+
+        return s
 
     def consume_resources(self, ts: TaskState, ws: WorkerState):
         if ts._resource_restrictions:
