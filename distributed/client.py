@@ -382,10 +382,11 @@ class Future(WrappedKey):
     def __del__(self):
         try:
             self.release()
-        except AttributeError:
+        except AttributeError as e:
             # Ocassionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            pass
+            if not shutting_down():
+                raise e
         except RuntimeError:  # closed event loop
             pass
 
