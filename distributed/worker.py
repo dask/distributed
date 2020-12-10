@@ -1497,8 +1497,6 @@ class Worker(ServerNode):
                 if dep_ts.state != "memory":
                     ts.waiting_for_data.add(dep_ts.key)
                     self.waiting_for_data_count += 1
-                elif dep_ts.state == "memory":
-                    dep_ts.nbytes = sizeof(self.data[dep_ts.key])
 
                 dep_ts.who_has.update(workers)
 
