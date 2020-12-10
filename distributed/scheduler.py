@@ -5232,7 +5232,7 @@ class Scheduler(ServerNode):
 
     def _propagate_forgotten(self, ts: TaskState, recommendations):
         ts.state = "forgotten"
-        key = ts._key
+        key: str = ts._key
         dts: TaskState
         for dts in ts._dependents:
             dts._has_lost_dependencies = True
@@ -5246,7 +5246,7 @@ class Scheduler(ServerNode):
 
         for dts in ts._dependencies:
             dts._dependents.remove(ts)
-            s = dts._waiters
+            s: set = dts._waiters
             s.discard(ts)
             if not dts._dependents and not dts._who_wants:
                 # Task not needed anymore
@@ -5262,7 +5262,7 @@ class Scheduler(ServerNode):
         for ws in ts._who_has:
             ws._has_what.remove(ts)
             ws._nbytes -= ts.get_nbytes()
-            w = ws._address
+            w: str = ws._address
             if w in self.workers:  # in case worker has died
                 self.worker_send(
                     w, {"op": "delete-data", "keys": [key], "report": False}
