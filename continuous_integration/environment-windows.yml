@@ -7,6 +7,7 @@ dependencies:
   - bokeh!=2.0.0
   - click
   - cloudpickle
+  - cython
   - dask
   - lz4
   - ipykernel
@@ -17,7 +18,7 @@ dependencies:
   - prometheus_client
   - psutil
   - pytest
-  - pytest-asyncio
+  - pytest-asyncio<0.14.0
   - pytest-repeat
   - pytest-timeout
   - pytest-faulthandler
@@ -29,6 +30,6 @@ dependencies:
   - fsspec
   - pip
   - pip:
-      - git+https://github.com/dask/dask
-      - git+https://github.com/joblib/joblib.git
-      - git+https://github.com/dask/zict
+      - git+https://github.com/dask/dask.git@master
+      - git+https://github.com/joblib/joblib.git@master
+      - git+https://github.com/dask/zict.git@master

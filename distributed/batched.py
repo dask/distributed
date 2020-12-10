@@ -54,6 +54,7 @@ class BatchedSend:
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
         self.serializers = serializers
+        self._consecutive_failures = 0
 
     def start(self, comm):
         self.comm = comm
@@ -101,12 +102,30 @@ class BatchedSend:
                 logger.info("Batched Comm Closed: %s", e)
                 break
             except Exception:
+                # We cannot safely retry self.comm.write, as we have no idea
+                # what (if anything) was actually written to the underlying stream.
+                # Re-writing messages could result in complete garbage (e.g. if a frame
+                # header has been written, but not the frame payload), therefore
+                # the only safe thing to do here is to abort the stream without
+                # any attempt to re-try `write`.
                 logger.exception("Error in batched write")
                 break
             finally:
                 payload = None  # lose ref
+        else:
+            # nobreak. We've been gracefully closed.
+            self.stopped.set()
+            return
 
+        # If we've reached here, it means `break` was hit above and
+        # there was an exception when using `comm`.
+        # We can't close gracefully via `.close()` since we can't send messages.
+        # So we just abort.
+        # This means that any messages in our buffer our lost.
+        # To propagate exceptions, we rely on subsequent `BatchedSend.send`
+        # calls to raise CommClosedErrors.
         self.stopped.set()
+        self.abort()
 
     def send(self, msg):
         """Schedule a message for sending to the other side

@@ -7,6 +7,8 @@ import numpy as np
 import pytest
 from tlz import identity
 
+from dask.utils_test import inc
+
 from distributed import wait
 from distributed.protocol import (
     register_serialization,
@@ -21,6 +23,8 @@ from distributed.protocol import (
     serialize_bytelist,
     register_serialization_family,
     dask_serialize,
+    dumps,
+    loads,
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
@@ -197,16 +201,12 @@ def test_empty():
 
 
 def test_empty_loads():
-    from distributed.protocol import loads, dumps
-
     e = Empty()
     e2 = loads(dumps([to_serialize(e)]))
     assert isinstance(e2[0], Empty)
 
 
 def test_empty_loads_deep():
-    from distributed.protocol import loads, dumps
-
     e = Empty()
     e2 = loads(dumps([[[to_serialize(e)]]]))
     assert isinstance(e2[0][0][0], Empty)

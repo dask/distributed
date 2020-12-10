@@ -81,29 +81,9 @@ code then this topic probably doesn't apply.
 Command Line tool
 -----------------
 
-Use the ``dask-worker`` command line tool to start an individual worker.  Here
-are the available options::
-
-   $ dask-worker --help
-   Usage: dask-worker [OPTIONS] SCHEDULER
-
-   Options:
-     --worker-port INTEGER  Serving worker port, defaults to randomly assigned
-     --http-port INTEGER    Serving http port, defaults to randomly assigned
-     --nanny-port INTEGER   Serving nanny port, defaults to randomly assigned
-     --port INTEGER         Deprecated, see --nanny-port
-     --host TEXT            Serving host. Defaults to an ip address that can
-                            hopefully be visible from the scheduler network.
-     --nthreads INTEGER     Number of threads per process. Defaults to number of
-                            cores
-     --nprocs INTEGER       Number of worker processes to launch.  Defaults to one.
-     --name TEXT            Alias
-     --memory-limit TEXT    Maximum bytes of memory that this worker should use.
-                            Use 0 for unlimited, or 'auto' for
-                            TOTAL_MEMORY * min(1, nthreads / total_nthreads)
-     --no-nanny
-     --help                 Show this message and exit.
-
+Use the ``dask-worker`` command line tool to start an individual worker. For
+more details on the command line options, please have a look at the
+`command line tools documentation <https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.
 
 Internal Scheduling
 -------------------
@@ -246,4 +226,5 @@ process.
 API Documentation
 -----------------
 
+.. autoclass:: distributed.worker.TaskState
 .. autoclass:: distributed.worker.Worker

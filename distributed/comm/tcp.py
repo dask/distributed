@@ -1,6 +1,7 @@
 import errno
 import logging
 import socket
+from ssl import SSLError
 import struct
 import sys
 from tornado import gen
@@ -199,6 +200,13 @@ class TCP(Comm):
             self.stream = None
             if not shutting_down():
                 convert_stream_closed_error(self, e)
+        except Exception:
+            # Some OSError or a another "low-level" exception. We do not really know what
+            # was already read from the underlying socket, so it is not even safe to retry
+            # here using the same stream. The only safe thing to do is to abort.
+            # (See also GitHub #4133).
+            self.abort()
+            raise
         else:
             try:
                 msg = await from_frames(
@@ -232,15 +240,15 @@ class TCP(Comm):
         )
 
         try:
+            nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
-            length_bytes = [struct.pack("Q", len(frames))] + [
-                struct.pack("Q", x) for x in lengths
-            ]
+            length_bytes = struct.pack(f"Q{nframes}Q", nframes, *lengths)
             if sum(lengths) < 2 ** 17:  # 128kiB
-                b = b"".join(length_bytes + frames)  # small enough, send in one go
-                stream.write(b)
+                # small enough, send in one go
+                stream.write(b"".join([length_bytes, *frames]))
             else:
-                stream.write(b"".join(length_bytes))  # avoid large memcpy, send in many
+                # avoid large memcpy, send in many
+                stream.write(length_bytes)
 
                 for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
@@ -252,13 +260,18 @@ class TCP(Comm):
                         await future
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
-            stream = None
-            convert_stream_closed_error(self, e)
-        except TypeError as e:
+            self.stream = None
+            if not shutting_down():
+                convert_stream_closed_error(self, e)
+        except Exception:
+            # Some OSError or a another "low-level" exception. We do not really know what
+            # was already written to the underlying socket, so it is not even safe to retry
+            # here using the same stream. The only safe thing to do is to abort.
+            # (See also GitHub #4133).
             if stream._write_buffer is None:
                 logger.info("tried to write message %s on closed stream", msg)
-            else:
-                raise
+            self.abort()
+            raise
 
         return sum(lengths)
 
@@ -349,7 +362,6 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
-
             # Under certain circumstances tornado will have a closed connnection with an error and not raise
             # a StreamClosedError.
             #
@@ -360,6 +372,8 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLError as err:
+            raise FatalCommClosedError() from err
 
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(
@@ -396,7 +410,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         deserialize=True,
         allow_offload=True,
         default_port=0,
-        **connection_args
+        **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
@@ -457,6 +471,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
             await self.on_connection(comm)
         except CommClosedError:
             logger.info("Connection closed before handshake completed")
+            return
 
         await self.comm_handler(comm)
 

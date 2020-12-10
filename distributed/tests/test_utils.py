@@ -24,7 +24,6 @@ from distributed.utils import (
     is_kernel,
     is_valid_xml,
     ensure_ip,
-    str_graph,
     truncate_exception,
     get_traceback,
     _maybe_complex,
@@ -110,6 +109,9 @@ def test_sync_timeout(loop_in_thread):
     with pytest.raises(TimeoutError):
         sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
 
+    with pytest.raises(TimeoutError):
+        sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout="50ms")
+
 
 def test_sync_closed_loop():
     loop = IOLoop.current()
@@ -190,32 +192,6 @@ def test_get_traceback():
     except Exception as e:
         tb = get_traceback()
         assert type(tb).__name__ == "traceback"
-
-
-def test_str_graph():
-    dsk = {"x": 1}
-    assert str_graph(dsk) == dsk
-
-    dsk = {("x", 1): (inc, 1)}
-    assert str_graph(dsk) == {str(("x", 1)): (inc, 1)}
-
-    dsk = {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))}
-    assert str_graph(dsk) == {
-        str(("x", 1)): (inc, 1),
-        str(("x", 2)): (inc, str(("x", 1))),
-    }
-
-    dsks = [
-        {"x": 1},
-        {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))},
-        {("x", 1): (sum, [1, 2, 3]), ("x", 2): (sum, [("x", 1), ("x", 1)])},
-    ]
-    for dsk in dsks:
-        sdsk = str_graph(dsk)
-        keys = list(dsk)
-        skeys = [str(k) for k in keys]
-        assert all(isinstance(k, str) for k in sdsk)
-        assert dask.get(dsk, keys) == dask.get(sdsk, skeys)
 
 
 def test_maybe_complex():

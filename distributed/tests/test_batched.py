@@ -7,7 +7,7 @@ from tlz import assoc
 from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
-from distributed.utils import All, TimeoutError
+from distributed.utils import All
 from distributed.utils_test import captured_logger
 from distributed.protocol import to_serialize
 
@@ -248,8 +248,4 @@ async def test_serializers():
         assert "type" in value
         assert "function" in value
 
-        msg = await comm.read()
-        assert list(msg) == [{"x": 123}, {"x": "hello"}]
-
-        with pytest.raises(TimeoutError):
-            msg = await asyncio.wait_for(comm.read(), 0.1)
+        assert comm.closed()

@@ -77,5 +77,17 @@ the scheduler as so:
 Worker Plugins
 =================
 
+:class:`distributed.diagnostics.plugin.WorkerPlugin` provides a base class
+for creating your own worker plugins. In addition, Dask provides some
+:ref:`built-in plugins <plugins.builtin>`.
+
 .. autoclass:: distributed.diagnostics.plugin.WorkerPlugin
    :members:
+
+.. _plugins.builtin:
+
+Built-In Worker Plugins
+-----------------------
+
+.. autoclass:: distributed.diagnostics.plugin.PipInstall
+.. autoclass:: distributed.diagnostics.plugin.UploadFile

@@ -7,8 +7,6 @@ from enum import Enum
 import dask
 from dask.base import normalize_token
 
-from tlz import valmap, get_in
-
 import msgpack
 
 from . import pickle
@@ -25,9 +23,10 @@ from .utils import (
 
 lazy_registrations = {}
 
-
 dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
+
+_cached_allowed_modules = {}
 
 
 def dask_dumps(x, context=None):
@@ -71,21 +70,57 @@ def pickle_loads(header, frames):
     return pickle.loads(x, buffers=buffers)
 
 
+def import_allowed_module(name):
+    if name in _cached_allowed_modules:
+        return _cached_allowed_modules[name]
+
+    # Check for non-ASCII characters
+    name = name.encode("ascii").decode()
+    # We only compare the root module
+    root = name.split(".", 1)[0]
+
+    # Note, if an empty string creeps into allowed-imports it is disallowed explicitly
+    if root and root in dask.config.get("distributed.scheduler.allowed-imports"):
+        _cached_allowed_modules[name] = importlib.import_module(name)
+        return _cached_allowed_modules[name]
+    else:
+        raise RuntimeError(
+            f"Importing {repr(name)} is not allowed, please add it to the list of "
+            "allowed modules the scheduler can import via the "
+            "distributed.scheduler.allowed-imports configuration setting."
+        )
+
+
 def msgpack_decode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
     if "__Enum__" in obj:
-        mod = importlib.import_module(obj["__module__"])
-        enum_type = getattr(mod, obj["__name__"])
-        obj = getattr(enum_type, obj["name"])
+        mod = import_allowed_module(obj["__module__"])
+        typ = getattr(mod, obj["__name__"])
+        return getattr(typ, obj["name"])
+
+    if "__Set__" in obj:
+        return set(obj["as-list"])
+
+    if "__Serialized__" in obj:
+        # Notice, the data here is marked a Serialized rather than deserialized. This
+        # is because deserialization requires Pickle which the Scheduler cannot run
+        # because of security reasons.
+        # By marking it Serialized, the data is passed through to the workers that
+        # eventually will deserialize it.
+        return Serialized(*obj["data"])
+
     return obj
 
 
 def msgpack_encode_default(obj):
     """
-    Custom packer/unpacker for msgpack to support Enums
+    Custom packer/unpacker for msgpack
     """
+
+    if isinstance(obj, Serialize):
+        return {"__Serialized__": True, "data": serialize(obj.data)}
 
     if isinstance(obj, Enum):
         return {
@@ -94,6 +129,10 @@ def msgpack_encode_default(obj):
             "__module__": obj.__module__,
             "__name__": type(obj).__name__,
         }
+
+    if isinstance(obj, set):
+        return {"__Set__": True, "as-list": list(obj)}
+
     return obj
 
 
@@ -392,16 +431,7 @@ class Serialized:
         return not (self == other)
 
 
-def container_copy(c):
-    typ = type(c)
-    if typ is list:
-        return list(map(container_copy, c))
-    if typ is dict:
-        return valmap(container_copy, c)
-    return c
-
-
-def extract_serialize(x):
+def extract_serialize(x) -> tuple:
     """Pull out Serialize objects from message
 
     This also remove large bytestrings from the message into a second
@@ -414,50 +444,55 @@ def extract_serialize(x):
     >>> extract_serialize(msg)
     ({'op': 'update'}, {('data',): <Serialize: 123>}, set())
     """
+    typ_x: type = type(x)
+    if typ_x is dict:
+        x_d: dict = x
+        x_items = x_d.items()
+        x2 = {}
+    elif typ_x is list:
+        x_l: list = x
+        x_items = enumerate(x_l)
+        x2 = len(x_l) * [None]
+
     ser = {}
-    _extract_serialize(x, ser)
-    if ser:
-        x = container_copy(x)
-        for path in ser:
-            t = get_in(path[:-1], x)
-            if isinstance(t, dict):
-                del t[path[-1]]
-            else:
-                t[path[-1]] = None
-
     bytestrings = set()
-    for k, v in ser.items():
-        if type(v) in (bytes, bytearray):
-            ser[k] = to_serialize(v)
-            bytestrings.add(k)
-    return x, ser, bytestrings
+    path = ()
+    _extract_serialize(x_items, x2, ser, bytestrings, path)
+    return x2, ser, bytestrings
 
 
-def _extract_serialize(x, ser, path=()):
-    if type(x) is dict:
-        for k, v in x.items():
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
-    elif type(x) is list:
-        for k, v in enumerate(x):
-            typ = type(v)
-            if typ is list or typ is dict:
-                _extract_serialize(v, ser, path + (k,))
-            elif (
-                typ is Serialize
-                or typ is Serialized
-                or typ in (bytes, bytearray)
-                and len(v) > 2 ** 16
-            ):
-                ser[path + (k,)] = v
+def _extract_serialize(x_items, x2, ser: dict, bytestrings: set, path: tuple) -> None:
+    for k, v in x_items:
+        path_k = path + (k,)
+        typ_v: type = type(v)
+        if typ_v is dict:
+            v_d: dict = v
+            v_items = v_d.items()
+            x2[k] = v2 = {}
+            _extract_serialize(v_items, v2, ser, bytestrings, path_k)
+        elif typ_v is list:
+            v_l: list = v
+            v_items = enumerate(v_l)
+            x2[k] = v2 = len(v_l) * [None]
+            _extract_serialize(v_items, v2, ser, bytestrings, path_k)
+        elif typ_v is Serialize or typ_v is Serialized:
+            ser[path_k] = v
+        elif typ_v is bytes:
+            v_b: bytes = v
+            if len(v_b) > 2 ** 16:
+                ser[path_k] = to_serialize(v_b)
+                bytestrings.add(path_k)
+            else:
+                x2[k] = v_b
+        elif typ_v is bytearray:
+            v_ba: bytearray = v
+            if len(v_ba) > 2 ** 16:
+                ser[path_k] = to_serialize(v_ba)
+                bytestrings.add(path_k)
+            else:
+                x2[k] = v_ba
+        else:
+            x2[k] = v
 
 
 def nested_deserialize(x):

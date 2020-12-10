@@ -293,6 +293,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
+    callback_timeout = parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -371,10 +372,8 @@ class LoopRunner:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
-            self._should_close_loop = True
         else:
             self._loop = loop
-            self._should_close_loop = False
         self._asynchronous = asynchronous
         self._loop_thread = None
         self._started = False
@@ -740,26 +739,6 @@ def truncate_exception(e, n=10000):
         return e
 
 
-def tokey(o):
-    """Convert an object to a string.
-
-    Examples
-    --------
-
-    >>> tokey(b'x')
-    b'x'
-    >>> tokey('x')
-    'x'
-    >>> tokey(1)
-    '1'
-    """
-    typ = type(o)
-    if typ is str or typ is bytes:
-        return o
-    else:
-        return str(o)
-
-
 def validate_key(k):
     """Validate a key as received on a stream."""
     typ = type(k)
@@ -776,25 +755,6 @@ def _maybe_complex(task):
         or type(task) is dict
         and any(map(_maybe_complex, task.values()))
     )
-
-
-def convert(task, dsk, extra_values):
-    if type(task) is list:
-        return [convert(v, dsk, extra_values) for v in task]
-    if type(task) is dict:
-        return {k: convert(v, dsk, extra_values) for k, v in task.items()}
-    if istask(task):
-        return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
-    try:
-        if task in dsk or task in extra_values:
-            return tokey(task)
-    except TypeError:
-        pass
-    return task
-
-
-def str_graph(dsk, extra_values=()):
-    return {tokey(k): convert(v, dsk, extra_values) for k, v in dsk.items()}
 
 
 def seek_delimiter(file, delimiter, blocksize):
@@ -1469,13 +1429,7 @@ def is_valid_xml(text):
     return xml.etree.ElementTree.fromstring(text) is not None
 
 
-try:
-    _offload_executor = ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="Dask-Offload"
-    )
-except TypeError:
-    _offload_executor = ThreadPoolExecutor(max_workers=1)
-
+_offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 

@@ -965,7 +965,7 @@ async def test_worker_arrives_with_processing_data(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1017,7 +1017,7 @@ async def test_no_workers_to_memory(c, s):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1)
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1047,7 +1047,7 @@ async def test_no_worker_to_memory_restrictions(c, s, a, b):
         await asyncio.sleep(0.01)
 
     w = Worker(s.address, nthreads=1, name="alice")
-    w.put_key_in_memory(y.key, 3)
+    w.update_data(data={y.key: 3})
 
     await w
 
@@ -1554,12 +1554,12 @@ async def test_closing_scheduler_closes_workers(s, a, b):
 async def test_resources_reset_after_cancelled_task(c, s, w):
     future = c.submit(sleep, 0.2, resources={"A": 1})
 
-    while not w.executing:
+    while not w.executing_count:
         await asyncio.sleep(0.01)
 
     await future.cancel()
 
-    while w.executing:
+    while w.executing_count:
         await asyncio.sleep(0.01)
 
     assert not s.workers[w.address].used_resources["A"]
@@ -2136,12 +2136,17 @@ async def test_worker_name_collision(s, a):
     # test that a name collision for workers produces the expected respsone
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
-    with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
-        await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
+    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+        with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
+            await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
 
     s.validate_state()
     assert set(s.workers) == {a.address}
     assert s.aliases == {a.name: a.address}
+
+    log = log.getvalue()
+    assert "duplicate" in log
+    assert str(a.name) in log
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})

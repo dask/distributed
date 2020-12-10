@@ -7,7 +7,9 @@ import os
 import psutil
 import sys
 from time import sleep
+import threading
 import traceback
+from unittest import mock
 import asyncio
 
 import dask
@@ -26,6 +28,7 @@ from distributed import (
     Reschedule,
     wait,
 )
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -51,6 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     a,
     b,
+    TaskStateMetadataPlugin,
 )
 
 
@@ -67,7 +71,7 @@ async def test_str(s, a, b):
     assert a.address in repr(a)
     assert str(a.nthreads) in str(a)
     assert str(a.nthreads) in repr(a)
-    assert str(len(a.executing)) in repr(a)
+    assert str(a.executing_count) in repr(a)
 
 
 @pytest.mark.asyncio
@@ -94,7 +98,7 @@ async def test_worker_bad_args(c, s, a, b):
 
     x = c.submit(NoReprObj, workers=a.address)
     await wait(x)
-    assert not a.executing
+    assert not a.executing_count
     assert a.data
 
     def bad_func(*args, **kwargs):
@@ -126,7 +130,7 @@ async def test_worker_bad_args(c, s, a, b):
     y = c.submit(bad_func, x, k=x, workers=b.address)
     await wait(y)
 
-    assert not b.executing
+    assert not b.executing_count
     assert y.status == "error"
     # Make sure job died because of bad func and not because of bad
     # argument.
@@ -569,13 +573,7 @@ async def test_clean(c, s, a, b):
 
     collections = [
         a.tasks,
-        a.task_state,
-        a.startstops,
         a.data,
-        a.nbytes,
-        a.durations,
-        a.priorities,
-        a.types,
         a.threads,
     ]
     for c in collections:
@@ -584,7 +582,7 @@ async def test_clean(c, s, a, b):
     x.release()
     y.release()
 
-    while x.key in a.task_state:
+    while x.key in a.tasks:
         await asyncio.sleep(0.01)
 
     for c in collections:
@@ -609,15 +607,16 @@ async def test_message_breakup(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_types(c, s, a, b):
-    assert not a.types
-    assert not b.types
+    assert all(ts.type is None for ts in a.tasks.values())
+    assert all(ts.type is None for ts in b.tasks.values())
     x = c.submit(inc, 1, workers=a.address)
     await wait(x)
-    assert a.types[x.key] == int
+    assert a.tasks[x.key].type == int
 
     y = c.submit(inc, x, workers=b.address)
     await wait(y)
-    assert b.types == {x.key: int, y.key: int}
+    assert b.tasks[x.key].type == int
+    assert b.tasks[y.key].type == int
 
     await c._cancel(y)
 
@@ -626,7 +625,7 @@ async def test_types(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    assert y.key not in b.types
+    assert y.key not in b.tasks
 
 
 @gen_cluster()
@@ -639,19 +638,24 @@ async def test_system_monitor(s, a, b):
     client=True, nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}}), ("127.0.0.1", 1)]
 )
 async def test_restrictions(c, s, a, b):
+    # Worker has resource available
+    assert a.available_resources == {"A": 1}
     # Resource restrictions
     x = c.submit(inc, 1, resources={"A": 1})
     await x
-    assert a.resource_restrictions == {x.key: {"A": 1}}
+    ts = a.tasks[x.key]
+    assert ts.resource_restrictions == {"A": 1}
     await c._cancel(x)
 
-    while x.key in a.task_state:
+    while ts.state != "memory":
+        # Resource should be unavailable while task isn't finished
+        assert a.available_resources == {"A": 0}
         await asyncio.sleep(0.01)
 
-    assert a.resource_restrictions == {}
+    # Resource restored after task is in memory
+    assert a.available_resources["A"] == 1
 
 
-@pytest.mark.xfail
 @gen_cluster(client=True)
 async def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
@@ -663,7 +667,11 @@ async def test_clean_nbytes(c, s, a, b):
     await wait(future)
 
     await asyncio.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    assert (
+        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        == 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
@@ -695,7 +703,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
 
     await wait(z)
 
-    r = w3.startstops[z.key]
+    r = w3.tasks[z.key].startstops
     transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
@@ -807,7 +815,7 @@ async def test_stop_doing_unnecessary_work(c, s, a, b):
     del futures
 
     start = time()
-    while a.executing:
+    while a.executing_count:
         await asyncio.sleep(0.01)
         assert time() - start < 0.5
 
@@ -1560,15 +1568,15 @@ async def test_close_gracefully(c, s, a, b):
         await asyncio.sleep(0.1)
 
     mem = set(b.data)
-    proc = set(b.executing)
+    proc = [ts for ts in b.tasks.values() if ts.state == "executing"]
 
     await b.close_gracefully()
 
     assert b.status == Status.closed
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
-    for key in proc:
-        assert s.tasks[key].state in ("processing", "memory")
+    for ts in proc:
+        assert ts.state in ("executing", "memory")
 
 
 @pytest.mark.slow
@@ -1614,6 +1622,53 @@ async def test_bad_startup(cleanup):
             pytest.fail("Startup exception was raised")
 
 
+@gen_cluster(client=True)
+async def test_pip_install(c, s, a, b):
+    with mock.patch(
+        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+        return_value=(b"", b""),
+    ) as p1:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+        ) as p2:
+            p1.communicate.return_value = b"", b""
+            p1.wait.return_value = 0
+            await c.register_worker_plugin(
+                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+            )
+
+            args = p2.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
+@gen_cluster(client=True)
+async def test_pip_install_fails(c, s, a, b):
+    with captured_logger(
+        "distributed.diagnostics.plugin", level=logging.ERROR
+    ) as logger:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+            return_value=(b"", b"error"),
+        ) as p1:
+            with mock.patch(
+                "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+            ) as p2:
+                p1.communicate.return_value = (
+                    b"",
+                    b"Could not find a version that satisfies the requirement not-a-package",
+                )
+                p1.wait.return_value = 1
+                await c.register_worker_plugin(PipInstall(packages=["not-a-package"]))
+
+                assert "not-a-package" in logger.getvalue()
+
+
+#             args = p2.call_args[0][0]
+#             assert "python" in args[0]
+#             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+
+
 @pytest.mark.asyncio
 async def test_update_latency(cleanup):
     async with await Scheduler() as s:
@@ -1624,6 +1679,23 @@ async def test_update_latency(cleanup):
 
             if w.digests is not None:
                 assert w.digests["latency"].size() > 0
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_executing(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                ws = s.workers[w.address]
+                # Initially there are no active tasks
+                assert not ws.metrics["executing"]
+                # Submit a task and ensure the worker's heartbeat includes the task
+                # in it's executing
+                f = c.submit(slowinc, 1, delay=1)
+                while not ws.metrics["executing"]:
+                    await w.heartbeat()
+                assert f.key in ws.metrics["executing"]
+                await f
 
 
 @pytest.mark.asyncio
@@ -1664,3 +1736,50 @@ async def test_bad_local_directory(cleanup):
                 assert False
 
         assert not any("error" in log for log in s.get_logs())
+
+
+@pytest.mark.asyncio
+async def test_taskstate_metadata(cleanup):
+
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+                f = c.submit(inc, 1)
+                await f
+
+                ts = w.tasks[f.key]
+                assert "start_time" in ts.metadata
+                assert "stop_time" in ts.metadata
+                assert ts.metadata["stop_time"] > ts.metadata["start_time"]
+
+                # Check that Scheduler TaskState.metadata was also updated
+                assert s.tasks[f.key].metadata == ts.metadata
+
+
+@pytest.mark.asyncio
+async def test_executor_offload(cleanup, monkeypatch):
+    class SameThreadClass:
+        def __getstate__(self):
+            return ()
+
+        def __setstate__(self, state):
+            self._thread_ident = threading.get_ident()
+            return self
+
+    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+
+    async with Scheduler() as s:
+        async with Worker(s.address, executor="offload") as w:
+            from distributed.utils import _offload_executor
+
+            assert w.executor is _offload_executor
+
+            async with Client(s.address, asynchronous=True) as c:
+                x = SameThreadClass()
+
+                def f(x):
+                    return threading.get_ident() == x._thread_ident
+
+                assert await c.submit(f, x)
