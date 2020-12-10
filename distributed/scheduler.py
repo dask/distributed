@@ -768,7 +768,7 @@ class TaskGroup:
 
     def add(self, o):
         ts: TaskState = o
-        self._states[ts.state] += 1
+        self._states[ts._state] += 1
         ts._group = self
 
     def __repr__(self):
@@ -2220,7 +2220,7 @@ class Scheduler(ServerNode):
                 for key in nbytes:
                     tasks: dict = self.tasks
                     ts: TaskState = tasks.get(key)
-                    if ts is not None and ts.state in ("processing", "waiting"):
+                    if ts is not None and ts._state in ("processing", "waiting"):
                         recommendations = self.transition(
                             key,
                             "memory",
@@ -2377,7 +2377,7 @@ class Scheduler(ServerNode):
         for k, v in dependencies.items():
             if v and k in self.tasks:
                 ts = self.tasks[k]
-                if ts.state in ("memory", "erred"):
+                if ts._state in ("memory", "erred"):
                     already_in_memory.add(k)
 
         dts: TaskState
@@ -2552,7 +2552,7 @@ class Scheduler(ServerNode):
         recommendations: dict = {}
 
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
-            if ts.state == "released" and ts._run_spec:
+            if ts._state == "released" and ts._run_spec:
                 recommendations[ts._key] = "waiting"
 
         for ts in touched_tasks:
@@ -2582,7 +2582,7 @@ class Scheduler(ServerNode):
         self.transitions(recommendations)
 
         for ts in touched_tasks:
-            if ts.state in ("memory", "erred"):
+            if ts._state in ("memory", "erred"):
                 self.report_on_key(ts._key, client=client)
 
         end = time()
@@ -2626,17 +2626,17 @@ class Scheduler(ServerNode):
         ts._metadata.update(kwargs["metadata"])
 
         recommendations: dict
-        if ts.state == "processing":
+        if ts._state == "processing":
             recommendations = self.transition(key, "memory", worker=worker, **kwargs)
 
-            if ts.state == "memory":
+            if ts._state == "memory":
                 assert ws in ts._who_has
         else:
             logger.debug(
                 "Received already computed task, worker: %s, state: %s"
                 ", key: %s, who_has: %s",
                 worker,
-                ts.state,
+                ts._state,
                 key,
                 ts._who_has,
             )
@@ -2657,7 +2657,7 @@ class Scheduler(ServerNode):
             return {}
 
         recommendations: dict
-        if ts.state == "processing":
+        if ts._state == "processing":
             retries = ts._retries
             if retries > 0:
                 ts._retries = retries - 1
@@ -2685,13 +2685,13 @@ class Scheduler(ServerNode):
             logger.debug("Stimulus missing data %s, %s", key, worker)
 
             ts: TaskState = self.tasks.get(key)
-            if ts is None or ts.state == "memory":
+            if ts is None or ts._state == "memory":
                 return {}
             cts: TaskState = self.tasks.get(cause)
 
             recommendations: dict = {}
 
-            if cts is not None and cts.state == "memory":  # couldn't find this
+            if cts is not None and cts._state == "memory":  # couldn't find this
                 ws: WorkerState
                 for ws in cts._who_has:  # TODO: this behavior is extreme
                     ws._has_what.remove(cts)
@@ -2723,7 +2723,7 @@ class Scheduler(ServerNode):
             key = stack.pop()
             seen.add(key)
             ts = self.tasks[key]
-            erred_deps = [dts._key for dts in ts._dependencies if dts.state == "erred"]
+            erred_deps = [dts._key for dts in ts._dependencies if dts._state == "erred"]
             if erred_deps:
                 stack.extend(erred_deps)
             else:
@@ -2900,7 +2900,7 @@ class Scheduler(ServerNode):
             ts._who_wants.add(cs)
             cs._wants_what.add(ts)
 
-            if ts.state in ("memory", "erred"):
+            if ts._state in ("memory", "erred"):
                 self.report_on_key(k, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
@@ -2923,7 +2923,7 @@ class Scheduler(ServerNode):
             if not ts._dependents:
                 # No live dependents, can forget
                 recommendations[ts._key] = "forgotten"
-            elif ts.state != "erred" and not ts._waiters:
+            elif ts._state != "erred" and not ts._waiters:
                 recommendations[ts._key] = "released"
 
         self.transitions(recommendations)
@@ -2940,7 +2940,7 @@ class Scheduler(ServerNode):
     def validate_released(self, key):
         ts: TaskState = self.tasks[key]
         dts: TaskState
-        assert ts.state == "released"
+        assert ts._state == "released"
         assert not ts._waiters
         assert not ts._waiting_on
         assert not ts._who_has
@@ -2980,7 +2980,7 @@ class Scheduler(ServerNode):
         assert not ts._waiting_on
         assert ts not in self.unrunnable
         for dts in ts._dependents:
-            assert (dts in ts._waiters) == (dts.state in ("waiting", "processing"))
+            assert (dts in ts._waiters) == (dts._state in ("waiting", "processing"))
             assert ts not in dts._waiting_on
 
     def validate_no_worker(self, key):
@@ -3008,10 +3008,10 @@ class Scheduler(ServerNode):
             else:
                 ts.validate()
                 try:
-                    func = getattr(self, "validate_" + ts.state.replace("-", "_"))
+                    func = getattr(self, "validate_" + ts._state.replace("-", "_"))
                 except AttributeError:
                     logger.error(
-                        "self.validate_%s not found", ts.state.replace("-", "_")
+                        "self.validate_%s not found", ts._state.replace("-", "_")
                     )
                 else:
                     func(key)
@@ -3765,7 +3765,7 @@ class Scheduler(ServerNode):
                     }
 
                 for sender, recipient, ts in msgs:
-                    assert ts.state == "memory"
+                    assert ts._state == "memory"
                     ts._who_has.add(recipient)
                     recipient.has_what.add(ts)
                     recipient.nbytes += ts.get_nbytes()
@@ -3857,7 +3857,7 @@ class Scheduler(ServerNode):
             while tasks:
                 gathers = defaultdict(dict)
                 for ts in list(tasks):
-                    if ts.state == "forgotten":
+                    if ts._state == "forgotten":
                         # task is no longer needed by any client or dependant task
                         tasks.remove(ts)
                         continue
@@ -4159,7 +4159,7 @@ class Scheduler(ServerNode):
         ws: WorkerState = self.workers[worker]
         for key in keys:
             ts: TaskState = self.tasks.get(key)
-            if ts is not None and ts.state == "memory":
+            if ts is not None and ts._state == "memory":
                 if ts not in ws._has_what:
                     ws._nbytes += ts.get_nbytes()
                     ws._has_what.add(ts)
@@ -4217,11 +4217,11 @@ class Scheduler(ServerNode):
                 return
         else:
             key = ts._key
-        if ts.state == "forgotten":
+        if ts._state == "forgotten":
             self.report({"op": "cancelled-key", "key": key}, ts=ts, client=client)
-        elif ts.state == "memory":
+        elif ts._state == "memory":
             self.report({"op": "key-in-memory", "key": key}, ts=ts, client=client)
-        elif ts.state == "erred":
+        elif ts._state == "erred":
             failing_ts: TaskState = ts._exception_blame
             self.report(
                 {
@@ -4348,9 +4348,9 @@ class Scheduler(ServerNode):
             while stack:
                 key = stack.pop()
                 ts = self.tasks[key]
-                if ts.state == "waiting":
+                if ts._state == "waiting":
                     stack.extend([dts._key for dts in ts._dependencies])
-                elif ts.state == "processing":
+                elif ts._state == "processing":
                     processing.add(ts)
 
             workers = defaultdict(list)
@@ -4583,7 +4583,7 @@ class Scheduler(ServerNode):
                 assert not ts._waiting_on
                 assert not ts._who_has
                 assert not ts._processing_on
-                assert not any([dts.state == "forgotten" for dts in ts._dependencies])
+                assert not any([dts._state == "forgotten" for dts in ts._dependencies])
 
             if ts._has_lost_dependencies:
                 return {key: "forgotten"}
@@ -4603,12 +4603,12 @@ class Scheduler(ServerNode):
                 dep = dts._key
                 if not dts._who_has:
                     ts._waiting_on.add(dts)
-                if dts.state == "released":
+                if dts._state == "released":
                     recommendations[dep] = "waiting"
                 else:
                     dts._waiters.add(ts)
 
-            ts._waiters = {dts for dts in ts._dependents if dts.state == "waiting"}
+            ts._waiters = {dts for dts in ts._dependents if dts._state == "waiting"}
 
             if not ts._waiting_on:
                 if self.workers:
@@ -4649,7 +4649,7 @@ class Scheduler(ServerNode):
                 dep = dts._key
                 if not dts._who_has:
                     ts._waiting_on.add(dts)
-                if dts.state == "released":
+                if dts._state == "released":
                     recommendations[dep] = "waiting"
                 else:
                     dts._waiters.add(ts)
@@ -4771,7 +4771,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert not ts._processing_on
                 assert ts._waiting_on
-                assert ts.state == "waiting"
+                assert ts._state == "waiting"
 
             ts._waiting_on.clear()
 
@@ -4823,7 +4823,7 @@ class Scheduler(ServerNode):
                 assert not ts._waiting_on
                 assert not ts._who_has, (ts, ts._who_has)
                 assert not ts._exception_blame
-                assert ts.state == "processing"
+                assert ts._state == "processing"
 
             ws = self.workers.get(worker)
             if ws is None:
@@ -4933,9 +4933,9 @@ class Scheduler(ServerNode):
             recommendations: dict = {}
 
             for dts in ts._waiters:
-                if dts.state in ("no-worker", "processing"):
+                if dts._state in ("no-worker", "processing"):
                     recommendations[dts._key] = "waiting"
-                elif dts.state == "waiting":
+                elif dts._state == "waiting":
                     dts._waiting_on.add(ts)
 
             # XXX factor this out?
@@ -5023,7 +5023,7 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert all([dts.state != "erred" for dts in ts._dependencies])
+                    assert all([dts._state != "erred" for dts in ts._dependencies])
                     assert ts._exception_blame
                     assert not ts._who_has
                     assert not ts._waiting_on
@@ -5036,7 +5036,7 @@ class Scheduler(ServerNode):
             ts._traceback = None
 
             for dts in ts._dependents:
-                if dts.state == "erred":
+                if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
 
             self.report({"op": "task-retried", "key": key})
@@ -5116,7 +5116,7 @@ class Scheduler(ServerNode):
 
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
-                    if dts.state != "released":
+                    if dts._state != "released":
                         s = dts._waiters
                         s.discard(ts)
                         if not s and not dts._who_wants:
@@ -5239,7 +5239,7 @@ class Scheduler(ServerNode):
     def remove_key(self, key):
         tasks: dict = self.tasks
         ts: TaskState = tasks.pop(key)
-        assert ts.state == "forgotten"
+        assert ts._state == "forgotten"
         self.unrunnable.discard(ts)
         cs: ClientState
         for cs in ts._who_wants:
@@ -5257,7 +5257,7 @@ class Scheduler(ServerNode):
             dts._has_lost_dependencies = True
             dts._dependencies.remove(ts)
             dts._waiting_on.discard(ts)
-            if dts.state not in ("memory", "erred"):
+            if dts._state not in ("memory", "erred"):
                 # Cannot compute task anymore
                 recommendations[dts._key] = "forgotten"
         ts._dependents.clear()
@@ -5296,7 +5296,7 @@ class Scheduler(ServerNode):
             ts: TaskState = tasks[key]
 
             if self.validate:
-                assert ts.state == "memory"
+                assert ts._state == "memory"
                 assert not ts._processing_on
                 assert not ts._waiting_on
                 if not ts._run_spec:
@@ -5337,7 +5337,7 @@ class Scheduler(ServerNode):
             ts: TaskState = tasks[key]
 
             if self.validate:
-                assert ts.state in ("released", "erred")
+                assert ts._state in ("released", "erred")
                 assert not ts._who_has
                 assert not ts._processing_on
                 assert not ts._waiting_on, (ts, ts._waiting_on)
@@ -5390,7 +5390,7 @@ class Scheduler(ServerNode):
                 ts = self.tasks[key]
             except KeyError:
                 return {}
-            start = ts.state
+            start = ts._state
             if start == finish:
                 return {}
 
@@ -5418,7 +5418,7 @@ class Scheduler(ServerNode):
                     "Impossible transition from %r to %r" % (start, finish)
                 )
 
-            finish2 = ts.state
+            finish2 = ts._state
             self.transition_log.append((key, start, finish2, recommendations, time()))
             if self.validate:
                 logger.debug(
@@ -5426,12 +5426,12 @@ class Scheduler(ServerNode):
                     key,
                     start,
                     finish2,
-                    ts.state,
+                    ts._state,
                     dict(recommendations),
                 )
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
-                if ts.state == "forgotten":
+                if ts._state == "forgotten":
                     try:
                         ts._dependents = dependents
                         ts._dependencies = dependencies
@@ -5443,10 +5443,10 @@ class Scheduler(ServerNode):
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
-                if ts.state == "forgotten":
+                if ts._state == "forgotten":
                     del self.tasks[ts._key]
 
-            if ts.state == "forgotten" and ts._group._name in self.task_groups:
+            if ts._state == "forgotten" and ts._group._name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg: TaskGroup = ts._group
                 if not any(tg._states.get(s) for s in ALL_TASK_STATES):
@@ -5504,7 +5504,7 @@ class Scheduler(ServerNode):
                 "found on the scheduler. Aborting reschedule.".format(key)
             )
             return
-        if ts.state != "processing":
+        if ts._state != "processing":
             return
         if worker and ts._processing_on.address != worker:
             return
@@ -6174,7 +6174,7 @@ def validate_task_state(ts: TaskState):
     ws: WorkerState
     dts: TaskState
 
-    assert ts.state in ALL_TASK_STATES or ts.state == "forgotten", ts
+    assert ts._state in ALL_TASK_STATES or ts._state == "forgotten", ts
 
     if ts._waiting_on:
         assert ts._waiting_on.issubset(ts._dependencies), (
@@ -6191,7 +6191,7 @@ def validate_task_state(ts: TaskState):
 
     for dts in ts._waiting_on:
         assert not dts._who_has, ("waiting on in-memory dep", str(ts), str(dts))
-        assert dts.state != "released", ("waiting on released dep", str(ts), str(dts))
+        assert dts._state != "released", ("waiting on released dep", str(ts), str(dts))
     for dts in ts._dependencies:
         assert ts in dts._dependents, (
             "not in dependency's dependents",
@@ -6199,16 +6199,16 @@ def validate_task_state(ts: TaskState):
             str(dts),
             str(dts._dependents),
         )
-        if ts.state in ("waiting", "processing"):
+        if ts._state in ("waiting", "processing"):
             assert dts in ts._waiting_on or dts._who_has, (
                 "dep missing",
                 str(ts),
                 str(dts),
             )
-        assert dts.state != "forgotten"
+        assert dts._state != "forgotten"
 
     for dts in ts._waiters:
-        assert dts.state in ("waiting", "processing"), (
+        assert dts._state in ("waiting", "processing"), (
             "waiter not in play",
             str(ts),
             str(dts),
@@ -6220,12 +6220,12 @@ def validate_task_state(ts: TaskState):
             str(dts),
             str(dts._dependencies),
         )
-        assert dts.state != "forgotten"
+        assert dts._state != "forgotten"
 
-    assert (ts._processing_on is not None) == (ts.state == "processing")
-    assert (not not ts._who_has) == (ts.state == "memory"), (ts, ts._who_has)
+    assert (ts._processing_on is not None) == (ts._state == "processing")
+    assert (not not ts._who_has) == (ts._state == "memory"), (ts, ts._who_has)
 
-    if ts.state == "processing":
+    if ts._state == "processing":
         assert all([dts._who_has for dts in ts._dependencies]), (
             "task processing without all deps",
             str(ts),
@@ -6262,9 +6262,9 @@ def validate_task_state(ts: TaskState):
             )
 
     if ts._actor:
-        if ts.state == "memory":
+        if ts._state == "memory":
             assert sum([ts in ws._actors for ws in ts._who_has]) == 1
-        if ts.state == "processing":
+        if ts._state == "processing":
             assert ts in ts._processing_on.actors
 
 
@@ -6279,7 +6279,7 @@ def validate_worker_state(ws: WorkerState):
         )
 
     for ts in ws._actors:
-        assert ts.state in ("memory", "processing")
+        assert ts._state in ("memory", "processing")
 
 
 def validate_state(tasks, workers, clients):
