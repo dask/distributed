@@ -2218,7 +2218,8 @@ class Scheduler(ServerNode):
             recommendations: dict
             if nbytes:
                 for key in nbytes:
-                    ts: TaskState = self.tasks.get(key)
+                    tasks: dict = self.tasks
+                    ts: TaskState = tasks.get(key)
                     if ts is not None and ts.state in ("processing", "waiting"):
                         recommendations = self.transition(
                             key,
@@ -4571,7 +4572,8 @@ class Scheduler(ServerNode):
 
     def transition_released_waiting(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -4624,7 +4626,8 @@ class Scheduler(ServerNode):
 
     def transition_no_worker_waiting(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -4710,7 +4713,8 @@ class Scheduler(ServerNode):
 
     def transition_waiting_processing(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -4759,7 +4763,8 @@ class Scheduler(ServerNode):
     def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
         try:
             ws: WorkerState = self.workers[worker]
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
 
             if self.validate:
                 assert not ts._processing_on
@@ -4804,7 +4809,8 @@ class Scheduler(ServerNode):
         ws: WorkerState
         wws: WorkerState
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             assert worker
             assert isinstance(worker, str)
 
@@ -4904,7 +4910,8 @@ class Scheduler(ServerNode):
     def transition_memory_released(self, key, safe=False):
         ws: WorkerState
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -4964,7 +4971,8 @@ class Scheduler(ServerNode):
 
     def transition_released_erred(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
             failing_ts: TaskState
 
@@ -5007,7 +5015,8 @@ class Scheduler(ServerNode):
 
     def transition_erred_released(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -5042,7 +5051,8 @@ class Scheduler(ServerNode):
 
     def transition_waiting_released(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
 
             if self.validate:
                 assert not ts._who_has
@@ -5079,7 +5089,8 @@ class Scheduler(ServerNode):
 
     def transition_processing_released(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -5127,7 +5138,8 @@ class Scheduler(ServerNode):
     ):
         ws: WorkerState
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
             failing_ts: TaskState
 
@@ -5196,7 +5208,8 @@ class Scheduler(ServerNode):
 
     def transition_no_worker_released(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
             dts: TaskState
 
             if self.validate:
@@ -5222,7 +5235,8 @@ class Scheduler(ServerNode):
             raise
 
     def remove_key(self, key):
-        ts: TaskState = self.tasks.pop(key)
+        tasks: dict = self.tasks
+        ts: TaskState = tasks.pop(key)
         assert ts.state == "forgotten"
         self.unrunnable.discard(ts)
         cs: ClientState
@@ -5273,9 +5287,11 @@ class Scheduler(ServerNode):
         ts._who_has.clear()
 
     def transition_memory_forgotten(self, key):
+        tasks: dict
         ws: WorkerState
         try:
-            ts: TaskState = self.tasks[key]
+            tasks = self.tasks
+            ts: TaskState = tasks[key]
 
             if self.validate:
                 assert ts.state == "memory"
@@ -5315,7 +5331,8 @@ class Scheduler(ServerNode):
 
     def transition_released_forgotten(self, key):
         try:
-            ts: TaskState = self.tasks[key]
+            tasks: dict = self.tasks
+            ts: TaskState = tasks[key]
 
             if self.validate:
                 assert ts.state in ("released", "erred")
