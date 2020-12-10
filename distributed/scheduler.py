@@ -4537,9 +4537,10 @@ class Scheduler(ServerNode):
         ws._has_what.add(ts)
         ws._nbytes += ts.get_nbytes()
 
-        deps = ts._dependents
+        deps: list = list(ts._dependents)
         if len(deps) > 1:
-            deps = sorted(deps, key=operator.attrgetter("priority"), reverse=True)
+            deps.sort(key=operator.attrgetter("priority"), reverse=True)
+
         dts: TaskState
         s: set
         for dts in deps:
