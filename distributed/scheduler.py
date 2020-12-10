@@ -86,13 +86,15 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import cclass, double, Py_hash_t, Py_ssize_t
+    from cython import bint, cclass, double, Py_hash_t, Py_ssize_t
 except ImportError:
     from ctypes import (
         c_double as double,
         c_ssize_t as Py_hash_t,
         c_ssize_t as Py_ssize_t,
     )
+
+    bint = bool
 
     def cclass(cls):
         return cls
@@ -1034,7 +1036,7 @@ class TaskState:
     _state: str
     _dependencies: set
     _dependents: set
-    _has_lost_dependencies: bool
+    _has_lost_dependencies: bint
     _waiting_on: set
     _waiters: set
     _who_wants: set
@@ -1050,10 +1052,10 @@ class TaskState:
     _host_restrictions: set
     _worker_restrictions: set
     _resource_restrictions: dict
-    _loose_restrictions: bool
+    _loose_restrictions: bint
     _metadata: dict
     _annotations: dict
-    _actor: bool
+    _actor: bint
     _group: TaskGroup
     _group_key: str
 
@@ -1128,7 +1130,7 @@ class TaskState:
         self._worker_restrictions = None
         self._resource_restrictions = None
         self._loose_restrictions = False
-        self._actor = None
+        self._actor = False
         self._type = None
         self._group_key = key_split_group(key)
         self._group = None
@@ -2131,7 +2133,7 @@ class Scheduler(ServerNode):
         now=None,
         resources=None,
         host_info=None,
-        memory_limit=0,
+        memory_limit=None,
         metrics=None,
         pid=0,
         services=None,
@@ -2164,7 +2166,7 @@ class Scheduler(ServerNode):
                 address=address,
                 pid=pid,
                 nthreads=nthreads,
-                memory_limit=memory_limit,
+                memory_limit=memory_limit or 0,
                 name=name,
                 local_directory=local_directory,
                 services=services,
@@ -4653,10 +4655,11 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    def decide_worker(self, ts: TaskState):
+    def decide_worker(self, ts: TaskState) -> WorkerState:
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
+        ws: WorkerState = None
         valid_workers: set = self.valid_workers(ts)
 
         if (
@@ -4667,36 +4670,31 @@ class Scheduler(ServerNode):
         ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
-            return None
+            return ws
 
         if ts._dependencies or valid_workers is not None:
-            worker = decide_worker(
+            ws = decide_worker(
                 ts,
                 self.workers.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
-        elif self.idle:
-            if len(self.idle) < 20:  # smart but linear in small case
-                worker = min(self.idle, key=operator.attrgetter("occupancy"))
-            else:  # dumb but fast in large case
-                worker = self.idle[self.n_tasks % len(self.idle)]
         else:
-            if len(self.workers) < 20:  # smart but linear in small case
-                worker = min(
-                    self.workers.values(), key=operator.attrgetter("occupancy")
-                )
+            worker_pool = self.idle or self.workers.values()
+            n_workers = len(worker_pool)
+            if n_workers < 20:  # smart but linear in small case
+                ws = min(worker_pool, key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                worker = self.workers.values()[self.n_tasks % len(self.workers)]
+                ws = worker_pool[self.n_tasks % n_workers]
 
         if self.validate:
-            assert worker is None or isinstance(worker, WorkerState), (
-                type(worker),
-                worker,
+            assert ws is None or isinstance(ws, WorkerState), (
+                type(ws),
+                ws,
             )
-            assert worker.address in self.workers
+            assert ws.address in self.workers
 
-        return worker
+        return ws
 
     def transition_waiting_processing(self, key):
         try:
@@ -5986,8 +5984,9 @@ class Scheduler(ServerNode):
         for ts in ws._processing:
             duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
-            ws._processing[ts] = duration + comm
-            new += duration + comm
+            occupancy = duration + comm
+            ws._processing[ts] = occupancy
+            new += occupancy
 
         ws._occupancy = new
         self.total_occupancy += new - old
@@ -6086,7 +6085,9 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
-def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
+def decide_worker(
+    ts: TaskState, all_workers, valid_workers: set, objective
+) -> WorkerState:
     """
     Decide which worker should take task *ts*.
 
@@ -6102,13 +6103,14 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+    ws: WorkerState
     dts: TaskState
-    deps = ts._dependencies
+    deps: set = ts._dependencies
+    candidates: set
     assert all([dts._who_has for dts in deps])
     if ts._actor:
         candidates = set(all_workers)
     else:
-        ws: WorkerState
         candidates = {ws for dts in deps for ws in dts._who_has}
     if valid_workers is None:
         if not candidates:
@@ -6126,9 +6128,11 @@ def decide_worker(ts: TaskState, all_workers, valid_workers: set, objective):
         return None
 
     if len(candidates) == 1:
-        return first(candidates)
-
-    return min(candidates, key=objective)
+        for ws in candidates:
+            break
+    else:
+        ws = min(candidates, key=objective)
+    return ws
 
 
 def validate_task_state(ts: TaskState):
