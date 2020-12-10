@@ -3066,20 +3066,25 @@ class Scheduler(ServerNode):
     # Manage Messages #
     ###################
 
-    def report(self, msg, ts: TaskState = None, client=None):
+    def report(self, msg: dict, ts: TaskState = None, client: str = None):
         """
         Publish updates to all listening Queues and Comms
 
         If the message contains a key then we only send the message to those
         comms that care about the key.
         """
-        if ts is None and "key" in msg:
-            ts = self.tasks.get(msg["key"])
+        if ts is None:
+            msg_key = msg.get("key")
+            if msg_key is not None:
+                tasks: dict = self.tasks
+                ts = tasks.get(msg_key)
 
         cs: ClientState
+        client_comms: dict = self.client_comms
+        client_keys: list
         if ts is None:
             # Notify all clients
-            client_keys = list(self.client_comms)
+            client_keys = list(client_comms)
         elif client is None:
             # Notify clients interested in key
             client_keys = [cs._client_key for cs in ts._who_wants]
@@ -3090,10 +3095,10 @@ class Scheduler(ServerNode):
             ]
             client_keys.append(client)
 
+        k: str
         for k in client_keys:
-            try:
-                c = self.client_comms[k]
-            except KeyError:
+            c = client_comms.get(k)
+            if c is None:
                 continue
             try:
                 c.send(msg)
@@ -3363,8 +3368,9 @@ class Scheduler(ServerNode):
         This also handles connection failures by adding a callback to remove
         the worker on the next cycle.
         """
+        stream_comms: dict = self.stream_comms
         try:
-            self.stream_comms[worker].send(msg)
+            stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self.loop.add_callback(self.remove_worker, address=worker)
 
@@ -4194,12 +4200,12 @@ class Scheduler(ServerNode):
             if client:
                 self.client_desires_keys(keys=list(who_has), client=client)
 
-    def report_on_key(self, key=None, ts: TaskState = None, client=None):
-        assert (key is None) + (ts is None) == 1, (key, ts)
+    def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
+        assert (key is None) != (ts is None), (key, ts)
         if ts is None:
-            try:
-                ts = self.tasks[key]
-            except KeyError:
+            tasks: dict = self.tasks
+            ts = tasks.get(key)
+            if ts is None:
                 self.report({"op": "cancelled-key", "key": key}, client=client)
                 return
         else:
