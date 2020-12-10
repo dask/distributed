@@ -1,3 +1,4 @@
+from asyncio.exceptions import CancelledError
 from concurrent.futures import ThreadPoolExecutor
 import importlib
 import logging
@@ -1759,9 +1760,20 @@ async def test_taskstate_metadata(cleanup):
 
 @gen_cluster(client=True)
 async def test_get_data(c, s, a, b):
+    """This test creates a broken dependency and forces serialization by
+    requiring it to be submitted to another worker. The computation should
+    eventually finish by flagging the dep as bad and raise an appropriate exception.
+    """
+    raise_exception = True
+
     class BrokenDeserialization:
         def __setstate__(self, *state):
-            raise AttributeError()
+            nonlocal raise_exception
+            if raise_exception:
+                # raise_exception = False
+                raise AttributeError()
+            else:
+                return ""
 
         def __getstate__(self, *args):
             return ""
@@ -1777,6 +1789,6 @@ async def test_get_data(c, s, a, b):
 
     await wait(fut1)
     fut2 = c.submit(collect, fut1, workers=[b.name])
-    # with pytest.raises(AttributeError):
-    args = await fut2.result()
-    assert args
+
+    with pytest.raises(CancelledError):
+        await fut2.result()
