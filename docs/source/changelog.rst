@@ -15,7 +15,7 @@ Highlights
   etc. with the ``dask.annotations`` context manager.
 - Switched to `CalVer <https://calver.org/>`_ for versioning scheme.
 - Updated minimum supported version of Dask to 2020.12.0.
-- Began adding many type annotations to allow for gradually Cythonizing the scheduler.
+- Added many type annotations and updates to allow for gradually Cythonizing the scheduler.
 
 All changes
 ^^^^^^^^^^^
