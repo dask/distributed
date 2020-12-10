@@ -251,7 +251,7 @@ class WorkStealing(SchedulerPlugin):
                 self.put_key_in_stealable(ts)
 
                 try:
-                    self.scheduler.send_task_to_worker(thief.address, key)
+                    self.scheduler.send_task_to_worker(thief.address, ts)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
                 self.log(("confirm", key, victim.address, thief.address))
