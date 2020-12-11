@@ -426,6 +426,7 @@ async def test_io_loop(cleanup):
         async with Worker(s.address, loop=s.loop) as w:
             assert w.io_loop is s.loop
 
+
 @pytest.mark.slow
 @gen_cluster(
     client=True,
@@ -438,6 +439,7 @@ async def test_memory_leak(c, s, a, b):
     import time
 
     x = {}
+
     def memory_leaking_fn(data):
         # leak 12MB blocks
         x[data] = np.random.randint(100, size=12 * 1024 ** 2 // 8)
