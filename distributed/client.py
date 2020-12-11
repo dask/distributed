@@ -2806,7 +2806,7 @@ class Client:
         >>> from operator import add
         >>> x = delayed(add)(1, 2)
         >>> y = delayed(add)(x, x)
-        >>> xx, yy = client.compute([x, y])  # doctest: +SKIP
+        >>> xx, yy = client.compute([x, y])  #:  +SKIP
         >>> xx  # doctest: +SKIP
         <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
         >>> xx.result()  # doctest: +SKIP
@@ -3927,10 +3927,22 @@ class Client:
     @classmethod
     def get_restrictions(cls, collections, workers, allow_other_workers):
         """ Get restrictions from inputs to compute/persist """
+        restrictions = {}
         if isinstance(workers, (str, tuple, list)):
-            workers = {tuple(collections): workers}
+            try:
+                workers = {tuple(collections): workers}
+            except TypeError:
+                keys = list(
+                    {
+                        k
+                        for c in flatten(collections)
+                        for k in flatten(c.__dask_keys__())
+                    }
+                )
+                if isinstance(workers, str):
+                    workers = [workers]
+                restrictions.update({k: workers for k in keys})
         if isinstance(workers, dict):
-            restrictions = {}
             for colls, ws in workers.items():
                 if isinstance(ws, str):
                     ws = [ws]
@@ -3943,8 +3955,31 @@ class Client:
                         {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
                     )
                 restrictions.update({k: ws for k in keys})
-        else:
-            restrictions = {}
+        # restrictions = {}
+        # print(type(collections))
+        # if isinstance(workers, (str, tuple, list)):
+        #     # dask arrays aren't hashable so go ahead and get their keys now
+        #     try:
+        #         workers = {tuple(collections): workers}
+        #     except TypeError:
+        #         keys = list(
+        #             {k for c in flatten(collections) for k in flatten(c.__dask_keys__())})
+        #         if isinstance(workers, str):
+        #             workers = [workers]
+        #             restrictions.update({k: workers for k in keys})
+        # if isinstance(workers, dict):
+        #     for colls, ws in workers.items():
+        #         if isinstance(ws, str):
+        #             ws = [ws]
+        #         if dask.is_dask_collection(colls):
+        #             keys = flatten(colls.__dask_keys__())
+        #         if isinstance(colls, str):
+        #             keys = [colls]
+        #         else:
+        #             keys = list(
+        #                 {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
+        #             )
+        #         restrictions.update({k: ws for k in keys})
 
         if allow_other_workers is True:
             loose_restrictions = list(restrictions)

@@ -4182,6 +4182,17 @@ def test_get_restrictions():
     assert r1 == {total.key: ["127.0.0.1"]}
     assert loose == [total.key]
 
+    import dask.array as da
+    from dask.core import flatten
+
+    col = da.arange(10)
+    col_keys = list({k for c in flatten(col) for k in flatten(c.__dask_keys__())})
+    print(col_keys)
+    worker = "127.0.0.1"
+    r1, loose = Client.get_restrictions(col, worker, False)
+    assert r1 == {k: ["127.0.0.1"] for k in col_keys}
+    assert not loose
+
 
 @gen_cluster(client=True)
 async def test_scatter_type(c, s, a, b):
@@ -6197,7 +6208,7 @@ async def test_mixed_compression(cleanup):
 
 
 @gen_cluster(client=True)
-async def test_da_error(c, s, a, b):
+async def test_array_with_worker_restrictions(c, s, a, b):
     import dask.array as da
 
     y = da.random.random(10)
