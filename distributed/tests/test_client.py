@@ -6206,6 +6206,7 @@ async def test_mixed_compression(cleanup):
                     await c.compute(y.sum())
 
 
+@gen_cluster(client=True)
 async def test_futures_in_subgraphs(c, s, a, b):
     """Regression test of <https://github.com/dask/distributed/issues/4145>"""
 
