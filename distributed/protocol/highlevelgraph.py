@@ -75,6 +75,27 @@ def _materialized_layer_pack(
 
 
 def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
+    """Pack the high level graph for Scheduler -> Worker communication
+
+    The approach is to delegate the packaging to each layer in the high
+    level graph by calling .__dask_distributed_pack__() on each layer.
+    If the layer doesn't implement packaging, we materialize the layer
+    and pack it.
+
+    Parameters
+    ----------
+    hlg: HighLevelGraph
+        The high level graph to pack
+    client: distributed.Client
+        The client calling this function.
+    client_keys: Iterable
+        List of keys requested by the client.
+
+    Returns
+    -------
+    data: bytes
+        Packed high level graph serialized by msgpack
+    """
     layers = []
 
     # Dump each layer (in topological order)
@@ -121,6 +142,28 @@ def _materialized_layer_unpack(state, dsk, dependencies, annotations):
 
 
 def highlevelgraph_unpack(dumped_hlg):
+    """Unpack the high level graph for Scheduler -> Worker communication
+
+    The approach is to delegate the packaging to each layer in the high
+    level graph by calling .__dask_distributed_pack__() on each layer.
+    If the layer doesn't implement a specialized packaging, we materialize
+    the layer can pack it.
+
+    Parameters
+    ----------
+    dumped_hlg: bytes
+        Packed high level graph serialized by msgpack
+
+    Returns
+    -------
+    dsk: dict
+        Materialized graph of all nodes in the high level graph
+    deps: dict
+        Dependencies of each key in `dsk`
+    annotations: dict
+        Annotations for `dsk`
+    """
+
     # Notice, we set `use_list=False`, which makes msgpack convert lists to tuples
     hlg = msgpack.loads(
         dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
