@@ -443,7 +443,7 @@ async def test_memory_leak(c, s, a, b):
     futures = c.map(memory_leaking_fn, range(1000))
 
     for f in futures:
-        print(f.result())
+        f.result()
 
 
 @gen_cluster(client=True, nthreads=[])
