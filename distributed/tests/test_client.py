@@ -6325,6 +6325,7 @@ async def test_annotations_priorities(c, s, a, b):
         x = await x.persist()
 
     assert all("15" in str(ts.priority) for ts in s.tasks.values())
+    assert all(ts.priority[0] == -15 for ts in s.tasks.values())
     assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
 
 

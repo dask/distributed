@@ -2448,7 +2448,7 @@ class Scheduler(ServerNode):
         # Override existing taxonomy with per task annotations
         if annotations:
             if "priority" in annotations:
-                priority.update(annotations["priority"])
+                user_priority.update(annotations["priority"])
 
             if "workers" in annotations:
                 restrictions.update(annotations["workers"])
