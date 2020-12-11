@@ -20,6 +20,7 @@ Highlights
 All changes
 ^^^^^^^^^^^
 
+- Some common optimizations across transitions (:pr:`4348`) `jakirkham`_
 - Drop serialize extension (:pr:`4344`) `jakirkham`_
 - Log duplciate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
 - Annotation of some comm related methods in the ``Scheduler`` (:pr:`4341`) `jakirkham`_
