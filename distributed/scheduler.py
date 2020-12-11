@@ -1290,8 +1290,7 @@ class TaskState:
         other._dependents.add(self)
 
     def get_nbytes(self) -> int:
-        nbytes = self._nbytes
-        return nbytes if nbytes >= 0 else DEFAULT_DATA_SIZE
+        return self._nbytes if self._nbytes >= 0 else DEFAULT_DATA_SIZE
 
     def set_nbytes(self, nbytes: Py_ssize_t):
         diff: Py_ssize_t = nbytes
@@ -2583,7 +2582,7 @@ class Scheduler(ServerNode):
 
         for ts in touched_tasks:
             if ts._state in ("memory", "erred"):
-                self.report_on_key(ts._key, client=client)
+                self.report_on_key(ts=ts, client=client)
 
         end = time()
         if self.digests is not None:
@@ -2901,7 +2900,7 @@ class Scheduler(ServerNode):
             cs._wants_what.add(ts)
 
             if ts._state in ("memory", "erred"):
-                self.report_on_key(k, client=client)
+                self.report_on_key(ts=ts, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
@@ -4208,16 +4207,18 @@ class Scheduler(ServerNode):
                 self.client_desires_keys(keys=list(who_has), client=client)
 
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
-        assert (key is None) != (ts is None), (key, ts)
         if ts is None:
             tasks: dict = self.tasks
             ts = tasks.get(key)
-            if ts is None:
-                self.report({"op": "cancelled-key", "key": key}, client=client)
-                return
-        else:
+        elif key is None:
             key = ts._key
-        if ts._state == "forgotten":
+        else:
+            assert False, (key, ts)
+            return
+
+        if ts is None:
+            self.report({"op": "cancelled-key", "key": key}, client=client)
+        elif ts._state == "forgotten":
             self.report({"op": "cancelled-key", "key": key}, ts=ts, client=client)
         elif ts._state == "memory":
             self.report({"op": "key-in-memory", "key": key}, ts=ts, client=client)
@@ -4504,7 +4505,7 @@ class Scheduler(ServerNode):
         """
         ws: WorkerState = ts._processing_on
         ts._processing_on = None
-        w = ws._address
+        w: str = ws._address
         if w in self.workers:  # may have been removed
             duration = ws._processing.pop(ts)
             if not ws._processing:
@@ -5701,11 +5702,16 @@ class Scheduler(ServerNode):
         Minimize expected start time.  If a tie then break with data storage.
         """
         dts: TaskState
-        comm_bytes = sum(
-            [dts.get_nbytes() for dts in ts._dependencies if ws not in dts._who_has]
-        )
-        stack_time = ws._occupancy / ws._nthreads
-        start_time = comm_bytes / self.bandwidth + stack_time
+        nbytes: Py_ssize_t
+        comm_bytes: Py_ssize_t = 0
+        for dts in ts._dependencies:
+            if ws not in dts._who_has:
+                nbytes = dts.get_nbytes()
+                comm_bytes += nbytes
+
+        bandwidth: double = self.bandwidth
+        stack_time: double = ws._occupancy / ws._nthreads
+        start_time: double = stack_time + comm_bytes / bandwidth
 
         if ts._actor:
             return (len(ws._actors), start_time, ws._nbytes)
