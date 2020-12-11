@@ -2583,7 +2583,7 @@ class Scheduler(ServerNode):
 
         for ts in touched_tasks:
             if ts._state in ("memory", "erred"):
-                self.report_on_key(ts._key, client=client)
+                self.report_on_key(ts=ts, client=client)
 
         end = time()
         if self.digests is not None:
@@ -2901,7 +2901,7 @@ class Scheduler(ServerNode):
             cs._wants_what.add(ts)
 
             if ts._state in ("memory", "erred"):
-                self.report_on_key(k, client=client)
+                self.report_on_key(ts=ts, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
