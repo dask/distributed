@@ -5708,7 +5708,7 @@ class Scheduler(ServerNode):
                 comm_bytes += nbytes
 
         stack_time = ws._occupancy / ws._nthreads
-        start_time = comm_bytes / self.bandwidth + stack_time
+        start_time = stack_time + comm_bytes / self.bandwidth
 
         if ts._actor:
             return (len(ws._actors), start_time, ws._nbytes)
