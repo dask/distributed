@@ -4207,15 +4207,18 @@ class Scheduler(ServerNode):
                 self.client_desires_keys(keys=list(who_has), client=client)
 
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
-        assert (key is None) != (ts is None), (key, ts)
         if ts is None:
             tasks: dict = self.tasks
             ts = tasks.get(key)
             if ts is None:
                 self.report({"op": "cancelled-key", "key": key}, client=client)
                 return
-        else:
+        elif key is None:
             key = ts._key
+        else:
+            assert False, (key, ts)
+            return
+
         if ts._state == "forgotten":
             self.report({"op": "cancelled-key", "key": key}, ts=ts, client=client)
         elif ts._state == "memory":
