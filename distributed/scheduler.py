@@ -5707,8 +5707,9 @@ class Scheduler(ServerNode):
                 nbytes = dts.get_nbytes()
                 comm_bytes += nbytes
 
-        stack_time = ws._occupancy / ws._nthreads
-        start_time = stack_time + comm_bytes / self.bandwidth
+        bandwidth: double = self.bandwidth
+        stack_time: double = ws._occupancy / ws._nthreads
+        start_time: double = stack_time + comm_bytes / bandwidth
 
         if ts._actor:
             return (len(ws._actors), start_time, ws._nbytes)
