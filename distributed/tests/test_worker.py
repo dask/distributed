@@ -427,7 +427,12 @@ async def test_io_loop(cleanup):
             assert w.io_loop is s.loop
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1)], worker_kwargs={"memory_limit": "512MB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1)],
+    worker_kwargs={"memory_limit": "512MB"},
+)
 async def test_memory_leak(c, s, a, b):
     import numpy as np
     import time
