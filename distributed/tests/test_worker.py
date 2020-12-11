@@ -7,6 +7,7 @@ import os
 import psutil
 import sys
 from time import sleep
+import threading
 import traceback
 from unittest import mock
 import asyncio
@@ -27,7 +28,7 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.diagnostics.plugin import PipInstall, WorkerPlugin
+from distributed.diagnostics.plugin import PipInstall
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
@@ -53,6 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     a,
     b,
+    TaskStateMetadataPlugin,
 )
 
 
@@ -591,7 +593,6 @@ async def test_clean(c, s, a, b):
     collections = [
         a.tasks,
         a.data,
-        a.nbytes,
         a.threads,
     ]
     for c in collections:
@@ -685,7 +686,11 @@ async def test_clean_nbytes(c, s, a, b):
     await wait(future)
 
     await asyncio.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    assert (
+        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        == 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
@@ -1754,24 +1759,11 @@ async def test_bad_local_directory(cleanup):
 
 @pytest.mark.asyncio
 async def test_taskstate_metadata(cleanup):
-    class MyPlugin(WorkerPlugin):
-        """WorkPlugin to populate TaskState.metadata"""
-
-        def setup(self, worker):
-            self.worker = worker
-
-        def transition(self, key, start, finish, **kwargs):
-            ts = self.worker.tasks[key]
-
-            if start == "ready" and finish == "executing":
-                ts.metadata["start_time"] = time()
-            elif start == "executing" and finish == "memory":
-                ts.metadata["stop_time"] = time()
 
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
-                await c.register_worker_plugin(MyPlugin())
+                await c.register_worker_plugin(TaskStateMetadataPlugin())
 
                 f = c.submit(inc, 1)
                 await f
@@ -1783,3 +1775,30 @@ async def test_taskstate_metadata(cleanup):
 
                 # Check that Scheduler TaskState.metadata was also updated
                 assert s.tasks[f.key].metadata == ts.metadata
+
+
+@pytest.mark.asyncio
+async def test_executor_offload(cleanup, monkeypatch):
+    class SameThreadClass:
+        def __getstate__(self):
+            return ()
+
+        def __setstate__(self, state):
+            self._thread_ident = threading.get_ident()
+            return self
+
+    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+
+    async with Scheduler() as s:
+        async with Worker(s.address, executor="offload") as w:
+            from distributed.utils import _offload_executor
+
+            assert w.executor is _offload_executor
+
+            async with Client(s.address, asynchronous=True) as c:
+                x = SameThreadClass()
+
+                def f(x):
+                    return threading.get_ident() == x._thread_ident
+
+                assert await c.submit(f, x)

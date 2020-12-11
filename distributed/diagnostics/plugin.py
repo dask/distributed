@@ -1,4 +1,5 @@
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -258,3 +259,36 @@ class PipInstall(WorkerPlugin):
                     worker.loop.add_callback(
                         worker.close_gracefully, restart=True
                     )  # restart
+
+
+# Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
+class UploadFile(WorkerPlugin):
+    """A WorkerPlugin to upload a local file to workers.
+
+    Parameters
+    ----------
+    filepath: str
+        A path to the file (.py, egg, or zip) to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadFile
+
+    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    """
+
+    name = "upload_file"
+
+    def __init__(self, filepath):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.filename = os.path.basename(filepath)
+        with open(filepath, "rb") as f:
+            self.data = f.read()
+
+    async def setup(self, worker):
+        response = await worker.upload_file(
+            comm=None, filename=self.filename, data=self.data, load=True
+        )
+        assert len(self.data) == response["nbytes"]

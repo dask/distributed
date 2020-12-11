@@ -493,7 +493,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
                 ts = s.tasks[dat.key]
                 # Ensure scheduler state stays consistent
                 old_nbytes = ts.nbytes
-                ts.nbytes = s.bandwidth * t
+                ts.nbytes = int(s.bandwidth * t)
                 for ws in ts.who_has:
                     ws.nbytes += ts.nbytes - old_nbytes
             else:
