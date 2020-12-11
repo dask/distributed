@@ -4210,16 +4210,15 @@ class Scheduler(ServerNode):
         if ts is None:
             tasks: dict = self.tasks
             ts = tasks.get(key)
-            if ts is None:
-                self.report({"op": "cancelled-key", "key": key}, client=client)
-                return
         elif key is None:
             key = ts._key
         else:
             assert False, (key, ts)
             return
 
-        if ts._state == "forgotten":
+        if ts is None:
+            self.report({"op": "cancelled-key", "key": key}, client=client)
+        elif ts._state == "forgotten":
             self.report({"op": "cancelled-key", "key": key}, ts=ts, client=client)
         elif ts._state == "memory":
             self.report({"op": "key-in-memory", "key": key}, ts=ts, client=client)
