@@ -4504,7 +4504,7 @@ class Scheduler(ServerNode):
         """
         ws: WorkerState = ts._processing_on
         ts._processing_on = None
-        w = ws._address
+        w: str = ws._address
         if w in self.workers:  # may have been removed
             duration = ws._processing.pop(ts)
             if not ws._processing:
