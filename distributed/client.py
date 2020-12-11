@@ -3930,6 +3930,7 @@ class Client:
         restrictions = {}
         if isinstance(workers, (str, tuple, list)):
             try:
+                # dask arrays arent hashable so this will fail
                 workers = {tuple(collections): workers}
             except TypeError:
                 keys = list(
