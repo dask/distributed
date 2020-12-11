@@ -4187,7 +4187,6 @@ def test_get_restrictions():
 
     col = da.arange(10)
     col_keys = list({k for c in flatten(col) for k in flatten(c.__dask_keys__())})
-    print(col_keys)
     worker = "127.0.0.1"
     r1, loose = Client.get_restrictions(col, worker, False)
     assert r1 == {k: ["127.0.0.1"] for k in col_keys}
@@ -6205,15 +6204,6 @@ async def test_mixed_compression(cleanup):
                     x = da.ones((10000, 10000))
                     y = x + x.T
                     await c.compute(y.sum())
-
-
-@gen_cluster(client=True)
-async def test_array_with_worker_restrictions(c, s, a, b):
-    import dask.array as da
-
-    y = da.random.random(10)
-    w = min(c.scheduler_info()["workers"])
-    c.compute([y], workers=w)
 
 
 async def test_futures_in_subgraphs(c, s, a, b):
