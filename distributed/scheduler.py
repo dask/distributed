@@ -5700,9 +5700,13 @@ class Scheduler(ServerNode):
         Minimize expected start time.  If a tie then break with data storage.
         """
         dts: TaskState
-        comm_bytes = sum(
-            [dts.get_nbytes() for dts in ts._dependencies if ws not in dts._who_has]
-        )
+        nbytes: Py_ssize_t
+        comm_bytes: Py_ssize_t = 0
+        for dts in ts._dependencies:
+            if ws not in dts._who_has:
+                nbytes = dts.get_nbytes()
+                comm_bytes += nbytes
+
         stack_time = ws._occupancy / ws._nthreads
         start_time = comm_bytes / self.bandwidth + stack_time
 
