@@ -4710,7 +4710,7 @@ class Scheduler(ServerNode):
                 type(ws),
                 ws,
             )
-            assert ws.address in self.workers
+            assert ws._address in self.workers
 
         return ws
 
