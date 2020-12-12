@@ -86,7 +86,7 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import bint, cclass, double, Py_hash_t, Py_ssize_t
+    from cython import bint, cast, cclass, double, Py_hash_t, Py_ssize_t
 except ImportError:
     from ctypes import (
         c_double as double,
@@ -95,6 +95,9 @@ except ImportError:
     )
 
     bint = bool
+
+    def cast(T, v, *a, **k):
+        return v
 
     def cclass(cls):
         return cls
@@ -1703,7 +1706,7 @@ class Scheduler(ServerNode):
                 func = compose(wrap, func)
             setattr(self, old_attr, _StateLegacyMapping(self.workers, func))
 
-        self.idle = sortedcontainers.SortedSet(key=operator.attrgetter("address"))
+        self.idle = sortedcontainers.SortedDict()
         self.saturated = set()
 
         self.total_nthreads = 0
@@ -2204,7 +2207,7 @@ class Scheduler(ServerNode):
             self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
             if ws._nthreads > len(ws._processing):
-                self.idle.add(ws)
+                self.idle[ws._address] = ws
 
             for plugin in self.plugins[:]:
                 try:
@@ -2783,7 +2786,7 @@ class Scheduler(ServerNode):
             self.rpc.remove(address)
             del self.stream_comms[address]
             del self.aliases[ws._name]
-            self.idle.discard(ws)
+            self.idle.pop(ws._address, None)
             self.saturated.discard(ws)
             del self.workers[address]
             ws.status = Status.closed
@@ -3035,7 +3038,7 @@ class Scheduler(ServerNode):
             assert ws._address == w
             if not ws._processing:
                 assert not ws._occupancy
-                assert ws in self.idle
+                assert ws._address in cast(dict, self.idle)
 
         ts: TaskState
         for k, ts in self.tasks.items():
@@ -4503,10 +4506,11 @@ class Scheduler(ServerNode):
         """
         Remove *ts* from the set of processing tasks.
         """
+        workers: dict = cast(dict, self.workers)
         ws: WorkerState = ts._processing_on
         ts._processing_on = None
         w: str = ws._address
-        if w in self.workers:  # may have been removed
+        if w in workers:  # may have been removed
             duration = ws._processing.pop(ts)
             if not ws._processing:
                 self.total_occupancy -= ws._occupancy
@@ -4576,6 +4580,7 @@ class Scheduler(ServerNode):
     def transition_released_waiting(self, key):
         try:
             tasks: dict = self.tasks
+            workers: dict = cast(dict, self.workers)
             ts: TaskState = tasks[key]
             dts: TaskState
 
@@ -4612,7 +4617,7 @@ class Scheduler(ServerNode):
             ts._waiters = {dts for dts in ts._dependents if dts._state == "waiting"}
 
             if not ts._waiting_on:
-                if self.workers:
+                if workers:
                     recommendations[key] = "processing"
                 else:
                     self.unrunnable.add(ts)
@@ -4630,6 +4635,7 @@ class Scheduler(ServerNode):
     def transition_no_worker_waiting(self, key):
         try:
             tasks: dict = self.tasks
+            workers: dict = cast(dict, self.workers)
             ts: TaskState = tasks[key]
             dts: TaskState
 
@@ -4658,7 +4664,7 @@ class Scheduler(ServerNode):
             ts.state = "waiting"
 
             if not ts._waiting_on:
-                if self.workers:
+                if workers:
                     recommendations[key] = "processing"
                 else:
                     self.unrunnable.add(ts)
@@ -4677,6 +4683,7 @@ class Scheduler(ServerNode):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
+        workers: dict = cast(dict, self.workers)
         ws: WorkerState = None
         valid_workers: set = self.valid_workers(ts)
 
@@ -4684,7 +4691,7 @@ class Scheduler(ServerNode):
             valid_workers is not None
             and not valid_workers
             and not ts._loose_restrictions
-            and self.workers
+            and workers
         ):
             self.unrunnable.add(ts)
             ts.state = "no-worker"
@@ -4693,24 +4700,26 @@ class Scheduler(ServerNode):
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self.workers.values(),
+                workers.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
         else:
-            worker_pool = self.idle or self.workers.values()
-            n_workers = len(worker_pool)
+            worker_pool = self.idle or self.workers
+            worker_pool_dv = cast(dict, worker_pool)
+            n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool, key=operator.attrgetter("occupancy"))
+                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                ws = worker_pool[self.n_tasks % n_workers]
+                n_tasks: Py_ssize_t = self.n_tasks
+                ws = worker_pool.values()[n_tasks % n_workers]
 
         if self.validate:
             assert ws is None or isinstance(ws, WorkerState), (
                 type(ws),
                 ws,
             )
-            assert ws.address in self.workers
+            assert ws._address in workers
 
         return ws
 
@@ -4765,7 +4774,8 @@ class Scheduler(ServerNode):
 
     def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
         try:
-            ws: WorkerState = self.workers[worker]
+            workers: dict = cast(dict, self.workers)
+            ws: WorkerState = workers[worker]
             tasks: dict = self.tasks
             ts: TaskState = tasks[key]
 
@@ -4826,7 +4836,8 @@ class Scheduler(ServerNode):
                 assert not ts._exception_blame
                 assert ts._state == "processing"
 
-            ws = self.workers.get(worker)
+            workers: dict = cast(dict, self.workers)
+            ws = workers.get(worker)
             if ws is None:
                 return {key: "released"}
 
@@ -5251,6 +5262,7 @@ class Scheduler(ServerNode):
         self.task_metadata.pop(key, None)
 
     def _propagate_forgotten(self, ts: TaskState, recommendations: dict):
+        workers: dict = cast(dict, self.workers)
         ts.state = "forgotten"
         key: str = ts._key
         dts: TaskState
@@ -5283,7 +5295,7 @@ class Scheduler(ServerNode):
             ws._has_what.remove(ts)
             ws._nbytes -= ts.get_nbytes()
             w: str = ws._address
-            if w in self.workers:  # in case worker has died
+            if w in workers:  # in case worker has died
                 self.worker_send(
                     w, {"op": "delete-data", "keys": [key], "report": False}
                 )
@@ -5543,10 +5555,10 @@ class Scheduler(ServerNode):
         idle = self.idle
         saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
-            idle.add(ws)
+            idle[ws._address] = ws
             saturated.discard(ws)
         else:
-            idle.discard(ws)
+            idle.pop(ws._address, None)
 
             pending: double = occ * (p - nc) / p / nc
             if p > nc and pending > 0.4 and pending > 1.9 * avg:
@@ -5564,10 +5576,11 @@ class Scheduler(ServerNode):
         *  host_restrictions
         *  resource_restrictions
         """
+        workers: dict = cast(dict, self.workers)
         s: set = None
 
         if ts._worker_restrictions:
-            s = {w for w in ts._worker_restrictions if w in self.workers}
+            s = {w for w in ts._worker_restrictions if w in workers}
 
         if ts._host_restrictions:
             # Resolve the alias here rather than early, for the worker
@@ -5600,7 +5613,7 @@ class Scheduler(ServerNode):
                 s &= ww
 
         if s is not None:
-            s = {self.workers[w] for w in s}
+            s = {workers[w] for w in s}
 
         return s
 
