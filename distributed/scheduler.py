@@ -1703,7 +1703,7 @@ class Scheduler(ServerNode):
                 func = compose(wrap, func)
             setattr(self, old_attr, _StateLegacyMapping(self.workers, func))
 
-        self.idle = sortedcontainers.SortedSet(key=operator.attrgetter("address"))
+        self.idle = sortedcontainers.SortedDict()
         self.saturated = set()
 
         self.total_nthreads = 0
@@ -2204,7 +2204,7 @@ class Scheduler(ServerNode):
             self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
 
             if ws._nthreads > len(ws._processing):
-                self.idle.add(ws)
+                self.idle[ws._address] = ws
 
             for plugin in self.plugins[:]:
                 try:
@@ -2783,7 +2783,7 @@ class Scheduler(ServerNode):
             self.rpc.remove(address)
             del self.stream_comms[address]
             del self.aliases[ws._name]
-            self.idle.discard(ws)
+            self.idle.pop(ws._address, None)
             self.saturated.discard(ws)
             del self.workers[address]
             ws.status = Status.closed
@@ -3035,7 +3035,7 @@ class Scheduler(ServerNode):
             assert ws._address == w
             if not ws._processing:
                 assert not ws._occupancy
-                assert ws in self.idle
+                assert ws._address in self.idle
 
         ts: TaskState
         for k, ts in self.tasks.items():
@@ -4698,13 +4698,13 @@ class Scheduler(ServerNode):
                 partial(self.worker_objective, ts),
             )
         else:
-            worker_pool = self.idle or self.workers.values()
+            worker_pool = self.idle or self.workers
             n_workers: Py_ssize_t = len(worker_pool)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool, key=operator.attrgetter("occupancy"))
+                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
                 n_tasks: Py_ssize_t = self.n_tasks
-                ws = worker_pool[n_tasks % n_workers]
+                ws = worker_pool.values()[n_tasks % n_workers]
 
         if self.validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -5544,10 +5544,10 @@ class Scheduler(ServerNode):
         idle = self.idle
         saturated: set = self.saturated
         if p < nc or occ / nc < avg / 2:
-            idle.add(ws)
+            idle[ws._address] = ws
             saturated.discard(ws)
         else:
-            idle.discard(ws)
+            idle.pop(ws._address, None)
 
             pending: double = occ * (p - nc) / p / nc
             if p > nc and pending > 0.4 and pending > 1.9 * avg:
