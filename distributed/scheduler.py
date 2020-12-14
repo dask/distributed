@@ -1384,6 +1384,13 @@ class TaskState:
 
                 pdb.set_trace()
 
+    def get_nbytes_deps(self):
+        nbytes: Py_ssize_t = 0
+        ts: TaskState
+        for ts in self._dependencies:
+            nbytes += ts.get_nbytes()
+        return nbytes
+
 
 class _StateLegacyMapping(Mapping):
     """
