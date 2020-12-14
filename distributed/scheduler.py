@@ -4401,9 +4401,10 @@ class Scheduler(ServerNode):
         dts: TaskState
         deps: set = ts._dependencies - ws._has_what
         nbytes: Py_ssize_t = 0
+        bandwidth: double = self.bandwidth
         for dts in deps:
             nbytes += dts._nbytes
-        return nbytes / self.bandwidth
+        return nbytes / bandwidth
 
     def get_task_duration(self, ts: TaskState, default=None):
         """
