@@ -91,6 +91,7 @@ try:
         cast,
         ccall,
         cclass,
+        declare,
         double,
         exceptval,
         final,
@@ -114,6 +115,12 @@ except ImportError:
 
     def cclass(cls):
         return cls
+
+    def declare(*a, **k):
+        if len(a) == 2:
+            return a[1]
+        else:
+            pass
 
     def exceptval(*a, **k):
         def wrapper(func):
