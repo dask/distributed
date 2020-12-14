@@ -159,6 +159,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
+@final
 @cclass
 class ClientState:
     """
@@ -231,6 +232,7 @@ class ClientState:
         return self._versions
 
 
+@final
 @cclass
 class WorkerState:
     """
@@ -579,6 +581,7 @@ class WorkerState:
         return self._nthreads
 
 
+@final
 @cclass
 class TaskPrefix:
     """Collection tracking all tasks within a group
@@ -703,6 +706,7 @@ class TaskPrefix:
         return set().union(*[tg._types for tg in self._groups])
 
 
+@final
 @cclass
 class TaskGroup:
     """Collection tracking all tasks within a group
@@ -818,6 +822,7 @@ class TaskGroup:
         return sum(self._states.values())
 
 
+@final
 @cclass
 class TaskState:
     """
