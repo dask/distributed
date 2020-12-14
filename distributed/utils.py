@@ -1002,7 +1002,7 @@ def import_file(path, is_dir=False, remote_path=""):
         names_to_import.extend(names)
 
     loaded = []
-    if not names_to_import:
+    if not names_to_import and not remote_path:
         logger.warning("Found nothing to import from %s", filename)
     else:
         importlib.invalidate_caches()
