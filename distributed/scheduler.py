@@ -5566,10 +5566,9 @@ class Scheduler(ServerNode):
                 pending: double = occ * (p - nc) / (p * nc)
                 if 0.4 < pending > 1.9 * avg:
                     saturated.add(ws)
-                else:
-                    saturated.discard(ws)
-            else:
-                saturated.discard(ws)
+                    return
+
+            saturated.discard(ws)
 
     def valid_workers(self, ts: TaskState) -> set:
         """Return set of currently valid workers for key
