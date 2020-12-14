@@ -5562,9 +5562,12 @@ class Scheduler(ServerNode):
         else:
             idle.pop(ws._address, None)
 
-            pending: double = occ * (p - nc) / (p * nc)
-            if p > nc and pending > 0.4 and pending > 1.9 * avg:
-                saturated.add(ws)
+            if p > nc:
+                pending: double = occ * (p - nc) / (p * nc)
+                if pending > 0.4 and pending > 1.9 * avg:
+                    saturated.add(ws)
+                else:
+                    saturated.discard(ws)
             else:
                 saturated.discard(ws)
 
