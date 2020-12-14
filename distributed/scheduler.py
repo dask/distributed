@@ -4411,7 +4411,7 @@ class Scheduler(ServerNode):
         Get the estimated computation cost of the given task
         (not including any communication cost).
         """
-        duration = ts._prefix._duration_average
+        duration: double = ts._prefix._duration_average
         if duration < 0:
             self.unknown_durations[ts._prefix._name].add(ts)
             if default is None:
