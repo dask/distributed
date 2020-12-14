@@ -91,6 +91,7 @@ Contents
    efficiency
    limitations
    locality
+   logging
    manage-computation
    memory
    priority

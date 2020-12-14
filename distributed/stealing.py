@@ -57,9 +57,8 @@ class WorkStealing(SchedulerPlugin):
 
         self.scheduler.stream_handlers["steal-response"] = self.move_task_confirm
 
-    @property
-    def log(self):
-        return self.scheduler.events["stealing"]
+    def log(self, msg):
+        return self.scheduler.log_event("stealing", msg)
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
@@ -86,7 +85,7 @@ class WorkStealing(SchedulerPlugin):
         ws = ts.processing_on
         worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
-        self.log.append(("add-stealable", ts.key, worker, level))
+        self.log(("add-stealable", ts.key, worker, level))
         if cost_multiplier is not None:
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
@@ -98,7 +97,7 @@ class WorkStealing(SchedulerPlugin):
             return
 
         worker, level = result
-        self.log.append(("remove-stealable", ts.key, worker, level))
+        self.log(("remove-stealable", ts.key, worker, level))
         try:
             self.stealable[worker][level].remove(ts)
         except KeyError:
@@ -121,7 +120,7 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
+        nbytes = ts.get_nbytes_deps()
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         split = ts.prefix.name
@@ -232,9 +231,7 @@ class WorkStealing(SchedulerPlugin):
 
             # Victim had already started execution, reverse stealing
             if state in ("memory", "executing", "long-running", None):
-                self.log.append(
-                    ("already-computing", key, victim.address, thief.address)
-                )
+                self.log(("already-computing", key, victim.address, thief.address))
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
 
@@ -254,10 +251,10 @@ class WorkStealing(SchedulerPlugin):
                 self.put_key_in_stealable(ts)
 
                 try:
-                    self.scheduler.send_task_to_worker(thief.address, key)
+                    self.scheduler.send_task_to_worker(thief.address, ts)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
-                self.log.append(("confirm", key, victim.address, thief.address))
+                self.log(("confirm", key, victim.address, thief.address))
             else:
                 raise ValueError("Unexpected task state: %s" % state)
         except Exception as e:
@@ -306,7 +303,7 @@ class WorkStealing(SchedulerPlugin):
 
         with log_errors():
             i = 0
-            idle = s.idle
+            idle = s.idle.values()
             saturated = s.saturated
             if not idle or len(idle) == len(s.workers):
                 return
@@ -392,7 +389,7 @@ class WorkStealing(SchedulerPlugin):
                         )
 
             if log:
-                self.log.append(log)
+                self.log(log)
                 self.count += 1
             stop = time()
             if s.digests:
@@ -410,7 +407,7 @@ class WorkStealing(SchedulerPlugin):
     def story(self, *keys):
         keys = set(keys)
         out = []
-        for L in self.log:
+        for _, L in self.scheduler.get_event("stealing"):
             if not isinstance(L, list):
                 L = [L]
             for t in L:

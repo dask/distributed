@@ -5,10 +5,10 @@ import pytest
 from dask.core import flatten
 import dask
 from dask import delayed, persist
+from dask.utils import stringify
 
 from distributed.utils_test import gen_cluster, inc, slowinc, slowdec
 from distributed import wait, Worker
-from distributed.utils import tokey
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -45,7 +45,7 @@ async def test_compute(c, s):
     async with Worker(s.address, nthreads=1):
         await wait(high)
         assert all(s.processing.values())
-        assert s.tasks[tokey(low.key)].state in ("processing", "waiting")
+        assert s.tasks[stringify(low.key)].state in ("processing", "waiting")
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -61,7 +61,7 @@ async def test_persist(c, s):
         await wait(high)
         assert all(s.processing.values())
         assert all(
-            s.tasks[tokey(k)].state in ("processing", "waiting")
+            s.tasks[stringify(k)].state in ("processing", "waiting")
             for k in flatten(low.__dask_keys__())
         )
 
