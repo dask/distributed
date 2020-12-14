@@ -5299,7 +5299,11 @@ class Scheduler(ServerNode):
 
             cs: ClientState = self.clients["fire-and-forget"]
             if ts in cs._wants_what:
-                self.client_releases_keys(client="fire-and-forget", keys=[key])
+                self._client_releases_keys(
+                    client="fire-and-forget",
+                    keys=[key],
+                    recommendations=recommendations,
+                )
 
             if self.validate:
                 assert not ts._processing_on
