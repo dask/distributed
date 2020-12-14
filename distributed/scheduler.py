@@ -4419,8 +4419,9 @@ class Scheduler(ServerNode):
             s: set = self.unknown_durations[ts._prefix._name]
             s.add(ts)
             if default < 0:
-                default = UNKNOWN_TASK_DURATION
-            return default
+                duration = UNKNOWN_TASK_DURATION
+            else:
+                duration = default
 
         return duration
 
