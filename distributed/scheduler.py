@@ -5564,7 +5564,7 @@ class Scheduler(ServerNode):
 
             if p > nc:
                 pending: double = occ * (p - nc) / (p * nc)
-                if pending > 0.4 and pending > 1.9 * avg:
+                if 0.4 < pending > 1.9 * avg:
                     saturated.add(ws)
                 else:
                     saturated.discard(ws)
