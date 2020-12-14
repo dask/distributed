@@ -1295,7 +1295,7 @@ class TaskState:
         self._group._dependencies.add(other._group)
         other._dependents.add(self)
 
-    def get_nbytes(self) -> int:
+    def get_nbytes(self) -> Py_ssize_t:
         return self._nbytes if self._nbytes >= 0 else DEFAULT_DATA_SIZE
 
     def set_nbytes(self, nbytes: Py_ssize_t):
