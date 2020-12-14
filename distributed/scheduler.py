@@ -4317,6 +4317,25 @@ class Scheduler(ServerNode):
         else:
             return None
 
+    def _task_to_client_msgs(self, ts: TaskState) -> dict:
+        cs: ClientState
+        clients: dict = self.clients
+        client_keys: list
+        if ts is None:
+            # Notify all clients
+            client_keys = list(clients)
+        else:
+            # Notify clients interested in key
+            client_keys = [cs._client_key for cs in ts._who_wants]
+
+        report_msg: dict = self._task_to_report_msg(ts)
+
+        client_msgs: dict = {}
+        for k in client_keys:
+            client_msgs[k] = report_msg
+
+        return client_msgs
+
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         if ts is None:
             tasks: dict = self.tasks
