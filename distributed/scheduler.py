@@ -2624,7 +2624,8 @@ class Scheduler(ServerNode):
         ts: TaskState = self.tasks.get(key)
         if ts is None:
             return {}
-        ws: WorkerState = self.workers[worker]
+        workers: dict = cast(dict, self.workers)
+        ws: WorkerState = workers[worker]
         ts._metadata.update(kwargs["metadata"])
 
         recommendations: dict
