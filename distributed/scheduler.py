@@ -86,7 +86,16 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import bint, cast, ccall, cclass, double, Py_hash_t, Py_ssize_t
+    from cython import (
+        bint,
+        cast,
+        ccall,
+        cclass,
+        double,
+        exceptval,
+        Py_hash_t,
+        Py_ssize_t,
+    )
 except ImportError:
     from ctypes import (
         c_double as double,
@@ -104,6 +113,12 @@ except ImportError:
 
     def cclass(cls):
         return cls
+
+    def exceptval(*a, **k):
+        def wrapper(func):
+            return func
+
+        return wrapper
 
 
 if sys.version_info < (3, 8):
