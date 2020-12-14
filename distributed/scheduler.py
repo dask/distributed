@@ -2970,7 +2970,9 @@ class Scheduler(ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    def client_releases_keys(self, keys=None, client=None):
+    def _client_releases_keys(
+        self, keys=None, client=None, recommendations: dict = None
+    ):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", client, keys)
         cs: ClientState = self.clients[client]
@@ -2985,7 +2987,6 @@ class Scheduler(ServerNode):
                 if not s:
                     tasks2.add(ts)
 
-        recommendations: dict = {}
         for ts in tasks2:
             if not ts._dependents:
                 # No live dependents, can forget
@@ -2993,6 +2994,13 @@ class Scheduler(ServerNode):
             elif ts._state != "erred" and not ts._waiters:
                 recommendations[ts._key] = "released"
 
+    def client_releases_keys(self, keys=None, client=None):
+        """ Remove keys from client desired list """
+
+        recommendations: dict = {}
+        self._client_releases_keys(
+            keys=keys, client=client, recommendations=recommendations
+        )
         self.transitions(recommendations)
 
     def client_heartbeat(self, client=None):
