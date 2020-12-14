@@ -4287,6 +4287,24 @@ class Scheduler(ServerNode):
             if client:
                 self.client_desires_keys(keys=list(who_has), client=client)
 
+    def _task_to_report_msg(self, ts: TaskState) -> dict:
+        if ts is None:
+            return {"op": "cancelled-key", "key": ts._key}
+        elif ts._state == "forgotten":
+            return {"op": "cancelled-key", "key": ts._key}
+        elif ts._state == "memory":
+            return {"op": "key-in-memory", "key": ts._key}
+        elif ts._state == "erred":
+            failing_ts: TaskState = ts._exception_blame
+            return {
+                "op": "task-erred",
+                "key": ts._key,
+                "exception": failing_ts._exception,
+                "traceback": failing_ts._traceback,
+            }
+        else:
+            return None
+
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         if ts is None:
             tasks: dict = self.tasks
@@ -4297,24 +4315,9 @@ class Scheduler(ServerNode):
             assert False, (key, ts)
             return
 
-        if ts is None:
-            self.report({"op": "cancelled-key", "key": key}, client=client)
-        elif ts._state == "forgotten":
-            self.report({"op": "cancelled-key", "key": key}, ts=ts, client=client)
-        elif ts._state == "memory":
-            self.report({"op": "key-in-memory", "key": key}, ts=ts, client=client)
-        elif ts._state == "erred":
-            failing_ts: TaskState = ts._exception_blame
-            self.report(
-                {
-                    "op": "task-erred",
-                    "key": key,
-                    "exception": failing_ts._exception,
-                    "traceback": failing_ts._traceback,
-                },
-                ts=ts,
-                client=client,
-            )
+        report_msg: dict = self._task_to_report_msg(ts)
+        if report_msg is not None:
+            self.report(report_msg, ts=ts, client=client)
 
     async def feed(
         self, comm, function=None, setup=None, teardown=None, interval="1s", **kwargs
