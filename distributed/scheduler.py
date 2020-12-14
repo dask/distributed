@@ -93,6 +93,7 @@ try:
         cclass,
         double,
         exceptval,
+        final,
         Py_hash_t,
         Py_ssize_t,
     )
@@ -119,6 +120,9 @@ except ImportError:
             return func
 
         return wrapper
+
+    def final(cls):
+        return cls
 
 
 if sys.version_info < (3, 8):
