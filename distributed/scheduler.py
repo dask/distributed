@@ -5556,7 +5556,7 @@ class Scheduler(ServerNode):
 
         idle = self.idle
         saturated: set = self.saturated
-        if p < nc or occ / nc < avg / 2:
+        if p < nc or occ < nc * avg / 2:
             idle[ws._address] = ws
             saturated.discard(ws)
         else:
