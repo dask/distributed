@@ -95,6 +95,7 @@ try:
         double,
         exceptval,
         final,
+        inline,
         Py_hash_t,
         Py_ssize_t,
     )
@@ -130,6 +131,9 @@ except ImportError:
 
     def final(cls):
         return cls
+
+    def inline(func):
+        return func
 
 
 if sys.version_info < (3, 8):
