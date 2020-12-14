@@ -120,7 +120,7 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
+        nbytes = ts.get_nbytes_deps()
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         split = ts.prefix.name

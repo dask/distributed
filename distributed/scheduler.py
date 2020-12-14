@@ -86,7 +86,20 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
-    from cython import bint, cast, cclass, double, Py_hash_t, Py_ssize_t
+    from cython import (
+        bint,
+        cast,
+        ccall,
+        cclass,
+        declare,
+        double,
+        exceptval,
+        final,
+        inline,
+        nogil,
+        Py_hash_t,
+        Py_ssize_t,
+    )
 except ImportError:
     from ctypes import (
         c_double as double,
@@ -99,8 +112,32 @@ except ImportError:
     def cast(T, v, *a, **k):
         return v
 
+    def ccall(func):
+        return func
+
     def cclass(cls):
         return cls
+
+    def declare(*a, **k):
+        if len(a) == 2:
+            return a[1]
+        else:
+            pass
+
+    def exceptval(*a, **k):
+        def wrapper(func):
+            return func
+
+        return wrapper
+
+    def final(cls):
+        return cls
+
+    def inline(func):
+        return func
+
+    def nogil(func):
+        return func
 
 
 if sys.version_info < (3, 8):
@@ -116,8 +153,12 @@ logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-DEFAULT_DATA_SIZE = parse_bytes(
-    dask.config.get("distributed.scheduler.default-data-size")
+DEFAULT_DATA_SIZE = declare(
+    Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
+)
+UNKNOWN_TASK_DURATION = declare(
+    double,
+    parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
 )
 
 DEFAULT_EXTENSIONS = [
@@ -134,6 +175,7 @@ DEFAULT_EXTENSIONS = [
 ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 
 
+@final
 @cclass
 class ClientState:
     """
@@ -206,6 +248,7 @@ class ClientState:
         return self._versions
 
 
+@final
 @cclass
 class WorkerState:
     """
@@ -503,6 +546,7 @@ class WorkerState:
     def versions(self):
         return self._versions
 
+    @ccall
     def clean(self):
         """ Return a version of this object that is appropriate for serialization """
         ws: WorkerState = WorkerState(
@@ -528,7 +572,9 @@ class WorkerState:
             len(self._processing),
         )
 
-    def identity(self):
+    @ccall
+    @exceptval(check=False)
+    def identity(self) -> dict:
         return {
             "type": "Worker",
             "id": self._name,
@@ -551,6 +597,7 @@ class WorkerState:
         return self._nthreads
 
 
+@final
 @cclass
 class TaskPrefix:
     """Collection tracking all tasks within a group
@@ -675,6 +722,7 @@ class TaskPrefix:
         return set().union(*[tg._types for tg in self._groups])
 
 
+@final
 @cclass
 class TaskGroup:
     """Collection tracking all tasks within a group
@@ -769,6 +817,7 @@ class TaskGroup:
     def types(self):
         return self._types
 
+    @ccall
     def add(self, o):
         ts: TaskState = o
         self._states[ts._state] += 1
@@ -789,6 +838,7 @@ class TaskGroup:
         return sum(self._states.values())
 
 
+@final
 @cclass
 class TaskState:
     """
@@ -1286,15 +1336,20 @@ class TaskState:
     def prefix_key(self):
         return self._prefix._name
 
+    @ccall
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
         self._dependencies.add(other)
         self._group._dependencies.add(other._group)
         other._dependents.add(self)
 
-    def get_nbytes(self) -> int:
+    @ccall
+    @inline
+    @nogil
+    def get_nbytes(self) -> Py_ssize_t:
         return self._nbytes if self._nbytes >= 0 else DEFAULT_DATA_SIZE
 
+    @ccall
     def set_nbytes(self, nbytes: Py_ssize_t):
         diff: Py_ssize_t = nbytes
         old_nbytes: Py_ssize_t = self._nbytes
@@ -1310,6 +1365,7 @@ class TaskState:
     def __repr__(self):
         return "<Task %r %s>" % (self._key, self._state)
 
+    @ccall
     def validate(self):
         try:
             for cs in self._who_wants:
@@ -1327,6 +1383,13 @@ class TaskState:
                 import pdb
 
                 pdb.set_trace()
+
+    def get_nbytes_deps(self):
+        nbytes: Py_ssize_t = 0
+        ts: TaskState
+        for ts in self._dependencies:
+            nbytes += ts.get_nbytes()
+        return nbytes
 
 
 class _StateLegacyMapping(Mapping):
@@ -2621,10 +2684,12 @@ class Scheduler(ServerNode):
         """ Mark that a task has finished execution on a particular worker """
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
-        ts: TaskState = self.tasks.get(key)
+        tasks: dict = self.tasks
+        ts: TaskState = tasks.get(key)
         if ts is None:
             return {}
-        ws: WorkerState = self.workers[worker]
+        workers: dict = cast(dict, self.workers)
+        ws: WorkerState = workers[worker]
         ts._metadata.update(kwargs["metadata"])
 
         recommendations: dict
@@ -3645,7 +3710,7 @@ class Scheduler(ServerNode):
 
         ws: WorkerState = self.workers[worker_address]
         ts: TaskState
-        tasks = {self.tasks[key] for key in keys}
+        tasks: set = {self.tasks[key] for key in keys}
         ws._has_what -= tasks
         for ts in tasks:
             ts._who_has.remove(ws)
@@ -4399,23 +4464,24 @@ class Scheduler(ServerNode):
         dts: TaskState
         deps: set = ts._dependencies - ws._has_what
         nbytes: Py_ssize_t = 0
+        bandwidth: double = self.bandwidth
         for dts in deps:
             nbytes += dts._nbytes
-        return nbytes / self.bandwidth
+        return nbytes / bandwidth
 
-    def get_task_duration(self, ts: TaskState, default=None):
+    def get_task_duration(self, ts: TaskState, default: double = -1):
         """
         Get the estimated computation cost of the given task
         (not including any communication cost).
         """
-        duration = ts._prefix._duration_average
+        duration: double = ts._prefix._duration_average
         if duration < 0:
-            self.unknown_durations[ts._prefix._name].add(ts)
-            if default is None:
-                default = parse_timedelta(
-                    dask.config.get("distributed.scheduler.unknown-task-duration")
-                )
-            return default
+            s: set = self.unknown_durations[ts._prefix._name]
+            s.add(ts)
+            if default < 0:
+                duration = UNKNOWN_TASK_DURATION
+            else:
+                duration = default
 
         return duration
 
@@ -5554,17 +5620,19 @@ class Scheduler(ServerNode):
 
         idle = self.idle
         saturated: set = self.saturated
-        if p < nc or occ / nc < avg / 2:
+        if p < nc or occ < nc * avg / 2:
             idle[ws._address] = ws
             saturated.discard(ws)
         else:
             idle.pop(ws._address, None)
 
-            pending: double = occ * (p - nc) / p / nc
-            if p > nc and pending > 0.4 and pending > 1.9 * avg:
-                saturated.add(ws)
-            else:
-                saturated.discard(ws)
+            if p > nc:
+                pending: double = occ * (p - nc) / (p * nc)
+                if 0.4 < pending > 1.9 * avg:
+                    saturated.add(ws)
+                    return
+
+            saturated.discard(ws)
 
     def valid_workers(self, ts: TaskState) -> set:
         """Return set of currently valid workers for key
