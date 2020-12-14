@@ -4413,7 +4413,8 @@ class Scheduler(ServerNode):
         """
         duration: double = ts._prefix._duration_average
         if duration < 0:
-            self.unknown_durations[ts._prefix._name].add(ts)
+            s: set = self.unknown_durations[ts._prefix._name]
+            s.add(ts)
             if default is None:
                 default = parse_timedelta(
                     dask.config.get("distributed.scheduler.unknown-task-duration")
