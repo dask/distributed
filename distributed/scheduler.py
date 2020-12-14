@@ -1345,6 +1345,7 @@ class TaskState:
 
     @ccall
     @inline
+    @nogil
     def get_nbytes(self) -> Py_ssize_t:
         return self._nbytes if self._nbytes >= 0 else DEFAULT_DATA_SIZE
 
