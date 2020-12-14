@@ -119,6 +119,9 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
 )
+UNKNOWN_TASK_DURATION = parse_timedelta(
+    dask.config.get("distributed.scheduler.unknown-task-duration")
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -4416,9 +4419,7 @@ class Scheduler(ServerNode):
             s: set = self.unknown_durations[ts._prefix._name]
             s.add(ts)
             if default < 0:
-                default = parse_timedelta(
-                    dask.config.get("distributed.scheduler.unknown-task-duration")
-                )
+                default = UNKNOWN_TASK_DURATION
             return default
 
         return duration
