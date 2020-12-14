@@ -524,6 +524,7 @@ class WorkerState:
     def versions(self):
         return self._versions
 
+    @ccall
     def clean(self):
         """ Return a version of this object that is appropriate for serialization """
         ws: WorkerState = WorkerState(
@@ -549,6 +550,8 @@ class WorkerState:
             len(self._processing),
         )
 
+    @ccall
+    @exceptval(check=False)
     def identity(self) -> dict:
         return {
             "type": "Worker",
@@ -790,6 +793,7 @@ class TaskGroup:
     def types(self):
         return self._types
 
+    @ccall
     def add(self, o):
         ts: TaskState = o
         self._states[ts._state] += 1
@@ -1307,15 +1311,18 @@ class TaskState:
     def prefix_key(self):
         return self._prefix._name
 
+    @ccall
     def add_dependency(self, other: "TaskState"):
         """ Add another task as a dependency of this task """
         self._dependencies.add(other)
         self._group._dependencies.add(other._group)
         other._dependents.add(self)
 
+    @ccall
     def get_nbytes(self) -> Py_ssize_t:
         return self._nbytes if self._nbytes >= 0 else DEFAULT_DATA_SIZE
 
+    @ccall
     def set_nbytes(self, nbytes: Py_ssize_t):
         diff: Py_ssize_t = nbytes
         old_nbytes: Py_ssize_t = self._nbytes
@@ -1331,6 +1338,7 @@ class TaskState:
     def __repr__(self):
         return "<Task %r %s>" % (self._key, self._state)
 
+    @ccall
     def validate(self):
         try:
             for cs in self._who_wants:
