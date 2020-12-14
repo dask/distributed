@@ -96,6 +96,7 @@ try:
         exceptval,
         final,
         inline,
+        nogil,
         Py_hash_t,
         Py_ssize_t,
     )
@@ -133,6 +134,9 @@ except ImportError:
         return cls
 
     def inline(func):
+        return func
+
+    def nogil(func):
         return func
 
 
