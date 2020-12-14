@@ -2621,7 +2621,8 @@ class Scheduler(ServerNode):
         """ Mark that a task has finished execution on a particular worker """
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
-        ts: TaskState = self.tasks.get(key)
+        tasks: dict = self.tasks
+        ts: TaskState = tasks.get(key)
         if ts is None:
             return {}
         workers: dict = cast(dict, self.workers)
