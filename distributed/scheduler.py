@@ -4568,7 +4568,7 @@ class Scheduler(ServerNode):
     # State Transitions #
     #####################
 
-    def _remove_from_processing(self, ts: TaskState, send_worker_msg=None):
+    def _remove_from_processing(self, ts: TaskState) -> str:
         """
         Remove *ts* from the set of processing tasks.
         """
@@ -4586,8 +4586,9 @@ class Scheduler(ServerNode):
                 ws._occupancy -= duration
             self.check_idle_saturated(ws)
             self.release_resources(ts, ws)
-            if send_worker_msg:
-                self.worker_send(w, send_worker_msg)
+            return w
+        else:
+            return None
 
     def _add_to_memory(
         self,
@@ -5179,9 +5180,9 @@ class Scheduler(ServerNode):
                 assert not ts._waiting_on
                 assert self.tasks[key].state == "processing"
 
-            self._remove_from_processing(
-                ts, send_worker_msg={"op": "release-task", "key": key}
-            )
+            w: str = self._remove_from_processing(ts)
+            if w:
+                self.worker_send(w, {"op": "release-task", "key": key})
 
             ts.state = "released"
 
