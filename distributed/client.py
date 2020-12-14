@@ -3082,7 +3082,8 @@ class Client:
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
         return self.register_worker_plugin(
-            UploadFile(filename), name=filename + str(uuid.uuid4()),
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
 
     def upload_dir(self, dir_path, remote_path=""):
