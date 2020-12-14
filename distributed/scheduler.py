@@ -3647,7 +3647,7 @@ class Scheduler(ServerNode):
 
         ws: WorkerState = self.workers[worker_address]
         ts: TaskState
-        tasks = {self.tasks[key] for key in keys}
+        tasks: set = {self.tasks[key] for key in keys}
         ws._has_what -= tasks
         for ts in tasks:
             ts._who_has.remove(ws)
