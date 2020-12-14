@@ -531,7 +531,7 @@ class WorkerState:
             len(self._processing),
         )
 
-    def identity(self):
+    def identity(self) -> dict:
         return {
             "type": "Worker",
             "id": self._name,
