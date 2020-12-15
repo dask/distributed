@@ -397,7 +397,6 @@ def main(
 
     if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
         config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        # Update the global config given priority to the existing global config
         dask.config.update(dask.config.global_config, config)
 
     nannies = [
