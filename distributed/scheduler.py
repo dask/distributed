@@ -2956,7 +2956,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.allowed_failures = allowed_failures
         if validate is None:
             validate = dask.config.get("distributed.scheduler.validate")
-        self.validate = validate
         self.proc = psutil.Process()
         self.delete_interval = parse_timedelta(delete_interval, default="ms")
         self.synchronize_worker_interval = parse_timedelta(
@@ -3034,7 +3033,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._ipython_kernel = None
 
         # Task state
-        self.tasks = dict()
+        tasks = dict()
         self.task_groups = dict()
         self.task_prefixes = dict()
         for old_attr, new_attr, wrap in [
@@ -3046,7 +3045,7 @@ class Scheduler(SchedulerState, ServerNode):
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(self.tasks, func))
+            setattr(self, old_attr, _StateLegacyMapping(tasks, func))
 
         for old_attr, new_attr, wrap in [
             ("nbytes", "nbytes", None),
@@ -3066,7 +3065,7 @@ class Scheduler(SchedulerState, ServerNode):
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
-            setattr(self, old_attr, _OptionalStateLegacyMapping(self.tasks, func))
+            setattr(self, old_attr, _OptionalStateLegacyMapping(tasks, func))
 
         for old_attr, new_attr, wrap in [
             ("loose_restrictions", "loose_restrictions", None)
@@ -3074,12 +3073,12 @@ class Scheduler(SchedulerState, ServerNode):
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacySet(self.tasks, func))
+            setattr(self, old_attr, _StateLegacySet(tasks, func))
 
         self.generation = 0
         self._last_client = None
         self._last_time = 0
-        self.unrunnable = set()
+        unrunnable = set()
 
         self.n_tasks = 0
         self.task_metadata = dict()
@@ -3089,18 +3088,17 @@ class Scheduler(SchedulerState, ServerNode):
         self.unknown_durations = defaultdict(set)
 
         # Client state
-        self.clients = dict()
+        clients = dict()
         for old_attr, new_attr, wrap in [
             ("wants_what", "wants_what", _legacy_task_key_set)
         ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(self.clients, func))
-        self.clients["fire-and-forget"] = ClientState("fire-and-forget")
+            setattr(self, old_attr, _StateLegacyMapping(clients, func))
 
         # Worker state
-        self.workers = sortedcontainers.SortedDict()
+        workers = sortedcontainers.SortedDict()
         for old_attr, new_attr, wrap in [
             ("nthreads", "nthreads", None),
             ("worker_bytes", "nbytes", None),
@@ -3114,23 +3112,23 @@ class Scheduler(SchedulerState, ServerNode):
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
-            setattr(self, old_attr, _StateLegacyMapping(self.workers, func))
+            setattr(self, old_attr, _StateLegacyMapping(workers, func))
 
         self.idle = sortedcontainers.SortedDict()
         self.saturated = set()
 
         self.total_nthreads = 0
         self.total_occupancy = 0
-        self.host_info = defaultdict(dict)
-        self.resources = defaultdict(dict)
+        host_info = defaultdict(dict)
+        resources = defaultdict(dict)
         self.aliases = dict()
 
-        self._task_state_collections = [self.unrunnable]
+        self._task_state_collections = [unrunnable]
 
         self._worker_collections = [
-            self.workers,
-            self.host_info,
-            self.resources,
+            workers,
+            host_info,
+            resources,
             self.aliases,
         ]
 
@@ -3245,6 +3243,13 @@ class Scheduler(SchedulerState, ServerNode):
             connection_limit=connection_limit,
             deserialize=False,
             connection_args=self.connection_args,
+            clients=clients,
+            workers=workers,
+            host_info=host_info,
+            resources=resources,
+            tasks=tasks,
+            unrunnable=unrunnable,
+            validate=validate,
             **kwargs,
         )
 
