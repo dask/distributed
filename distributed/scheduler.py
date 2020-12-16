@@ -4685,7 +4685,11 @@ class Scheduler(ServerNode):
 
         cs: ClientState = self.clients["fire-and-forget"]
         if ts in cs._wants_what:
-            self.client_releases_keys(client="fire-and-forget", keys=[ts._key])
+            self._client_releases_keys(
+                client="fire-and-forget",
+                keys=[ts._key],
+                recommendations=recommendations,
+            )
 
     def transition_released_waiting(self, key):
         try:
