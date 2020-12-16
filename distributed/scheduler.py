@@ -1642,6 +1642,74 @@ class SchedulerState:
         self._workers_dv: dict = cast(dict, self._workers)
         super().__init__(**kwargs)
 
+    @property
+    def bandwidth(self):
+        return self._bandwidth
+
+    @property
+    def clients(self):
+        return self._clients
+
+    @property
+    def extensions(self):
+        return self._extensions
+
+    @property
+    def host_info(self):
+        return self._host_info
+
+    @property
+    def idle(self):
+        return self._idle
+
+    @property
+    def n_tasks(self):
+        return self._n_tasks
+
+    @property
+    def resources(self):
+        return self._resources
+
+    @property
+    def saturated(self):
+        return self._saturated
+
+    @property
+    def tasks(self):
+        return self._tasks
+
+    @property
+    def total_nthreads(self):
+        return self._total_nthreads
+
+    @property
+    def total_occupancy(self):
+        return self._total_occupancy
+
+    @total_occupancy.setter
+    def total_occupancy(self, v: double):
+        self._total_occupancy = v
+
+    @property
+    def unknown_durations(self):
+        return self._unknown_durations
+
+    @property
+    def unrunnable(self):
+        return self._unrunnable
+
+    @property
+    def validate(self):
+        return self._validate
+
+    @validate.setter
+    def validate(self, v: bint):
+        self._validate = v
+
+    @property
+    def workers(self):
+        return self._workers
+
     def _remove_from_processing(self, ts: TaskState) -> str:
         """
         Remove *ts* from the set of processing tasks.
