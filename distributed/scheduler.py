@@ -3000,22 +3000,20 @@ class Scheduler(ServerNode):
             if ts._state in ("memory", "erred"):
                 self.report_on_key(ts=ts, client=client)
 
-    def client_releases_keys(self, keys=None, client=None):
+    def _client_releases_keys(self, keys: list, cs: ClientState, recommendations: dict):
         """ Remove keys from client desired list """
-        logger.debug("Client %s releases keys: %s", client, keys)
-        cs: ClientState = self.clients[client]
+        logger.debug("Client %s releases keys: %s", cs._client_key, keys)
         ts: TaskState
-        tasks2 = set()
-        for key in list(keys):
+        tasks2: set = set()
+        for key in keys:
             ts = self.tasks.get(key)
             if ts is not None and ts in cs._wants_what:
                 cs._wants_what.remove(ts)
-                s = ts._who_wants
+                s: set = ts._who_wants
                 s.remove(cs)
                 if not s:
                     tasks2.add(ts)
 
-        recommendations: dict = {}
         for ts in tasks2:
             if not ts._dependents:
                 # No live dependents, can forget
@@ -3023,6 +3021,15 @@ class Scheduler(ServerNode):
             elif ts._state != "erred" and not ts._waiters:
                 recommendations[ts._key] = "released"
 
+    def client_releases_keys(self, keys=None, client=None):
+        """ Remove keys from client desired list """
+
+        if not isinstance(keys, list):
+            keys = list(keys)
+        cs: ClientState = self.clients[client]
+        recommendations: dict = {}
+
+        self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations)
 
     def client_heartbeat(self, client=None):
