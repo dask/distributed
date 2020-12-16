@@ -1646,11 +1646,10 @@ class SchedulerState:
         """
         Remove *ts* from the set of processing tasks.
         """
-        workers: dict = cast(dict, self._workers)
         ws: WorkerState = ts._processing_on
         ts._processing_on = None
         w: str = ws._address
-        if w in workers:  # may have been removed
+        if w in self._workers_dv:  # may have been removed
             duration = ws._processing.pop(ts)
             if not ws._processing:
                 self._total_occupancy -= ws._occupancy
@@ -1730,9 +1729,7 @@ class SchedulerState:
 
     def transition_released_waiting(self, key):
         try:
-            tasks: dict = self._tasks
-            workers: dict = cast(dict, self._workers)
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -1770,7 +1767,7 @@ class SchedulerState:
             ts._waiters = {dts for dts in ts._dependents if dts._state == "waiting"}
 
             if not ts._waiting_on:
-                if workers:
+                if self._workers_dv:
                     recommendations[key] = "processing"
                 else:
                     self._unrunnable.add(ts)
@@ -1787,9 +1784,7 @@ class SchedulerState:
 
     def transition_no_worker_waiting(self, key):
         try:
-            tasks: dict = self._tasks
-            workers: dict = cast(dict, self._workers)
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -1819,7 +1814,7 @@ class SchedulerState:
             ts.state = "waiting"
 
             if not ts._waiting_on:
-                if workers:
+                if self._workers_dv:
                     recommendations[key] = "processing"
                 else:
                     self._unrunnable.add(ts)
@@ -1838,7 +1833,6 @@ class SchedulerState:
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
-        workers: dict = cast(dict, self._workers)
         ws: WorkerState = None
         valid_workers: set = self.valid_workers(ts)
 
@@ -1846,7 +1840,7 @@ class SchedulerState:
             valid_workers is not None
             and not valid_workers
             and not ts._loose_restrictions
-            and workers
+            and self._workers_dv
         ):
             self._unrunnable.add(ts)
             ts.state = "no-worker"
@@ -1855,7 +1849,7 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                workers.values(),
+                self._workers_dv.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
@@ -1866,15 +1860,14 @@ class SchedulerState:
             if n_workers < 20:  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                n_tasks: Py_ssize_t = self._n_tasks
-                ws = worker_pool.values()[n_tasks % n_workers]
+                ws = worker_pool.values()[self._n_tasks % n_workers]
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
                 type(ws),
                 ws,
             )
-            assert ws._address in workers
+            assert ws._address in self._workers_dv
 
         return ws
 
@@ -1897,8 +1890,7 @@ class SchedulerState:
 
     def transition_waiting_processing(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -1944,10 +1936,8 @@ class SchedulerState:
 
     def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
         try:
-            workers: dict = cast(dict, self._workers)
-            ws: WorkerState = workers[worker]
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ws: WorkerState = self._workers_dv[worker]
+            ts: TaskState = self._tasks[key]
             worker_msgs: dict = {}
             client_msgs: dict = {}
 
@@ -1997,8 +1987,7 @@ class SchedulerState:
         worker_msgs: dict = {}
         client_msgs: dict = {}
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             assert worker
             assert isinstance(worker, str)
 
@@ -2011,8 +2000,7 @@ class SchedulerState:
                 assert not ts._exception_blame
                 assert ts._state == "processing"
 
-            workers: dict = cast(dict, self._workers)
-            ws = workers.get(worker)
+            ws = self._workers_dv.get(worker)
             if ws is None:
                 return {key: "released"}, worker_msgs, client_msgs
 
@@ -2102,8 +2090,7 @@ class SchedulerState:
     def transition_memory_released(self, key, safe=False):
         ws: WorkerState
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -2175,8 +2162,7 @@ class SchedulerState:
 
     def transition_released_erred(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             failing_ts: TaskState
             worker_msgs: dict = {}
@@ -2222,8 +2208,7 @@ class SchedulerState:
 
     def transition_erred_released(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -2264,8 +2249,7 @@ class SchedulerState:
 
     def transition_waiting_released(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             worker_msgs: dict = {}
             client_msgs: dict = {}
 
@@ -2304,8 +2288,7 @@ class SchedulerState:
 
     def transition_processing_released(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -2355,8 +2338,7 @@ class SchedulerState:
     ):
         ws: WorkerState
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             failing_ts: TaskState
             worker_msgs: dict = {}
@@ -2432,8 +2414,7 @@ class SchedulerState:
 
     def transition_no_worker_released(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             dts: TaskState
             worker_msgs: dict = {}
             client_msgs: dict = {}
@@ -2462,7 +2443,6 @@ class SchedulerState:
 
     def _propagate_forgotten(self, ts: TaskState, recommendations: dict):
         worker_msgs: dict = {}
-        workers: dict = cast(dict, self._workers)
         ts.state = "forgotten"
         key: str = ts._key
         dts: TaskState
@@ -2495,18 +2475,16 @@ class SchedulerState:
             ws._has_what.remove(ts)
             ws._nbytes -= ts.get_nbytes()
             w: str = ws._address
-            if w in workers:  # in case worker has died
+            if w in self._workers_dv:  # in case worker has died
                 worker_msgs[w] = {"op": "delete-data", "keys": [key], "report": False}
         ts._who_has.clear()
 
         return worker_msgs
 
     def transition_memory_forgotten(self, key):
-        tasks: dict
         ws: WorkerState
         try:
-            tasks = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             worker_msgs: dict = {}
             client_msgs: dict = {}
 
@@ -2548,8 +2526,7 @@ class SchedulerState:
 
     def transition_released_forgotten(self, key):
         try:
-            tasks: dict = self._tasks
-            ts: TaskState = tasks[key]
+            ts: TaskState = self._tasks[key]
             worker_msgs: dict = {}
             client_msgs: dict = {}
 
@@ -2704,11 +2681,10 @@ class SchedulerState:
 
     def _task_to_client_msgs(self, ts: TaskState) -> dict:
         cs: ClientState
-        clients: dict = self._clients
         client_keys: list
         if ts is None:
             # Notify all clients
-            client_keys = list(clients)
+            client_keys = list(self._clients)
         else:
             # Notify clients interested in key
             client_keys = [cs._client_key for cs in ts._who_wants]
@@ -2784,11 +2760,10 @@ class SchedulerState:
         *  host_restrictions
         *  resource_restrictions
         """
-        workers: dict = cast(dict, self._workers)
         s: set = None
 
         if ts._worker_restrictions:
-            s = {w for w in ts._worker_restrictions if w in workers}
+            s = {w for w in ts._worker_restrictions if w in self._workers_dv}
 
         if ts._host_restrictions:
             # Resolve the alias here rather than early, for the worker
@@ -2821,7 +2796,7 @@ class SchedulerState:
                 s &= ww
 
         if s is not None:
-            s = {workers[w] for w in s}
+            s = {self._workers_dv[w] for w in s}
 
         return s
 
@@ -4051,8 +4026,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = tasks.get(key)
         if ts is None:
             return {}
-        workers: dict = cast(dict, parent._workers)
-        ws: WorkerState = workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         ts._metadata.update(kwargs["metadata"])
 
         recommendations: dict
@@ -4468,7 +4442,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert ws._address == w
             if not ws._processing:
                 assert not ws._occupancy
-                assert ws._address in cast(dict, parent._idle)
+                assert ws._address in parent._idle_dv
 
         ts: TaskState
         for k, ts in parent._tasks.items():
