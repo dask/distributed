@@ -135,6 +135,7 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -229,6 +230,8 @@ class Server:
         )
 
         self.__stopped = False
+
+        super().__init__(**kwargs)
 
     @property
     def status(self):

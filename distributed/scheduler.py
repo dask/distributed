@@ -1526,7 +1526,34 @@ def _task_key_or_none(task):
     return task.key if task is not None else None
 
 
-class Scheduler(ServerNode):
+@cclass
+class SchedulerState:
+    """Underlying task state of dynamic scheduler
+
+    Tracks the current state of workers, data, and computations.
+
+    Handles transitions between different task states. Notifies the
+    Scheduler of changes by messaging passing through Queues, which the
+    Scheduler listens to responds accordingly.
+
+    All events are handled quickly, in linear time with respect to their
+    input (which is often of constant size) and generally within a
+    millisecond. Additionally when Cythonized, this can be faster still.
+    To accomplish this the scheduler tracks a lot of state.  Every
+    operation maintains the consistency of this state.
+
+    Users typically do not interact with ``Transitions`` directly. Instead
+    users interact with the ``Client``, which in turn engages the
+    ``Scheduler`` affecting different transitions here under-the-hood. In
+    the background ``Worker``s also engage with the ``Scheduler``
+    affecting these state transitions as well.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+class Scheduler(SchedulerState, ServerNode):
     """Dynamic distributed task scheduler
 
     The scheduler tracks the current state of workers, data, and computations.
