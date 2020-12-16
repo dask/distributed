@@ -1547,7 +1547,49 @@ class SchedulerState:
     ``Scheduler`` affecting different transitions here under-the-hood. In
     the background ``Worker``s also engage with the ``Scheduler``
     affecting these state transitions as well.
+
+    **State**
+
+    The ``Transitions`` object contains the following state variables.
+    Each variable is listed along with what it stores and a brief
+    description.
+
+    * **tasks:** ``{task key: TaskState}``
+        Tasks currently known to the scheduler
+    * **unrunnable:** ``{TaskState}``
+        Tasks in the "no-worker" state
+
+    * **workers:** ``{worker key: WorkerState}``
+        Workers currently connected to the scheduler
+    * **idle:** ``{WorkerState}``:
+        Set of workers that are not fully utilized
+    * **saturated:** ``{WorkerState}``:
+        Set of workers that are not over-utilized
+
+    * **clients:** ``{client key: ClientState}``
+        Clients currently connected to the scheduler
+
+    * **task_duration:** ``{key-prefix: time}``
+        Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
     """
+
+    _bandwidth: double
+    _clients: dict
+    _extensions: dict
+    _host_info: object
+    _idle: object
+    _idle_dv: dict
+    _n_tasks: Py_ssize_t
+    _resources: object
+    _saturated: set
+    _tasks: dict
+    _total_nthreads: Py_ssize_t
+    _total_occupancy: double
+    _unknown_durations: object
+    _unrunnable: set
+    _validate: bint
+    _workers: object
+    _workers_dv: dict
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
