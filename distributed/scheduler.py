@@ -1591,7 +1591,55 @@ class SchedulerState:
     _workers: object
     _workers_dv: dict
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        clients: dict = None,
+        workers=None,
+        host_info=None,
+        resources=None,
+        tasks: dict = None,
+        unrunnable: set = None,
+        validate: bint = False,
+        **kwargs,
+    ):
+        self._bandwidth = parse_bytes(
+            dask.config.get("distributed.scheduler.bandwidth")
+        )
+        if clients is not None:
+            self._clients = clients
+        else:
+            self._clients = dict()
+        self._clients["fire-and-forget"] = ClientState("fire-and-forget")
+        self._extensions = dict()
+        if host_info is not None:
+            self._host_info = host_info
+        else:
+            self._host_info = defaultdict(dict)
+        self._idle = sortedcontainers.SortedDict()
+        self._idle_dv: dict = cast(dict, self._idle)
+        self._n_tasks = 0
+        if resources is not None:
+            self._resources = resources
+        else:
+            self._resources = defaultdict(dict)
+        self._saturated = set()
+        if tasks is not None:
+            self._tasks = tasks
+        else:
+            self._tasks = dict()
+        self._total_nthreads = 0
+        self._total_occupancy = 0
+        self._unknown_durations = defaultdict(set)
+        if unrunnable is not None:
+            self._unrunnable = unrunnable
+        else:
+            self._unrunnable = set()
+        self._validate = validate
+        if workers is not None:
+            self._workers = workers
+        else:
+            self._workers = sortedcontainers.SortedDict()
+        self._workers_dv: dict = cast(dict, self._workers)
         super().__init__(**kwargs)
 
     def _remove_from_processing(self, ts: TaskState) -> str:
