@@ -2509,8 +2509,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def _propagate_forgotten(self, ts: TaskState, recommendations: dict):
-        worker_msgs: dict = {}
+    def _propagate_forgotten(
+        self, ts: TaskState, recommendations: dict, worker_msgs: dict
+    ):
         ts.state = "forgotten"
         key: str = ts._key
         dts: TaskState
@@ -2547,8 +2548,6 @@ class SchedulerState:
                 worker_msgs[w] = {"op": "delete-data", "keys": [key], "report": False}
         ts._who_has.clear()
 
-        return worker_msgs
-
     def transition_memory_forgotten(self, key):
         ws: WorkerState
         try:
@@ -2578,7 +2577,7 @@ class SchedulerState:
                 for ws in ts._who_has:
                     ws._actors.discard(ts)
 
-            worker_msgs = self._propagate_forgotten(ts, recommendations)
+            self._propagate_forgotten(ts, recommendations, worker_msgs)
 
             client_msgs = self._task_to_client_msgs(ts)
             self.remove_key(key)
@@ -2616,7 +2615,7 @@ class SchedulerState:
                     assert 0, (ts,)
 
             recommendations: dict = {}
-            self._propagate_forgotten(ts, recommendations)
+            self._propagate_forgotten(ts, recommendations, worker_msgs)
 
             client_msgs = self._task_to_client_msgs(ts)
             self.remove_key(key)
