@@ -1899,6 +1899,8 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    @exceptval(check=False)
     def decide_worker(self, ts: TaskState) -> WorkerState:
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
@@ -1941,6 +1943,7 @@ class SchedulerState:
 
         return ws
 
+    @ccall
     def set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> double:
         """Estimate task duration using worker state and task state.
 
@@ -2633,6 +2636,8 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    @exceptval(check=False)
     def check_idle_saturated(self, ws: WorkerState, occ: double = -1.0):
         """Update the status of the idle and saturated state
 
@@ -2802,6 +2807,7 @@ class SchedulerState:
                     steal.remove_key_from_stealable(ts)
                     steal.put_key_in_stealable(ts)
 
+    @ccall
     def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> double:
         """
         Get the estimated communication cost (in s.) to compute the task
@@ -2815,6 +2821,7 @@ class SchedulerState:
             nbytes += dts._nbytes
         return nbytes / bandwidth
 
+    @ccall
     def get_task_duration(self, ts: TaskState, default: double = -1) -> double:
         """
         Get the estimated computation cost of the given task
@@ -2831,6 +2838,8 @@ class SchedulerState:
 
         return duration
 
+    @ccall
+    @exceptval(check=False)
     def valid_workers(self, ts: TaskState) -> set:
         """Return set of currently valid workers for key
 
@@ -2881,6 +2890,8 @@ class SchedulerState:
 
         return s
 
+    @ccall
+    @exceptval(check=False)
     def worker_objective(self, ts: TaskState, ws: WorkerState) -> tuple:
         """
         Objective function to determine which worker should get the task
