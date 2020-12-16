@@ -3490,6 +3490,18 @@ class Scheduler(ServerNode):
         except (CommClosedError, AttributeError):
             self.loop.add_callback(self.remove_worker, address=worker)
 
+    def client_send(self, client, msg):
+        """Send message to client"""
+        client_comms: dict = self.client_comms
+        c = client_comms.get(client)
+        if c is None:
+            return
+        try:
+            c.send(msg)
+        except CommClosedError:
+            if self.status == Status.running:
+                logger.critical("Tried writing to closed comm: %s", msg)
+
     ############################
     # Less common interactions #
     ############################
