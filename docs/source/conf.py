@@ -436,6 +436,10 @@ import re
 
 
 class AutoAutoSummary(Autosummary):
+    """Create a summary for methods and attributes (autosummary).
+
+    See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+    """
 
     option_spec = {
         'methods': directives.unchanged,
