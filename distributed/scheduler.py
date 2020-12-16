@@ -1738,7 +1738,7 @@ class SchedulerState:
         recommendations: dict,
         client_msgs: dict,
         type=None,
-        typename=None,
+        typename: str = None,
         **kwargs,
     ):
         """
@@ -1939,7 +1939,7 @@ class SchedulerState:
 
         return ws
 
-    def set_duration_estimate(self, ts: TaskState, ws: WorkerState):
+    def set_duration_estimate(self, ts: TaskState, ws: WorkerState) -> double:
         """Estimate task duration using worker state and task state.
 
         If a task takes longer than twice the current average duration we
@@ -2045,7 +2045,7 @@ class SchedulerState:
         key,
         nbytes=None,
         type=None,
-        typename=None,
+        typename: str = None,
         worker=None,
         startstops=None,
         **kwargs,
@@ -2155,7 +2155,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_memory_released(self, key, safe=False):
+    def transition_memory_released(self, key, safe: bint = False):
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -2788,7 +2788,7 @@ class SchedulerState:
                     steal.remove_key_from_stealable(ts)
                     steal.put_key_in_stealable(ts)
 
-    def get_comm_cost(self, ts: TaskState, ws: WorkerState):
+    def get_comm_cost(self, ts: TaskState, ws: WorkerState) -> double:
         """
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
@@ -2801,7 +2801,7 @@ class SchedulerState:
             nbytes += dts._nbytes
         return nbytes / bandwidth
 
-    def get_task_duration(self, ts: TaskState, default: double = -1):
+    def get_task_duration(self, ts: TaskState, default: double = -1) -> double:
         """
         Get the estimated computation cost of the given task
         (not including any communication cost).
@@ -2867,7 +2867,7 @@ class SchedulerState:
 
         return s
 
-    def worker_objective(self, ts: TaskState, ws: WorkerState):
+    def worker_objective(self, ts: TaskState, ws: WorkerState) -> tuple:
         """
         Objective function to determine which worker should get the task
 
