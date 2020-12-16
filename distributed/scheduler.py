@@ -4160,12 +4160,12 @@ class Scheduler(SchedulerState, ServerNode):
 
             address = self.coerce_address(address)
 
-            if address not in parent._workers:
+            if address not in parent._workers_dv:
                 return "already-removed"
 
             host = get_address_host(address)
 
-            ws: WorkerState = parent._workers[address]
+            ws: WorkerState = parent._workers_dv[address]
 
             self.log_event(
                 ["all", address],
@@ -4240,16 +4240,16 @@ class Scheduler(SchedulerState, ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
-            if not parent._workers:
+            if not parent._workers_dv:
                 logger.info("Lost all workers")
 
-            for w in parent._workers:
+            for w in parent._workers_dv:
                 self.bandwidth_workers.pop((address, w), None)
                 self.bandwidth_workers.pop((w, address), None)
 
             def remove_worker_from_events():
                 # If the worker isn't registered anymore after the delay, remove from events
-                if address not in parent._workers and address in self.events:
+                if address not in parent._workers_dv and address in self.events:
                     del self.events[address]
 
             cleanup_delay = parse_timedelta(
@@ -4432,11 +4432,11 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         validate_state(parent._tasks, parent._workers, parent._clients)
 
-        if not (set(parent._workers) == set(self.stream_comms)):
+        if not (set(parent._workers_dv) == set(self.stream_comms)):
             raise ValueError("Workers not the same in all collections")
 
         ws: WorkerState
-        for w, ws in parent._workers.items():
+        for w, ws in parent._workers_dv.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws._address == w
@@ -4458,15 +4458,15 @@ class Scheduler(SchedulerState, ServerNode):
             assert type(cs) == ClientState, (type(cs), cs)
             assert cs._client_key == c
 
-        a = {w: ws._nbytes for w, ws in parent._workers.items()}
+        a = {w: ws._nbytes for w, ws in parent._workers_dv.items()}
         b = {
             w: sum(ts.get_nbytes() for ts in ws._has_what)
-            for w, ws in parent._workers.items()
+            for w, ws in parent._workers_dv.items()
         }
         assert a == b, (a, b)
 
         actual_total_occupancy = 0
-        for worker, ws in parent._workers.items():
+        for worker, ws in parent._workers_dv.items():
             assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8
             actual_total_occupancy += ws._occupancy
 
@@ -4547,7 +4547,7 @@ class Scheduler(SchedulerState, ServerNode):
             ws: WorkerState
             version_warning = version_module.error_message(
                 version_module.get_versions(),
-                {w: ws._versions for w, ws in parent._workers.items()},
+                {w: ws._versions for w, ws in parent._workers_dv.items()},
                 versions,
             )
             msg.update(version_warning)
@@ -4623,7 +4623,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def handle_task_finished(self, key=None, worker=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
-        if worker not in parent._workers:
+        if worker not in parent._workers_dv:
             return
         validate_key(key)
         r = self.stimulus_task_finished(key=key, worker=worker, **msg)
@@ -4638,7 +4638,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         if ts._processing_on != ws:
             return
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
@@ -4652,8 +4652,8 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None or not ts._who_has:
             return
-        if errant_worker in parent._workers:
-            ws: WorkerState = parent._workers[errant_worker]
+        if errant_worker in parent._workers_dv:
+            ws: WorkerState = parent._workers_dv[errant_worker]
             if ws in ts._who_has:
                 ts._who_has.remove(ws)
                 ws._has_what.remove(ts)
@@ -4666,7 +4666,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         tasks = {parent._tasks[k] for k in keys}
         removed_tasks = tasks & ws._has_what
         ws._has_what -= removed_tasks
@@ -4797,17 +4797,17 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         start = time()
-        while not parent._workers:
+        while not parent._workers_dv:
             await asyncio.sleep(0.2)
             if time() > start + timeout:
                 raise TimeoutError("No workers found")
 
         if workers is None:
             ws: WorkerState
-            nthreads = {w: ws._nthreads for w, ws in parent._workers.items()}
+            nthreads = {w: ws._nthreads for w, ws in parent._workers_dv.items()}
         else:
             workers = [self.coerce_address(w) for w in workers]
-            nthreads = {w: parent._workers[w].nthreads for w in workers}
+            nthreads = {w: parent._workers_dv[w].nthreads for w in workers}
 
         assert isinstance(data, dict)
 
@@ -4880,7 +4880,7 @@ class Scheduler(SchedulerState, ServerNode):
                     if not workers or ts is None:
                         continue
                     for worker in workers:
-                        ws = parent._workers.get(worker)
+                        ws = parent._workers_dv.get(worker)
                         if ws is not None and ts in ws._has_what:
                             ws._has_what.remove(ts)
                             ts._who_has.remove(ws)
@@ -4902,7 +4902,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
 
-            n_workers = len(parent._workers)
+            n_workers = len(parent._workers_dv)
 
             logger.info("Send lost future signal to clients")
             cs: ClientState
@@ -4913,9 +4913,9 @@ class Scheduler(SchedulerState, ServerNode):
                 )
 
             ws: WorkerState
-            nannies = {addr: ws._nanny for addr, ws in parent._workers.items()}
+            nannies = {addr: ws._nanny for addr, ws in parent._workers_dv.items()}
 
-            for addr in list(parent._workers):
+            for addr in list(parent._workers_dv):
                 try:
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
@@ -4972,7 +4972,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.log_event([client, "all"], {"action": "restart", "client": client})
             start = time()
-            while time() < start + 10 and len(parent._workers) < n_workers:
+            while time() < start + 10 and len(parent._workers_dv) < n_workers:
                 await asyncio.sleep(0.01)
 
             self.report({"op": "restart"})
@@ -4990,7 +4990,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         if workers is None or workers is True:
             if hosts is None:
-                workers = list(parent._workers)
+                workers = list(parent._workers_dv)
             else:
                 workers = []
         if hosts is not None:
@@ -5000,7 +5000,7 @@ class Scheduler(SchedulerState, ServerNode):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = [parent._workers[w].nanny for w in workers]
+            addresses = [parent._workers_dv[w].nanny for w in workers]
         else:
             addresses = workers
 
@@ -5041,7 +5041,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
         )
 
-        ws: WorkerState = parent._workers[worker_address]
+        ws: WorkerState = parent._workers_dv[worker_address]
         ts: TaskState
         tasks: set = {parent._tasks[key] for key in keys}
         ws._has_what -= tasks
@@ -5074,10 +5074,10 @@ class Scheduler(SchedulerState, ServerNode):
                     tasks = set(parent._tasks.values())
 
                 if workers:
-                    workers = {parent._workers[w] for w in workers}
+                    workers = {parent._workers_dv[w] for w in workers}
                     workers_by_task = {ts: ts._who_has & workers for ts in tasks}
                 else:
-                    workers = set(parent._workers.values())
+                    workers = set(parent._workers_dv.values())
                     workers_by_task = {ts: ts._who_has for ts in tasks}
 
                 ws: WorkerState
@@ -5224,7 +5224,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         assert branching_factor > 0
         async with self._lock if lock else empty_context:
-            workers = {parent._workers[w] for w in self.workers_list(workers)}
+            workers = {parent._workers_dv[w] for w in self.workers_list(workers)}
             if n is None:
                 n = len(workers)
             else:
@@ -5370,18 +5370,18 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         if target is not None and n is None:
-            n = len(parent._workers) - target
+            n = len(parent._workers_dv) - target
         if n is not None:
             if n < 0:
                 n = 0
-            target = len(parent._workers) - n
+            target = len(parent._workers_dv) - n
 
         if n is None and memory_ratio is None:
             memory_ratio = 2
 
         ws: WorkerState
         with log_errors():
-            if not n and all([ws._processing for ws in parent._workers.values()]):
+            if not n and all([ws._processing for ws in parent._workers_dv.values()]):
                 return []
 
             if key is None:
@@ -5410,7 +5410,7 @@ class Scheduler(SchedulerState, ServerNode):
             idle = sorted(groups, key=_key)
 
             to_close = []
-            n_remain = len(parent._workers)
+            n_remain = len(parent._workers_dv)
 
             while idle:
                 group = idle.pop()
@@ -5487,7 +5487,7 @@ class Scheduler(SchedulerState, ServerNode):
                     names = set(map(str, names))
                     workers = [
                         ws._address
-                        for ws in parent._workers.values()
+                        for ws in parent._workers_dv.values()
                         if str(ws._name) in names
                     ]
                 if workers is None:
@@ -5506,7 +5506,9 @@ class Scheduler(SchedulerState, ServerNode):
                                 return {}
                         except KeyError:  # keys left during replicate
                             pass
-                workers = {parent._workers[w] for w in workers if w in parent._workers}
+                workers = {
+                    parent._workers_dv[w] for w in workers if w in parent._workers_dv
+                }
                 if not workers:
                     return {}
                 logger.info("Retire workers %s", workers)
@@ -5515,7 +5517,7 @@ class Scheduler(SchedulerState, ServerNode):
                 keys = set.union(*[w.has_what for w in workers])
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
-                other_workers = set(parent._workers.values()) - workers
+                other_workers = set(parent._workers_dv.values()) - workers
                 if keys:
                     if other_workers:
                         logger.info("Moving %d keys to other workers", len(keys))
@@ -5559,9 +5561,9 @@ class Scheduler(SchedulerState, ServerNode):
         reasons.  However, it is sent by workers from time to time.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        if worker not in parent._workers:
+        if worker not in parent._workers_dv:
             return "not found"
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
@@ -5601,7 +5603,7 @@ class Scheduler(SchedulerState, ServerNode):
                 if key in nbytes:
                     ts.set_nbytes(nbytes[key])
                 for w in workers:
-                    ws: WorkerState = parent._workers[w]
+                    ws: WorkerState = parent._workers_dv[w]
                     if ts not in ws._has_what:
                         ws._nbytes += ts.get_nbytes()
                         ws._has_what.add(ts)
@@ -5689,12 +5691,12 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
             return {
-                w: [ts._key for ts in parent._workers[w].processing] for w in workers
+                w: [ts._key for ts in parent._workers_dv[w].processing] for w in workers
             }
         else:
             return {
                 w: [ts._key for ts in ws._processing]
-                for w, ws in parent._workers.items()
+                for w, ws in parent._workers_dv.items()
             }
 
     def get_who_has(self, comm=None, keys=None):
@@ -5721,14 +5723,15 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts._key for ts in parent._workers[w].has_what]
-                if w in parent._workers
+                w: [ts._key for ts in parent._workers_dv[w].has_what]
+                if w in parent._workers_dv
                 else []
                 for w in workers
             }
         else:
             return {
-                w: [ts._key for ts in ws._has_what] for w, ws in parent._workers.items()
+                w: [ts._key for ts in ws._has_what]
+                for w, ws in parent._workers_dv.items()
             }
 
     def get_ncores(self, comm=None, workers=None):
@@ -5737,10 +5740,12 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: parent._workers[w].nthreads for w in workers if w in parent._workers
+                w: parent._workers_dv[w].nthreads
+                for w in workers
+                if w in parent._workers_dv
             }
         else:
-            return {w: ws._nthreads for w, ws in parent._workers.items()}
+            return {w: ws._nthreads for w, ws in parent._workers_dv.items()}
 
     async def get_call_stack(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5762,7 +5767,7 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts._processing_on:
                     workers[ts._processing_on.address].append(ts._key)
         else:
-            workers = {w: None for w in parent._workers}
+            workers = {w: None for w in parent._workers_dv}
 
         if not workers:
             return {}
@@ -6065,7 +6070,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def add_resources(self, comm=None, worker=None, resources=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         if resources:
             ws._resources.update(resources)
         ws._used_resources = {}
@@ -6076,7 +6081,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def remove_resources(self, worker):
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         for resource, quantity in ws._resources.items():
             del parent._resources[resource][worker]
 
@@ -6108,7 +6113,7 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         if host in self.aliases:
-            return parent._workers[self.aliases[host]].host
+            return parent._workers_dv[self.aliases[host]].host
         else:
             return host
 
@@ -6157,9 +6162,9 @@ class Scheduler(SchedulerState, ServerNode):
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         if workers is None:
-            workers = parent._workers
+            workers = parent._workers_dv
         else:
-            workers = set(parent._workers) & set(workers)
+            workers = set(parent._workers_dv) & set(workers)
 
         if scheduler:
             return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
@@ -6196,9 +6201,9 @@ class Scheduler(SchedulerState, ServerNode):
         dt = parse_timedelta(dt, default="ms")
 
         if workers is None:
-            workers = parent._workers
+            workers = parent._workers_dv
         else:
-            workers = set(parent._workers) & set(workers)
+            workers = set(parent._workers_dv) & set(workers)
         results = await asyncio.gather(
             *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers),
             return_exceptions=True,
@@ -6317,10 +6322,10 @@ class Scheduler(SchedulerState, ServerNode):
             ntasks=total_tasks,
             tasks_timings=tasks_timings,
             address=self.address,
-            nworkers=len(parent._workers),
-            threads=sum([ws._nthreads for ws in parent._workers.values()]),
+            nworkers=len(parent._workers_dv),
+            threads=sum([ws._nthreads for ws in parent._workers_dv.values()]),
             memory=format_bytes(
-                sum([ws._memory_limit for ws in parent._workers.values()])
+                sum([ws._memory_limit for ws in parent._workers_dv.values()])
             ),
             code=code,
             dask_version=dask.__version__,
@@ -6447,9 +6452,9 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         now = time()
-        for ws in parent._workers.values():
+        for ws in parent._workers_dv.values():
             if (ws._last_seen < now - self.worker_ttl) and (
-                ws._last_seen < now - 10 * heartbeat_interval(len(parent._workers))
+                ws._last_seen < now - 10 * heartbeat_interval(len(parent._workers_dv))
             ):
                 logger.warning(
                     "Worker failed to heartbeat within %s seconds. Closing: %s",
@@ -6462,7 +6467,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         if (
-            any([ws._processing for ws in parent._workers.values()])
+            any([ws._processing for ws in parent._workers_dv.values()])
             or parent._unrunnable
         ):
             self.idle_since = None
@@ -6506,7 +6511,7 @@ class Scheduler(SchedulerState, ServerNode):
         # Avoid a few long tasks from asking for many cores
         ws: WorkerState
         tasks_processing = 0
-        for ws in parent._workers.values():
+        for ws in parent._workers_dv.values():
             tasks_processing += len(ws._processing)
 
             if tasks_processing > cpu:
@@ -6514,25 +6519,27 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             cpu = min(tasks_processing, cpu)
 
-        if parent._unrunnable and not parent._workers:
+        if parent._unrunnable and not parent._workers_dv:
             cpu = max(1, cpu)
 
         # Memory
-        limit_bytes = {addr: ws._memory_limit for addr, ws in parent._workers.items()}
-        worker_bytes = [ws._nbytes for ws in parent._workers.values()]
+        limit_bytes = {
+            addr: ws._memory_limit for addr, ws in parent._workers_dv.items()
+        }
+        worker_bytes = [ws._nbytes for ws in parent._workers_dv.values()]
         limit = sum(limit_bytes.values())
         total = sum(worker_bytes)
         if total > 0.6 * limit:
-            memory = 2 * len(parent._workers)
+            memory = 2 * len(parent._workers_dv)
         else:
             memory = 0
 
         target = max(memory, cpu)
-        if target >= len(parent._workers):
+        if target >= len(parent._workers_dv):
             return target
         else:  # Scale down?
             to_close = self.workers_to_close()
-            return len(parent._workers) - len(to_close)
+            return len(parent._workers_dv) - len(to_close)
 
 
 @cfunc
