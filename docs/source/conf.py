@@ -425,5 +425,64 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
+# -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
+# Fixes issues/3693
+# See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+from sphinx.ext.autosummary import Autosummary
+from sphinx.ext.autosummary import get_documenter
+from docutils.parsers.rst import directives
+from sphinx.util.inspect import safe_getattr
+import re
+
+
+class AutoAutoSummary(Autosummary):
+
+    option_spec = {
+        'methods': directives.unchanged,
+        'attributes': directives.unchanged,
+    }
+
+    required_arguments = 1
+    app = None
+
+    @staticmethod
+    def get_members(app, obj, typ, include_public=None):
+        if not app:
+            app = AutoAutoSummary.app
+        if not include_public:
+            include_public = []
+        items = []
+        for name in sorted(obj.__dict__.keys()):#dir(obj):
+            try:
+                documenter = get_documenter(app, safe_getattr(obj, name), obj)
+            except AttributeError:
+                continue
+            if documenter.objtype in typ:
+                items.append(name)
+        public = [x for x in items if x in include_public or not x.startswith('_')]
+        return public, items
+
+    def run(self):
+        clazz = str(self.arguments[0])
+        try:
+            (module_name, class_name) = clazz.rsplit('.', 1)
+            m = __import__(module_name, globals(), locals(), [class_name])
+            c = getattr(m, class_name)
+            app = self.state.document.settings.env.app
+            if 'methods' in self.options:
+                _, methods = self.get_members(app, c, ['method'], ['__init__'])
+                # self.content = ["~%s.%s" % (clazz, method) for method in methods if not method.startswith('_')]
+                self.content = ["%s.%s" % (class_name, method) for method in methods if not method.startswith('_')]
+            if 'attributes' in self.options:
+                _, attribs = self.get_members(app, c, ['attribute', 'property'])
+                self.content = ["~%s.%s" % (clazz, attrib) for attrib in attribs if not attrib.startswith('_')]
+        except:
+            print('Something went wrong when autodocumenting {}'.format(clazz))
+        finally:
+            print(f'self.content: {self.content}')
+            return super().run()
+
+
 def setup(app):
+    app.add_directive('autoautosummary', AutoAutoSummary)
     app.connect("build-finished", copy_legacy_redirects)
