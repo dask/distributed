@@ -4630,6 +4630,7 @@ class Scheduler(ServerNode):
         ts: TaskState,
         ws: WorkerState,
         recommendations: dict,
+        report_msg: dict,
         type=None,
         typename=None,
         **kwargs,
@@ -4666,10 +4667,10 @@ class Scheduler(ServerNode):
         if not ts._waiters and not ts._who_wants:
             recommendations[ts._key] = "released"
         else:
-            msg: dict = {"op": "key-in-memory", "key": ts._key}
+            report_msg["op"] = "key-in-memory"
+            report_msg["key"] = ts._key
             if type is not None:
-                msg["type"] = type
-            self.report(msg)
+                report_msg["type"] = type
 
         ts.state = "memory"
         ts._type = typename
@@ -4907,8 +4908,11 @@ class Scheduler(ServerNode):
             self.check_idle_saturated(ws)
 
             recommendations: dict = {}
+            report_msg: dict = {}
 
-            self._add_to_memory(ts, ws, recommendations, **kwargs)
+            self._add_to_memory(ts, ws, recommendations, report_msg, **kwargs)
+            if report_msg:
+                self.report(report_msg)
 
             if self.validate:
                 assert not ts._processing_on
@@ -5018,10 +5022,15 @@ class Scheduler(ServerNode):
                 ts.set_nbytes(nbytes)
 
             recommendations: dict = {}
+            report_msg: dict = {}
 
             self._remove_from_processing(ts)
 
-            self._add_to_memory(ts, ws, recommendations, type=type, typename=typename)
+            self._add_to_memory(
+                ts, ws, recommendations, report_msg, type=type, typename=typename
+            )
+            if report_msg:
+                self.report(report_msg)
 
             if self.validate:
                 assert not ts._processing_on
