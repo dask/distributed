@@ -45,6 +45,8 @@ from distributed.utils import (
     LRU,
     offload,
     TimeoutError,
+    deserialize_for_cli,
+    serialize_for_cli,
 )
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
@@ -606,3 +608,19 @@ def test_lru():
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
+
+
+def test_cli_serialization():
+    # Use context manager without changing the value to ensure test side effects are restored
+    with dask.config.set(
+        {
+            "distributed.comm.default-scheme": dask.config.get(
+                "distributed.comm.default-scheme"
+            )
+        }
+    ):
+        config = deserialize_for_cli(
+            serialize_for_cli({"distributed": {"comm": {"default-scheme": "tls"}}})
+        )  # Take a round trip through the serialization
+        dask.config.update(dask.config.global_config, config)
+        assert dask.config.get("distributed.comm.default-scheme") == "tls"
