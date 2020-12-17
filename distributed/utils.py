@@ -25,7 +25,6 @@ import threading
 import warnings
 import weakref
 import pkgutil
-import base64
 import tblib.pickling_support
 import xml.etree.ElementTree
 
@@ -36,6 +35,9 @@ except ImportError:
 
 import dask
 from dask import istask
+
+# Import config serialization functions here for backward compatibility
+from dask.config import serialize_for_cli, deserialize_for_cli  # noqa
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
@@ -1453,36 +1455,6 @@ def import_term(name: str):
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
-
-
-def serialize_for_cli(data):
-    """Serialize data into a string that can be passthrough cli
-
-    Parameters
-    ----------
-    data: json-serializable object
-        The data to serialize
-    Returns
-    -------
-    serialized_data: str
-        The serialized data as a string
-    """
-    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
-
-
-def deserialize_for_cli(data):
-    """De-serialize data into the original object
-
-    Parameters
-    ----------
-    data: str
-        String serialied by serialize_for_cli()
-    Returns
-    -------
-    deserialized_data: obj
-        The de-serialized data
-    """
-    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
 
 
 class EmptyContext:

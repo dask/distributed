@@ -5,13 +5,13 @@ import warnings
 import weakref
 
 import dask
+from dask.config import serialize_for_cli
 
 from .spec import SpecCluster, ProcessInterface
 from ..core import Status
 from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
 from ..worker import Worker as _Worker
-from ..utils import serialize_for_cli
 
 logger = logging.getLogger(__name__)
 
