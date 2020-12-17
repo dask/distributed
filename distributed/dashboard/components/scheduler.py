@@ -1266,6 +1266,9 @@ class TaskStream(DashboardComponent):
         boxes = {}
 
         def highlight_worker_band(event):
+            if event.x is None or event.y is None:
+                return
+
             # highlights the horizontal band corresponding to the tasks
             # completed by all threads of a given worker
             nonlocal last_box
