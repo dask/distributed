@@ -1348,7 +1348,6 @@ class TaskStream(DashboardComponent):
                     this_worker_positions['nthreads']
                 ) / 2
                 this_worker_positions['threads_y_coord'][thread] = y
-                print(worker, thread, y)
 
     def _group_tasks_vetrically_by_workers(self, rects):
         # Modifies the 'y' field of the completed tasks data structure so that
