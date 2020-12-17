@@ -5,6 +5,8 @@ from numbers import Number
 import operator
 import os
 
+from bokeh.models.annotations import BoxAnnotation
+from bokeh.events import MouseMove, MouseLeave
 from bokeh.layouts import column, row
 from bokeh.models import (
     ColumnDataSource,
@@ -1255,6 +1257,113 @@ class TaskStream(DashboardComponent):
         # Required for update callback
         self.task_stream_index = [0]
 
+        self._worker_position_info = {}
+        self._compute_workers_y_range()
+        self._add_worker_band_hover_effect(self.root)
+
+    def _add_worker_band_hover_effect(self, root):
+        last_box = None
+        boxes = {}
+
+        def highlight_worker_band(event):
+            # highlights the horizontal band corresponding to the tasks
+            # completed by all threads of a given worker
+            nonlocal last_box
+            for w, t in self._worker_position_info.items():
+                if t['y_min'] - 0.25 < event.y and t['y_max'] + 0.25 > event.y:
+                    if t['worker_uuid'] not in boxes:
+                        b = BoxAnnotation(
+                            top=t['y_min'] - 0.25,
+                            bottom=t['y_max'] + 0.25,
+                            fill_alpha=0.2,
+                            fill_color="gray"
+                        )
+                        root.renderers.extend([b])
+                        boxes[t['worker_uuid']] = b
+                    else:
+                        b = boxes[t['worker_uuid']]
+
+                    if last_box is b:
+                        break
+
+                    # wipe the band highlight of previous mouse event if necessary
+                    elif last_box is not None:
+                        last_box.fill_alpha = 0
+
+                    b.fill_alpha = 0.2
+                    # remember currently hovered band to wipe it at the next event
+                    last_box = b
+                    break
+            else:
+                last_box.fill_alpha = None
+
+        root.on_event(MouseMove, highlight_worker_band)
+        root.on_event(MouseLeave, lambda: setattr(last_box, "fill_alpha", 0))
+
+    def _compute_workers_y_range(self):
+        # for each worker, defin  a unique, static y range where the task
+        # stream of all of the worker's threads will be displayed. One slot in
+        # this range is reserved for additional threads created afer ``secede``
+        # calls.
+
+        # ugly hack: ``max`` requires at least 2 arguments
+        prev_y_max = max(
+            -0.5,
+            -0.5,
+            *[d['y_max'] for _, d in self._worker_position_info.items()]
+        )
+
+        for worker, state in self.scheduler.workers.items():
+            last_worker_table = self._worker_position_info.get(state.address, {})
+            if (last_worker_table and
+                    state.uuid == last_worker_table['worker_uuid']):
+                # don't update table if worker is already known
+                continue
+
+            d = {
+                'worker_uuid': state.uuid,
+                'y_min': prev_y_max + 1 / 2,
+                'y_max': prev_y_max + 1 / 2 + (state.nthreads) / 2,
+                'nthreads': state.nthreads,
+                # active threads positions will be computed as they return computed tasks
+                'threads_y_coord': {}
+            }
+            prev_y_max = d['y_max']
+            self._worker_position_info[state.address] = d
+
+    def _compute_threads_y_coord(self, rects):
+        # Takes a set of finished tasks, and affect a unique y coordinate to
+        # every unseen computing thread
+        for worker, thread in zip(rects['worker'], rects['worker_thread']):
+            this_worker_positions = self._worker_position_info[worker]
+            if thread not in this_worker_positions['threads_y_coord']:
+                # The horizontal band allocated to each worker plans for
+                # ``WorkerState.nthreads`` threads. As threads returns their
+                # first computed task, this function allocates the first
+                # available sub-band of the thread's worker band, from bottom to top.
+                # Any unexpected additional thread is redirected to the
+                # uppermost area of the associated worker.
+                y = this_worker_positions['y_min'] + min(
+                    len(this_worker_positions['threads_y_coord']),
+                    this_worker_positions['nthreads']
+                ) / 2
+                this_worker_positions['threads_y_coord'][thread] = y
+                print(worker, thread, y)
+
+    def _group_tasks_vetrically_by_workers(self, rects):
+        # Modifies the 'y' field of the completed tasks data structure so that
+        # tasks computed from threads originating from the same worker are
+        # plotted as a contiguous group in the y coordinate
+        self._compute_workers_y_range()
+        self._compute_threads_y_coord(rects)
+
+        rects['y'] = [
+            self._worker_position_info[worker]['threads_y_coord'][thread]
+            for thread, worker in zip(rects['worker_thread'], rects['worker'])
+        ]
+
+        return rects
+
     @without_property_validation
     def update(self):
         if self.index == self.plugin.index:
@@ -1269,6 +1378,7 @@ class TaskStream(DashboardComponent):
             rectangles = self.plugin.rectangles(
                 istart=self.index, workers=self.workers, start_boundary=boundary
             )
+            rectangles = self._group_tasks_vetrically_by_workers(rectangles)
             n = len(rectangles["name"])
             self.index = self.plugin.index
 

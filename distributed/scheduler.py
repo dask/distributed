@@ -19,6 +19,7 @@ import weakref
 import psutil
 import sortedcontainers
 
+from uuid import uuid4
 from tlz import (
     merge,
     pluck,
@@ -377,6 +378,7 @@ class WorkerState:
         "_services",
         "_status",
         "_time_delay",
+        "_uuid",
         "_used_resources",
         "_versions",
     )
@@ -403,8 +405,9 @@ class WorkerState:
         self._services = services or {}
         self._versions = versions or {}
         self._nanny = nanny
-
+        self._uuid = uuid4().hex
         self._hash = hash(address)
+
         self._status = Status.running
         self._nbytes = 0
         self._occupancy = 0
