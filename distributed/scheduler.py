@@ -542,6 +542,10 @@ class WorkerState:
         return self._time_delay
 
     @property
+    def uuid(self):
+        return self._uuid
+
+    @property
     def used_resources(self):
         return self._used_resources
 
