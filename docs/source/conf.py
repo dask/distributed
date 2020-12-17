@@ -446,12 +446,9 @@ class AutoAutoSummary(Autosummary):
     }
 
     required_arguments = 1
-    app = None
 
     @staticmethod
     def get_members(app, obj, typ, include_public=None):
-        if not app:
-            app = AutoAutoSummary.app
         if not include_public:
             include_public = []
         items = []
@@ -467,30 +464,25 @@ class AutoAutoSummary(Autosummary):
 
     def run(self):
         clazz = str(self.arguments[0])
-        try:
-            (module_name, class_name) = clazz.rsplit(".", 1)
-            m = __import__(module_name, globals(), locals(), [class_name])
-            c = getattr(m, class_name)
-            app = self.state.document.settings.env.app
-            if "methods" in self.options:
-                _, methods = self.get_members(app, c, ["method"], ["__init__"])
-                self.content = [
-                    "%s.%s" % (class_name, method)
-                    for method in methods
-                    if not method.startswith("_")
-                ]
-            if "attributes" in self.options:
-                _, attribs = self.get_members(app, c, ["attribute", "property"])
-                self.content = [
-                    "~%s.%s" % (clazz, attrib)
-                    for attrib in attribs
-                    if not attrib.startswith("_")
-                ]
-        except Exception:
-            print("Something went wrong when autodocumenting {}".format(clazz))
-        finally:
-            print(f"self.content: {self.content}")
-            return super().run()
+        (module_name, class_name) = clazz.rsplit(".", 1)
+        m = __import__(module_name, globals(), locals(), [class_name])
+        c = getattr(m, class_name)
+        app = self.state.document.settings.env.app
+        if "methods" in self.options:
+            _, methods = self.get_members(app, c, ["method"], ["__init__"])
+            self.content = [
+                "%s.%s" % (class_name, method)
+                for method in methods
+                if not method.startswith("_")
+            ]
+        if "attributes" in self.options:
+            _, attribs = self.get_members(app, c, ["attribute", "property"])
+            self.content = [
+                "~%s.%s" % (clazz, attrib)
+                for attrib in attribs
+                if not attrib.startswith("_")
+            ]
+        return super().run()
 
 
 def setup(app):
