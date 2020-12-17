@@ -5,7 +5,7 @@ import warnings
 import weakref
 
 import dask
-from dask.config import serialize_for_cli
+from dask.config import serialize
 
 from .spec import SpecCluster, ProcessInterface
 from ..core import Status
@@ -95,13 +95,13 @@ class Worker(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -176,13 +176,13 @@ class Scheduler(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(

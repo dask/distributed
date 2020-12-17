@@ -37,7 +37,8 @@ import dask
 from dask import istask
 
 # Import config serialization functions here for backward compatibility
-from dask.config import serialize_for_cli, deserialize_for_cli  # noqa
+from dask.config import serialize as serialize_for_cli  # noqa
+from dask.config import deserialize as deserialize_for_cli  # noqa
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
