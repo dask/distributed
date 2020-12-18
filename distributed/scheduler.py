@@ -4389,7 +4389,7 @@ class Scheduler(SchedulerState, ServerNode):
         cs: ClientState = parent._clients[client]
         recommendations: dict = {}
 
-        self._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
+        parent._client_releases_keys(keys=keys, cs=cs, recommendations=recommendations)
         self.transitions(recommendations)
 
     def client_heartbeat(self, client=None):
@@ -5693,7 +5693,7 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        report_msg: dict = self._task_to_report_msg(ts)
+        report_msg: dict = parent._task_to_report_msg(ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -6498,7 +6498,7 @@ class Scheduler(SchedulerState, ServerNode):
                     try:
                         if ws is None or not ws._processing:
                             continue
-                        self._reevaluate_occupancy_worker(ws)
+                        parent._reevaluate_occupancy_worker(ws)
                     finally:
                         del ws  # lose ref
 
