@@ -84,7 +84,6 @@ class WorkStealing(SchedulerPlugin):
         ws = ts.processing_on
         worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
-        self.log(("add-stealable", ts.key, worker, level))
         if cost_multiplier is not None:
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
