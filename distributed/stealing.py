@@ -133,7 +133,7 @@ class WorkStealing(SchedulerPlugin):
         if cost_multiplier > 100:
             return None, None
 
-        level = int(round(log2(cost_multiplier) + 6, 0))
+        level = int(round(log2(cost_multiplier) + 6))
         level = max(1, level)
         return cost_multiplier, level
 
