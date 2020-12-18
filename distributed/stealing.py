@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 import logging
-from math import log
+from math import log2
 from time import time
 
 from tornado.ioloop import PeriodicCallback
@@ -14,7 +14,6 @@ from .utils import log_errors, parse_timedelta
 from tlz import topk
 
 LATENCY = 10e-3
-log_2 = log(2)
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +133,7 @@ class WorkStealing(SchedulerPlugin):
         if cost_multiplier > 100:
             return None, None
 
-        level = int(round(log(cost_multiplier) / log_2 + 6, 0))
+        level = int(round(log2(cost_multiplier) + 6, 0))
         level = max(1, level)
         return cost_multiplier, level
 
