@@ -1710,6 +1710,8 @@ class SchedulerState:
     def workers(self):
         return self._workers
 
+    @cfunc
+    @exceptval(check=False)
     def _remove_from_processing(self, ts: TaskState) -> str:
         """
         Remove *ts* from the set of processing tasks.
@@ -2509,6 +2511,8 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @cfunc
+    @exceptval(check=False)
     def _propagate_forgotten(
         self, ts: TaskState, recommendations: dict, worker_msgs: dict
     ):
@@ -2670,6 +2674,8 @@ class SchedulerState:
 
             saturated.discard(ws)
 
+    @cfunc
+    @exceptval(check=False)
     def _client_releases_keys(self, keys: list, cs: ClientState, recommendations: dict):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", cs._client_key, keys)
@@ -2691,6 +2697,8 @@ class SchedulerState:
             elif ts._state != "erred" and not ts._waiters:
                 recommendations[ts._key] = "released"
 
+    @cfunc
+    @exceptval(check=False)
     def _task_to_msg(self, ts: TaskState, duration=None) -> dict:
         """ Convert a single computational task to a message """
         ws: WorkerState
@@ -2728,6 +2736,8 @@ class SchedulerState:
 
         return msg
 
+    @cfunc
+    @exceptval(check=False)
     def _task_to_report_msg(self, ts: TaskState) -> dict:
         if ts is None:
             return {"op": "cancelled-key", "key": ts._key}
@@ -2746,6 +2756,8 @@ class SchedulerState:
         else:
             return None
 
+    @cfunc
+    @exceptval(check=False)
     def _task_to_client_msgs(self, ts: TaskState) -> dict:
         cs: ClientState
         client_keys: list
@@ -2764,6 +2776,8 @@ class SchedulerState:
 
         return client_msgs
 
+    @cfunc
+    @exceptval(check=False)
     def _reevaluate_occupancy_worker(self, ws: WorkerState):
         """ See reevaluate_occupancy """
         old: double = ws._occupancy
