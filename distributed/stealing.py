@@ -119,9 +119,6 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = ts.get_nbytes_deps()
-
-        transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         split = ts.prefix.name
         if split in fast_tasks:
             return None, None
@@ -129,6 +126,9 @@ class WorkStealing(SchedulerPlugin):
         compute_time = ws.processing[ts]
         if compute_time < 0.005:  # 5ms, just give up
             return None, None
+
+        nbytes = ts.get_nbytes_deps()
+        transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         cost_multiplier = transfer_time / compute_time
         if cost_multiplier > 100:
             return None, None
