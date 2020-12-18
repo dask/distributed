@@ -96,6 +96,7 @@ if compiled:
         cast,
         ccall,
         cclass,
+        cfunc,
         declare,
         double,
         exceptval,
@@ -122,6 +123,9 @@ else:
 
     def cclass(cls):
         return cls
+
+    def cfunc(func):
+        return func
 
     def declare(*a, **k):
         if len(a) == 2:
