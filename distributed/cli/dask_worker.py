@@ -294,10 +294,10 @@ def main(
         if v is not None
     }
 
-    if nprocs != "auto":
-        nprocs = int(nprocs)
-    else:
+    if nprocs == "auto":
         nprocs, nthreads = nprocesses_nthreads()
+    else:
+        nprocs = int(nprocs)
 
     if nprocs < 0:
         nprocs = CPU_COUNT + 1 + nprocs
