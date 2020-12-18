@@ -6213,6 +6213,8 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
+@cfunc
+@exceptval(check=False)
 def decide_worker(
     ts: TaskState, all_workers, valid_workers: set, objective
 ) -> WorkerState:
