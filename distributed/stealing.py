@@ -122,6 +122,7 @@ class WorkStealing(SchedulerPlugin):
         split = ts.prefix.name
         if split in fast_tasks:
             return None, None
+
         ws = ts.processing_on
         compute_time = ws.processing[ts]
         if compute_time < 0.005:  # 5ms, just give up
