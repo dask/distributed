@@ -86,6 +86,11 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
+    from cython import compiled
+except ImportError:
+    compiled = False
+
+if compiled:
     from cython import (
         bint,
         cast,
@@ -100,7 +105,7 @@ try:
         Py_hash_t,
         Py_ssize_t,
     )
-except ImportError:
+else:
     from ctypes import (
         c_double as double,
         c_ssize_t as Py_hash_t,
