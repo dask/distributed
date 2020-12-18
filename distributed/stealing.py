@@ -134,7 +134,9 @@ class WorkStealing(SchedulerPlugin):
             return None, None
 
         level = int(round(log2(cost_multiplier) + 6))
-        level = max(1, level)
+        if level < 1:
+            level = 1
+
         return cost_multiplier, level
 
     def move_task_request(self, ts, victim, thief):
