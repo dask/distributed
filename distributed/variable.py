@@ -6,8 +6,9 @@ import uuid
 
 from tlz import merge
 
+from dask.utils import stringify
 from .client import Future, Client
-from .utils import tokey, log_errors, TimeoutError, parse_timedelta
+from .utils import log_errors, TimeoutError, parse_timedelta
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,7 @@ class Variable:
     async def _set(self, value):
         if isinstance(value, Future):
             await self.client.scheduler.variable_set(
-                key=tokey(value.key), name=self.name
+                key=stringify(value.key), name=self.name
             )
         else:
             await self.client.scheduler.variable_set(data=value, name=self.name)

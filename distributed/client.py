@@ -29,7 +29,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes, funcname
+from dask.utils import ensure_dict, format_bytes, funcname, stringify
 from dask.highlevelgraph import HighLevelGraph
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
@@ -69,11 +69,10 @@ from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import get_client, get_worker, secede
-from .diagnostics.plugin import WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
-    tokey,
     log_errors,
     key_split,
     thread_state,
@@ -170,7 +169,7 @@ class Future(WrappedKey):
     def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
-        tkey = tokey(key)
+        tkey = stringify(key)
         self.client = client or Client.current()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
@@ -184,7 +183,7 @@ class Future(WrappedKey):
             self.client._send_to_scheduler(
                 {
                     "op": "client-desires-keys",
-                    "keys": [tokey(key)],
+                    "keys": [stringify(key)],
                     "client": self.client.id,
                 }
             )
@@ -357,7 +356,7 @@ class Future(WrappedKey):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
-                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+                self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
             except TypeError:
                 pass  # Shutting down, add_callback may be None
 
@@ -375,7 +374,7 @@ class Future(WrappedKey):
             {
                 "op": "update-graph",
                 "tasks": {},
-                "keys": [tokey(self.key)],
+                "keys": [stringify(self.key)],
                 "client": c.id,
             }
         )
@@ -383,6 +382,11 @@ class Future(WrappedKey):
     def __del__(self):
         try:
             self.release()
+        except AttributeError:
+            # Ocassionally we see this error when shutting down the client
+            # https://github.com/dask/distributed/issues/4305
+            if not shutting_down():
+                raise
         except RuntimeError:  # closed event loop
             pass
 
@@ -1553,7 +1557,7 @@ class Client:
             else:
                 key = funcname(func) + "-" + str(uuid.uuid4())
 
-        skey = tokey(key)
+        skey = stringify(key)
 
         with self._refcount_lock:
             if skey in self.futures:
@@ -1798,11 +1802,11 @@ class Client:
         )
         logger.debug("map(%s, ...)", funcname(func))
 
-        return [futures[tokey(k)] for k in keys]
+        return [futures[stringify(k)] for k in keys]
 
     async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
-        keys = [tokey(future.key) for future in future_set]
+        keys = [stringify(future.key) for future in future_set]
         bad_data = dict()
         data = {}
 
@@ -2009,8 +2013,8 @@ class Client:
         if isinstance(data, dict) and not all(
             isinstance(k, (bytes, str)) for k in data
         ):
-            d = await self._scatter(keymap(tokey, data), workers, broadcast)
-            return {k: d[tokey(k)] for k in data}
+            d = await self._scatter(keymap(stringify, data), workers, broadcast)
+            return {k: d[stringify(k)] for k in data}
 
         if isinstance(data, type(range(0))):
             data = list(data)
@@ -2199,7 +2203,7 @@ class Client:
         )
 
     async def _cancel(self, futures, force=False):
-        keys = list({tokey(f.key) for f in futures_of(futures)})
+        keys = list({stringify(f.key) for f in futures_of(futures)})
         await self.scheduler.cancel(keys=keys, client=self.id, force=force)
         for k in keys:
             st = self.futures.pop(k, None)
@@ -2223,7 +2227,7 @@ class Client:
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
     async def _retry(self, futures):
-        keys = list({tokey(f.key) for f in futures_of(futures)})
+        keys = list({stringify(f.key) for f in futures_of(futures)})
         response = await self.scheduler.retry(keys=keys, client=self.id)
         for key in response:
             st = self.futures[key]
@@ -2244,7 +2248,7 @@ class Client:
             coroutines = []
 
             def add_coro(name, data):
-                keys = [tokey(f.key) for f in futures_of(data)]
+                keys = [stringify(f.key) for f in futures_of(data)]
                 coroutines.append(
                     self.scheduler.publish_put(
                         keys=keys,
@@ -2558,7 +2562,7 @@ class Client:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)
                 )
-                resources = {tokey(k): v for k, v in resources.items()}
+                resources = {stringify(k): v for k, v in resources.items()}
 
             if retries:
                 retries = self._expand_retries(
@@ -2569,11 +2573,11 @@ class Client:
                 actors = list(self._expand_key(actors))
 
             if restrictions:
-                restrictions = keymap(tokey, restrictions)
+                restrictions = keymap(stringify, restrictions)
                 restrictions = valmap(list, restrictions)
 
             if loose_restrictions is not None:
-                loose_restrictions = list(map(tokey, loose_restrictions))
+                loose_restrictions = list(map(stringify, loose_restrictions))
 
             keyset = set(keys)
 
@@ -2581,7 +2585,7 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, keyset, self, self.futures)
+            dsk = highlevelgraph_pack(dsk, self, keyset)
 
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
@@ -2592,7 +2596,7 @@ class Client:
                 {
                     "op": "update-graph-hlg",
                     "hlg": dsk,
-                    "keys": list(map(tokey, keys)),
+                    "keys": list(map(stringify, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
                     "priority": priority,
@@ -2696,7 +2700,7 @@ class Client:
         with self._refcount_lock:
             changed = False
             for key in list(dsk):
-                if tokey(key) in self.futures:
+                if stringify(key) in self.futures:
                     if not changed:
                         changed = True
                         dsk = ensure_dict(dsk)
@@ -3034,23 +3038,6 @@ class Client:
         """
         return self.sync(self._restart, **kwargs)
 
-    async def _upload_file(self, filename, raise_on_error=True):
-        with open(filename, "rb") as f:
-            data = f.read()
-        _, fn = os.path.split(filename)
-        d = await self.scheduler.broadcast(
-            msg={"op": "upload_file", "filename": fn, "data": to_serialize(data)}
-        )
-
-        if any(v["status"] == "error" for v in d.values()):
-            exceptions = [v["exception"] for v in d.values() if v["status"] == "error"]
-            if raise_on_error:
-                raise exceptions[0]
-            else:
-                return exceptions[0]
-
-        assert all(len(data) == v["nbytes"] for v in d.values())
-
     async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
@@ -3094,17 +3081,14 @@ class Client:
         >>> from mylibrary import myfunc  # doctest: +SKIP
         >>> L = client.map(myfunc, seq)  # doctest: +SKIP
         """
-        result = self.sync(
-            self._upload_file, filename, raise_on_error=self.asynchronous, **kwargs
+        return self.register_worker_plugin(
+            UploadFile(filename),
+            name=filename + str(uuid.uuid4()),
         )
-        if isinstance(result, Exception):
-            raise result
-        else:
-            return result
 
     async def _rebalance(self, futures=None, workers=None):
         await _wait(futures)
-        keys = list({tokey(f.key) for f in self.futures_of(futures)})
+        keys = list({stringify(f.key) for f in self.futures_of(futures)})
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
             raise ValueError(
@@ -3135,7 +3119,7 @@ class Client:
     async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
         futures = self.futures_of(futures)
         await _wait(futures)
-        keys = {tokey(f.key) for f in futures}
+        keys = {stringify(f.key) for f in futures}
         await self.scheduler.replicate(
             keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
         )
@@ -3245,7 +3229,7 @@ class Client:
         """
         if futures is not None:
             futures = self.futures_of(futures)
-            keys = list(map(tokey, {f.key for f in futures}))
+            keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
         return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
@@ -3369,7 +3353,7 @@ class Client:
         keys = keys or []
         if futures is not None:
             futures = self.futures_of(futures)
-            keys += list(map(tokey, {f.key for f in futures}))
+            keys += list(map(stringify, {f.key for f in futures}))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
     def profile(
@@ -3578,6 +3562,35 @@ class Client:
         Logs are returned in reversed order (newest first)
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
+
+    def log_event(self, topic, msg):
+        """Log an event under a given topic
+
+        Parameters
+        ----------
+        topic: str, list
+            Name of the topic under which to log an event. To log the same
+            event under multiple topics, pass a list of topic names.
+        msg
+            Event message to log. Note this must be msgpack serializable.
+
+        Examples
+        --------
+        >>> from time import time
+        >>> client.log_event("current-time", time())
+        """
+        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
+
+    def get_events(self, topic: str = None):
+        """Retrieve structured topic logs
+
+        Parameters
+        ----------
+        topic: str, optional
+            Name of topic log to retrieve events for. If no ``topic`` is
+            provided, then logs for all topics will be returned.
+        """
+        return self.sync(self.scheduler.events, topic=topic)
 
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler
@@ -3861,9 +3874,9 @@ class Client:
         for kk in k:
             if dask.is_dask_collection(kk):
                 for kkk in kk.__dask_keys__():
-                    yield tokey(kkk)
+                    yield stringify(kkk)
             else:
-                yield tokey(kk)
+                yield stringify(kk)
 
     @classmethod
     def _expand_retries(cls, retries, all_keys):
@@ -3884,7 +3897,7 @@ class Client:
             raise TypeError(
                 "`retries` should be an integer or dict, got %r" % (type(retries))
             )
-        return keymap(tokey, result)
+        return keymap(stringify, result)
 
     def _expand_resources(cls, resources, all_keys):
         """
@@ -4092,7 +4105,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None):
+    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4108,8 +4121,8 @@ class Client:
         cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  A a plugin with that name has
-        already registered then any future plugins will not run.
+        used then that will control idempotency.  If a plugin with that name has
+        already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
@@ -4121,6 +4134,9 @@ class Client:
         name: str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+        **kwargs: optional
+            If you pass a class as the plugin, instead of a class instance, then the
+            class will be instantiated with any extra keyword arguments.
 
         Examples
         --------
@@ -4155,6 +4171,9 @@ class Client:
         --------
         distributed.WorkerPlugin
         """
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
@@ -4620,7 +4639,7 @@ def fire_and_forget(obj):
         future.client._send_to_scheduler(
             {
                 "op": "client-desires-keys",
-                "keys": [tokey(future.key)],
+                "keys": [stringify(future.key)],
                 "client": "fire-and-forget",
             }
         )
