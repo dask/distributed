@@ -31,7 +31,6 @@ except ImportError:
 
 import pytest
 
-import concurrent.futures
 import dask
 from tlz import merge, memoize, assoc
 from tornado import gen
