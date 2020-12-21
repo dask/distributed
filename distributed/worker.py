@@ -32,6 +32,7 @@ from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
+from .comm.utils import OFFLOAD_THRESHOLD
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .http import get_handlers
@@ -213,6 +214,9 @@ class Worker(ServerNode):
         Number of nthreads used by this worker process
     * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
         Executor used to perform computation
+        This can also be the string "offload" in which case this uses the same
+        thread pool used for offloading communications.  This results in the
+        same thread being used for deserialization and computation.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
@@ -610,6 +614,8 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
+        if executor == "offload":
+            from distributed.utils import _offload_executor as executor
         self.executor = executor or ThreadPoolExecutor(
             self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
         )
@@ -1766,7 +1772,7 @@ class Worker(ServerNode):
                 }
             )
 
-            self.ensure_computing()
+            self.io_loop.add_callback(self.ensure_computing)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2131,7 +2137,7 @@ class Worker(ServerNode):
                 if self.validate:
                     self.validate_state()
 
-                self.ensure_computing()
+                await self.ensure_computing()
 
                 if not busy:
                     self.repetitively_busy = 0
@@ -2455,12 +2461,16 @@ class Worker(ServerNode):
 
         return True
 
-    def _maybe_deserialize_task(self, ts):
+    async def _maybe_deserialize_task(self, ts):
         if not isinstance(ts.runspec, SerializedTask):
             return ts.runspec
         try:
             start = time()
-            function, args, kwargs = _deserialize(*ts.runspec)
+            # Offload deserializing large tasks
+            if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
+                function, args, kwargs = await offload(_deserialize, *ts.runspec)
+            else:
+                function, args, kwargs = _deserialize(*ts.runspec)
             stop = time()
 
             if stop - start > 0.010:
@@ -2477,21 +2487,21 @@ class Worker(ServerNode):
             self.log.append((ts.key, "deserialize-error"))
             raise
 
-    def ensure_computing(self):
+    async def ensure_computing(self):
         if self.paused:
             return
         try:
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
-                ts = self.tasks[key]
-                if ts.state != "constrained":
+                ts = self.tasks.get(key, None)
+                if ts is None or ts.state != "constrained":
                     self.constrained.popleft()
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
                     try:
                         # Ensure task is deserialized prior to execution
-                        ts.runspec = self._maybe_deserialize_task(ts)
+                        ts.runspec = await self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(ts, "executing")
@@ -2510,7 +2520,7 @@ class Worker(ServerNode):
                 elif ts.state in READY:
                     try:
                         # Ensure task is deserialized prior to execution
-                        ts.runspec = self._maybe_deserialize_task(ts)
+                        ts.runspec = await self._maybe_deserialize_task(ts)
                     except Exception:
                         continue
                     self.transition(ts, "executing")
@@ -2624,7 +2634,7 @@ class Worker(ServerNode):
                 assert ts.state != "executing"
                 assert not ts.waiting_for_data
 
-            self.ensure_computing()
+            await self.ensure_computing()
             self.ensure_communicating()
         except Exception as e:
             if executor_error is e:
@@ -2657,7 +2667,7 @@ class Worker(ServerNode):
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
-        def check_pause(memory):
+        async def check_pause(memory):
             frac = memory / self.memory_limit
             # Pause worker threads if above 80% memory use
             if self.memory_pause_fraction and frac > self.memory_pause_fraction:
@@ -2685,9 +2695,9 @@ class Worker(ServerNode):
                     else "None",
                 )
                 self.paused = False
-                self.ensure_computing()
+                await self.ensure_computing()
 
-        check_pause(memory)
+        await check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
@@ -2729,7 +2739,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
-            check_pause(memory)
+            await check_pause(memory)
             if count:
                 logger.debug(
                     "Moved %d pieces of data data and %s to disk",

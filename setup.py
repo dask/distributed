@@ -21,27 +21,31 @@ for r in requires:
     else:
         install_requires.append(r)
 
-try:
-    sys.argv.remove("--with-cython")
-    cython = True
-except ValueError:
-    cython = False
+cython_arg = None
+for i in range(len(sys.argv)):
+    if sys.argv[i].startswith("--with-cython"):
+        cython_arg = sys.argv[i]
+        del sys.argv[i]
+        break
 
 ext_modules = []
-if cython:
+if cython_arg:
     try:
-        import cython
+        import cython  # noqa: F401
     except ImportError:
         setup_requires.append("cython")
+
+    profile = False
+    try:
+        _, param = cython_arg.split("=")
+        profile = param == "profile"
+    except ValueError:
+        pass
 
     cyext_modules = [
         Extension(
             "distributed.scheduler",
             sources=["distributed/scheduler.py"],
-        ),
-        Extension(
-            "distributed.protocol.serialize",
-            sources=["distributed/protocol/serialize.py"],
         ),
     ]
     for e in cyext_modules:
@@ -50,6 +54,7 @@ if cython:
             "binding": False,
             "embedsignature": True,
             "language_level": 3,
+            "profile": profile,
         }
     ext_modules.extend(cyext_modules)
 

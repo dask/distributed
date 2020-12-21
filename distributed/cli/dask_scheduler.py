@@ -169,8 +169,7 @@ def main(
 
     if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
         config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        # Update the global config given priority to the existing global config
-        dask.config.update(dask.config.global_config, config, priority="old")
+        dask.config.update(dask.config.global_config, config)
 
     if not host and (tls_ca_file or tls_cert or tls_key):
         host = "tls://"

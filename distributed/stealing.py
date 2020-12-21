@@ -120,7 +120,7 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
+        nbytes = ts.get_nbytes_deps()
 
         transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         split = ts.prefix.name
@@ -251,7 +251,7 @@ class WorkStealing(SchedulerPlugin):
                 self.put_key_in_stealable(ts)
 
                 try:
-                    self.scheduler.send_task_to_worker(thief.address, key)
+                    self.scheduler.send_task_to_worker(thief.address, ts)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
                 self.log(("confirm", key, victim.address, thief.address))
@@ -303,7 +303,7 @@ class WorkStealing(SchedulerPlugin):
 
         with log_errors():
             i = 0
-            idle = s.idle
+            idle = s.idle.values()
             saturated = s.saturated
             if not idle or len(idle) == len(s.workers):
                 return
