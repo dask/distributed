@@ -797,6 +797,7 @@ class Worker(ServerNode):
     async def get_metrics(self):
         now = time()
         core = dict(
+            executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=self.in_flight_tasks,
@@ -804,11 +805,6 @@ class Worker(ServerNode):
                 "total": self.bandwidth,
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
-            },
-            executing={
-                key: now - self.tasks[key].start_time
-                for key in self.active_threads.values()
-                if key in self.tasks
             },
         )
         custom = {}
@@ -937,6 +933,11 @@ class Worker(ServerNode):
                     address=self.contact_address,
                     now=time(),
                     metrics=await self.get_metrics(),
+                    executing={
+                        key: start - self.tasks[key].start_time
+                        for key in self.active_threads.values()
+                        if key in self.tasks
+                    },
                 )
                 end = time()
                 middle = (start + end) / 2
