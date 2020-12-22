@@ -274,6 +274,12 @@ class WorkerState:
 
        This attribute is kept in sync with :attr:`TaskState.processing_on`.
 
+    .. attribute:: executing: {TaskState: duration}
+
+       A dictionary of tasks that are currently being run on this worker.
+       Each task state is asssociated with the duration in seconds which
+       the task has been running.
+
     .. attribute:: has_what: {TaskState}
 
        The set of tasks which currently reside on this worker.
@@ -334,6 +340,7 @@ class WorkerState:
     _actors: set
     _address: str
     _bandwidth: double
+    _executing: dict
     _extra: dict
     _has_what: set
     _hash: Py_hash_t
@@ -360,6 +367,7 @@ class WorkerState:
         "_address",
         "_bandwidth",
         "_extra",
+        "_executing",
         "_has_what",
         "_hash",
         "_last_seen",
@@ -418,6 +426,7 @@ class WorkerState:
         self._actors = set()
         self._has_what = set()
         self._processing = {}
+        self._executing = {}
         self._resources = {}
         self._used_resources = {}
 
@@ -446,6 +455,10 @@ class WorkerState:
     @property
     def bandwidth(self):
         return self._bandwidth
+
+    @property
+    def executing(self):
+        return self._executing
 
     @property
     def extra(self):
@@ -562,6 +575,7 @@ class WorkerState:
         )
         ts: TaskState
         ws._processing = {ts._key: cost for ts, cost in self._processing.items()}
+        ws._executing = {ts._key: duration for ts, duration in self._executing.items()}
         return ws
 
     def __repr__(self):
@@ -2127,6 +2141,7 @@ class Scheduler(ServerNode):
         resources=None,
         host_info=None,
         metrics=None,
+        executing=None,
     ):
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
@@ -2164,6 +2179,11 @@ class Scheduler(ServerNode):
         ws: WorkerState = self.workers[address]
 
         ws._last_seen = time()
+
+        if executing is not None:
+            ws._executing = {
+                self.tasks[key]: duration for key, duration in executing.items()
+            }
 
         if metrics:
             ws._metrics = metrics
@@ -4789,6 +4809,23 @@ class Scheduler(ServerNode):
 
         return ws
 
+    def set_duration_estimate(self, ts: TaskState, ws: WorkerState):
+        """Estimate task duration using worker state and task state.
+
+        If a task takes longer than twice the current average duration we
+        estimate the task duration to be 2x current-runtime, otherwise we set it
+        to be the average duration.
+        """
+        duration: double = self.get_task_duration(ts)
+        comm: double = self.get_comm_cost(ts, ws)
+        total_duration: double = duration + comm
+        if ts in ws._executing:
+            exec_time: double = ws._executing[ts]
+            if exec_time > 2 * duration:
+                total_duration = 2 * exec_time
+        ws._processing[ts] = total_duration
+        return ws._processing[ts]
+
     def transition_waiting_processing(self, key):
         try:
             tasks: dict = self.tasks
@@ -4809,14 +4846,10 @@ class Scheduler(ServerNode):
                 return {}
             worker = ws._address
 
-            duration = self.get_task_duration(ts)
-            comm = self.get_comm_cost(ts, ws)
-            occupancy = duration + comm
-
-            ws._processing[ts] = occupancy
+            duration_estimate = self.set_duration_estimate(ts, ws)
             ts._processing_on = ws
-            ws._occupancy += occupancy
-            self.total_occupancy += occupancy
+            ws._occupancy += duration_estimate
+            self.total_occupancy += duration_estimate
             ts.state = "processing"
             self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
@@ -4827,7 +4860,7 @@ class Scheduler(ServerNode):
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            self.send_task_to_worker(worker, ts, duration)
+            self.send_task_to_worker(worker, ts)
 
             return {}
         except Exception as e:
@@ -6101,11 +6134,7 @@ class Scheduler(ServerNode):
         new = 0
         nbytes = 0
         for ts in ws._processing:
-            duration = self.get_task_duration(ts)
-            comm = self.get_comm_cost(ts, ws)
-            occupancy = duration + comm
-            ws._processing[ts] = occupancy
-            new += occupancy
+            new += self.set_duration_estimate(ts, ws)
 
         ws._occupancy = new
         self.total_occupancy += new - old
