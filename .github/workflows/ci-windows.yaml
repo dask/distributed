@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.6", "3.7", "3.8"]
+        python-version: ["3.7", "3.8"]
 
     steps:
       - name: Checkout source
@@ -22,13 +22,6 @@ jobs:
           environment-file: continuous_integration/environment-windows.yml
           activate-environment: dask-distributed
           auto-activate-base: false
-
-      - name: Install contextvars
-        shell: bash -l {0}
-        run: |
-          if [[ "${{ matrix.python-version }}" = "3.6" ]]; then
-            conda install -c conda-forge contextvars
-          fi
 
       - name: Install tornado
         shell: bash -l {0}
