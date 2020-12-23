@@ -3670,7 +3670,6 @@ async def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.skipif(sys.version_info < (3, 7), reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -4055,10 +4054,6 @@ def test_as_current_is_thread_local(s):
     t2.join()
 
 
-@pytest.mark.xfail(
-    sys.version_info < (3, 7),
-    reason="Python 3.6 contextvars are not copied on Task creation",
-)
 @gen_cluster(client=False)
 async def test_as_current_is_task_local(s, a, b):
     l1 = asyncio.Lock()

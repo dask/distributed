@@ -1,7 +1,6 @@
 import asyncio
 import os
 import socket
-import sys
 import threading
 import weakref
 import warnings
@@ -209,10 +208,6 @@ class MyServer(Server):
     default_port = 8756
 
 
-@pytest.mark.skipif(
-    sys.version_info < (3, 7),
-    reason="asynccontextmanager not avaiable before Python 3.7",
-)
 @pytest.mark.asyncio
 async def test_server_listen():
     """
