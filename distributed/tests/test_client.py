@@ -6129,6 +6129,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
+    pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
     async def f():
