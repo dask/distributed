@@ -4,13 +4,12 @@ import pytest
 from distributed import Client, Scheduler, Worker
 from distributed.comm.registry import backends, get_backend
 from distributed.comm import ws, listen, connect
-from distributed.utils_test import (
+from distributed.utils_test import (  # noqa: F401
     get_client_ssl_context,
     get_server_ssl_context,
     cleanup,
     inc,
-    captured_logger,
-)  # noqa: F401
+)
 
 from .test_comms import check_tls_extra
 
