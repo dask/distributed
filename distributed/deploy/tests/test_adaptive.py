@@ -460,3 +460,22 @@ async def test_update_adaptive(cleanup):
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
+
+
+@pytest.mark.asyncio
+async def test_adaptive_no_memory_limit(cleanup):
+    """Make sure that adapt() does not keep creating workers when no memory limit is set."""
+    async with LocalCluster(
+        n_workers=0, threads_per_worker=1, memory_limit=0, asynchronous=True
+    ) as cluster:
+        cluster.adapt(minimum=1, maximum=10, interval="1 ms")
+        async with Client(cluster, asynchronous=True) as client:
+            await client.gather(client.map(slowinc, range(5), delay=0.35))
+        assert (
+            sum(
+                state[1]["n"]
+                for state in cluster._adaptive.log
+                if state[1]["status"] == "up"
+            )
+            <= 5
+        )
