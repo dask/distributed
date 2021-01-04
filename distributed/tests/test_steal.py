@@ -809,3 +809,19 @@ async def test_worker_stealing_interval(c, s, a, b):
     with dask.config.set({"distributed.scheduler.work-stealing-interval": 2}):
         ws = WorkStealing(s)
     assert ws._pc.callback_time == 2
+
+
+@gen_cluster(client=True)
+async def test_balance_with_longer_task(c, s, a, b):
+    np = pytest.importorskip("numpy")
+
+    await c.submit(slowinc, 0, delay=0)  # scheduler learns that slowinc is very fast
+    x = await c.scatter(np.arange(10000), workers=[a.address])
+    y = c.submit(
+        slowinc, 1, delay=5, workers=[a.address], priority=1
+    )  # a surprisingly long task
+    z = c.submit(
+        inc, x, workers=[a.address], allow_other_workers=True, priority=0
+    )  # a task after y, suggesting a, but open to b
+    await z
+    assert z.key in b.data
