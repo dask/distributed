@@ -4162,28 +4162,6 @@ async def test_compute_nested_containers(c, s, a, b):
     assert result["y"] == 123
 
 
-def test_get_restrictions():
-    L1 = [delayed(inc)(i) for i in range(4)]
-    total = delayed(sum)(L1)
-    L2 = [delayed(add)(i, total) for i in L1]
-
-    r1, loose = Client.get_restrictions(L2, "127.0.0.1", False)
-    assert r1 == {d.key: ["127.0.0.1"] for d in L2}
-    assert not loose
-
-    r1, loose = Client.get_restrictions(L2, ["127.0.0.1"], True)
-    assert r1 == {d.key: ["127.0.0.1"] for d in L2}
-    assert set(loose) == {d.key for d in L2}
-
-    r1, loose = Client.get_restrictions(L2, {total: "127.0.0.1"}, True)
-    assert r1 == {total.key: ["127.0.0.1"]}
-    assert loose == [total.key]
-
-    r1, loose = Client.get_restrictions(L2, {(total,): "127.0.0.1"}, True)
-    assert r1 == {total.key: ["127.0.0.1"]}
-    assert loose == [total.key]
-
-
 @gen_cluster(client=True)
 async def test_scatter_type(c, s, a, b):
     [future] = await c.scatter([1])
