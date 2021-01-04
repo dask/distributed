@@ -1570,12 +1570,6 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if workers is not None:
-            restrictions = {skey: workers}
-            loose_restrictions = [skey] if allow_other_workers else []
-        else:
-            restrictions = {}
-            loose_restrictions = []
 
         if kwargs:
             dsk = {skey: (apply, func, list(args), kwargs)}
@@ -1585,8 +1579,8 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             [skey],
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
             resources={skey: resources} if resources else None,
@@ -1762,26 +1756,8 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if isinstance(workers, (list, set)):
-            if workers and isinstance(first(workers), (list, set)):
-                if len(workers) != len(keys):
-                    raise ValueError(
-                        "You only provided %d worker restrictions"
-                        " for a sequence of length %d" % (len(workers), len(keys))
-                    )
-                restrictions = dict(zip(keys, workers))
-            else:
-                restrictions = {k: workers for k in keys}
-        elif workers is None:
-            restrictions = {}
-        else:
+        if workers is not None and not isinstance(workers, (list, set)):
             raise TypeError("Workers must be a list or set of workers or None")
-        if allow_other_workers not in (True, False, None):
-            raise TypeError("allow_other_workers= must be True or False")
-        if allow_other_workers is True:
-            loose_restrictions = set(keys)
-        else:
-            loose_restrictions = set()
 
         internal_priority = dict(zip(keys, range(len(keys))))
 
@@ -1793,8 +1769,8 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             keys,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority=internal_priority,
             resources=resources,
             retries=retries,
@@ -2605,8 +2581,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         resources=None,
         sync=True,
         asynchronous=None,
@@ -2652,8 +2628,8 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             keys=set(flatten([keys])),
-            restrictions=restrictions,
-            loose_restrictions=loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             fifo_timeout=fifo_timeout,
             retries=retries,
@@ -2969,18 +2945,14 @@ class Client:
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
         if not isinstance(priority, Number):
             priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
         futures = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
