@@ -6139,7 +6139,6 @@ class Scheduler(ServerNode):
     def _reevaluate_occupancy_worker(self, ws: WorkerState):
         """ See reevaluate_occupancy """
         old = ws._occupancy
-
         new = 0
         nbytes = 0
         for ts in ws._processing:
