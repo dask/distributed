@@ -6138,11 +6138,14 @@ class Scheduler(ServerNode):
 
     def _reevaluate_occupancy_worker(self, ws: WorkerState):
         """ See reevaluate_occupancy """
-        old = ws._occupancy
-        new = 0
+        old: double = ws._occupancy
+        new: double = 0
+        diff: double
         ts: TaskState
+        est: double
         for ts in ws._processing:
-            new += self.set_duration_estimate(ts, ws)
+            est = self.set_duration_estimate(ts, ws)
+            new += est
 
         ws._occupancy = new
         diff = new - old
