@@ -6140,6 +6140,7 @@ class Scheduler(ServerNode):
         """ See reevaluate_occupancy """
         old = ws._occupancy
         new = 0
+        ts: TaskState
         for ts in ws._processing:
             new += self.set_duration_estimate(ts, ws)
 
