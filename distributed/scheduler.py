@@ -4833,7 +4833,7 @@ class Scheduler(ServerNode):
             if exec_time > 2 * duration:
                 total_duration = 2 * exec_time
         ws._processing[ts] = total_duration
-        return ws._processing[ts]
+        return total_duration
 
     def transition_waiting_processing(self, key):
         try:
