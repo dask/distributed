@@ -5,7 +5,7 @@ import warnings
 import weakref
 
 import dask
-import dask.config.serialize
+import dask.config
 
 from .spec import SpecCluster, ProcessInterface
 from ..core import Status
