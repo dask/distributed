@@ -1429,13 +1429,7 @@ def is_valid_xml(text):
     return xml.etree.ElementTree.fromstring(text) is not None
 
 
-try:
-    _offload_executor = ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="Dask-Offload"
-    )
-except TypeError:
-    _offload_executor = ThreadPoolExecutor(max_workers=1)
-
+_offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 

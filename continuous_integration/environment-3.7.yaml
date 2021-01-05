@@ -8,7 +8,8 @@ dependencies:
   - asyncssh
   - bokeh
   - click
-  - coverage
+  - cloudpickle
+  - cython
   - dask
   - flake8
   - h5py
@@ -37,9 +38,9 @@ dependencies:
   - pickle5>=0.0.11
   - numba
   - pip:
-      - git+https://github.com/dask/dask
-      - git+https://github.com/joblib/joblib.git
-      - git+https://github.com/dask/zict
-      - git+https://github.com/intake/filesystem_spec.git
-      - git+https://github.com/dask/s3fs.git
+      - git+https://github.com/dask/dask@master
+      - git+https://github.com/joblib/joblib.git@master
+      - git+https://github.com/dask/zict@master
+      - git+https://github.com/intake/filesystem_spec.git@master
+      - git+https://github.com/dask/s3fs.git@master
       - keras

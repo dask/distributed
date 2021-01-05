@@ -200,6 +200,13 @@ class TCP(Comm):
             self.stream = None
             if not shutting_down():
                 convert_stream_closed_error(self, e)
+        except Exception:
+            # Some OSError or a another "low-level" exception. We do not really know what
+            # was already read from the underlying socket, so it is not even safe to retry
+            # here using the same stream. The only safe thing to do is to abort.
+            # (See also GitHub #4133).
+            self.abort()
+            raise
         else:
             try:
                 msg = await from_frames(
@@ -253,13 +260,18 @@ class TCP(Comm):
                         await future
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
-            stream = None
-            convert_stream_closed_error(self, e)
-        except TypeError as e:
+            self.stream = None
+            if not shutting_down():
+                convert_stream_closed_error(self, e)
+        except Exception:
+            # Some OSError or a another "low-level" exception. We do not really know what
+            # was already written to the underlying socket, so it is not even safe to retry
+            # here using the same stream. The only safe thing to do is to abort.
+            # (See also GitHub #4133).
             if stream._write_buffer is None:
                 logger.info("tried to write message %s on closed stream", msg)
-            else:
-                raise
+            self.abort()
+            raise
 
         return sum(lengths)
 

@@ -250,7 +250,7 @@ class AllProgress(SchedulerPlugin):
             prefix = ts.prefix.name
             self.all[prefix].add(key)
             self.state[ts.state][prefix].add(key)
-            if ts.nbytes is not None:
+            if ts.nbytes >= 0:
                 self.nbytes[prefix] += ts.nbytes
 
         scheduler.add_plugin(self)
@@ -264,11 +264,11 @@ class AllProgress(SchedulerPlugin):
         except KeyError:  # TODO: remove me once we have a new or clean state
             pass
 
-        if start == "memory":
+        if start == "memory" and ts.nbytes >= 0:
             # XXX why not respect DEFAULT_DATA_SIZE?
-            self.nbytes[prefix] -= ts.nbytes or 0
-        if finish == "memory":
-            self.nbytes[prefix] += ts.nbytes or 0
+            self.nbytes[prefix] -= ts.nbytes
+        if finish == "memory" and ts.nbytes >= 0:
+            self.nbytes[prefix] += ts.nbytes
 
         if finish != "forgotten":
             self.state[finish][prefix].add(key)
@@ -304,7 +304,7 @@ class GroupProgress(SchedulerPlugin):
                 self.create(key, k)
             self.keys[k].add(key)
             self.groups[k][ts.state] += 1
-            if ts.state == "memory" and ts.nbytes is not None:
+            if ts.state == "memory" and ts.nbytes >= 0:
                 self.nbytes[k] += ts.nbytes
 
         scheduler.add_plugin(self)
@@ -347,9 +347,9 @@ class GroupProgress(SchedulerPlugin):
                     for dep in self.dependencies.pop(k):
                         self.dependents[key_split_group(dep)].remove(k)
 
-            if start == "memory" and ts.nbytes is not None:
+            if start == "memory" and ts.nbytes >= 0:
                 self.nbytes[k] -= ts.nbytes
-            if finish == "memory" and ts.nbytes is not None:
+            if finish == "memory" and ts.nbytes >= 0:
                 self.nbytes[k] += ts.nbytes
 
     def restart(self, scheduler):

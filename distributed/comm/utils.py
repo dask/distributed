@@ -14,11 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 # Offload (de)serializing large frames to improve event loop responsiveness.
-# We use at most 4 threads to allow for parallel processing of large messages.
-
-FRAME_OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
-if isinstance(FRAME_OFFLOAD_THRESHOLD, str):
-    FRAME_OFFLOAD_THRESHOLD = parse_bytes(FRAME_OFFLOAD_THRESHOLD)
+OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
+if isinstance(OFFLOAD_THRESHOLD, str):
+    OFFLOAD_THRESHOLD = parse_bytes(OFFLOAD_THRESHOLD)
 
 
 async def to_frames(
@@ -40,7 +38,7 @@ async def to_frames(
             logger.exception(e)
             raise
 
-    if FRAME_OFFLOAD_THRESHOLD and allow_offload:
+    if OFFLOAD_THRESHOLD and allow_offload:
         try:
             msg_size = sizeof(msg)
         except RecursionError:
@@ -48,7 +46,7 @@ async def to_frames(
     else:
         msg_size = 0
 
-    if allow_offload and FRAME_OFFLOAD_THRESHOLD and msg_size > FRAME_OFFLOAD_THRESHOLD:
+    if allow_offload and OFFLOAD_THRESHOLD and msg_size > OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
     else:
         return _to_frames()
@@ -74,14 +72,9 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
             logger.error("truncated data stream (%d bytes): %s", size, datastr)
             raise
 
-    if allow_offload and deserialize and FRAME_OFFLOAD_THRESHOLD:
+    if allow_offload and deserialize and OFFLOAD_THRESHOLD:
         size = sum(map(nbytes, frames))
-    if (
-        allow_offload
-        and deserialize
-        and FRAME_OFFLOAD_THRESHOLD
-        and size > FRAME_OFFLOAD_THRESHOLD
-    ):
+    if allow_offload and deserialize and OFFLOAD_THRESHOLD and size > OFFLOAD_THRESHOLD:
         res = await offload(_from_frames)
     else:
         res = _from_frames()

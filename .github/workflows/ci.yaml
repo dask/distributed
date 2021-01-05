@@ -30,6 +30,13 @@ jobs:
           source continuous_integration/scripts/install.sh
           source continuous_integration/scripts/setup-ssh.sh
 
+      - name: Optionally Cythonize
+        shell: bash -l {0}
+        run: |
+          if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
+            python setup.py build_ext --with-cython
+          fi
+
       - name: Test
         shell: bash -l {0}
         run: source continuous_integration/scripts/run_tests.sh
