@@ -1,6 +1,7 @@
 import warnings
 import pytest
 
+import numpy as np
 from distributed import Client, Scheduler, Worker
 from distributed.comm.registry import backends, get_backend
 from distributed.comm import ws, listen, connect
@@ -9,6 +10,7 @@ from distributed.utils_test import (  # noqa: F401
     get_server_ssl_context,
     cleanup,
     inc,
+    gen_cluster,
 )
 
 from .test_comms import check_tls_extra
@@ -119,3 +121,14 @@ async def test_quiet_close(cleanup):
     record = [warning for warning in record if "coroutine" not in str(warning.message)]
 
     assert not record, record[0].message
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={"protocol": "ws://"},
+)
+async def test_client_scheduler_worker_scheduler_client_roundtrip(c, s, a, b):
+    x = np.arange(100)
+    future = await c.scatter(x)
+    y = await future
+    assert (x == y).all()
