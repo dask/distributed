@@ -30,12 +30,14 @@ class WSHandler(WebSocketHandler):
         application,
         request,
         handler=None,
-        deserialize=None,
+        deserialize: bool = True,
+        allow_offload: bool = True,
         listener=None,
         **kwargs,
     ):
         self.handler = handler
         self.deserialize = deserialize
+        self.allow_offload = allow_offload
         self.request = request
         self.listener = listener()
         super().__init__(application, request, **kwargs)
@@ -44,7 +46,9 @@ class WSHandler(WebSocketHandler):
         self.set_nodelay(True)
         self.q = asyncio.Queue()
         self.closed = False
-        self.comm = WSHandlerComm(self, deserialize=self.deserialize)
+        self.comm = WSHandlerComm(
+            self, deserialize=self.deserialize, allow_offload=self.allow_offload
+        )
         # `on_message` won't get called until `open` returns
         # we need `open` to return to finish the handshake
         asyncio.ensure_future(self.on_open())
@@ -69,9 +73,10 @@ class WSHandler(WebSocketHandler):
 
 
 class WSHandlerComm(Comm):
-    def __init__(self, handler, deserialize=True):
+    def __init__(self, handler, deserialize=True, allow_offload=True):
         self.handler = handler
         self.deserialize = deserialize
+        self.allow_offload = allow_offload
         super().__init__()
 
     async def read(self, deserializers=None):
@@ -86,12 +91,16 @@ class WSHandlerComm(Comm):
             n_frames = struct.unpack("Q", n_frames)[0]
         frames = [(await self.handler.q.get()) for _ in range(n_frames)]
         return await from_frames(
-            frames, deserialize=self.deserialize, deserializers=deserializers
+            frames,
+            deserialize=self.deserialize,
+            deserializers=deserializers,
+            allow_offload=self.allow_offload,
         )
 
     async def write(self, msg, serializers=None, on_error=None):
         frames = await to_frames(
             msg,
+            allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
             context={
@@ -144,13 +153,14 @@ class WSHandlerComm(Comm):
 class WS(Comm):
     prefix = "ws://"
 
-    def __init__(self, sock, deserialize=True):
+    def __init__(self, sock, deserialize=True, allow_offload=True):
         self._closed = False
         Comm.__init__(self)
         self.sock = sock
         self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self.deserialize = deserialize
+        self.allow_offload = allow_offload
         self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._extra = {}
         self._read_extra()
@@ -176,14 +186,18 @@ class WS(Comm):
 
         frames = [(await self.sock.read_message()) for _ in range(n_frames)]
 
-        return await from_frames(
-            frames, deserialize=self.deserialize, deserializers=deserializers
+        msg = await from_frames(
+            frames,
+            deserialize=self.deserialize,
+            deserializers=deserializers,
+            allow_offload=self.allow_offload,
         )
+        return msg
 
     async def write(self, msg, serializers=None, on_error=None):
-        # TODO: Add
         frames = await to_frames(
             msg,
+            allow_offload=self.allow_offload,
             serializers=serializers,
             on_error=on_error,
             context={
@@ -258,7 +272,8 @@ class WSListener(Listener):
         self,
         address: str,
         handler: Callable,
-        deserialize: bool = False,
+        deserialize=True,
+        allow_offload=False,
         **connection_args,
     ):
         if not address.startswith(self.prefix):
@@ -267,6 +282,7 @@ class WSListener(Listener):
         self.ip, self.port = parse_host_port(address, default_port=0)
         self.handler = handler
         self.deserialize = deserialize
+        self.allow_offload = allow_offload
         self.connection_args = connection_args
         self.bound_address = None
         self.server_args = self._get_server_args(**connection_args)
@@ -286,6 +302,7 @@ class WSListener(Listener):
                 {
                     "handler": self.handler,
                     "deserialize": self.deserialize,
+                    "allow_offload": self.allow_offload,
                     "listener": weakref.ref(self),
                 },
             )
@@ -343,7 +360,7 @@ class WSConnector(Connector):
             convert_stream_closed_error(self, e)
         except SSLError as err:
             raise FatalCommClosedError() from err
-        return self.comm_class(sock)
+        return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):
         return {}
