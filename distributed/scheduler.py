@@ -86,11 +86,17 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
+    from cython import compiled
+except ImportError:
+    compiled = False
+
+if compiled:
     from cython import (
         bint,
         cast,
         ccall,
         cclass,
+        cfunc,
         declare,
         double,
         exceptval,
@@ -100,7 +106,7 @@ try:
         Py_hash_t,
         Py_ssize_t,
     )
-except ImportError:
+else:
     from ctypes import (
         c_double as double,
         c_ssize_t as Py_hash_t,
@@ -117,6 +123,9 @@ except ImportError:
 
     def cclass(cls):
         return cls
+
+    def cfunc(func):
+        return func
 
     def declare(*a, **k):
         if len(a) == 2:
@@ -6233,6 +6242,8 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
+@cfunc
+@exceptval(check=False)
 def decide_worker(
     ts: TaskState, all_workers, valid_workers: set, objective
 ) -> WorkerState:
