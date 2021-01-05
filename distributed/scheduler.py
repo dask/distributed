@@ -6148,11 +6148,12 @@ class Scheduler(ServerNode):
         self.check_idle_saturated(ws)
 
         # significant increase in duration
-        if (new > old * 1.3) and ("stealing" in self.extensions):
-            steal = self.extensions["stealing"]
-            for ts in ws._processing:
-                steal.remove_key_from_stealable(ts)
-                steal.put_key_in_stealable(ts)
+        if new > old * 1.3:
+            steal = self.extensions.get("stealing")
+            if steal is not None:
+                for ts in ws._processing:
+                    steal.remove_key_from_stealable(ts)
+                    steal.put_key_in_stealable(ts)
 
     async def check_worker_ttl(self):
         ws: WorkerState
