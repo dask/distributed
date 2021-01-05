@@ -6145,7 +6145,8 @@ class Scheduler(ServerNode):
             new += self.set_duration_estimate(ts, ws)
 
         ws._occupancy = new
-        self.total_occupancy += new - old
+        diff = new - old
+        self.total_occupancy += diff
         self.check_idle_saturated(ws)
 
         # significant increase in duration
