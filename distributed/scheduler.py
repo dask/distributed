@@ -703,7 +703,7 @@ class TaskPrefix:
         return [
             tg
             for tg in self._groups
-            if any(v != 0 for k, v in tg._states.items() if k != "forgotten")
+            if any([v != 0 for k, v in tg._states.items() if k != "forgotten"])
         ]
 
     @property
@@ -5570,7 +5570,7 @@ class Scheduler(ServerNode):
             if ts._state == "forgotten" and ts._group._name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg: TaskGroup = ts._group
-                if not any(tg._states.get(s) for s in ALL_TASK_STATES):
+                if not any([tg._states.get(s) for s in ALL_TASK_STATES]):
                     ts._prefix._groups.remove(tg)
                     del self.task_groups[tg._name]
 
