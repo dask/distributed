@@ -127,7 +127,9 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
             }
         )
 
-    return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
+    return msgpack.dumps(
+        {"layers": layers}, use_bin_type=True, default=msgpack_encode_default
+    )
 
 
 def _materialized_layer_unpack(state, dsk, dependencies, annotations):
