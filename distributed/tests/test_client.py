@@ -4371,13 +4371,13 @@ async def test_auto_normalize_collection(c, s, a, b):
         future = c.compute(y.sum())
         await future
         end = time()
-        assert end - start < 1
+        assert end - start < 2
 
         start = time()
         z = c.persist(y + 1)
         await wait(z)
         end = time()
-        assert end - start < 1
+        assert end - start < 2
 
 
 def test_auto_normalize_collection_sync(c):
@@ -4393,7 +4393,7 @@ def test_auto_normalize_collection_sync(c):
         start = time()
         y.sum().compute()
         end = time()
-        assert end - start < 1
+        assert end - start < 2
 
 
 def assert_no_data_loss(scheduler):
