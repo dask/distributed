@@ -4011,6 +4011,7 @@ async def test_as_current(c, s, a, b):
     await c2.close()
 
 
+@gen_cluster(client=False)
 def test_as_current_is_thread_local(s):
     l1 = threading.Lock()
     l2 = threading.Lock()
