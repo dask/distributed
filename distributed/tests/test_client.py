@@ -910,31 +910,6 @@ async def test_restrictions_ip_port(c, s, a, b):
     assert y.key in b.data
 
 
-@gen_cluster(client=True)
-async def test_restrictions_ip_port_task_key(c, s, a, b):
-    # Create a long dependency list
-    tasks = [delayed(inc)(1)]
-    for _ in range(100):
-        tasks.append(delayed(add)(tasks[-1], random.choice(tasks)))
-
-    last_task = tasks[-1]
-
-    # calculate all dependency keys
-    all_tasks = list(last_task.__dask_graph__())
-    # only restrict to a single worker
-    workers = {d: a.address for d in all_tasks}
-    result = c.compute(last_task, workers=workers)
-    await result
-
-    # all tasks should have been calculated by the first worker
-    for task in tasks:
-        assert s.worker_restrictions[task.key] == {a.address}
-
-    # and the data should also be there
-    assert last_task.key in a.data
-    assert last_task.key not in b.data
-
-
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
@@ -948,16 +923,6 @@ async def test_restrictions_map(c, s, a, b):
     for x in L:
         assert s.host_restrictions[x.key] == {a.ip}
 
-    L = c.map(inc, [10, 11, 12], workers=[{a.ip}, {a.ip, b.ip}, {b.ip}])
-    await wait(L)
-
-    assert s.host_restrictions[L[0].key] == {a.ip}
-    assert s.host_restrictions[L[1].key] == {a.ip, b.ip}
-    assert s.host_restrictions[L[2].key] == {b.ip}
-
-    with pytest.raises(ValueError):
-        c.map(inc, [10, 11, 12], workers=[{a.ip}])
-
 
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
@@ -967,11 +932,30 @@ async def test_restrictions_get(c, s, a, b):
     dsk = {"x": 1, "y": (inc, "x"), "z": (inc, "y")}
     restrictions = {"y": {a.ip}, "z": {b.ip}}
 
-    futures = c.get(dsk, ["y", "z"], restrictions, sync=False)
+    futures = c.get(dsk, ["y", "z"], workers=a.ip, sync=False)
     result = await c.gather(futures)
     assert result == [2, 3]
     assert "y" in a.data
-    assert "z" in b.data
+    assert "z" in a.data
+    assert len(b.data) == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
+async def test_restrictions_get_annotate(c, s, a, b):
+    x = 1
+    with dask.annotate(workers=a.ip):
+        y = delayed(inc)(x)
+    with dask.annotate(workers=b.ip):
+        z = delayed(inc)(y)
+
+    futures = c.get(z.__dask_graph__(), [y.key, z.key], sync=False)
+    result = await c.gather(futures)
+    assert result == [2, 3]
+    assert y.key in a.data
+    assert z.key in b.data
 
 
 @gen_cluster(client=True)

@@ -2562,6 +2562,8 @@ class Client:
                 annotations["workers"] = workers
             if retries:
                 annotations["retries"] = retries
+            if allow_other_workers not in (True, False, None):
+                raise TypeError("allow_other_workers= must be True or False")
             if allow_other_workers:
                 annotations["allow_other_workers"] = allow_other_workers
             if resources:
