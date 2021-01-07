@@ -4355,6 +4355,7 @@ def test_normalize_collection_with_released_futures(c):
 
 
 @gen_cluster(client=True)
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 async def test_auto_normalize_collection(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
@@ -4380,6 +4381,7 @@ async def test_auto_normalize_collection(c, s, a, b):
         assert end - start < 1
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
@@ -6362,10 +6364,7 @@ async def test_annotations_retries(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    nthreads=[
-        ("127.0.0.1", 1),
-        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
-    ],
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1, {"resources": {"GPU": 1}}),],
 )
 async def test_annotations_resources(c, s, a, b):
     da = pytest.importorskip("dask.array")
