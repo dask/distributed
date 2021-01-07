@@ -2841,10 +2841,7 @@ class Client:
         layers.update(dsk.layers)
         dependencies = {finalize_name: set(dsk.layers.keys())}
         dependencies.update(dsk.dependencies)
-        print("A")
-        print(layers)
         dsk = HighLevelGraph(layers, dependencies)
-        print("B")
 
         futures_dict = self._graph_to_futures(
             dsk,
