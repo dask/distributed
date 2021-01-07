@@ -1,4 +1,3 @@
-import msgpack
 from tlz import valmap
 
 from dask.core import keys_in_tasks
@@ -10,12 +9,8 @@ from ..worker import dumps_task
 
 from ..utils import CancelledError
 
-from .utils import msgpack_opts
-from .serialize import (
-    import_allowed_module,
-    msgpack_encode_default,
-    msgpack_decode_default,
-)
+from .core import dumps_msgpack, loads_msgpack
+from .serialize import import_allowed_module
 
 
 def _materialized_layer_pack(
@@ -93,8 +88,8 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
 
     Returns
     -------
-    data: bytes
-        Packed high level graph serialized by msgpack
+    data: list of header and payload
+        Packed high level graph serialized by dumps_msgpack
     """
     layers = []
 
@@ -126,8 +121,7 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
                 ),
             }
         )
-
-    return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
+    return dumps_msgpack({"layers": layers})
 
 
 def _materialized_layer_unpack(state, dsk, dependencies, annotations):
@@ -151,8 +145,8 @@ def highlevelgraph_unpack(dumped_hlg):
 
     Parameters
     ----------
-    dumped_hlg: bytes
-        Packed high level graph serialized by msgpack
+    dumped_hlg: list of header and payload
+        Packed high level graph serialized by dumps_msgpack
 
     Returns
     -------
@@ -164,10 +158,7 @@ def highlevelgraph_unpack(dumped_hlg):
         Annotations for `dsk`
     """
 
-    # Notice, we set `use_list=False`, which makes msgpack convert lists to tuples
-    hlg = msgpack.loads(
-        dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
-    )
+    hlg = loads_msgpack(*dumped_hlg)
 
     dsk = {}
     deps = {}

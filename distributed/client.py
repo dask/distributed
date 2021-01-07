@@ -2585,10 +2585,10 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, self, keyset)
-
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
+
+            dsk = highlevelgraph_pack(dsk, self, keyset)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
