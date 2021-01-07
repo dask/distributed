@@ -6,7 +6,7 @@ dependencies:
   - python=3.6
   - pip
   - asyncssh
-  - bokeh
+  - bokeh!=2.0.0
   - click
   - coverage
   - dask
