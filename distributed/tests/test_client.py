@@ -4022,7 +4022,7 @@ def test_as_current_is_thread_local(s):
     l4.acquire()
 
     def run1():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.acquire()
                 l2.release()
@@ -4035,7 +4035,7 @@ def test_as_current_is_thread_local(s):
                     l4.release()
 
     def run2():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.release()
                 l2.acquire()

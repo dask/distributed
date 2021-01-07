@@ -1,6 +1,6 @@
 from collections import defaultdict, deque
 import logging
-from math import log
+from math import log2
 from time import time
 
 from tornado.ioloop import PeriodicCallback
@@ -14,7 +14,6 @@ from .utils import log_errors, parse_timedelta
 from tlz import topk
 
 LATENCY = 10e-3
-log_2 = log(2)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,6 @@ class WorkStealing(SchedulerPlugin):
         ws = ts.processing_on
         worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
-        self.log(("add-stealable", ts.key, worker, level))
         if cost_multiplier is not None:
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
@@ -120,22 +118,25 @@ class WorkStealing(SchedulerPlugin):
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = ts.get_nbytes_deps()
-
-        transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         split = ts.prefix.name
         if split in fast_tasks:
             return None, None
+
         ws = ts.processing_on
         compute_time = ws.processing[ts]
         if compute_time < 0.005:  # 5ms, just give up
             return None, None
+
+        nbytes = ts.get_nbytes_deps()
+        transfer_time = nbytes / self.scheduler.bandwidth + LATENCY
         cost_multiplier = transfer_time / compute_time
         if cost_multiplier > 100:
             return None, None
 
-        level = int(round(log(cost_multiplier) / log_2 + 6, 0))
-        level = max(1, level)
+        level = int(round(log2(cost_multiplier) + 6))
+        if level < 1:
+            level = 1
+
         return cost_multiplier, level
 
     def move_task_request(self, ts, victim, thief):

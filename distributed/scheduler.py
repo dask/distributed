@@ -86,11 +86,17 @@ from .variable import VariableExtension
 from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
+    from cython import compiled
+except ImportError:
+    compiled = False
+
+if compiled:
     from cython import (
         bint,
         cast,
         ccall,
         cclass,
+        cfunc,
         declare,
         double,
         exceptval,
@@ -100,7 +106,7 @@ try:
         Py_hash_t,
         Py_ssize_t,
     )
-except ImportError:
+else:
     from ctypes import (
         c_double as double,
         c_ssize_t as Py_hash_t,
@@ -117,6 +123,9 @@ except ImportError:
 
     def cclass(cls):
         return cls
+
+    def cfunc(func):
+        return func
 
     def declare(*a, **k):
         if len(a) == 2:
@@ -694,11 +703,12 @@ class TaskPrefix:
         return [
             tg
             for tg in self._groups
-            if any(v != 0 for k, v in tg._states.items() if k != "forgotten")
+            if any([v != 0 for k, v in tg._states.items() if k != "forgotten"])
         ]
 
     @property
     def active_states(self):
+        tg: TaskGroup
         return merge_with(sum, [tg._states for tg in self.active])
 
     def __repr__(self):
@@ -5561,7 +5571,7 @@ class Scheduler(ServerNode):
             if ts._state == "forgotten" and ts._group._name in self.task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
                 tg: TaskGroup = ts._group
-                if not any(tg._states.get(s) for s in ALL_TASK_STATES):
+                if not any([tg._states.get(s) for s in ALL_TASK_STATES]):
                     ts._prefix._groups.remove(tg)
                     del self.task_groups[tg._name]
 
@@ -6233,6 +6243,8 @@ class Scheduler(ServerNode):
             return len(self.workers) - len(to_close)
 
 
+@cfunc
+@exceptval(check=False)
 def decide_worker(
     ts: TaskState, all_workers, valid_workers: set, objective
 ) -> WorkerState:
