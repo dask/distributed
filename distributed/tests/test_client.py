@@ -6364,7 +6364,10 @@ async def test_annotations_retries(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1, {"resources": {"GPU": 1}}),],
+    nthreads=[
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
+    ],
 )
 async def test_annotations_resources(c, s, a, b):
     da = pytest.importorskip("dask.array")
