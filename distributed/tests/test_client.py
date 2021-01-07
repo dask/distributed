@@ -4354,6 +4354,7 @@ def test_normalize_collection_with_released_futures(c):
     assert res == sol
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 @gen_cluster(client=True)
 async def test_auto_normalize_collection(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -4380,6 +4381,7 @@ async def test_auto_normalize_collection(c, s, a, b):
         assert end - start < 1
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
