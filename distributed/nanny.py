@@ -144,7 +144,7 @@ class Nanny(ServerNode):
 
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
-        self.config = config or {}
+        self.config = config or dask.config.config
         worker_kwargs.update(
             {
                 "port": worker_port,

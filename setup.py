@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 
 import os
+import sys
 from setuptools import setup, find_packages
+from setuptools.extension import Extension
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
+setup_requires = []
 install_requires = []
 extras_require = {}
 for r in requires:
@@ -17,6 +20,44 @@ for r in requires:
         cond_reqs.append(req)
     else:
         install_requires.append(r)
+
+cython_arg = None
+for i in range(len(sys.argv)):
+    if sys.argv[i].startswith("--with-cython"):
+        cython_arg = sys.argv[i]
+        del sys.argv[i]
+        break
+
+ext_modules = []
+if cython_arg:
+    try:
+        import cython  # noqa: F401
+    except ImportError:
+        setup_requires.append("cython")
+
+    profile = False
+    try:
+        _, param = cython_arg.split("=")
+        profile = param == "profile"
+    except ValueError:
+        pass
+
+    cyext_modules = [
+        Extension(
+            "distributed.scheduler",
+            sources=["distributed/scheduler.py"],
+        ),
+    ]
+    for e in cyext_modules:
+        e.cython_directives = {
+            "annotation_typing": True,
+            "binding": False,
+            "embedsignature": True,
+            "language_level": 3,
+            "profile": profile,
+        }
+    ext_modules.extend(cyext_modules)
+
 
 setup(
     name="distributed",
@@ -33,9 +74,11 @@ setup(
         "distributed": ["http/templates/*.html"],
     },
     include_package_data=True,
+    setup_requires=setup_requires,
     install_requires=install_requires,
     extras_require=extras_require,
     packages=find_packages(exclude=["*tests*"]),
+    ext_modules=ext_modules,
     long_description=(
         open("README.rst").read() if os.path.exists("README.rst") else ""
     ),

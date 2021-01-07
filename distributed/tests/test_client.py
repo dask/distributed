@@ -4022,7 +4022,7 @@ def test_as_current_is_thread_local(s):
     l4.acquire()
 
     def run1():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.acquire()
                 l2.release()
@@ -4035,7 +4035,7 @@ def test_as_current_is_thread_local(s):
                     l4.release()
 
     def run2():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.release()
                 l2.acquire()
@@ -6129,6 +6129,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
+    pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
     async def f():
@@ -6297,3 +6298,104 @@ async def test_log_event(c, s, a, b):
     events = await c.get_events("topic2")
     assert len(events) == 2
     assert events[1][1] == ("alice", "bob")
+
+
+@gen_cluster(client=True)
+async def test_annotations_task_state(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(qux="bar", priority=100):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(
+        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
+    )
+
+
+@gen_cluster(client=True)
+async def test_annotations_priorities(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(priority=15):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all("15" in str(ts.priority) for ts in s.tasks.values())
+    assert all(ts.priority[0] == -15 for ts in s.tasks.values())
+    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
+
+
+@gen_cluster(client=True)
+async def test_annotations_workers(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(workers=[a.address]):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all({"workers": (a.address,)} == ts.annotations for ts in s.tasks.values())
+    assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
+    assert a.data
+    assert not b.data
+
+
+@gen_cluster(client=True)
+async def test_annotations_retries(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(retries=2):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(ts.retries == 2 for ts in s.tasks.values())
+    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
+    ],
+)
+async def test_annotations_resources(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(resources={"GPU": 1}):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
+
+
+@gen_cluster(client=True)
+async def test_annotations_loose_restrictions(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    # Eventually fails if allow_other_workers=False
+    with dask.annotate(workers=["fake"], allow_other_workers=True):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(not ts.worker_restrictions for ts in s.tasks.values())
+    assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
+    assert all(
+        [
+            {"workers": ("fake",), "allow_other_workers": True} == ts.annotations
+            for ts in s.tasks.values()
+        ]
+    )
