@@ -2588,12 +2588,14 @@ class Client:
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
 
+            dsk = highlevelgraph_pack(dsk, self, keyset)
+
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "hlg": highlevelgraph_pack(dsk, self, keyset),
+                    "hlg": dsk,
                     "keys": list(map(stringify, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
