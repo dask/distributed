@@ -12,6 +12,7 @@ from multiprocessing import cpu_count
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
+from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile, parse_ports
 from distributed.utils_test import popen, terminate_process, wait_for_port
@@ -250,7 +251,8 @@ def test_nprocs_auto(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=auto"]) as worker:
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
-                c.wait_for_workers(cpu_count(), timeout="10 seconds")
+                procs, _ = nprocesses_nthreads()
+                c.wait_for_workers(procs, timeout="10 seconds")
 
 
 def test_nprocs_expands_name(loop):
