@@ -3857,19 +3857,23 @@ class Scheduler(SchedulerState, ServerNode):
         annotations=None,
     ):
 
+        dsk: dict
+        dependencies: dict
+        annotations: dict
         dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
-            deps = set(v)
+            deps: set = set(v)
             if k in deps:
                 deps.remove(k)
             dependencies[k] = deps
 
         if priority is None:
             # Removing all non-local keys before calling order()
-            dsk_keys = set(dsk)  # intersection() of sets is much faster than dict_keys
-            stripped_deps = {
+            dsk_keys: set = set(dsk)  # intersection() of sets is much faster than dict_keys
+            v: set
+            stripped_deps: dict = {
                 k: v.intersection(dsk_keys)
                 for k, v in dependencies.items()
                 if k in dsk_keys
