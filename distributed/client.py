@@ -2585,8 +2585,6 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, self, keyset)
-
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
 
@@ -2595,7 +2593,7 @@ class Client:
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
-                    "hlg": dsk,
+                    "hlg": highlevelgraph_pack(dsk, self, keyset),
                     "keys": list(map(stringify, keys)),
                     "restrictions": restrictions or {},
                     "loose_restrictions": loose_restrictions,
