@@ -708,6 +708,7 @@ class TaskPrefix:
 
     @property
     def active_states(self):
+        tg: TaskGroup
         return merge_with(sum, [tg._states for tg in self.active])
 
     def __repr__(self):
