@@ -1583,7 +1583,7 @@ class Client:
             allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
-            resources={skey: resources} if resources else None,
+            resources=resources,
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
@@ -1760,11 +1760,6 @@ class Client:
             raise TypeError("Workers must be a list or set of workers or None")
 
         internal_priority = dict(zip(keys, range(len(keys))))
-
-        if resources:
-            resources = {k: resources for k in keys}
-        else:
-            resources = None
 
         futures = self._graph_to_futures(
             dsk,
