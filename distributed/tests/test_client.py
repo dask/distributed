@@ -6327,6 +6327,24 @@ async def test_annotations_task_state(c, s, a, b):
     )
 
 
+@pytest.mark.parametrize("fn", ["compute", "persist"])
+def test_annotations_compute_time(fn):
+    da = pytest.importorskip("dask.array")
+
+    @gen_cluster(client=True)
+    async def test(c, s, a, b):
+        x = da.ones(10, chunks=(5,))
+
+        with dask.annotate(foo="bar"):
+            # Turn off optimization to avoid rewriting layers and picking up annotations
+            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+            x = await getattr(c, fn)(x, optimize_graph=False)
+
+        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
+
+    test()
+
+
 @pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
 @gen_cluster(client=True)
 async def test_annotations_survive_optimization(c, s, a, b):
