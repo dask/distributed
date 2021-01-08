@@ -1,5 +1,6 @@
 import asyncio
 import operator
+import sys
 from time import sleep
 
 import pytest
@@ -9,6 +10,7 @@ from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
 from distributed.utils_test import cluster, gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 from distributed.metrics import time
+from distributed.worker import get_worker
 
 
 class Counter:
@@ -16,6 +18,7 @@ class Counter:
 
     def __init__(self):
         self.n = 0
+        self.should_kill = False
 
     def increment(self):
         self.n += 1
@@ -29,6 +32,22 @@ class Counter:
         self.n += x
         return self.n
 
+    def set_kill(self):
+        self.should_kill = True
+        return True
+
+    def kill_now(self):
+        if self.should_kill:
+            sys.exit()
+        return True
+
+    def kill_soon(self):
+        if self.should_kill:
+            loop = get_worker().loop
+            loop.add_callback(sys.exit)
+            return False
+        return True
+
 
 class UsesCounter:
     # An actor whose method argument is another actor
@@ -38,6 +57,20 @@ class UsesCounter:
 
     async def ado_inc(self, ac):
         return await ac.ainc()
+
+
+class UsesCounterInit:
+    # An actor whose init argument is another actor
+    # and saves the reference
+
+    def __init__(self, ac):
+        self.ac = ac
+
+    def do_inc(self):
+        return self.ac.increment().result()
+
+    async def ado_inc(self):
+        return await self.ac.ainc()
 
 
 class List:
@@ -581,3 +614,85 @@ async def test_async_deadlock(client, s, a, b):
     ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
 
     assert (await ac2.ado_inc(ac)) == 1
+
+
+def test_exception():
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Broken, actor=True).result()
+        acfut = ac.method()
+        with pytest.raises(MyException):
+            acfut.result()
+
+        with pytest.raises(MyException):
+            ac.prop
+
+
+def test_actor_retire():
+    # for the graceful movement of actor from one worker to another
+    with cluster(nworkers=3) as (cl, w):
+        client = Client(cl["address"])
+        # each actor goes to a different worker by default, but worker holding ac3
+        # will also hold a reference to ac
+        ac = client.submit(Counter, actor=True, workers=[w[0]["address"]]).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]["address"]]).result()
+        ac3 = client.submit(
+            UsesCounterInit, ac, actor=True, workers=[w[2]["address"]]
+        ).result()
+        assert ac.increment().result() == 1
+        assert ac2.do_inc(ac).result() == 2
+        assert ac3.do_inc().result() == 3
+
+        to_retire = ac._address
+        client.retire_workers([to_retire])
+
+        # counter value has reset to zero
+        assert ac.increment().result() == 1
+        assert ac2.do_inc(ac).result() == 2
+        # on this one, the remote copy also needs to reset its address
+        assert ac3.do_inc().result() == 3
+
+        # for cleanup
+        w[:] = [_ for _ in w if _["address"] != to_retire]
+        del ac, ac2, ac3
+
+
+def test_actor_kill():
+    # for the graceful movement of actor from one worker to another
+    with cluster(nworkers=3) as (cl, w):
+        client = Client(cl["address"])
+        # each actor goes to a different worker by default, but worker holding ac3
+        # will also hold a reference to ac
+        ac = client.submit(Counter, actor=True, workers=[w[0]["address"]]).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[w[1]["address"]]).result()
+        ac3 = client.submit(
+            UsesCounterInit, ac, actor=True, workers=[w[2]["address"]]
+        ).result()
+        assert ac.increment().result() == 1
+        assert ac2.do_inc(ac).result() == 2
+        assert ac3.do_inc().result() == 3
+
+        assert ac.set_kill().result()
+        assert ac.kill_now().result()
+
+        # counter value has reset to zero
+        assert ac.increment().result() == 1
+        assert ac2.do_inc(ac).result() == 2
+        # on this one, the remote copy also needs to reset its address
+        print(ac3.do_inc().result())
+        print("DONE")
+
+        # for cleanup
+        w.pop(0)
+        del ac, ac2, ac3

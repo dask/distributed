@@ -1445,7 +1445,7 @@ class Worker(ServerNode):
         **kwargs2,
     ):
         try:
-            if key in self.tasks:
+            if key in self.tasks and not actor:
                 ts = self.tasks[key]
                 if ts.state == "memory":
                     assert key in self.data or key in self.actors
@@ -1473,7 +1473,12 @@ class Worker(ServerNode):
                 self.generation -= 1
 
             if actor:
+                if ts.key in self.actors:
+                    # already was an actor
+                    return
+                # make pristine actor
                 self.actors[ts.key] = None
+                self.data.pop(ts.key, None)
 
             ts.priority = priority
             ts.duration = duration
@@ -2414,32 +2419,38 @@ class Worker(ServerNode):
         key = actor
         actor = self.actors[key]
         func = getattr(actor, function)
-        name = key_split(key) + "." + function
 
-        if iscoroutinefunction(func):
-            result = await func(*args, **kwargs)
-        elif separate_thread:
-            result = await self.executor_submit(
-                name,
-                apply_function_actor,
-                args=(
-                    func,
-                    args,
-                    kwargs,
-                    self.execution_state,
+        try:
+            if iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            elif separate_thread:
+                name = key_split(key) + "." + function
+                result = await self.executor_submit(
                     name,
-                    self.active_threads,
-                    self.active_threads_lock,
-                ),
-                executor=self.actor_executor,
-            )
-        else:
-            result = func(*args, **kwargs)
-        return {"status": "OK", "result": to_serialize(result)}
+                    apply_function_actor,
+                    args=(
+                        func,
+                        args,
+                        kwargs,
+                        self.execution_state,
+                        name,
+                        self.active_threads,
+                        self.active_threads_lock,
+                    ),
+                    executor=self.actor_executor,
+                )
+            else:
+                result = func(*args, **kwargs)
+            return {"status": "OK", "result": to_serialize(result)}
+        except Exception as ex:
+            return {"status": "error", "exception": to_serialize(ex)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
-        value = getattr(self.actors[actor], attribute)
-        return {"status": "OK", "result": to_serialize(value)}
+        try:
+            value = getattr(self.actors[actor], attribute)
+            return {"status": "OK", "result": to_serialize(value)}
+        except Exception as ex:
+            return {"status": "error", "exception": to_serialize(ex)}
 
     def meets_resource_constraints(self, key):
         ts = self.tasks[key]

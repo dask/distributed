@@ -674,18 +674,26 @@ def cluster(
         finally:
             logger.debug("Closing out test cluster")
 
-            loop.run_sync(
-                lambda: disconnect_all(
-                    [w["address"] for w in workers],
-                    timeout=disconnect_timeout,
-                    rpc_kwargs=rpc_kwargs,
+            try:
+                loop.run_sync(
+                    lambda: disconnect_all(
+                        [w["address"] for w in workers],
+                        timeout=disconnect_timeout,
+                        rpc_kwargs=rpc_kwargs,
+                    )
                 )
-            )
-            loop.run_sync(
-                lambda: disconnect(
-                    saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+            except Exception:
+                # when closing, may have some futures still in flight
+                pass
+            try:
+                loop.run_sync(
+                    lambda: disconnect(
+                        saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+                    )
                 )
-            )
+            except Exception:
+                # when closing, may have some futures still in flight
+                pass
 
             scheduler.terminate()
             scheduler_q.close()
