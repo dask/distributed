@@ -2007,7 +2007,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_waiting_memory(self, key, nbytes=None, worker=None, **kwargs):
+    def transition_waiting_memory(
+        self, key, nbytes=None, type=None, typename: str = None, worker=None, **kwargs
+    ):
         try:
             ws: WorkerState = self._workers_dv[worker]
             ts: TaskState = self._tasks[key]
@@ -2029,7 +2031,9 @@ class SchedulerState:
             recommendations: dict = {}
             client_msgs: dict = {}
 
-            self._add_to_memory(ts, ws, recommendations, client_msgs, **kwargs)
+            self._add_to_memory(
+                ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
 
             if self._validate:
                 assert not ts._processing_on
