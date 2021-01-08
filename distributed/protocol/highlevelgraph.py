@@ -1,4 +1,3 @@
-import msgpack
 from tlz import merge, valmap
 
 from dask.core import keys_in_tasks
