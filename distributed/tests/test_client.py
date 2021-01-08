@@ -6327,6 +6327,25 @@ async def test_annotations_task_state(c, s, a, b):
     )
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
+@gen_cluster(client=True)
+async def test_annotations_survive_optimization(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(foo="bar"):
+        x = da.ones(10, chunks=(5,))
+
+    ann = x.__dask_graph__().layers[x.name].annotations
+    assert ann is not None
+    assert ann.get("foo", None) == "bar"
+
+    (xx,) = dask.optimize(x)
+
+    ann = xx.__dask_graph__().layers[x.name].annotations
+    assert ann is not None
+    assert ann.get("foo", None) == "bar"
+
+
 @gen_cluster(client=True)
 async def test_annotations_priorities(c, s, a, b):
     da = pytest.importorskip("dask.array")
