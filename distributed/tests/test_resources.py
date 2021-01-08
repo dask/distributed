@@ -253,6 +253,7 @@ async def test_minimum_resource(c, s, a):
     client=True,
     nthreads=[("127.0.0.1", 2, {"resources": {"A": 1}})],
     active_rpc_timeout=10,
+    timeout=20,
 )
 async def test_prefer_constrained(c, s, a):
     futures = c.map(slowinc, range(1000), delay=0.1)
