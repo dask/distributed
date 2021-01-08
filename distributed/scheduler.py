@@ -1733,6 +1733,8 @@ class SchedulerState:
         else:
             return None
 
+    @cfunc
+    @exceptval(check=False)
     def _add_to_memory(
         self,
         ts: TaskState,
