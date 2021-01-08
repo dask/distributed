@@ -250,21 +250,31 @@ async def test_compute_retries(c, s, a, b):
     x = c.compute(delayed(varying(args))(), retries=2)
     assert await x == 3
 
+
+@gen_cluster(client=True)
+async def test_compute_retries_annotations(c, s, a, b):
     # Per-future retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
     yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
     zargs = [80, 90, 100]
 
-    x, y = [delayed(varying(args))() for args in (xargs, yargs)]
-    x, y = c.compute([x, y], retries={x: 2})
+    with dask.annotate(retries=2):
+        x = delayed(varying(xargs))()
+    y = delayed(varying(yargs))()
+
+    x, y = c.compute([x, y], optimize_graph=False)
     gc.collect()
 
     assert await x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
         await y
 
-    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
-    x, y, z = c.compute([x, y, z], retries={(y, z): 2})
+    x = delayed(varying(xargs))()
+    with dask.annotate(retries=2):
+        y = delayed(varying(yargs))()
+        z = delayed(varying(zargs))()
+
+    x, y, z = c.compute([x, y, z], optimize_graph=False)
 
     with pytest.raises(ZeroDivisionError, match="one"):
         await x
@@ -322,13 +332,20 @@ async def test_persist_retries(c, s, a, b):
     x = c.compute(x)
     assert await x == 3
 
+
+@gen_cluster(client=True)
+async def test_persist_retries_annotations(c, s, a, b):
     # Per-key retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
     yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
     zargs = [80, 90, 100]
 
-    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
-    x, y, z = c.persist([x, y, z], retries={(y, z): 2})
+    x = delayed(varying(xargs))()
+    with dask.annotate(retries=2):
+        y = delayed(varying(yargs))()
+        z = delayed(varying(zargs))()
+
+    x, y, z = c.persist([x, y, z], optimize_graph=False)
     x, y, z = c.compute([x, y, z])
 
     with pytest.raises(ZeroDivisionError, match="one"):

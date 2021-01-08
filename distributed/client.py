@@ -11,10 +11,9 @@ import errno
 from functools import partial
 import html
 import inspect
-import itertools
 import json
 import logging
-from numbers import Integral, Number
+from numbers import Number
 import os
 import sys
 import uuid
@@ -2537,11 +2536,6 @@ class Client:
         actors=None,
     ):
         with self._refcount_lock:
-            if retries:
-                retries = self._expand_retries(
-                    retries, all_keys=itertools.chain(dsk, keys)
-                )
-
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
 
@@ -3846,28 +3840,6 @@ class Client:
                     yield stringify(kkk)
             else:
                 yield stringify(kk)
-
-    @classmethod
-    def _expand_retries(cls, retries, all_keys):
-        """
-        Expand the user-provided "retries" specification
-        to a {task key: Integral} dictionary.
-        """
-        if retries and isinstance(retries, dict):
-            result = {
-                name: value
-                for key, value in retries.items()
-                for name in cls._expand_key(key)
-            }
-            result["__expanded_annotations__"] = True
-        elif isinstance(retries, Integral):
-            # If a simple number, it can be expanded on the scheduler
-            return retries
-        else:
-            raise TypeError(
-                "`retries` should be an integer or dict, got %r" % (type(retries))
-            )
-        return keymap(stringify, result)
 
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):
