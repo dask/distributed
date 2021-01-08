@@ -1741,7 +1741,6 @@ class SchedulerState:
         client_msgs: dict,
         type=None,
         typename: str = None,
-        **kwargs,
     ):
         """
         Add *ts* to the set of in-memory tasks.
