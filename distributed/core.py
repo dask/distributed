@@ -638,7 +638,8 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
         # If an exception occured we will need to close the comm, if possible.
         # Otherwise the other end might wait for a reply while this end is
         # reusing the comm for something else.
-        comm.abort()
+        with suppress(Exception):
+            await comm.close()
         raise exc
     finally:
         if please_close:
