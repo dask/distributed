@@ -1710,6 +1710,26 @@ class SchedulerState:
     def workers(self):
         return self._workers
 
+    @property
+    def __pdict__(self):
+        return {
+            "bandwidth": self._bandwidth,
+            "resources": self._resources,
+            "saturated": self._saturated,
+            "unrunnable": self._unrunnable,
+            "n_tasks": self._n_tasks,
+            "unknown_durations": self._unknown_durations,
+            "validate": self._validate,
+            "tasks": self._tasks,
+            "total_nthreads": self._total_nthreads,
+            "total_occupancy": self._total_occupancy,
+            "extensions": self._extensions,
+            "clients": self._clients,
+            "workers": self._workers,
+            "idle": self._idle,
+            "host_info": self._host_info,
+        }
+
     def transition_released_waiting(self, key):
         try:
             ts: TaskState = self._tasks[key]
