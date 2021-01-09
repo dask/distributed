@@ -1506,7 +1506,7 @@ class Client:
         pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
+        workers: string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
         key: str
@@ -1522,9 +1522,11 @@ class Client:
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` this job requires on the worker; e.g.
-            ``{'GPU': 2}``. See :doc:`worker resources <resources>` for details
-            on defining resources.
+            Defines the `resources` these tasks require on the worker. Can
+            specify global resources (``{'GPU': 2}``), or per-task resources
+            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         actor: bool (default False)
             Whether this task should exist on the worker as a stateful actor.
             See :doc:`actors` for additional details.
@@ -1624,7 +1626,7 @@ class Client:
         pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
+        workers: string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
         allow_other_workers: bool (defaults to False)
@@ -2598,14 +2600,23 @@ class Client:
         ----------
         dsk: dict
         keys: object, or nested lists of objects
-        restrictions: dict (optional)
-            A mapping of {key: {set of worker hostnames}} that restricts where
-            jobs can take place
+        workers: string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        resources: dict (defaults to {})
+            Defines the `resources` these tasks require on the worker. Can
+            specify global resources (``{'GPU': 2}``), or per-task resources
+            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         sync: bool (optional)
             Returns Futures if False or concrete values if True (default).
         direct: bool
@@ -2733,15 +2744,12 @@ class Client:
             Returns Futures if False (default) or concrete values if True
         optimize_graph: bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
+        workers: string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
@@ -2890,15 +2898,12 @@ class Client:
             Collections like dask.array or dataframe or dask.value objects
         optimize_graph: bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
+        workers: string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
