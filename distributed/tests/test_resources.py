@@ -182,7 +182,6 @@ async def test_get(c, s, a, b):
 
     result = await c.get(dsk, "y", resources={"A": 1}, sync=False)
     assert result == 3
-    assert "x" in a.data
     assert "y" in a.data
     assert not b.data
 
