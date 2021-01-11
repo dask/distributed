@@ -12,6 +12,7 @@ import weakref
 import warnings
 import io
 import builtins
+import pickle
 safe_builtins = {
     'range',
     'complex',
@@ -1140,12 +1141,14 @@ def error_message(e, status="error"):
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
         e3 = protocol.pickle.dumps(e2, protocol=4)
+        restricetd_loads(e3)
         protocol.pickle.loads(e3)
     except Exception:
         e2 = Exception(str(e2))
     e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb, protocol=4)
+        restricted_loads(tb2)
         protocol.pickle.loads(tb2)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
@@ -1167,6 +1170,7 @@ def clean_exception(exception, traceback, **kwargs):
     """
     if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:
+            restricted_loads(exception)
             exception = protocol.pickle.loads(exception)
         except Exception:
             exception = Exception(exception)
@@ -1174,6 +1178,7 @@ def clean_exception(exception, traceback, **kwargs):
         exception = Exception(exception)
     if isinstance(traceback, bytes):
         try:
+            restricted_loads(traceback)
             traceback = protocol.pickle.loads(traceback)
         except (TypeError, AttributeError):
             traceback = None
