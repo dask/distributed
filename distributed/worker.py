@@ -2164,6 +2164,8 @@ class Worker(ServerNode):
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    # See if anyone new has the data
+                    await self.query_who_has(*deps)
                 self.ensure_communicating()
 
     def bad_dep(self, ts):
@@ -2221,7 +2223,8 @@ class Worker(ServerNode):
             self.transition(dep, "waiting", worker=worker)
 
     async def query_who_has(self, *deps):
-        # FIXME: If this is improperly called, the query fails. We should ensure that deps is a flat list here
+        if self.validate:
+            assert all(k in self.tasks for k in deps)
         with log_errors():
             response = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(response)
