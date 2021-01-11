@@ -45,3 +45,7 @@ jobs:
         shell: bash -l {0}
         if: ${{ matrix.os == 'ubuntu-latest' &&  matrix.python-version == '3.8' }}
         run: coverage report; python -m pip install -q coveralls ; coveralls
+
+      - name: Debug with tmate on failure
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
