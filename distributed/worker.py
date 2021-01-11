@@ -77,8 +77,13 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-PENDING = ("waiting", "ready", "constrained")
-PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running")
+
+# All valid error-free states for which the keys are not in memory yet but we
+# can assume the tasks are available eventually. Not to be confused with the scheduler "processing" state
+PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running", "flight")
+
+# Ready keys are supposed to be computed on this worker. All dependencies are
+# available and the task is waiting for the next available slot of an executor or resource
 READY = ("ready", "constrained")
 
 
@@ -116,7 +121,7 @@ class TaskState:
         The worker that current task data is coming from if task is in flight
     * **waiting_for_data**: ``set(keys of dependencies)``
         A dynamic verion of dependencies.  All dependencies that we still don't
-        have for a particular key.
+        have for a particular key. Some of these keys may be computed on this worker while others are gathered.
     * **resource_restrictions**: ``{str: number}``
         Abstract resources required to run a task
     * **exception**: ``str``
@@ -1477,6 +1482,8 @@ class Worker(ServerNode):
                     )
                     self.send_task_state_to_scheduler(ts)
                     return
+                self.log.append((key, "dependency to runnable"))
+                logger.debug("Asked to compute dependency: %s: %s", key, ts.state)
             else:
                 self.log.append((key, "new"))
                 self.tasks[key] = ts = TaskState(key=key)
@@ -1622,10 +1629,6 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "flight"
                 assert not ts.waiting_for_data
-                assert all(
-                    dep.key in self.data or dep.key in self.actors
-                    for dep in ts.dependencies
-                )
                 assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.ready
                 assert ts.runspec is not None
@@ -1649,10 +1652,8 @@ class Worker(ServerNode):
                 assert ts.state == "waiting"
                 assert not ts.waiting_for_data
                 assert all(
-                    dep.key in self.data or dep.key in self.actors
-                    for dep in ts.dependencies
-                )
-                assert all(dep.state == "memory" for dep in ts.dependencies)
+                    dep.state == "memory" for dep in ts.dependencies
+                ), ts.dependencies
                 assert ts.key not in self.ready
                 assert ts.runspec is not None
 
@@ -1843,6 +1844,8 @@ class Worker(ServerNode):
 
                 key = self.data_needed[0]
 
+                # Key might've been already cancelled since it was put into
+                # data_needed. Worker.release_key doesn't clean up data_needed
                 if key not in self.tasks:
                     self.data_needed.popleft()
                     changed = True
@@ -2139,7 +2142,7 @@ class Worker(ServerNode):
                     if ts.key in data:
                         self.transition(ts, "memory", value=data[d])
 
-                    if ts.state != "memory":
+                    if ts.state == "flight":
                         self.transition(ts, "waiting", worker=worker)
                         missing.add(ts)
 
@@ -2148,9 +2151,6 @@ class Worker(ServerNode):
                 if missing:
                     await self.handle_missing_dep(*missing, worker=worker)
                     if cause not in self.data_needed:
-                        if self.validate:
-                            assert isinstance(cause, str)
-                            assert cause in self.tasks
                         self.data_needed.append(cause)
 
                 if self.validate:
@@ -2953,11 +2953,7 @@ class Worker(ServerNode):
                     assert ts in dep.dependents
                 for key in ts.waiting_for_data:
                     ts_wait = self.tasks[key]
-                    assert (
-                        ts_wait.state == "flight"
-                        or ts_wait.state == "waiting"
-                        or ts_wait.who_has.issubset(self.in_flight_workers)
-                    )
+                    assert ts_wait.state in PROCESSING, ts_wait
                     waiting_keys.add(key)
                 if ts.state == "memory":
                     assert isinstance(ts.nbytes, int)
