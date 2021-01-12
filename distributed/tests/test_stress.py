@@ -228,6 +228,12 @@ async def test_close_connections(c, s, *workers):
         x = x.rechunk((1000, 1))
 
     future = c.compute(x.sum())
+
+    # need to wait to ensure the scheduler actually registered anything
+    # processing. Computation itself should take a few seconds so this should be
+    # a safe period to wait.
+    await asyncio.sleep(0.05)
+
     while any(s.processing.values()):
         await asyncio.sleep(0.5)
         worker = random.choice(list(workers))
