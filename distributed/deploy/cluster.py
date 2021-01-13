@@ -77,6 +77,8 @@ class Cluster:
         if self.status == Status.closed:
             return
 
+        with suppress(AttributeError):
+            self._adaptive.stop()
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
