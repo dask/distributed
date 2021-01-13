@@ -245,6 +245,7 @@ class SpecCluster(Cluster):
         security=None,
         silence_logs=False,
         name=None,
+        shutdown_on_close=True,
     ):
         self._created = weakref.WeakSet()
 
@@ -268,6 +269,7 @@ class SpecCluster(Cluster):
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
+        self.shutdown_on_close = shutdown_on_close
 
         super().__init__(
             asynchronous=asynchronous,
@@ -644,6 +646,7 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with suppress(gen.TimeoutError, TimeoutError):
-            if cluster.status != Status.closed:
-                cluster.close(timeout=10)
+        if cluster.shutdown_on_close:
+            with suppress(gen.TimeoutError, TimeoutError):
+                if cluster.status != Status.closed:
+                    cluster.close(timeout=10)
