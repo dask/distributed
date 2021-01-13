@@ -3789,7 +3789,7 @@ def test_scheduler_info(c):
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
-    assert "time_started" in info
+    assert isinstance(info["started"], float)
 
 
 def test_write_scheduler_file(c):
