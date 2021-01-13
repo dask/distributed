@@ -269,7 +269,10 @@ class SpecCluster(Cluster):
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
 
-        super().__init__(asynchronous=asynchronous)
+        super().__init__(
+            asynchronous=asynchronous,
+            name=name,
+        )
 
         if not self.asynchronous:
             self._loop_runner.start()
@@ -616,6 +619,11 @@ class SpecCluster(Cluster):
             )
 
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
+
+    @classmethod
+    def from_name(cls, name: str):
+        """Create an instance of this class to represent an existing cluster by name."""
+        raise NotImplementedError()
 
 
 async def run_spec(spec: dict, *args):
