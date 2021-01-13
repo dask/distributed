@@ -83,6 +83,7 @@ def test_close_twice():
 
 def test_adapt_coros():
     import time
+
     with LocalCluster(n_workers=0, threads_per_worker=1) as cluster:
         cluster.adapt(minimum=1, maximum=4)
         with Client(cluster) as client:
