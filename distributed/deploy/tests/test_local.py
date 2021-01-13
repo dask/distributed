@@ -1045,3 +1045,17 @@ async def test_no_workers(cleanup):
         n_workers=0, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
         pass
+
+
+@pytest.mark.asyncio
+async def test_cluster_names():
+    async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster:
+        async with LocalCluster(
+            processes=False, asynchronous=True, name="mycluster"
+        ) as named_cluster:
+            assert isinstance(unnamed_cluster.name, str)
+            assert isinstance(named_cluster.name, str)
+            assert named_cluster.name == "mycluster"
+            assert unnamed_cluster == unnamed_cluster
+            assert named_cluster == named_cluster
+            assert unnamed_cluster != named_cluster
