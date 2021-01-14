@@ -476,8 +476,8 @@ def _scrub_ucx_config():
             tls = "tcp,rdmacm"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp,sockcm"
-            tls_priority = "sockcm"
+            tls = "tcp"
+            tls_priority = "tcp"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
