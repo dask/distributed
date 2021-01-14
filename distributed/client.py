@@ -382,6 +382,11 @@ class Future(WrappedKey):
     def __del__(self):
         try:
             self.release()
+        except AttributeError:
+            # Ocassionally we see this error when shutting down the client
+            # https://github.com/dask/distributed/issues/4305
+            if not shutting_down():
+                raise
         except RuntimeError:  # closed event loop
             pass
 
@@ -2580,10 +2585,10 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, self, keyset)
-
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk}
+
+            dsk = highlevelgraph_pack(dsk, self, keyset)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
