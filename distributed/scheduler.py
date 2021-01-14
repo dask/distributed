@@ -3120,6 +3120,7 @@ class Scheduler(SchedulerState, ServerNode):
             "id": str(self.id),
             "address": self.address,
             "services": {key: v.port for (key, v) in self.services.items()},
+            "started": self.time_started,
             "workers": {
                 worker.address: worker.identity() for worker in parent._workers.values()
             },
