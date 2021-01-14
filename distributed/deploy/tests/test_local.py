@@ -98,7 +98,7 @@ def test_procs():
         repr(c)
 
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         processes=True,
         threads_per_worker=3,
