@@ -83,7 +83,7 @@ def test_close_twice():
 
 def test_procs():
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         processes=False,
         threads_per_worker=3,
@@ -434,7 +434,7 @@ def test_blocks_until_full(loop):
 @pytest.mark.asyncio
 async def test_scale_up_and_down():
     async with LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         processes=False,
         silence_logs=False,
@@ -763,7 +763,7 @@ async def test_scale_retires_workers():
 
     loop = IOLoop.current()
     cluster = await MyCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         processes=False,
         silence_logs=False,
