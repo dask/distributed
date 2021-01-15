@@ -1045,3 +1045,10 @@ async def test_no_workers(cleanup):
         n_workers=0, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
         pass
+
+
+@pytest.mark.asyncio
+async def test__default_scheduler_port():
+    async with LocalCluster(n_workers=2, processes=False, asynchronous=True) as cluster:
+
+        assert cluster.scheduler_port == 8786
