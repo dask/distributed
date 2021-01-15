@@ -1052,5 +1052,5 @@ async def test_no_workers(cleanup):
 async def test_default_scheduler_port():
     async with LocalCluster(n_workers=2, processes=False, asynchronous=True) as cluster:
 
-        _, port = parse_host_port(cluster.scheduler_adress)
+        _, port = parse_host_port(cluster.scheduler_address)
         assert port == 8786
