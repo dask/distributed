@@ -1,4 +1,4 @@
-from tlz import merge, valmap
+from tlz import valmap
 
 from dask.core import keys_in_tasks
 from dask.highlevelgraph import HighLevelGraph, Layer
@@ -134,7 +134,7 @@ def _materialized_layer_unpack(state, dsk, dependencies, annotations):
         new_annotations = {}
         for k, v in expanded.items():
             if isinstance(v, dict) and k in annotations:
-                new_annotations[k] = merge(annotations[k], v)
+                new_annotations[k] = {**annotations[k], **v}
             else:
                 new_annotations[k] = v
         annotations.update(new_annotations)
