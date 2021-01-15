@@ -16,6 +16,7 @@ import pytest
 
 from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
+from distributed.comm.addressing import parse_host_port
 from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
@@ -1048,7 +1049,8 @@ async def test_no_workers(cleanup):
 
 
 @pytest.mark.asyncio
-async def test__default_scheduler_port():
+async def test_default_scheduler_port():
     async with LocalCluster(n_workers=2, processes=False, asynchronous=True) as cluster:
 
-        assert "8786" in cluster.scheduler_address
+        _, port = parse_host_port(cluster.scheduler_adress)
+        assert port == 8786
