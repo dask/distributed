@@ -2825,9 +2825,6 @@ class Client:
             else:
                 dsk2[name] = (func, keys) + extra_args
 
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
-
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
@@ -2944,9 +2941,6 @@ class Client:
         dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
-
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
 
         futures = self._graph_to_futures(
             dsk,
