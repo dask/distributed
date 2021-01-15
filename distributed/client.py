@@ -1522,9 +1522,8 @@ class Client:
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         actor: bool (default False)
@@ -1641,8 +1640,8 @@ class Client:
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``. See
-            :doc:`worker resources <resources>` for details on defining
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
             resources.
         actor: bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
@@ -2612,9 +2611,8 @@ class Client:
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         sync: bool (optional)
@@ -2763,9 +2761,8 @@ class Client:
             be expensive. If none of the arguments contain any dask objects,
             set ``traverse=False`` to avoid doing this traversal.
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         actors: bool or dict (default None)
@@ -2912,9 +2909,8 @@ class Client:
         fifo_timeout: timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         actors: bool or dict (default None)
