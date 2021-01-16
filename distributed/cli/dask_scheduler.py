@@ -119,6 +119,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=str,
     help="Time of inactivity after which to kill the scheduler",
 )
+@click.option(
+    "--log-file",
+    default=None,
+    type=str,
+    help="Path to log file",
+)
 @click.version_option()
 def main(
     host,

@@ -239,6 +239,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Module that should be loaded by each nanny "
     'like "foo.bar" or "/path/to/foo.py"',
 )
+@click.option(
+    "--log-file",
+    default=None,
+    type=str,
+    help="Path to log file",
+)
 @click.version_option()
 def main(
     scheduler,

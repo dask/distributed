@@ -393,6 +393,7 @@ class Worker(ServerNode):
         lifetime=None,
         lifetime_stagger=None,
         lifetime_restart=None,
+        log_file=None,
         **kwargs,
     ):
         self.tasks = dict()
@@ -481,7 +482,9 @@ class Worker(ServerNode):
             profile_cycle_interval = dask.config.get("distributed.worker.profile.cycle")
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default="ms")
 
-        self._setup_logging(logger)
+        if log_file is None:
+            log_file = dask.config.get("distributed.worker.log-file")
+        self._setup_logging(logger, log_file)
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)

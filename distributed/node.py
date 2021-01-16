@@ -77,24 +77,32 @@ class ServerNode(Server):
     def service_ports(self):
         return {k: v.port for k, v in self.services.items()}
 
-    def _setup_logging(self, logger):
-        self._deque_handler = DequeHandler(
-            n=dask.config.get("distributed.admin.log-length")
-        )
-        self._deque_handler.setFormatter(
-            logging.Formatter(dask.config.get("distributed.admin.log-format"))
-        )
-        logger.addHandler(self._deque_handler)
-        weakref.finalize(self, logger.removeHandler, self._deque_handler)
+    def _setup_logging(self, logger, log_file):
+        self._log_file = None
+        if log_file:
+            self._log_file = log_file
+        else:
+            self._deque_handler = DequeHandler(
+                n=dask.config.get("distributed.admin.log-length")
+            )
+            self._deque_handler.setFormatter(
+                logging.Formatter(dask.config.get("distributed.admin.log-format"))
+            )
+            logger.addHandler(self._deque_handler)
+            weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
     def get_logs(self, comm=None, n=None):
-        deque_handler = self._deque_handler
-        if n is None:
-            L = list(deque_handler.deque)
+        if self._log_file:
+            with open(self._log_file) as f:
+                return f.readlines()
         else:
-            L = deque_handler.deque
-            L = [L[-i] for i in range(min(n, len(L)))]
-        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+            deque_handler = self._deque_handler
+            if n is None:
+                L = list(deque_handler.deque)
+            else:
+                L = deque_handler.deque
+                L = [L[-i] for i in range(min(n, len(L)))]
+            return [deque_handler.format(msg) for msg in L]
 
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None

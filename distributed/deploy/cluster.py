@@ -208,12 +208,12 @@ class Cluster:
 
         if scheduler:
             L = await self.scheduler_comm.get_logs()
-            logs["Scheduler"] = Log("\n".join(line for level, line in L))
+            logs["Scheduler"] = Log("\n".join(line for line in L))
 
         if workers:
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
-                logs[k] = Log("\n".join(line for level, line in v))
+                logs[k] = Log("\n".join(line for line in v))
 
         return logs
 

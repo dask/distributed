@@ -45,6 +45,7 @@ distributed:
     locks:
       lease-validation-interval: 10s  # The interval in which the scheduler validates staleness of all acquired leases. Must always be smaller than the lease-timeout itself.
       lease-timeout: 30s  # Maximum interval to wait for a Client refresh before a lease is invalidated and released.
+    log-file: null
 
     http:
       routes:
@@ -94,10 +95,12 @@ distributed:
         - distributed.http.worker.prometheus
         - distributed.http.health
         - distributed.http.statics
+    log-file: null
 
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    log-file: null
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
