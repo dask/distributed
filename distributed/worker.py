@@ -2282,13 +2282,14 @@ class Worker(ServerNode):
         self.batched_stream.send(response)
 
         if state in ("ready", "waiting", "constrained"):
-            self.transition(ts, "waiting")
             ts.runspec = None
             self.release_key(key)
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
             ts = self.tasks.get(key, TaskState(key=key))
+            if self.validate:
+                assert not ts.dependents
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
