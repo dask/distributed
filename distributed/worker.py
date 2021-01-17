@@ -1,5 +1,6 @@
 import asyncio
 import bisect
+
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from contextlib import suppress
@@ -1791,6 +1792,7 @@ class Worker(ServerNode):
         }
 
     def story(self, *keys):
+        keys = [key.key if isinstance(key, TaskState) else key for key in keys]
         return [
             msg
             for msg in self.log
