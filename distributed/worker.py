@@ -1715,14 +1715,7 @@ class Worker(ServerNode):
         """
         ts.state = "waiting"
         ts.runspec = None
-        # FIXME GH4413 Replace with recommended transition to forgotten
-        # If there are no dependents anymore, this has been a mere dependency
-        # and it was not intended to be executed on this worker. In this case we
-        # need to release the key ourselves since the scheduler will no longer
-        # propagate the deletion to this worker
-        if not ts.dependents:
-            self.release_key(ts.key)
-            return
+
         return ts.state
 
     def transition_constrained_executing(self, ts):
@@ -2174,7 +2167,6 @@ class Worker(ServerNode):
                     self.repetitively_busy += 1
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
-                    # See if anyone new has the data
                     await self.query_who_has(dep.key)
                     self.ensure_communicating()
 
@@ -2256,10 +2248,11 @@ class Worker(ServerNode):
                 if not workers:
                     continue
 
-                self.tasks[dep].who_has.update(workers)
+                if dep in self.tasks:
+                    self.tasks[dep].who_has.update(workers)
 
-                for worker in workers:
-                    self.has_what[worker].add(dep)
+                    for worker in workers:
+                        self.has_what[worker].add(dep)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2282,14 +2275,24 @@ class Worker(ServerNode):
         self.batched_stream.send(response)
 
         if state in ("ready", "waiting", "constrained"):
+            # Resetting the runspec should be reset by the transition. However,
+            # the waiting->waiting transition results in a no-op which would not
+            # reset.
             ts.runspec = None
-            self.release_key(key)
+            self.transition(ts, "waiting")
+            if not ts.dependents:
+                self.release_key(ts.key)
+                if self.validate:
+                    assert ts.key not in self.tasks
+            if self.validate:
+                assert ts.runspec is None
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
-            ts = self.tasks.get(key, TaskState(key=key))
             if self.validate:
-                assert not ts.dependents
+                assert isinstance(key, str)
+            ts = self.tasks.get(key, TaskState(key=key))
+
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
@@ -2329,7 +2332,7 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
-            if key in self.tasks:
+            if key in self.tasks and not ts.dependents:
                 self.tasks.pop(key)
             del ts
         except CommClosedError:
@@ -2952,7 +2955,7 @@ class Worker(ServerNode):
     def validate_task_waiting(self, ts):
         assert ts.key not in self.data
         assert ts.state == "waiting"
-        if ts.dependencies:
+        if ts.dependencies and ts.runspec:
             assert not all(dep.key in self.data for dep in ts.dependencies)
 
     def validate_task_flight(self, ts):
