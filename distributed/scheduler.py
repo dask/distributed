@@ -1,5 +1,6 @@
 import asyncio
 from collections import defaultdict, deque
+
 from collections.abc import Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
@@ -5605,7 +5606,7 @@ class Scheduler(ServerNode):
 
     def story(self, *keys):
         """ Get all transitions that touch one of the input keys """
-        keys = set(keys)
+        keys = {key.key if isinstance(key, TaskState) else key for key in keys}
         return [
             t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
         ]
