@@ -2316,6 +2316,7 @@ class Worker(ServerNode):
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
+            ts.who_has.clear()
 
             if key in self.threads:
                 del self.threads[key]
