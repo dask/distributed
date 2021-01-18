@@ -973,6 +973,8 @@ async def test_repr(cleanup):
         memory_limit="2GB",
         asynchronous=True,
     ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            await client.wait_for_workers(2)
         text = repr(cluster)
         assert "workers=2" in text
         assert cluster.scheduler_address in text
