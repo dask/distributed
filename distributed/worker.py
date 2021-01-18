@@ -453,6 +453,7 @@ class Worker(ServerNode):
             ("ready", "error"): self.transition_ready_error,
             ("ready", "waiting"): self.transition_ready_waiting,
             ("constrained", "waiting"): self.transition_ready_waiting,
+            ("constrained", "error"): self.transition_ready_error,
             ("constrained", "executing"): self.transition_constrained_executing,
             ("executing", "memory"): self.transition_executing_done,
             ("executing", "error"): self.transition_executing_done,
