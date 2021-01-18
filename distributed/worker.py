@@ -1714,10 +1714,7 @@ class Worker(ServerNode):
         """
         This transition is common for work stealing
         """
-        ts.state = "waiting"
-        ts.runspec = None
-
-        return ts.state
+        pass
 
     def transition_constrained_executing(self, ts):
         self.transition_ready_executing(ts)
