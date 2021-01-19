@@ -104,7 +104,10 @@ class TaskState:
     * **dependencies**: ``set(TaskState instances)``
         The data needed by this key to run
     * **dependents**: ``set(TaskState instances)``
-        The keys that use this dependency
+        The keys that use this dependency. Only keys which are not available
+        already are tracked in this structure and dependents made available are
+        actively removed. Only after all dependents have been removed, this task
+        is allowed to be forgotten
     * **duration**: ``float``
         Expected duration the a task
     * **priority**: ``tuple``
