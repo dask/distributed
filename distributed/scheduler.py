@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 
 from collections.abc import Mapping, Set
 from contextlib import suppress
-from datetime import timedelta
+from datetime import timedelta, date
 from functools import partial
 import inspect
 import itertools
@@ -5952,7 +5952,7 @@ class Scheduler(ServerNode):
 
         # Task stream
         task_stream = self.get_task_stream(start=start)
-        total_tasks = len(task_stream)
+        total_tasks = self.n_tasks
         timespent = defaultdict(int)
         for d in task_stream:
             for x in d.get("startstops", []):
@@ -5988,6 +5988,7 @@ class Scheduler(ServerNode):
 
         <i> Select different tabs on the top for additional information </i>
 
+        <h2> Date: {date} </h2>
         <h2> Duration: {time} </h2>
         <h2> Tasks Information </h2>
         <ul>
@@ -6010,6 +6011,7 @@ class Scheduler(ServerNode):
 {code}
         </pre>
         """.format(
+            date=date.today().strftime("%Y-%m-%d"),
             time=format_time(stop - start),
             ntasks=total_tasks,
             tasks_timings=tasks_timings,
