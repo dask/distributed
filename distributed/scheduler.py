@@ -1574,6 +1574,7 @@ class SchedulerState:
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
     """
 
+    _aliases: dict
     _bandwidth: double
     _clients: dict
     _extensions: dict
@@ -1594,6 +1595,7 @@ class SchedulerState:
 
     def __init__(
         self,
+        aliases: dict = None,
         clients: dict = None,
         workers=None,
         host_info=None,
@@ -1603,6 +1605,10 @@ class SchedulerState:
         validate: bint = False,
         **kwargs,
     ):
+        if aliases is not None:
+            self._aliases = aliases
+        else:
+            self._aliases = dict()
         self._bandwidth = parse_bytes(
             dask.config.get("distributed.scheduler.bandwidth")
         )
@@ -1642,6 +1648,10 @@ class SchedulerState:
             self._workers = sortedcontainers.SortedDict()
         self._workers_dv: dict = cast(dict, self._workers)
         super().__init__(**kwargs)
+
+    @property
+    def aliases(self):
+        return self._aliases
 
     @property
     def bandwidth(self):
@@ -2966,7 +2976,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         host_info = defaultdict(dict)
         resources = defaultdict(dict)
-        self.aliases = dict()
+        aliases = dict()
 
         self._task_state_collections = [unrunnable]
 
@@ -2974,7 +2984,7 @@ class Scheduler(SchedulerState, ServerNode):
             workers,
             host_info,
             resources,
-            self.aliases,
+            aliases,
         ]
 
         self.plugins = list(plugins)
@@ -3081,6 +3091,7 @@ class Scheduler(SchedulerState, ServerNode):
         connection_limit = get_fileno_limit() / 2
 
         super().__init__(
+            aliases=aliases,
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
             io_loop=self.loop,
@@ -3427,7 +3438,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ws is not None:
                 raise ValueError("Worker already exists %s" % ws)
 
-            if name in self.aliases:
+            if name in parent._aliases:
                 logger.warning(
                     "Worker tried to connect with a duplicate name: %s", name
                 )
@@ -3460,7 +3471,7 @@ class Scheduler(SchedulerState, ServerNode):
             parent._host_info[host]["nthreads"] += nthreads
 
             parent._total_nthreads += nthreads
-            self.aliases[name] = address
+            parent._aliases[name] = address
 
             response = self.heartbeat_worker(
                 address=address,
@@ -4070,7 +4081,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            del self.aliases[ws._name]
+            del parent._aliases[ws._name]
             parent._idle.pop(ws._address, None)
             parent._saturated.discard(ws)
             del parent._workers[address]
@@ -5958,8 +5969,9 @@ class Scheduler(SchedulerState, ServerNode):
         Handles strings, tuples, or aliases.
         """
         # XXX how many address-parsing routines do we have?
-        if addr in self.aliases:
-            addr = self.aliases[addr]
+        parent: SchedulerState = cast(SchedulerState, self)
+        if addr in parent._aliases:
+            addr = parent._aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, str):
