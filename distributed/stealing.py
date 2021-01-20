@@ -74,8 +74,7 @@ class WorkStealing(SchedulerPlugin):
         ts = self.scheduler.tasks[key]
         if finish == "processing":
             self.put_key_in_stealable(ts)
-
-        if start == "processing":
+        elif start == "processing":
             self.remove_key_from_stealable(ts)
             if finish != "memory":
                 self.in_flight.pop(ts, None)
