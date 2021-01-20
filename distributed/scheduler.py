@@ -1585,6 +1585,7 @@ class SchedulerState:
     _resources: object
     _saturated: set
     _tasks: dict
+    _task_metadata: dict
     _total_nthreads: Py_ssize_t
     _total_occupancy: double
     _unknown_durations: object
@@ -1634,6 +1635,7 @@ class SchedulerState:
             self._tasks = tasks
         else:
             self._tasks = dict()
+        self._task_metadata = dict()
         self._total_nthreads = 0
         self._total_occupancy = 0
         self._unknown_durations = defaultdict(set)
@@ -1688,6 +1690,10 @@ class SchedulerState:
     @property
     def tasks(self):
         return self._tasks
+
+    @property
+    def task_metadata(self):
+        return self._task_metadata
 
     @property
     def total_nthreads(self):
@@ -2952,7 +2958,6 @@ class Scheduler(SchedulerState, ServerNode):
         self._last_time = 0
         unrunnable = set()
 
-        self.task_metadata = dict()
         self.datasets = dict()
 
         # Prefix-keyed containers
@@ -5710,8 +5715,9 @@ class Scheduler(SchedulerState, ServerNode):
         return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def set_metadata(self, comm=None, keys=None, value=None):
+        parent: SchedulerState = cast(SchedulerState, self)
         try:
-            metadata = self.task_metadata
+            metadata = parent._task_metadata
             for key in keys[:-1]:
                 if key not in metadata or not isinstance(metadata[key], (dict, list)):
                     metadata[key] = dict()
@@ -5723,7 +5729,8 @@ class Scheduler(SchedulerState, ServerNode):
             pdb.set_trace()
 
     def get_metadata(self, comm=None, keys=None, default=no_default):
-        metadata = self.task_metadata
+        parent: SchedulerState = cast(SchedulerState, self)
+        metadata = parent._task_metadata
         for key in keys[:-1]:
             metadata = metadata[key]
         try:
