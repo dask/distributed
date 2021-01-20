@@ -81,10 +81,10 @@ class WorkStealing(SchedulerPlugin):
                 self.in_flight.pop(ts, None)
 
     def put_key_in_stealable(self, ts):
-        ws = ts.processing_on
-        worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
         if cost_multiplier is not None:
+            ws = ts.processing_on
+            worker = ws.address
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
             self.key_stealable[ts] = (worker, level)
