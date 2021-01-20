@@ -131,7 +131,7 @@ class SemaphoreExtension:
             or len(self.leases[name]) < self.max_leases[name]
         ):
             now = time()
-            logger.info("Acquire lease %s for %s at %s", lease_id, name, now)
+            logger.debug("Acquire lease %s for %s at %s", lease_id, name, now)
             self.leases[name][lease_id] = now
             self.metrics["acquire_total"][name] += 1
         else:
@@ -155,7 +155,7 @@ class SemaphoreExtension:
 
             self.metrics["pending"][name] += 1
             while True:
-                logger.info(
+                logger.debug(
                     "Trying to acquire %s for %s with %s seconds left.",
                     lease_id,
                     name,
@@ -178,7 +178,7 @@ class SemaphoreExtension:
                         continue
                     except TimeoutError:
                         result = False
-                logger.info(
+                logger.debug(
                     "Acquisition of lease %s for %s is %s after waiting for %ss.",
                     lease_id,
                     name,
@@ -211,7 +211,7 @@ class SemaphoreExtension:
                 )
 
     def _release_value(self, name, lease_id):
-        logger.info("Releasing %s for %s", lease_id, name)
+        logger.debug("Releasing %s for %s", lease_id, name)
         # Everything needs to be atomic here.
         del self.leases[name][lease_id]
         self.events[name].set()
@@ -231,7 +231,7 @@ class SemaphoreExtension:
             for _id in ids:
                 time_since_refresh = now - self.leases[name][_id]
                 if time_since_refresh > self.lease_timeout:
-                    logger.info(
+                    logger.debug(
                         "Lease %s for %s timed out after %ss.",
                         _id,
                         name,
@@ -372,8 +372,6 @@ class Semaphore:
             self.scheduler_rpc = scheduler_rpc or client.scheduler
             self.io_loop = io_loop or client.io_loop
 
-        self.scheduler_comm = None
-
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
         self.id = uuid.uuid4().hex
@@ -460,7 +458,9 @@ class Semaphore:
 
     async def _acquire(self, timeout=None):
         lease_id = uuid.uuid4().hex
-        logger.info("%s requests lease for %s with ID %s", self.id, self.name, lease_id)
+        logger.debug(
+            "%s requests lease for %s with ID %s", self.id, self.name, lease_id
+        )
 
         # Using a unique lease id generated here allows us to retry since the
         # server handle is idempotent
@@ -529,7 +529,7 @@ class Semaphore:
 
         # popleft to release the oldest lease first
         lease_id = self._leases.popleft()
-        logger.info("%s releases %s for %s", self.id, lease_id, self.name)
+        logger.debug("%s releases %s for %s", self.id, lease_id, self.name)
         return self.sync(self._release, lease_id=lease_id)
 
     def get_value(self):

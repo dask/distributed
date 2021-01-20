@@ -432,7 +432,7 @@ async def test_oversubscribing_leases(c, s, a, b):
     )
     fut_observe = c.submit(observe_state, sem=sem, workers=[observer.address])
 
-    with captured_logger("distributed.semaphore") as caplog:
+    with captured_logger("distributed.semaphore", level=logging.DEBUG) as caplog:
         payload, observer = await c.gather([futures, fut_observe])
 
     logs = caplog.getvalue().split("\n")
@@ -581,7 +581,9 @@ async def test_release_failure(c, s, a, b):
             with captured_logger("distributed.utils_comm") as retry_log:
                 assert await semaphore.release() is False
 
-        with captured_logger("distributed.semaphore") as semaphore_cleanup_log:
+        with captured_logger(
+            "distributed.semaphore", level=logging.DEBUG
+        ) as semaphore_cleanup_log:
             pool.deactivate()  # comm chaos stops
             assert await semaphore.get_value() == 1  # lease is still registered
             await asyncio.sleep(0.2)  # Wait for lease to be cleaned up
