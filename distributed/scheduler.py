@@ -2534,6 +2534,10 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    ##############################
+    # Assigning Tasks to Workers #
+    ##############################
+
     @ccall
     @exceptval(check=False)
     def check_idle_saturated(self, ws: WorkerState, occ: double = -1.0):
@@ -2659,6 +2663,18 @@ class SchedulerState:
             s = {self._workers_dv[w] for w in s}
 
         return s
+
+    @ccall
+    def consume_resources(self, ts: TaskState, ws: WorkerState):
+        if ts._resource_restrictions:
+            for r, required in ts._resource_restrictions.items():
+                ws._used_resources[r] += required
+
+    @ccall
+    def release_resources(self, ts: TaskState, ws: WorkerState):
+        if ts._resource_restrictions:
+            for r, required in ts._resource_restrictions.items():
+                ws._used_resources[r] -= required
 
     @ccall
     @exceptval(check=False)
@@ -5912,20 +5928,6 @@ class Scheduler(SchedulerState, ServerNode):
         if worker and ts._processing_on.address != worker:
             return
         self.transitions({key: "released"})
-
-    ##############################
-    # Assigning Tasks to Workers #
-    ##############################
-
-    def consume_resources(self, ts: TaskState, ws: WorkerState):
-        if ts._resource_restrictions:
-            for r, required in ts._resource_restrictions.items():
-                ws._used_resources[r] += required
-
-    def release_resources(self, ts: TaskState, ws: WorkerState):
-        if ts._resource_restrictions:
-            for r, required in ts._resource_restrictions.items():
-                ws._used_resources[r] -= required
 
     #####################
     # Utility functions #
