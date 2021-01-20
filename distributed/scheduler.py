@@ -6106,7 +6106,6 @@ class Scheduler(ServerNode):
         lets us avoid this fringe optimization when we have better things to
         think about.
         """
-        DELAY = 0.1
         try:
             if self.status == Status.closed:
                 return
@@ -6131,7 +6130,7 @@ class Scheduler(ServerNode):
                         next_time = timedelta(seconds=duration * 5)  # 25ms gap
                         break
             else:
-                next_time = timedelta(seconds=DELAY)
+                next_time = timedelta(seconds=0.1)
 
             self.loop.add_timeout(
                 next_time, self.reevaluate_occupancy, worker_index=worker_index
