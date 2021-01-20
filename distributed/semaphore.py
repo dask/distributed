@@ -318,6 +318,13 @@ class Semaphore:
         initialization, this can also be done by calling the register method of
         this class.
         When registering, this needs to be awaited.
+    scheduler_rpc: ConnectionPool
+        The ConnectionPool to connect to the scheduler. If None is provided, it
+        uses the worker or client pool. This paramter is mostly used for
+        testing.
+    loop: IOLoop
+        The event loop this instance is using. If None is provided, reuse the
+        loop of the active worker or client.
 
     Examples
     --------
@@ -359,18 +366,18 @@ class Semaphore:
         name=None,
         register=True,
         scheduler_rpc=None,
-        io_loop=None,
+        loop=None,
     ):
 
         try:
             worker = get_worker()
-            self.scheduler_rpc = scheduler_rpc or worker.scheduler
-            self.io_loop = io_loop or worker.loop
+            self.scheduler = scheduler_rpc or worker.scheduler
+            self.loop = loop or worker.loop
 
         except ValueError:
             client = get_client()
-            self.scheduler_rpc = scheduler_rpc or client.scheduler
-            self.io_loop = io_loop or client.io_loop
+            self.scheduler = scheduler_rpc or client.scheduler
+            self.loop = loop or client.io_loop
 
         self.name = name or "semaphore-" + uuid.uuid4().hex
         self.max_leases = max_leases
@@ -399,15 +406,15 @@ class Semaphore:
 
         # Need to start the callback using IOLoop.add_callback to ensure that the
         # PC uses the correct event loop.
-        self.io_loop.add_callback(pc.start)
+        self.loop.add_callback(pc.start)
 
     @property
     def asynchronous(self):
-        return self.io_loop is IOLoop.current()
+        return self.loop is IOLoop.current()
 
     async def _register(self):
         await retry_operation(
-            self.scheduler_rpc.semaphore_register,
+            self.scheduler.semaphore_register,
             name=self.name,
             max_leases=self.max_leases,
             operation=f"semaphore register id={self.id} name={self.name}",
@@ -437,7 +444,7 @@ class Semaphore:
             return future
         else:
             return sync(
-                self.io_loop, func, *args, callback_timeout=callback_timeout, **kwargs
+                self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
             )
 
     async def _refresh_leases(self):
@@ -449,7 +456,7 @@ class Semaphore:
                 self._leases,
             )
             await retry_operation(
-                self.scheduler_rpc.semaphore_refresh_leases,
+                self.scheduler.semaphore_refresh_leases,
                 lease_ids=list(self._leases),
                 name=self.name,
                 operation="semaphore refresh leases: id=%s, lease_ids=%s, name=%s"
@@ -465,7 +472,7 @@ class Semaphore:
         # Using a unique lease id generated here allows us to retry since the
         # server handle is idempotent
         result = await retry_operation(
-            self.scheduler_rpc.semaphore_acquire,
+            self.scheduler.semaphore_acquire,
             name=self.name,
             timeout=timeout,
             lease_id=lease_id,
@@ -497,7 +504,7 @@ class Semaphore:
     async def _release(self, lease_id):
         try:
             await retry_operation(
-                self.scheduler_rpc.semaphore_release,
+                self.scheduler.semaphore_release,
                 name=self.name,
                 lease_id=lease_id,
                 operation="semaphore release: id=%s, lease_id=%s, name=%s"
@@ -536,7 +543,7 @@ class Semaphore:
         """
         Return the number of currently registered leases.
         """
-        return self.sync(self.scheduler_rpc.semaphore_value, name=self.name)
+        return self.sync(self.scheduler.semaphore_value, name=self.name)
 
     def __enter__(self):
         self.acquire()
@@ -566,7 +573,7 @@ class Semaphore:
         )
 
     def close(self):
-        return self.sync(self.scheduler_rpc.semaphore_close, name=self.name)
+        return self.sync(self.scheduler.semaphore_close, name=self.name)
 
     def __del__(self):
         self.refresh_callback.stop()
