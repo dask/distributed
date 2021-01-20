@@ -2687,6 +2687,16 @@ class SchedulerState:
                 ws._used_resources[r] -= required
 
     @ccall
+    def coerce_hostname(self, host):
+        """
+        Coerce the hostname of a worker.
+        """
+        if host in self._aliases:
+            return self._workers_dv[self._aliases[host]].host
+        else:
+            return host
+
+    @ccall
     @exceptval(check=False)
     def worker_objective(self, ts: TaskState, ws: WorkerState) -> tuple:
         """
@@ -5983,16 +5993,6 @@ class Scheduler(SchedulerState, ServerNode):
             addr = normalize_address(addr)
 
         return addr
-
-    def coerce_hostname(self, host):
-        """
-        Coerce the hostname of a worker.
-        """
-        parent: SchedulerState = cast(SchedulerState, self)
-        if host in self.aliases:
-            return parent._workers_dv[self.aliases[host]].host
-        else:
-            return host
 
     def workers_list(self, workers):
         """
