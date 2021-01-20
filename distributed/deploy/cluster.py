@@ -51,7 +51,7 @@ class Cluster:
     """
 
     _supports_scaling = True
-    name = str(uuid.uuid4())[:8]
+    name = None
 
     def __init__(self, asynchronous, quiet=False, name=None):
         self.scheduler_info = {"workers": {}}
@@ -65,6 +65,8 @@ class Cluster:
 
         if name is not None:
             self.name = name
+        elif self.name is None:
+            self.name = str(uuid.uuid4())[:8]
         self.status = Status.created
 
     async def _start(self):

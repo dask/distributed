@@ -1059,3 +1059,6 @@ async def test_cluster_names():
             assert unnamed_cluster == unnamed_cluster
             assert named_cluster == named_cluster
             assert unnamed_cluster != named_cluster
+
+        async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster2:
+            assert unnamed_cluster2 != unnamed_cluster
