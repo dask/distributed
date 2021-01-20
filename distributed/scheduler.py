@@ -6111,9 +6111,8 @@ class Scheduler(ServerNode):
             if self.status == Status.closed:
                 return
 
-            last = time()
-
             if self.proc.cpu_percent() < 50:
+                last = time()
                 workers = list(self.workers.values())
                 for i in range(len(workers)):
                     ws: WorkerState = workers[worker_index % len(workers)]
