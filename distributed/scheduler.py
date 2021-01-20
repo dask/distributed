@@ -6091,7 +6091,7 @@ class Scheduler(ServerNode):
     # Cleanup #
     ###########
 
-    def reevaluate_occupancy(self, worker_index=0):
+    def reevaluate_occupancy(self, worker_index: Py_ssize_t = 0):
         """Periodically reassess task duration time
 
         The expected duration of a task can change over time.  Unfortunately we
@@ -6113,8 +6113,9 @@ class Scheduler(ServerNode):
 
             if self.proc.cpu_percent() < 50:
                 last = time()
-                workers = list(self.workers.values())
-                nworkers = len(workers)
+                workers: list = list(self.workers.values())
+                nworkers: Py_ssize_t = len(workers)
+                i: Py_ssize_t
                 for i in range(nworkers):
                     ws: WorkerState = workers[worker_index % nworkers]
                     worker_index += 1
