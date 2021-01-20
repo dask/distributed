@@ -683,6 +683,8 @@ async def test_story(c, s, a, b):
 
     assert len(s.story(x.key, y.key)) > len(story)
 
+    assert s.story(x.key) == s.story(s.tasks[x.key])
+
 
 @gen_cluster(nthreads=[], client=True)
 async def test_scatter_no_workers(c, s):

@@ -83,7 +83,7 @@ def test_close_twice():
 
 def test_procs():
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         processes=False,
         threads_per_worker=3,
@@ -98,7 +98,7 @@ def test_procs():
         repr(c)
 
     with LocalCluster(
-        2,
+        n_workers=2,
         scheduler_port=0,
         processes=True,
         threads_per_worker=3,
@@ -434,7 +434,7 @@ def test_blocks_until_full(loop):
 @pytest.mark.asyncio
 async def test_scale_up_and_down():
     async with LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         processes=False,
         silence_logs=False,
@@ -763,7 +763,7 @@ async def test_scale_retires_workers():
 
     loop = IOLoop.current()
     cluster = await MyCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         processes=False,
         silence_logs=False,
@@ -973,6 +973,8 @@ async def test_repr(cleanup):
         memory_limit="2GB",
         asynchronous=True,
     ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            await client.wait_for_workers(2)
         text = repr(cluster)
         assert "workers=2" in text
         assert cluster.scheduler_address in text
@@ -1045,3 +1047,20 @@ async def test_no_workers(cleanup):
         n_workers=0, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
         pass
+
+
+@pytest.mark.asyncio
+async def test_cluster_names():
+    async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster:
+        async with LocalCluster(
+            processes=False, asynchronous=True, name="mycluster"
+        ) as named_cluster:
+            assert isinstance(unnamed_cluster.name, str)
+            assert isinstance(named_cluster.name, str)
+            assert named_cluster.name == "mycluster"
+            assert unnamed_cluster == unnamed_cluster
+            assert named_cluster == named_cluster
+            assert unnamed_cluster != named_cluster
+
+        async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster2:
+            assert unnamed_cluster2 != unnamed_cluster

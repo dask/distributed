@@ -42,11 +42,6 @@ from distributed.utils_test import (
 from distributed.utils_test import loop  # noqa F401
 
 
-EXTERNAL_IP4 = get_ip()
-if has_ipv6():
-    EXTERNAL_IP6 = get_ipv6()
-
-
 def echo(comm, x):
     return x
 
@@ -194,6 +189,15 @@ async def test_server_listen():
     """
     Test various Server.listen() arguments and their effect.
     """
+    import socket
+
+    try:
+        EXTERNAL_IP4 = get_ip()
+        if has_ipv6():
+            EXTERNAL_IP6 = get_ipv6()
+    except socket.gaierror:
+        raise pytest.skip(reason="no network access")
+
     from contextlib import asynccontextmanager
 
     @asynccontextmanager

@@ -51,7 +51,11 @@ async def test_simultaneous_scale_up_and_down(cleanup):
 
 def test_adaptive_local_cluster(loop):
     with LocalCluster(
-        0, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        loop=loop,
     ) as cluster:
         alc = cluster.adapt(interval="100 ms")
         with Client(cluster, loop=loop) as c:
@@ -76,7 +80,7 @@ def test_adaptive_local_cluster(loop):
 @pytest.mark.asyncio
 async def test_adaptive_local_cluster_multi_workers(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         silence_logs=False,
         processes=False,
@@ -146,7 +150,7 @@ async def test_adaptive_scale_down_override(cleanup):
 @gen_test()
 async def test_min_max():
     cluster = await LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         silence_logs=False,
         processes=False,
@@ -201,7 +205,7 @@ async def test_avoid_churn(cleanup):
     user is taking a brief pause between work
     """
     async with LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
         scheduler_port=0,
@@ -226,7 +230,7 @@ async def test_adapt_quickly():
     user is taking a brief pause between work
     """
     cluster = await LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
         scheduler_port=0,
