@@ -2469,6 +2469,19 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    def remove_key(self, key):
+        ts: TaskState = self._tasks.pop(key)
+        assert ts._state == "forgotten"
+        self._unrunnable.discard(ts)
+        cs: ClientState
+        for cs in ts._who_wants:
+            cs._wants_what.remove(ts)
+        ts._who_wants.clear()
+        ts._processing_on = None
+        ts._exception_blame = ts._exception = ts._traceback = None
+        self._task_metadata.pop(key, None)
+
     def transition_memory_forgotten(self, key):
         ws: WorkerState
         try:
@@ -5788,20 +5801,6 @@ class Scheduler(SchedulerState, ServerNode):
     #####################
     # State Transitions #
     #####################
-
-    def remove_key(self, key):
-        parent: SchedulerState = cast(SchedulerState, self)
-        tasks: dict = parent._tasks
-        ts: TaskState = tasks.pop(key)
-        assert ts._state == "forgotten"
-        parent._unrunnable.discard(ts)
-        cs: ClientState
-        for cs in ts._who_wants:
-            cs._wants_what.remove(ts)
-        ts._who_wants.clear()
-        ts._processing_on = None
-        ts._exception_blame = ts._exception = ts._traceback = None
-        self.task_metadata.pop(key, None)
 
     def transition(self, key, finish, *args, **kwargs):
         """Transition a key from its current state to the finish state
