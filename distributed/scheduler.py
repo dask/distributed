@@ -6110,8 +6110,10 @@ class Scheduler(ServerNode):
             if self.status == Status.closed:
                 return
 
+            last = time()
+            next_time = timedelta(seconds=0.1)
+
             if self.proc.cpu_percent() < 50:
-                last = time()
                 workers: list = list(self.workers.values())
                 nworkers: Py_ssize_t = len(workers)
                 i: Py_ssize_t
@@ -6129,8 +6131,6 @@ class Scheduler(ServerNode):
                     if duration > 0.005:  # 5ms since last release
                         next_time = timedelta(seconds=duration * 5)  # 25ms gap
                         break
-            else:
-                next_time = timedelta(seconds=0.1)
 
             self.loop.add_timeout(
                 next_time, self.reevaluate_occupancy, worker_index=worker_index
