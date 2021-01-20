@@ -6114,8 +6114,9 @@ class Scheduler(ServerNode):
             if self.proc.cpu_percent() < 50:
                 last = time()
                 workers = list(self.workers.values())
-                for i in range(len(workers)):
-                    ws: WorkerState = workers[worker_index % len(workers)]
+                nworkers = len(workers)
+                for i in range(nworkers):
+                    ws: WorkerState = workers[worker_index % nworkers]
                     worker_index += 1
                     try:
                         if ws is None or not ws._processing:
