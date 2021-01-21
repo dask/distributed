@@ -71,20 +71,20 @@ class WorkStealing(SchedulerPlugin):
     def transition(
         self, key, start, finish, compute_start=None, compute_stop=None, *args, **kwargs
     ):
-        ts = self.scheduler.tasks[key]
         if finish == "processing":
+            ts = self.scheduler.tasks[key]
             self.put_key_in_stealable(ts)
-
-        if start == "processing":
+        elif start == "processing":
+            ts = self.scheduler.tasks[key]
             self.remove_key_from_stealable(ts)
             if finish != "memory":
                 self.in_flight.pop(ts, None)
 
     def put_key_in_stealable(self, ts):
-        ws = ts.processing_on
-        worker = ws.address
         cost_multiplier, level = self.steal_time_ratio(ts)
         if cost_multiplier is not None:
+            ws = ts.processing_on
+            worker = ws.address
             self.stealable_all[level].add(ts)
             self.stealable[worker][level].add(ts)
             self.key_stealable[ts] = (worker, level)
