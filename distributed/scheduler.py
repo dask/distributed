@@ -1901,13 +1901,14 @@ class SchedulerState:
         estimate the task duration to be 2x current-runtime, otherwise we set it
         to be the average duration.
         """
+        exec_time: double = ws._executing.get(ts, 0)
         duration: double = self.get_task_duration(ts)
-        comm: double = self.get_comm_cost(ts, ws)
-        total_duration: double = duration + comm
-        if ts in ws._executing:
-            exec_time: double = ws._executing[ts]
-            if exec_time > 2 * duration:
-                total_duration = 2 * exec_time
+        total_duration: double
+        if exec_time > 2 * duration:
+            total_duration = 2 * exec_time
+        else:
+            comm: double = self.get_comm_cost(ts, ws)
+            total_duration = duration + comm
         ws._processing[ts] = total_duration
         return total_duration
 
@@ -6282,7 +6283,7 @@ class Scheduler(SchedulerState, ServerNode):
     # Cleanup #
     ###########
 
-    def reevaluate_occupancy(self, worker_index=0):
+    def reevaluate_occupancy(self, worker_index: Py_ssize_t = 0):
         """Periodically reassess task duration time
 
         The expected duration of a task can change over time.  Unfortunately we
@@ -6298,18 +6299,19 @@ class Scheduler(SchedulerState, ServerNode):
         think about.
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        DELAY = 0.1
         try:
             if self.status == Status.closed:
                 return
 
             last = time()
-            next_time = timedelta(seconds=DELAY)
+            next_time = timedelta(seconds=0.1)
 
             if self.proc.cpu_percent() < 50:
-                workers = list(parent._workers.values())
-                for i in range(len(workers)):
-                    ws: WorkerState = workers[worker_index % len(workers)]
+                workers: list = list(parent._workers.values())
+                nworkers: Py_ssize_t = len(workers)
+                i: Py_ssize_t
+                for i in range(nworkers):
+                    ws: WorkerState = workers[worker_index % nworkers]
                     worker_index += 1
                     try:
                         if ws is None or not ws._processing:
