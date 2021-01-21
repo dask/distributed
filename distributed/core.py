@@ -29,6 +29,7 @@ from .metrics import time
 from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
+    format_time,
     is_coroutine_function,
     get_traceback,
     truncate_exception,
@@ -199,7 +200,10 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(
+            self.monitor.update,
+            format_time(dask.config.get("distributed.admin.system-monitor.interval")),
+        )
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
