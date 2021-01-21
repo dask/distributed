@@ -203,7 +203,8 @@ class Server:
             self.monitor.update,
             parse_timedelta(
                 dask.config.get("distributed.admin.system-monitor.interval")
-            ),
+            )
+            * 1000,
         )
         self.periodic_callbacks["monitor"] = pc
 
