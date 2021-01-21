@@ -4830,8 +4830,8 @@ class Scheduler(ServerNode):
         """
         duration: double = self.get_task_duration(ts)
         comm: double = self.get_comm_cost(ts, ws)
-        total_duration: double
         exec_time: double = ws._executing.get(ts, 0)
+        total_duration: double
         if exec_time > 2 * duration:
             total_duration = 2 * exec_time
         else:
