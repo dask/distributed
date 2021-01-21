@@ -176,6 +176,7 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:
       interval: 500ms
+    event-loop: tornado
 rmm:
   pool-size: null
 ucx:

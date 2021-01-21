@@ -760,6 +760,12 @@ properties:
               The log format to emit.
 
               See https://docs.python.org/3/library/logging.html#logrecord-attributes
+          event-loop:
+            type: string
+            description: |
+              The event loop to use,
+
+              Must be one of tornado, asyncio, or uvloop
 
           pdb-on-err:
             type: boolean
