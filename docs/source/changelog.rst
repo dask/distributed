@@ -1,6 +1,22 @@
 Changelog
 =========
 
+2021.01.1
+---------
+
+Released on January 22, 2021
+
+- Make system monitor interval configurable (:pr:`4447`) `Matthew Rocklin`_
+- Add ``uvloop`` config value (:pr:`4448`) `Matthew Rocklin`_
+- Additional optimizations to stealing (:pr:`4445`) `jakirkham`_
+- Give clusters names (:pr:`4426`) `Jacob Tomlinson`_
+- Use worker comm pool in ``Semaphore`` (:pr:`4195`) `Florian Jetter`_
+- Set ``runspec`` on all new tasks to avoid deadlocks (:pr:`4432`) `Florian Jetter`_
+- Support ``TaskState`` objects in story methods (:pr:`4434`) `Matthew Rocklin`_
+- Support missing event loop in ``Client.asynchronous`` (:pr:`4436`) `Matthew Rocklin`_
+- Don't require network to inspect tests (:pr:`4433`) `Matthew Rocklin`_
+
+
 2021.01.0
 ---------
 
