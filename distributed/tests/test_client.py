@@ -6426,6 +6426,37 @@ async def test_annotations_retries(c, s, a, b):
     assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
 
 
+@gen_cluster(client=True)
+async def test_annotations_blockwise_unpack(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    from dask.array.utils import assert_eq
+    import numpy as np
+
+    # A flaky doubling function -- need extra args because it is called before
+    # application to establish dtype/meta.
+    scale = varying([ZeroDivisionError("one"), ZeroDivisionError("two"), 2, 2])
+
+    def flaky_double(x):
+        return scale() * x
+
+    # A reliable double function.
+    def reliable_double(x):
+        return 2 * x
+
+    x = da.ones(10, chunks=(5,))
+
+    # The later annotations should not override the earlier annotations
+    with dask.annotate(retries=2):
+        y = x.map_blocks(flaky_double, meta=np.array((), dtype=np.float))
+    with dask.annotate(retries=0):
+        z = y.map_blocks(reliable_double, meta=np.array((), dtype=np.float))
+
+    with dask.config.set(optimization__fuse__active=False):
+        z = await c.compute(z)
+
+    assert_eq(z, np.ones(10) * 4.0)
+
+
 @gen_cluster(
     client=True,
     nthreads=[
