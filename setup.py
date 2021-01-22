@@ -47,6 +47,10 @@ if cython_arg:
             "distributed.scheduler",
             sources=["distributed/scheduler.py"],
         ),
+        Extension(
+            "distributed.protocol.serialize",
+            sources=["distributed/protocol/serialize.py"],
+        ),
     ]
     for e in cyext_modules:
         e.cython_directives = {
