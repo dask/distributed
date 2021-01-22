@@ -157,14 +157,16 @@ def serialization_error_loads(header, frames):
 families = {}
 
 
-def register_serialization_family(name, dumps, loads):
-    families[name] = (dumps, loads, dumps and has_keyword(dumps, "context"))
+def register_serialization_family(name, dumps, loads, context=None):
+    if context is None:
+        context = has_keyword(dumps, "context")
+    families[name] = (dumps, loads, dumps and context)
 
 
-register_serialization_family("dask", dask_dumps, dask_loads)
-register_serialization_family("pickle", pickle_dumps, pickle_loads)
-register_serialization_family("msgpack", msgpack_dumps, msgpack_loads)
-register_serialization_family("error", None, serialization_error_loads)
+register_serialization_family("dask", dask_dumps, dask_loads, True)
+register_serialization_family("pickle", pickle_dumps, pickle_loads, True)
+register_serialization_family("msgpack", msgpack_dumps, msgpack_loads, False)
+register_serialization_family("error", None, serialization_error_loads, False)
 
 
 def check_dask_serializable(x):
