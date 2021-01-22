@@ -3411,7 +3411,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         if executing is not None:
             ws._executing = {
-                self.tasks[key]: duration for key, duration in executing.items()
+                parent._tasks[key]: duration for key, duration in executing.items()
             }
 
         if metrics:
