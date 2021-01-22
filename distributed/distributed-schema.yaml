@@ -771,6 +771,15 @@ properties:
             type: boolean
             description: Enter Python Debugger on scheduling error
 
+          system-monitor:
+            type: object
+            description: |
+              Options for the periodic system monitor
+            properties:
+              interval:
+                type: string
+                description: Polling time to query cpu/memory statistics default 500ms
+
   rmm:
     type: object
     description: |
