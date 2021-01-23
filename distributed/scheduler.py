@@ -3931,16 +3931,14 @@ class Scheduler(SchedulerState, ServerNode):
         tg: TaskGroup
         ts._state = state
         prefix_key = key_split(key)
-        try:
-            tp = parent._task_prefixes[prefix_key]
-        except KeyError:
+        tp = parent._task_prefixes.get(prefix_key)
+        if tp is None:
             parent._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
         ts._prefix = tp
 
         group_key = ts._group_key
-        try:
-            tg = parent._task_groups[group_key]
-        except KeyError:
+        tg = parent._task_groups.get(group_key)
+        if tg is None:
             parent._task_groups[group_key] = tg = TaskGroup(group_key)
             tg._prefix = tp
             tp._groups.append(tg)
