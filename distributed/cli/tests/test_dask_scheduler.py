@@ -70,6 +70,8 @@ def test_dashboard(loop):
             if b"dashboard at" in line:
                 dashboard_port = int(line.decode().split(":")[-1].strip())
                 break
+        else:
+            raise Exception("dashboard not found")
 
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             pass

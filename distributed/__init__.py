@@ -1,4 +1,5 @@
 from . import config
+import dask
 from dask.config import config
 from .actor import Actor, ActorFuture
 from .core import connect, rpc, Status
@@ -39,3 +40,15 @@ versions = get_versions()
 __version__ = versions["version"]
 __git_revision__ = versions["full-revisionid"]
 del get_versions, versions
+
+if dask.config.get("distributed.admin.event-loop") in ("asyncio", "tornado"):
+    pass
+elif dask.config.get("distributed.admin.event-loop") == "uvloop":
+    import uvloop
+
+    uvloop.install()
+else:
+    raise ValueError(
+        "Expected distributed.admin.event-loop to be in ('asyncio', 'tornado', 'uvloop'), got %s"
+        % dask.config.get("distributed.admin.event-loop")
+    )

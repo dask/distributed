@@ -803,7 +803,10 @@ class Client:
         though the client was originally created in asynchronous mode we may
         find ourselves in contexts when it is better to operate synchronously.
         """
-        return self._asynchronous and self.loop is IOLoop.current()
+        try:
+            return self._asynchronous and self.loop is IOLoop.current()
+        except RuntimeError:
+            return False
 
     @property
     def dashboard_link(self):

@@ -1783,3 +1783,12 @@ async def test_executor_offload(cleanup, monkeypatch):
                     return threading.get_ident() == x._thread_ident
 
                 assert await c.submit(f, x)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_story(c, s, w):
+    future = c.submit(inc, 1)
+    await future
+    ts = w.tasks[future.key]
+    assert ts.state in str(w.story(ts))
+    assert w.story(ts) == w.story(ts.key)

@@ -94,6 +94,7 @@ class LocalCluster(SpecCluster):
 
     def __init__(
         self,
+        name=None,
         n_workers=None,
         threads_per_worker=None,
         processes=True,
@@ -232,6 +233,7 @@ class LocalCluster(SpecCluster):
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
+            name=name,
             scheduler=scheduler,
             workers=workers,
             worker=worker,

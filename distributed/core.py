@@ -135,6 +135,7 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -199,7 +200,13 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(
+            self.monitor.update,
+            parse_timedelta(
+                dask.config.get("distributed.admin.system-monitor.interval")
+            )
+            * 1000,
+        )
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
@@ -229,6 +236,8 @@ class Server:
         )
 
         self.__stopped = False
+
+        super().__init__(**kwargs)
 
     @property
     def status(self):
