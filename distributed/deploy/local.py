@@ -101,7 +101,7 @@ class LocalCluster(SpecCluster):
         start=None,
         host=None,
         ip=None,
-        scheduler_port=8786,
+        scheduler_port=None,
         silence_logs=logging.WARN,
         dashboard_address=":8787",
         worker_dashboard_address=None,
@@ -167,6 +167,11 @@ class LocalCluster(SpecCluster):
                 protocol = "tcp://"
         if not protocol.endswith("://"):
             protocol = protocol + "://"
+
+        if protocol.startswith("inproc"):
+            scheduler_port = 0
+        else:
+            scheduler_port = 8786
 
         if host is None and not protocol.startswith("inproc") and not interface:
             host = "127.0.0.1"
