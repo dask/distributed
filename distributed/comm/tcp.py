@@ -1,4 +1,5 @@
 import errno
+import functools
 import logging
 import socket
 from ssl import SSLError
@@ -126,8 +127,16 @@ def convert_stream_closed_error(obj, exc):
         raise CommClosedError("in %s: %s" % (obj, exc)) from exc
 
 
-def _do_nothing():
-    pass
+def _close_comm(ref):
+    """ Callback to close Dask Comm when Tornado Stream closes
+
+    Parameters
+    ----------
+        ref: weak reference to a Dask comm
+    """
+    comm = ref()
+    if comm:
+        comm._closed = True
 
 
 class TCP(Comm):
@@ -136,6 +145,7 @@ class TCP(Comm):
     """
 
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+        self._closed = False
         Comm.__init__(self)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
@@ -145,18 +155,12 @@ class TCP(Comm):
         self._finalizer.atexit = False
         self._extra = {}
 
+        ref = weakref.ref(self)
+
+        stream.set_close_callback(functools.partial(_close_comm, ref))
+
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
-        # set a close callback, to make `self.stream.closed()` more reliable.
-        # Background: if `stream` is unused (e.g. because it's in `ConnectionPool.available`),
-        # the underlying fd is not watched for changes. In this case, even if the
-        # connection is actively closed by the remote end, `self.closed()` would still return `False`.
-        # Registering a closed callback will make tornado register the underlying fd
-        # for changes, and this would be reflected in `self.closed()` even without reading/writing.
-        #
-        # Use a global method (instead of a lambda) to avoid creating a reference
-        # to the local scope.
-        stream.set_close_callback(_do_nothing)
         self._read_extra()
 
     def _read_extra(self):
@@ -198,6 +202,7 @@ class TCP(Comm):
                 frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
+            self._closed = True
             if not shutting_down():
                 convert_stream_closed_error(self, e)
         except Exception:
@@ -261,6 +266,7 @@ class TCP(Comm):
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
             self.stream = None
+            self._closed = True
             if not shutting_down():
                 convert_stream_closed_error(self, e)
         except Exception:
@@ -281,6 +287,7 @@ class TCP(Comm):
         # Task was destroyed but it is pending!
         # Triggered by distributed.deploy.tests.test_local::test_silent_startup
         stream, self.stream = self.stream, None
+        self._closed = True
         if stream is not None and not stream.closed():
             try:
                 # Flush the stream's write buffer by waiting for a last write.
@@ -295,12 +302,13 @@ class TCP(Comm):
 
     def abort(self):
         stream, self.stream = self.stream, None
+        self._closed = True
         if stream is not None and not stream.closed():
             self._finalizer.detach()
             stream.close()
 
     def closed(self):
-        return self.stream is None or self.stream.closed()
+        return self._closed
 
     @property
     def extra_info(self):
