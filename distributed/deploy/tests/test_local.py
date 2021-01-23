@@ -122,7 +122,7 @@ def test_move_unserializable_data():
     transports.
     """
     with LocalCluster(
-        processes=False, silence_logs=False, dashboard_address=None, scheduler_port=0
+        processes=False, silence_logs=False, dashboard_address=None
     ) as cluster:
         assert cluster.scheduler_address.startswith("inproc://")
         assert cluster.workers[0].address.startswith("inproc://")
@@ -138,7 +138,7 @@ def test_transports_inproc():
     Test the transport chosen by LocalCluster depending on arguments.
     """
     with LocalCluster(
-        1, processes=False, silence_logs=False, dashboard_address=None, scheduler_port=0
+        1, processes=False, silence_logs=False, dashboard_address=None
     ) as c:
         assert c.scheduler_address.startswith("inproc://")
         assert c.workers[0].address.startswith("inproc://")
@@ -833,9 +833,7 @@ def test_asynchronous_property(loop):
 
 
 def test_protocol_inproc(loop):
-    with LocalCluster(
-        protocol="inproc://", loop=loop, processes=False, scheduler_port=0
-    ) as cluster:
+    with LocalCluster(protocol="inproc://", loop=loop, processes=False) as cluster:
         assert cluster.scheduler.address.startswith("inproc://")
 
 
