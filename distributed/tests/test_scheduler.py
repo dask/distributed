@@ -17,7 +17,7 @@ import pytest
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.comm import Comm
 from distributed.core import connect, rpc, ConnectionPool, Status
-from distributed.scheduler import Scheduler
+from distributed.scheduler import Scheduler, UNKNOWN_TASK_DURATION
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -2165,6 +2165,52 @@ async def test_unknown_task_duration_config(client, s, a, b):
 @gen_cluster()
 async def test_unknown_task_duration_config(s, a, b):
     assert s.idle_since == s.time_started
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_unknown_task_duration_updated_during_run(c, s, a, b):
+    """
+    If long running tasks are submitted, we'll only get an accurate meassurement once the task finishes.
+    """
+
+    fut = c.submit(slowinc, 1, delay=5)
+
+    while not s.tasks:
+        await asyncio.sleep(0.01)
+
+    ts = s.tasks[fut.key]
+    assert ts._prefix._name in s.unknown_durations
+    duration = s.get_task_duration(ts)
+    assert duration == UNKNOWN_TASK_DURATION
+    # Workers hearbeat every 0.5 secondas and we need at least one beat before
+    # an updated measurement gets in
+    await asyncio.sleep(1)
+    while ts.state != "memory":
+        new_duration = s.get_task_duration(ts)
+        assert new_duration > UNKNOWN_TASK_DURATION
+        assert new_duration >= duration
+        assert ts._prefix._name in s.unknown_durations
+        duration = new_duration
+        await asyncio.sleep(0.01)
+
+    old_duration = s.get_task_duration(ts)
+    # The continuous meassurement should not impact known meassurements
+    fut = c.submit(slowinc, 1, delay=3)
+
+    while fut.key not in s.tasks:
+        await asyncio.sleep(0.01)
+
+    ts = s.tasks[fut.key]
+    while ts.state != "memory":
+        duration = s.get_task_duration(ts)
+        assert duration == old_duration
+        await asyncio.sleep(0.01)
+
+    # Once they key is finished, the ordinary update continues
+    duration = s.get_task_duration(ts)
+    assert old_duration != duration
+    assert ts._prefix._name not in s.unknown_durations
 
 
 @gen_cluster(client=True, timeout=1000)

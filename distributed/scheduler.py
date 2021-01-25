@@ -3422,9 +3422,20 @@ class Scheduler(SchedulerState, ServerNode):
         ws._last_seen = time()
 
         if executing is not None:
-            ws._executing = {
-                parent._tasks[key]: duration for key, duration in executing.items()
-            }
+            ws._executing = {}
+            for key, duration in executing.items():
+                ts = parent.tasks[key]
+                ws._executing[ts] = duration
+                if ts._prefix._name in self.unknown_durations:
+                    old_duration = ts._prefix._duration_average
+                    new_duration = duration
+                    if old_duration < 0:
+                        avg_duration = new_duration
+                    else:
+                        avg_duration = 0.5 * old_duration + 0.5 * new_duration
+
+                    ts._prefix._duration_average = avg_duration
+                    ts._group._duration = new_duration
 
         if metrics:
             ws._metrics = metrics
