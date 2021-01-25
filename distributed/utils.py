@@ -10,7 +10,7 @@ from hashlib import md5
 import html
 import json
 import logging
-import multiprocessing
+import multiprocessing  # noqa: F401
 import os
 import re
 import shutil
@@ -71,6 +71,8 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
+    import multiprocessing  # noqa: F401
+
     if not WINDOWS:
         # For some reason this is required in python >= 3.9
         import multiprocessing.popen_spawn_posix
