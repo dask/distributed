@@ -163,7 +163,7 @@ class TaskState:
         self.dependents = set()
         self.duration = None
         self.priority = None
-        self.state = None
+        self.state = "new"
         self.who_has = set()
         self.coming_from = None
         self.waiting_for_data = set()
@@ -448,27 +448,26 @@ class Worker(ServerNode):
         self.validate = validate
 
         self._transitions = {
+            # Basic state transitions
+            ("new", "waiting"): self.transition_new_waiting,
+            ("new", "fetch"): self.transition_new_fetch,
             ("waiting", "ready"): self.transition_waiting_ready,
-            ("waiting", "memory"): self.transition_waiting_done,
-            ("waiting", "error"): self.transition_waiting_done,
-            ("waiting", "flight"): self.transition_waiting_flight,
+            ("fetch", "flight"): self.transition_fetch_flight,
             ("ready", "executing"): self.transition_ready_executing,
-            ("ready", "memory"): self.transition_ready_memory,
-            ("ready", "error"): self.transition_ready_error,
-            ("ready", "waiting"): self.transition_ready_waiting,
-            ("constrained", "waiting"): self.transition_ready_waiting,
-            ("constrained", "error"): self.transition_ready_error,
-            ("constrained", "executing"): self.transition_constrained_executing,
             ("executing", "memory"): self.transition_executing_done,
+            ("flight", "memory"): self.transition_flight_memory,
+            ("flight", "fetch"): self.transition_flight_fetch,
+            # Scheduler intercession
+            ("fetch", "waiting"): self.transition_fetch_waiting,
+            # Errors, long-running, constrained
+            ("waiting", "error"): self.transition_waiting_done,
+            ("constrained", "executing"): self.transition_constrained_executing,
             ("executing", "error"): self.transition_executing_done,
             ("executing", "rescheduled"): self.transition_executing_done,
             ("executing", "long-running"): self.transition_executing_long_running,
             ("long-running", "error"): self.transition_executing_done,
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
-            ("flight", "memory"): self.transition_flight_memory,
-            ("flight", "ready"): self.transition_flight_memory,
-            ("flight", "waiting"): self.transition_flight_waiting,
         }
 
         self.incoming_transfer_log = deque(maxlen=100000)
@@ -1473,13 +1472,18 @@ class Worker(ServerNode):
                     ts.exception = None
                     ts.traceback = None
                 else:
-                    ts.state = "waiting"
+                    # self.log.append((ts.key, "re-add", ts.state, "waiting"))
+                    self.log.append((ts.key, "re-adding key, new TaskState"))
+                    self.tasks[key] = ts = TaskState(
+                        key=key, runspec=SerializedTask(function, args, kwargs, task)
+                    )
+                    self.transition(ts, "waiting")
             else:
                 self.log.append((key, "new"))
                 self.tasks[key] = ts = TaskState(
                     key=key, runspec=SerializedTask(function, args, kwargs, task)
                 )
-                ts.state = "waiting"
+                self.transition(ts, "waiting")
 
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
@@ -1500,9 +1504,7 @@ class Worker(ServerNode):
                 assert workers
                 if dependency not in self.tasks:
                     self.tasks[dependency] = dep_ts = TaskState(key=dependency)
-                    dep_ts.state = (
-                        "waiting" if dependency not in self.data else "memory"
-                    )
+                    dep_ts.state = "fetch" if dependency not in self.data else "memory"
 
                 dep_ts = self.tasks[dependency]
                 self.log.append((dependency, "new-dep", dep_ts.state))
@@ -1558,10 +1560,25 @@ class Worker(ServerNode):
             self.validate_task(ts)
         self._notify_plugins("transition", ts.key, start, state or finish, **kwargs)
 
-    def transition_waiting_flight(self, ts, worker=None):
+    def transition_new_waiting(self, ts):
+        if self.validate:
+            assert ts.state == "new"
+            assert ts.runspec is not None
+
+    def transition_new_fetch(self, ts):
+        if self.validate:
+            assert ts.state == "new"
+            assert ts.runspec is None
+
+    def transition_fetch_waiting(self, ts):
+        if self.validate:
+            assert ts.state == "fetch"
+            assert ts.runspec is not None
+
+    def transition_fetch_flight(self, ts, worker=None):
         try:
             if self.validate:
-                assert ts.state != "flight"
+                assert ts.state == "fetch"
                 assert ts.dependents
 
             ts.coming_from = worker
@@ -1574,7 +1591,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_flight_waiting(self, ts, worker=None, remove=True, runspec=None):
+    def transition_flight_fetch(self, ts, worker=None, remove=True):
         try:
             if self.validate:
                 assert ts.state == "flight"
@@ -1867,7 +1884,7 @@ class Worker(ServerNode):
                 if self.validate:
                     assert all(dep.key in self.tasks for dep in deps)
 
-                deps = [dep for dep in deps if dep.state == "waiting"]
+                deps = [dep for dep in deps if dep.state == "fetch"]
 
                 missing_deps = {dep for dep in deps if not dep.who_has}
                 if missing_deps:
@@ -1892,7 +1909,7 @@ class Worker(ServerNode):
                     or self.comm_nbytes < self.total_comm_nbytes
                 ):
                     dep = deps.pop()
-                    if dep.state != "waiting":
+                    if dep.state != "fetch":
                         continue
                     if not dep.who_has:
                         continue
@@ -2019,7 +2036,7 @@ class Worker(ServerNode):
         while L:
             d = L.popleft()
             ts = self.tasks.get(d)
-            if ts is None or ts.state != "waiting":
+            if ts is None or ts.state != "fetch":
                 continue
             if total_bytes + ts.get_nbytes() > self.target_message_size:
                 break
@@ -2069,7 +2086,7 @@ class Worker(ServerNode):
                     self.log.append(("busy-gather", worker, deps))
                     for ts in deps_ts:
                         if ts.state == "flight":
-                            self.transition(ts, "waiting")
+                            self.transition(ts, "fetch")
                     return
 
                 if cause:
@@ -2152,7 +2169,8 @@ class Worker(ServerNode):
                         self.release_key(d)
                         continue
                     elif ts.state not in ("ready", "memory"):
-                        self.transition(ts, "waiting", worker=worker, remove=not busy)
+                        # "waiting" or "fetch"?
+                        self.transition(ts, "fetch", worker=worker, remove=not busy)
 
                     if not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
@@ -3012,7 +3030,7 @@ class Worker(ServerNode):
                     ts_wait = self.tasks[key]
                     assert (
                         ts_wait.state == "flight"
-                        or ts_wait.state == "waiting"
+                        or ts_wait.state == "fetch"
                         or ts_wait.key in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
