@@ -392,3 +392,21 @@ def test_collections_get(client, optimize_graph, s, a, b):
     logs = client.run(g)
     assert logs[a["address"]]
     assert not logs[b["address"]]
+
+
+@gen_cluster(config={"distributed.worker.resources.my_resources": 1}, client=True)
+async def test_resources_from_config(c, s, a, b):
+    info = c.scheduler_info()
+    for worker in [a, b]:
+        assert info["workers"][worker.address]["resources"] == {"my_resources": 1}
+
+
+@gen_cluster(
+    worker_kwargs=dict(resources={"my_resources": 10}),
+    config={"distributed.worker.resources.my_resources": 1},
+    client=True,
+)
+async def test_resources_from_python_override_config(c, s, a, b):
+    info = c.scheduler_info()
+    for worker in [a, b]:
+        assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
