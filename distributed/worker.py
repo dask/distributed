@@ -3007,7 +3007,7 @@ class Worker(ServerNode):
                     assert (
                         ts_wait.state == "flight"
                         or ts_wait.state == "waiting"
-                        or ts.wait.key in self._missing_dep_flight
+                        or ts_wait.key in self._missing_dep_flight
                         or ts_wait.who_has.issubset(self.in_flight_workers)
                     )
                 if ts.state == "memory":
