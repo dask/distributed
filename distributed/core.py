@@ -1,5 +1,5 @@
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
@@ -60,32 +60,6 @@ class Status(Enum):
     stopping = "stopping"
     undefined = None
     dont_reply = "dont-reply"
-
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status, this avoid comparison with non-existing status.
-        """
-        if isinstance(other, type(self)):
-            return self.value == other.value
-        elif isinstance(other, str) or (other is None):
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            assert other in [
-                s.value for s in type(self)
-            ], f"comparison with non-existing states {other}"
-            return other == self.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
 
 
 class RPCClosed(IOError):
@@ -161,6 +135,7 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -184,8 +159,6 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self.events = None
-        self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
         self._event_finished = asyncio.Event()
 
@@ -224,12 +197,16 @@ class Server:
         from .counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-        self.events = defaultdict(lambda: deque(maxlen=10000))
-        self.event_counts = defaultdict(lambda: 0)
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(
+            self.monitor.update,
+            parse_timedelta(
+                dask.config.get("distributed.admin.system-monitor.interval")
+            )
+            * 1000,
+        )
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
@@ -259,6 +236,8 @@ class Server:
         )
 
         self.__stopped = False
+
+        super().__init__(**kwargs)
 
     @property
     def status(self):
@@ -369,16 +348,6 @@ class Server:
         if self.digests is not None:
             self.digests["tick-duration"].add(diff)
 
-    def log_event(self, name, msg):
-        msg["time"] = time()
-        if isinstance(name, list):
-            for n in name:
-                self.events[n].append(msg)
-                self.event_counts[n] += 1
-        else:
-            self.events[name].append(msg)
-            self.event_counts[name] += 1
-
     @property
     def address(self):
         """
@@ -472,9 +441,12 @@ class Server:
                         )
                     break
                 except Exception as e:
-                    logger.exception(e)
-                    await comm.write(error_message(e, status="uncaught-error"))
-                    continue
+                    logger.exception("Exception while reading from %s", address)
+                    if comm.closed():
+                        raise
+                    else:
+                        await comm.write(error_message(e, status="uncaught-error"))
+                        continue
                 if not isinstance(msg, dict):
                     raise TypeError(
                         "Bad message type.  Expected dict, got\n  " + str(msg)
@@ -531,8 +503,11 @@ class Server:
                             logger.info("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
-                        logger.exception(e)
-                        result = error_message(e, status="uncaught-error")
+                        logger.exception("Exception while handling op %s", op)
+                        if comm.closed():
+                            raise
+                        else:
+                            result = error_message(e, status="uncaught-error")
 
                 # result is not type stable:
                 # when LHS is not Status then RHS must not be Status or it raises.
@@ -600,7 +575,10 @@ class Server:
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
-                    func()
+                    if is_coroutine_function(func):
+                        self.loop.add_callback(func)
+                    else:
+                        func()
 
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
@@ -1155,6 +1133,7 @@ def error_message(e, status="error"):
     e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb, protocol=4)
+        protocol.pickle.loads(tb2)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 

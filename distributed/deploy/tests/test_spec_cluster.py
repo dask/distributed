@@ -494,7 +494,7 @@ async def test_run_spec_cluster_worker_names(cleanup):
 
     class MyCluster(SpecCluster):
         def _new_worker_name(self, worker_number):
-            return f"prefix-{self._name }-{worker_number}-suffix"
+            return f"prefix-{self.name}-{worker_number}-suffix"
 
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker

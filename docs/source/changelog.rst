@@ -1,6 +1,164 @@
 Changelog
 =========
 
+2021.01.1
+---------
+
+Released on January 22, 2021
+
+- Make system monitor interval configurable (:pr:`4447`) `Matthew Rocklin`_
+- Add ``uvloop`` config value (:pr:`4448`) `Matthew Rocklin`_
+- Additional optimizations to stealing (:pr:`4445`) `jakirkham`_
+- Give clusters names (:pr:`4426`) `Jacob Tomlinson`_
+- Use worker comm pool in ``Semaphore`` (:pr:`4195`) `Florian Jetter`_
+- Set ``runspec`` on all new tasks to avoid deadlocks (:pr:`4432`) `Florian Jetter`_
+- Support ``TaskState`` objects in story methods (:pr:`4434`) `Matthew Rocklin`_
+- Support missing event loop in ``Client.asynchronous`` (:pr:`4436`) `Matthew Rocklin`_
+- Don't require network to inspect tests (:pr:`4433`) `Matthew Rocklin`_
+
+
+2021.01.0
+---------
+
+Released on January 15, 2021
+
+- Add time started to scheduler info (:pr:`4425`) `Jacob Tomlinson`_
+- Log adaptive error (:pr:`4422`) `Jacob Tomlinson`_
+- Xfail normalization tests (:pr:`4411`) `Jacob Tomlinson`_
+- Use ``dumps_msgpack`` and ``loads_msgpack`` when packing high level graphs (:pr:`4409`) `Mads R. B. Kristensen`_
+- Add ``nprocs`` auto option to ``dask-worker`` CLI (:pr:`4377`) `Jacob Tomlinson`_
+- Type annotation of ``_reevaluate_occupancy_worker`` (:pr:`4398`) `jakirkham`_
+- Type ``TaskGroup`` in ``active_states`` (:pr:`4408`) `jakirkham`_
+- Fix ``test_as_current_is_thread_local`` (:pr:`4402`) `jakirkham`_
+- Use ``list`` comprehensions to bind ``TaskGroup`` type (:pr:`4401`) `jakirkham`_
+- Make tests pass after 2028 (:pr:`4403`) `Bernhard M. Wiedemann`_
+- Fix compilation warnings, ``decide_worker`` now a C func, stealing improvements (:pr:`4375`) `jakirkham`_
+- Drop custom ``__eq__`` from ``Status`` (:pr:`4270`) `jakirkham`_
+- ``test_performance_report``: skip without bokeh (:pr:`4388`) `Bruno Pagani`_
+- ``Nanny`` now respects dask settings from ctx mgr (:pr:`4378`) `Florian Jetter`_
+- Better task duration estimates for outliers (:pr:`4213`) `selshowk`_
+- Dask internal inherit config (:pr:`4364`) `Jacob Tomlinson`_
+- Provide ``setup.py`` option to profile Cython code (:pr:`4362`) `jakirkham`_
+- Optimizations of ``*State`` and ``Task*`` objects and stealing (:pr:`4358`) `jakirkham`_
+- Cast ``SortedDict`` s to ``dict`` s in a few key places & other minor changes (:pr:`4355`) `jakirkham`_
+- Use task annotation priorities for user-level priorities (:pr:`4354`) `James Bourbeau`_
+- Added docs to highlevelgraph pack/unpack (:pr:`4352`) `Mads R. B. Kristensen`_
+- Optimizations in notable functions used by transitions (:pr:`4351`) `jakirkham`_
+- Silence exception when releasing futures on process shutdown (:pr:`4309`) `Benjamin Zaitlen`_
+
+
+2020.12.0
+---------
+
+Released on December 10, 2020
+
+Highlights
+^^^^^^^^^^
+
+- Switched to `CalVer <https://calver.org/>`_ for versioning scheme.
+- The scheduler can now receives Dask ``HighLevelGraph`` s instead of raw dictionary task graphs.
+  This allows for a much more efficient communication of task graphs from the client to the scheduler.
+- Added support for using custom ``Layer``-level annotations like ``priority``, ``retries``,
+  etc. with the ``dask.annotations`` context manager.
+- Updated minimum supported version of Dask to 2020.12.0.
+- Added many type annotations and updates to allow for gradually Cythonizing the scheduler.
+
+All changes
+^^^^^^^^^^^
+
+- Some common optimizations across transitions (:pr:`4348`) `jakirkham`_
+- Drop serialize extension (:pr:`4344`) `jakirkham`_
+- Log duplciate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
+- Annotation of some comm related methods in the ``Scheduler`` (:pr:`4341`) `jakirkham`_
+- Optimize ``assert`` in ``validate_waiting`` (:pr:`4342`) `jakirkham`_
+- Optimize ``decide_worker`` (:pr:`4332`) `jakirkham`_
+- Store occupancy in ``_reevaluate_occupancy_worker`` (:pr:`4337`) `jakirkham`_
+- Handle ``WorkerState`` ``memory_limit`` of ``None`` (:pr:`4335`) `jakirkham`_
+- Use ``bint`` to annotate boolean attributes (:pr:`4334`) `jakirkham`_
+- Optionally use offload executor in worker (:pr:`4307`) `Matthew Rocklin`_
+- Optimize ``send_task_to_worker`` (:pr:`4331`) `jakirkham`_
+- Optimize ``valid_workers`` (:pr:`4329`) `jakirkham`_
+- Store occupancy in ``transition_waiting_processing`` (:pr:`4330`) `jakirkham`_
+- Optimize ``get_comm_cost`` (:pr:`4328`) `jakirkham`_
+- Use ``.pop(...)`` to remove ``key`` (:pr:`4327`) `jakirkham`_
+- Use ``operator.attrgetter`` on ``WorkerState.address`` (:pr:`4324`) `jakirkham`_
+- Annotate ``Task*`` objects for Cythonization (:pr:`4302`) `jakirkham`_
+- Ensure ``retire_workers`` always ``return`` a ``dict`` (:pr:`4323`) `jakirkham`_
+- Some Cython fixes for ``WorkerState`` (:pr:`4321`) `jakirkham`_
+- Optimize ``WorkerState.__eq__`` (:pr:`4320`) `jakirkham`_
+- Swap order of ``TaskGroup`` and ``TaskPrefix`` (:pr:`4319`) `jakirkham`_
+- Check traceback object can be unpickled (:pr:`4299`) `jakirkham`_
+- Move ``TaskGroup`` & ``TaskPrefix`` before `TaskState` (:pr:`4318`) `jakirkham`_
+- Remove empty ``test_highgraph.py`` file (:pr:`4313`) `James Bourbeau`_
+- Ensure that ``retire_workers`` returns a ``dict`` (:pr:`4315`) `Matthew Rocklin`_
+- Annotate ``WorkerState`` for Cythonization (:pr:`4294`) `jakirkham`_
+- Close ``comm`` on low-level errors (:pr:`4239`) `jochen-ott-by`_
+- Coerce new ``TaskState.nbytes`` value to ``int`` (:pr:`4311`) `jakirkham`_
+- Remove offload ``try``/``except`` for ``thread_name_prefix`` keyword (:pr:`4308`) `James Bourbeau`_
+- Fix ``pip`` install issue on CI (:pr:`4310`) `jakirkham`_
+- Transmit ``Layer`` annotations to scheduler (:pr:`4279`) `Simon Perkins`_
+- Ignores any compiled files generated by Cython (:pr:`4301`) `jakirkham`_
+- Protect against missing key in ``get_metrics`` (:pr:`4300`) `Matthew Rocklin`_
+- Provide option to build Distributed with Cython (:pr:`4292`) `jakirkham`_
+- Set ``WorkerState.processing`` w/``dict`` in ``clean`` (:pr:`4295`) `jakirkham`_
+- Annotate ``ClientState`` for Cythonization (:pr:`4290`) `jakirkham`_
+- Annotate ``check_idle_saturated`` for Cythonization (:pr:`4289`) `jakirkham`_
+- Avoid flicker in ``TaskStream`` with "Scheduler is empty" message (:pr:`4284`) `Matthew Rocklin`_
+- Make ``gather_dep`` robust to missing tasks (:pr:`4285`) `Matthew Rocklin`_
+- Annotate ``extract_serialize`` (for Cythonization) (:pr:`4283`) `jakirkham`_
+- Move ``nbytes`` from Worker's state to ``TaskState`` (:pr:`4274`) `Gil Forsyth`_
+- Drop extra type check in ``_extract_serialize`` (:pr:`4281`) `jakirkham`_
+- Move Status to top-level import (:pr:`4280`) `Matthew Rocklin`_
+- Add ``__hash__`` and ``__eq__`` for ``TaskState`` (:pr:`4278`) `jakirkham`_
+- Add ``__hash__`` and ``__eq__`` for ``ClientState`` (:pr:`4276`) `jakirkham`_
+- Collect ``report``'s ``client_key``s in a ``list`` (:pr:`4275`) `jakirkham`_
+- Precompute ``hash`` for ``WorkerState`` (:pr:`4271`) `jakirkham`_
+- Use ``Status`` ``Enum`` in ``remove_worker`` (:pr:`4269`) `jakirkham`_
+- Add aggregated topic logs and ``log_event`` method (:pr:`4230`) `James Bourbeau`_
+- Find the set of workers instead of their frequency (:pr:`4267`) `jakirkham`_
+- Use ``set.update`` to include other ``comms`` (:pr:`4268`) `jakirkham`_
+- Support string timeouts in ``sync`` (:pr:`4266`) `James Bourbeau`_
+- Use ``dask.utils.stringify()`` instead of ``distributed.utils.tokey()`` (:pr:`4255`) `Mads R. B. Kristensen`_
+- Use ``.items()`` to walk through keys and values (:pr:`4261`) `jakirkham`_
+- Simplify frame length packing in TCP write (:pr:`4257`) `jakirkham`_
+- Comm/tcp listener: do not pass comm with failed handshake to ``comm_handler`` (:pr:`4240`) `jochen-ott-by`_
+- Fuse steps in ``extract_serialize`` (:pr:`4254`) `jakirkham`_
+- Drop ``test_sklearn`` (:pr:`4253`) `jakirkham`_
+- Document task priority tie breaking (:pr:`4252`) `James Bourbeau`_
+- ``__dask_distributed_pack__()``: client argument (:pr:`4248`) `Mads R. B. Kristensen`_
+- Configurable timeouts for ``worker_client`` and ``get_client`` (:pr:`4146`) `GeethanjaliEswaran`_
+- Add dask/distributed versions to ``performance_report`` (:pr:`4249`) `Matthew Rocklin`_
+- Update miniconda GitHub action (:pr:`4250`) `James Bourbeau`_
+- UCX closing ignore error (:pr:`4236`) `Mads R. B. Kristensen`_
+- Redirect to ``dask-worker`` cli documentation (:pr:`4247`) `Timost`_
+- Upload file worker plugin (:pr:`4238`) `Ian Rose`_
+- Create dependency ``TaskState`` as needed in ``gather_dep`` (:pr:`4241`) `Gil Forsyth`_
+- Instantiate plugin if needed in ``register_worker_plugin`` (:pr:`4198`) `Julia Signell`_
+- Allow actors to call actors on the same worker (:pr:`4225`) `Martin Durant`_
+- Special case profile thread in leaked thread check (:pr:`4229`) `James Bourbeau`_
+- Use ``intersection()`` on a set instead of ``dict_keys`` in ``update_graph`` (:pr:`4227`) `Mads R. B. Kristensen`_
+- Communicate ``HighLevelGraphs`` directly to the ``Scheduler`` (:pr:`4140`) `Mads R. B. Kristensen`_
+- Add ``get_task_metadata`` context manager (:pr:`4216`) `James Bourbeau`_
+- Task state logs and data fix (:pr:`4206`) `Gil Forsyth`_
+- Send active task durations from worker to scheduler (:pr:`4192`) `James Bourbeau`_
+- Fix state check in ``test_close_gracefully`` (:pr:`4203`) `Gil Forsyth`_
+- Avoid materializing layers in ``Client.compute()`` (:pr:`4196`) `Mads R. B. Kristensen`_
+- Add ``TaskState`` metadata (:pr:`4191`) `James Bourbeau`_
+- Fix regression in task stealing for already released keys (:pr:`4182`) `Florian Jetter`_
+- Fix ``_graph_to_futures`` bug for futures-based dependencies (:pr:`4178`) `Richard J Zamora`_
+- High level graph ``dumps``/``loads`` support (:pr:`4174`) `Mads R. B. Kristensen`_
+- Implement pass HighLevelGraphs through ``_graph_to_futures`` (:pr:`4139`) `Mads R. B. Kristensen`_
+- Support ``async`` preload click commands (:pr:`4170`) `James Bourbeau`_
+- ``dask-worker`` cli memory limit option doc fix (:pr:`4172`) `marwan116`_
+- Add ``TaskState`` to ``worker.py`` (:pr:`4107`) `Gil Forsyth`_
+- Increase robustness of ``Semaphore.release`` (:pr:`4151`) `Lucas Rademaker`_
+- Skip batched comm test win / tornado5 (:pr:`4166`) `Tom Augspurger`_
+- Set Zict buffer target to maxsize when ``memory_target_fraction`` is ``False`` (:pr:`4156`) `Krishan Bhasin`_
+- Add ``PipInstall`` ``WorkerPlugin`` (:pr:`3216`) `Matthew Rocklin`_
+- Log ``KilledWorker`` events in the scheduler (:pr:`4157`) `Matthew Rocklin`_
+- Fix ``test_gpu_metrics`` failure (:pr:`4154`) `jakirkham`_
+
+
 2.30.1 - 2020-11-03
 -------------------
 
@@ -2003,3 +2161,12 @@ significantly without many new features.
 .. _`Poruri Sai Rahul`: https://github.com/rahulporuri
 .. _`jennalc`: https://github.com/jennalc
 .. _`Sergey Kozlov`: https://github.com/skozlovf
+.. _`jochen-ott-by`: https://github.com/jochen-ott-by
+.. _`Simon Perkins`: https://github.com/sjperkins
+.. _`GeethanjaliEswaran`: https://github.com/geethanjalieswaran
+.. _`Timost`: https://github.com/Timost
+.. _`Ian Rose`: https://github.com/ian-r-rose
+.. _`marwan116`: https://github.com/marwan116
+.. _`Bernhard M. Wiedemann`: https://github.com/bmwiedemann
+.. _`Bruno Pagani`: https://github.com/ArchangeGabriel
+.. _`selshowk`: https://github.com/selshowk

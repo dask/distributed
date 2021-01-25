@@ -14,6 +14,7 @@ from dask.system import CPU_COUNT
 from distributed import Nanny
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
+from distributed.deploy.utils import nprocesses_nthreads
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -124,11 +125,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
 @click.option(
     "--nprocs",
-    type=int,
+    type=str,
     default=1,
     show_default=True,
     help="Number of worker processes to launch. "
-    "If negative, then (CPU_COUNT + 1 + nprocs) is used.",
+    "If negative, then (CPU_COUNT + 1 + nprocs) is used. "
+    "Set to 'auto' to set nprocs and nthreads dynamically based on CPU_COUNT",
 )
 @click.option(
     "--name",
@@ -292,6 +294,11 @@ def main(
         if v is not None
     }
 
+    if nprocs == "auto":
+        nprocs, nthreads = nprocesses_nthreads()
+    else:
+        nprocs = int(nprocs)
+
     if nprocs < 0:
         nprocs = CPU_COUNT + 1 + nprocs
 
@@ -397,8 +404,7 @@ def main(
 
     if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
         config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        # Update the global config given priority to the existing global config
-        dask.config.update(dask.config.global_config, config, priority="old")
+        dask.config.update(dask.config.global_config, config)
 
     nannies = [
         t(

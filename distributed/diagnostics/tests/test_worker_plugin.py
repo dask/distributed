@@ -53,6 +53,19 @@ async def test_create_with_client(c, s):
     assert worker._my_plugin_status == "teardown"
 
 
+@gen_cluster(client=True, nthreads=[])
+async def test_create_with_client_and_plugin_from_class(c, s):
+    await c.register_worker_plugin(MyPlugin, data=456)
+
+    worker = await Worker(s.address, loop=s.loop)
+    assert worker._my_plugin_status == "setup"
+    assert worker._my_plugin_data == 456
+
+    # Give the plugin a new name so that it registers
+    await c.register_worker_plugin(MyPlugin, name="new", data=789)
+    assert worker._my_plugin_data == 789
+
+
 @gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
 async def test_create_on_construction(c, s, a, b):
     assert len(a.plugins) == len(b.plugins) == 1

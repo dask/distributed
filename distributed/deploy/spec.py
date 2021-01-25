@@ -245,6 +245,7 @@ class SpecCluster(Cluster):
         security=None,
         silence_logs=False,
         name=None,
+        shutdown_on_close=True,
     ):
         self._created = weakref.WeakSet()
 
@@ -268,8 +269,12 @@ class SpecCluster(Cluster):
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
+        self.shutdown_on_close = shutdown_on_close
 
-        super().__init__(asynchronous=asynchronous)
+        super().__init__(
+            asynchronous=asynchronous,
+            name=name,
+        )
 
         if not self.asynchronous:
             self._loop_runner.start()
@@ -617,6 +622,11 @@ class SpecCluster(Cluster):
 
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
 
+    @classmethod
+    def from_name(cls, name: str):
+        """Create an instance of this class to represent an existing cluster by name."""
+        raise NotImplementedError()
+
 
 async def run_spec(spec: dict, *args):
     workers = {}
@@ -636,6 +646,7 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with suppress(gen.TimeoutError, TimeoutError):
-            if cluster.status != Status.closed:
-                cluster.close(timeout=10)
+        if cluster.shutdown_on_close:
+            with suppress(gen.TimeoutError, TimeoutError):
+                if cluster.status != Status.closed:
+                    cluster.close(timeout=10)

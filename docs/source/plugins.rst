@@ -90,3 +90,4 @@ Built-In Worker Plugins
 -----------------------
 
 .. autoclass:: distributed.diagnostics.plugin.PipInstall
+.. autoclass:: distributed.diagnostics.plugin.UploadFile

@@ -25,6 +25,7 @@ from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
 import dask
 from dask import delayed
 from dask.optimization import SubgraphCallable
+from dask.utils import stringify
 import dask.bag as db
 from distributed import (
     Worker,
@@ -59,7 +60,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
 from distributed.sizeof import sizeof
-from distributed.utils import mp_context, sync, tmp_text, tokey, tmpfile, is_valid_xml
+from distributed.utils import mp_context, sync, tmp_text, tmpfile, is_valid_xml
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -1682,6 +1683,21 @@ def test_upload_file_exception_sync(c):
     with tmp_text("myfile.py", "syntax-error!") as fn:
         with pytest.raises(SyntaxError):
             c.upload_file(fn)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_upload_file_new_worker(c, s):
+    def g():
+        import myfile
+
+        return myfile.x
+
+    with tmp_text("myfile.py", "x = 123") as fn:
+        await c.upload_file(fn)
+        async with Worker(s.address):
+            x = await c.submit(g)
+
+        assert x == 123
 
 
 @pytest.mark.skip
@@ -3559,7 +3575,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         await wait(b4)
 
-        assert set(map(tokey, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(map(stringify, b3.__dask_keys__())).issubset(s.tasks)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3569,7 +3585,7 @@ async def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         await wait(b4)
 
-        assert not any(tokey(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(stringify(k) in s.tasks for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -3773,6 +3789,7 @@ def test_scheduler_info(c):
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
+    assert isinstance(info["started"], float)
 
 
 def test_write_scheduler_file(c):
@@ -3950,7 +3967,7 @@ async def test_serialize_future(s, a, b):
             with ctxman():
                 future2 = pickle.loads(pickle.dumps(future))
                 assert future2.client is ci
-                assert tokey(future2.key) in ci.futures
+                assert stringify(future2.key) in ci.futures
                 result2 = await future2
                 assert result == result2
 
@@ -4006,7 +4023,7 @@ def test_as_current_is_thread_local(s):
     l4.acquire()
 
     def run1():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.acquire()
                 l2.release()
@@ -4019,7 +4036,7 @@ def test_as_current_is_thread_local(s):
                     l4.release()
 
     def run2():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.release()
                 l2.acquire()
@@ -4338,6 +4355,7 @@ def test_normalize_collection_with_released_futures(c):
     assert res == sol
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 @gen_cluster(client=True)
 async def test_auto_normalize_collection(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -4364,6 +4382,7 @@ async def test_auto_normalize_collection(c, s, a, b):
         assert end - start < 1
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
@@ -5586,7 +5605,7 @@ async def test_nested_prioritization(c, s, w):
     await wait([fx, fy])
 
     assert (o[x.key] < o[y.key]) == (
-        s.tasks[tokey(fx.key)].priority < s.tasks[tokey(fy.key)].priority
+        s.tasks[stringify(fx.key)].priority < s.tasks[stringify(fy.key)].priority
     )
 
 
@@ -6113,6 +6132,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
+    pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
     async def f():
@@ -6139,6 +6159,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
+    assert dask.__version__ in data
 
 
 @pytest.mark.asyncio
@@ -6251,3 +6272,133 @@ async def test_get_task_metadata_multiple(c, s, a, b):
     assert len(metadata2) == 1
     assert list(metadata2.keys()) == [f2.key]
     assert metadata2[f2.key] == s.tasks.get(f2.key).metadata
+
+
+@gen_cluster(client=True)
+async def test_log_event(c, s, a, b):
+
+    # Log an event from inside a task
+    def foo():
+        get_worker().log_event("topic1", {"foo": "bar"})
+
+    assert not await c.get_events("topic1")
+    await c.submit(foo)
+    events = await c.get_events("topic1")
+    assert len(events) == 1
+    assert events[0][1] == {"foo": "bar"}
+
+    # Log an event while on the scheduler
+    def log_scheduler(dask_scheduler):
+        dask_scheduler.log_event("topic2", {"woo": "hoo"})
+
+    await c.run_on_scheduler(log_scheduler)
+    events = await c.get_events("topic2")
+    assert len(events) == 1
+    assert events[0][1] == {"woo": "hoo"}
+
+    # Log an event from the client process
+    await c.log_event("topic2", ("alice", "bob"))
+    events = await c.get_events("topic2")
+    assert len(events) == 2
+    assert events[1][1] == ("alice", "bob")
+
+
+@gen_cluster(client=True)
+async def test_annotations_task_state(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(qux="bar", priority=100):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(
+        {"qux": "bar", "priority": 100} == ts.annotations for ts in s.tasks.values()
+    )
+
+
+@gen_cluster(client=True)
+async def test_annotations_priorities(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(priority=15):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all("15" in str(ts.priority) for ts in s.tasks.values())
+    assert all(ts.priority[0] == -15 for ts in s.tasks.values())
+    assert all({"priority": 15} == ts.annotations for ts in s.tasks.values())
+
+
+@gen_cluster(client=True)
+async def test_annotations_workers(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(workers=[a.address]):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all({"workers": (a.address,)} == ts.annotations for ts in s.tasks.values())
+    assert all({a.address} == ts.worker_restrictions for ts in s.tasks.values())
+    assert a.data
+    assert not b.data
+
+
+@gen_cluster(client=True)
+async def test_annotations_retries(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(retries=2):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(ts.retries == 2 for ts in s.tasks.values())
+    assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
+    ],
+)
+async def test_annotations_resources(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(resources={"GPU": 1}):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
+    assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
+
+
+@gen_cluster(client=True)
+async def test_annotations_loose_restrictions(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    # Eventually fails if allow_other_workers=False
+    with dask.annotate(workers=["fake"], allow_other_workers=True):
+        x = da.ones(10, chunks=(5,))
+
+    with dask.config.set(optimization__fuse__active=False):
+        x = await x.persist()
+
+    assert all(not ts.worker_restrictions for ts in s.tasks.values())
+    assert all({"fake"} == ts.host_restrictions for ts in s.tasks.values())
+    assert all(
+        [
+            {"workers": ("fake",), "allow_other_workers": True} == ts.annotations
+            for ts in s.tasks.values()
+        ]
+    )

@@ -683,6 +683,8 @@ async def test_story(c, s, a, b):
 
     assert len(s.story(x.key, y.key)) > len(story)
 
+    assert s.story(x.key) == s.story(s.tasks[x.key])
+
 
 @gen_cluster(nthreads=[], client=True)
 async def test_scatter_no_workers(c, s):
@@ -2136,12 +2138,17 @@ async def test_worker_name_collision(s, a):
     # test that a name collision for workers produces the expected respsone
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
-    with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
-        await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
+    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+        with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
+            await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
 
     s.validate_state()
     assert set(s.workers) == {a.address}
     assert s.aliases == {a.name: a.address}
+
+    log = log.getvalue()
+    assert "duplicate" in log
+    assert str(a.name) in log
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.unknown-task-duration": "1h"})

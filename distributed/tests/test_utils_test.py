@@ -7,7 +7,7 @@ from time import sleep
 import pytest
 from tornado import gen
 
-from distributed import Scheduler, Worker, Client, config, default_client
+from distributed import Scheduler, Worker, Nanny, Client, config, default_client
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
@@ -51,6 +51,23 @@ async def test_gen_cluster(c, s, a, b):
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    config={"distributed.comm.timeouts.connect": "1s", "new.config.value": "foo"},
+)
+async def test_gen_cluster_set_config_nanny(c, s, a, b):
+    def assert_config():
+        import dask
+
+        assert dask.config.get("distributed.comm.timeouts.connect") == "1s"
+        assert dask.config.get("new.config.value") == "foo"
+        return dask.config
+
+    await c.run(assert_config)
+    await c.run_on_scheduler(assert_config)
 
 
 @gen_cluster(client=True)

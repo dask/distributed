@@ -1121,9 +1121,9 @@ class StealingEvents(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            log = self.steal.log
+            log = self.scheduler.get_events(topic="stealing")
             n = self.steal.count - self.last
-            log = [log[-i] for i in range(1, n + 1) if isinstance(log[-i], list)]
+            log = [log[-i][1] for i in range(1, n + 1) if isinstance(log[-i][1], list)]
             self.last = self.steal.count
 
             if log:
@@ -1205,8 +1205,8 @@ class Events(DashboardComponent):
                 hovers = []
                 ys = []
                 colors = []
-                for msg in log:
-                    times.append(msg["time"] * 1000)
+                for msg_time, msg in log:
+                    times.append(msg_time * 1000)
                     action = msg["action"]
                     actions.append(action)
                     try:
@@ -1479,7 +1479,6 @@ class TaskGraph(DashboardComponent):
                     container.data = {col: [] for col in container.column_names}
             else:
                 # occasionally reset the column data source to remove old nodes
-                self.subtitle.text = " "
                 if self.invisible_count > len(self.node_source.data["x"]) / 2:
                     self.layout.reset_index()
                     self.invisible_count = 0
@@ -1497,6 +1496,8 @@ class TaskGraph(DashboardComponent):
 
                 if len(self.scheduler.tasks) == 0:
                     self.subtitle.text = "Scheduler is empty."
+                else:
+                    self.subtitle.text = " "
 
     @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
