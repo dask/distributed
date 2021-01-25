@@ -305,6 +305,14 @@ properties:
               Whether or not to run consistency checks during execution.
               This is typically only used for debugging.
 
+          resources:
+            type: object
+            description: |
+              A dictionary specifying resources for workers.
+
+              See https://distributed.dask.org/en/latest/resources.html for more information.
+            properties: {}
+
           lifetime:
             type: object
             description: |
