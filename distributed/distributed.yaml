@@ -70,6 +70,7 @@ distributed:
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
     daemon: True
     validate: False         # Check worker state at every step for debugging
+    resources: {}           # Key: value pairs specifying worker resources.
     lifetime:
       duration: null        # Time after which to gracefully shutdown the worker
       stagger: 0 seconds    # Random amount by which to stagger lifetimes

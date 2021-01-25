@@ -519,6 +519,9 @@ class Worker(ServerNode):
             nthreads = ncores
 
         self.nthreads = nthreads or CPU_COUNT
+        if resources is None:
+            resources = dask.config.get("distributed.worker.resources", None)
+
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
