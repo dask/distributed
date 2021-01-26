@@ -33,10 +33,10 @@ jobs:
       - name: Install tornado
         shell: bash -l {0}
         run: |
-          if [[ "${{ matrix.python-version }}" = "3.8" ]]; then
-            conda install -c conda-forge tornado=6
-          else
+          if [[ "${{ matrix.python-version }}" = "3.6" ]]; then
             conda install -c conda-forge tornado=5
+          else
+            conda install -c conda-forge tornado=6
           fi
 
       - name: Install distributed from source
