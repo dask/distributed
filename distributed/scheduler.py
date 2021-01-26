@@ -3424,7 +3424,7 @@ class Scheduler(SchedulerState, ServerNode):
         if executing is not None:
             ws._executing = {}
             for key, duration in executing.items():
-                ts = parent.tasks[key]
+                ts: TaskState = parent._tasks[key]
                 ws._executing[ts] = duration
                 if ts._prefix._name in self.unknown_durations:
                     old_duration = ts._prefix._duration_average
