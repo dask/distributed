@@ -128,7 +128,7 @@ def convert_stream_closed_error(obj, exc):
 
 
 def _close_comm(ref):
-    """ Callback to close Dask Comm when Tornado Stream closes
+    """Callback to close Dask Comm when Tornado Stream closes
 
     Parameters
     ----------
