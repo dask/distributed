@@ -14,6 +14,7 @@ from .utils import get_tcp_server_address
 
 
 def _register_transports():
+    from . import mpi
     from . import inproc
     from . import tcp
 
