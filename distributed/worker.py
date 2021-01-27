@@ -1571,6 +1571,7 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "new"
             assert ts.runspec is not None
+            assert not ts.who_has, breakpoint()
 
     def transition_new_fetch(self, parent, child=None):
         if self.validate:
@@ -2178,9 +2179,9 @@ class Worker(ServerNode):
 
                     if not busy and d in data:
                         self.transition(ts, "memory", value=data[d])
-                    # elif ts is None or ts.state == "executing":
-                    #    self.release_key(d)
-                    #    continue
+                    elif ts is None or ts.state == "executing":
+                        self.release_key(d)
+                        continue
                     elif ts.state not in ("ready", "memory"):
                         # "waiting" or "fetch"?
                         self.transition(ts, "fetch", worker=worker, remove=not busy)
