@@ -1472,7 +1472,6 @@ class Worker(ServerNode):
                     ts.exception = None
                     ts.traceback = None
                 else:
-                    # self.log.append((ts.key, "re-add", ts.state, "waiting"))
                     self.log.append((ts.key, "re-adding key, new TaskState"))
                     self.tasks[key] = ts = TaskState(
                         key=key, runspec=SerializedTask(function, args, kwargs, task)
@@ -1504,19 +1503,19 @@ class Worker(ServerNode):
                 assert workers
                 if dependency not in self.tasks:
                     self.tasks[dependency] = dep_ts = TaskState(key=dependency)
-                    dep_ts.state = "fetch" if dependency not in self.data else "memory"
 
+                state = "fetch" if dependency not in self.data else "memory"
                 dep_ts = self.tasks[dependency]
+                self.transition(dep_ts, state, child=ts)
                 self.log.append((dependency, "new-dep", dep_ts.state))
-
-                if dep_ts.state != "memory":
-                    ts.waiting_for_data.add(dep_ts.key)
-                    self.waiting_for_data_count += 1
 
                 dep_ts.who_has.update(workers)
 
                 ts.dependencies.add(dep_ts)
                 dep_ts.dependents.add(ts)
+
+                if dep_ts.state == "fetch":
+                    ts.waiting_for_data.add(dep_ts.key)
 
                 for worker in workers:
                     self.has_what[worker].add(dep_ts.key)
@@ -1527,9 +1526,17 @@ class Worker(ServerNode):
                 for key, value in nbytes.items():
                     self.tasks[key].nbytes = value
 
-            if ts.waiting_for_data:
-                self.data_needed.append(ts.key)
-            else:
+            # If a worker dies there can be a scheduler-triggered reassignment
+            # of the task leading to a state change from `fetch` -> `waiting`
+            # This can cause problems if a worker goes looking for who has a
+            # dependency when the answer is suddenly "me"
+            # To stop this, update who has what after all dependencies
+            # have been (re)created.
+            # TODO: move this into the appropriate transition functions
+            self.update_who_has(who_has)
+            #            if ts.waiting_for_data:
+            #                self.data_needed.append(ts.key)
+            if not ts.waiting_for_data:
                 self.transition(ts, "ready")
             if self.validate:
                 if who_has:
@@ -1565,10 +1572,16 @@ class Worker(ServerNode):
             assert ts.state == "new"
             assert ts.runspec is not None
 
-    def transition_new_fetch(self, ts):
+    def transition_new_fetch(self, parent, child=None):
         if self.validate:
-            assert ts.state == "new"
-            assert ts.runspec is None
+            assert parent.state == "new"
+            assert parent.runspec is None
+            assert child.runspec is not None
+            assert child.state != "new"
+
+        child.waiting_for_data.add(parent.key)
+        self.data_needed.append(child.key)
+        self.waiting_for_data_count += 1
 
     def transition_fetch_waiting(self, ts):
         if self.validate:
@@ -1663,7 +1676,7 @@ class Worker(ServerNode):
                 assert all(
                     dep.key in self.data or dep.key in self.actors
                     for dep in ts.dependencies
-                )
+                ), breakpoint()
                 assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.ready
 
@@ -2165,9 +2178,9 @@ class Worker(ServerNode):
 
                     if not busy and d in data:
                         self.transition(ts, "memory", value=data[d])
-                    elif ts is None or ts.state == "executing":
-                        self.release_key(d)
-                        continue
+                    # elif ts is None or ts.state == "executing":
+                    #    self.release_key(d)
+                    #    continue
                     elif ts.state not in ("ready", "memory"):
                         # "waiting" or "fetch"?
                         self.transition(ts, "fetch", worker=worker, remove=not busy)
@@ -3041,7 +3054,7 @@ class Worker(ServerNode):
 
             for worker, keys in self.has_what.items():
                 for k in keys:
-                    assert worker in self.tasks[k].who_has
+                    assert worker in self.tasks[k].who_has, breakpoint()
 
             for ts in self.tasks.values():
                 self.validate_task(ts)
