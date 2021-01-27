@@ -4119,9 +4119,7 @@ async def test_persist_workers_annotate(e, s, a, b, c):
 
     await wait(out)
     assert all(v.key in a.data for v in L1)
-    assert all(v.key in c.data for v in L2)
     assert total.key in b.data
-    assert total2.key in b.data
 
     assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
 
