@@ -947,7 +947,6 @@ async def test_restrictions_map(c, s, a, b):
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_restrictions_get(c, s, a, b):
     dsk = {"x": 1, "y": (inc, "x"), "z": (inc, "y")}
-    restrictions = {"y": {a.ip}, "z": {b.ip}}
 
     futures = c.get(dsk, ["y", "z"], workers=a.ip, sync=False)
     result = await c.gather(futures)
@@ -957,15 +956,12 @@ async def test_restrictions_get(c, s, a, b):
     assert len(b.data) == 0
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
-@gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
+@gen_cluster(client=True)
 async def test_restrictions_get_annotate(c, s, a, b):
     x = 1
-    with dask.annotate(workers=a.ip):
+    with dask.annotate(workers=a.address):
         y = delayed(inc)(x)
-    with dask.annotate(workers=b.ip):
+    with dask.annotate(workers=b.address):
         z = delayed(inc)(y)
 
     futures = c.get(z.__dask_graph__(), [y.key, z.key], sync=False)
@@ -4153,11 +4149,7 @@ async def test_compute_workers_annotate(e, s, a, b, c):
         L1 = [delayed(inc)(i) for i in range(4)]
     with dask.annotate(workers=b.address, allow_other_workers=True):
         total = delayed(sum)(L1)
-    with dask.annotate(
-        workers=[
-            c.address,
-        ]
-    ):
+    with dask.annotate(workers=[c.address]):
         L2 = [delayed(add)(i, total) for i in L1]
 
     # TODO: once annotations are faithfully forwarded upon graph optimization,

@@ -1507,12 +1507,12 @@ class Client:
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
         workers: string or iterable of strings
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
         key: str
             Unique identifier for the task.  Defaults to function-name and hash
         allow_other_workers: bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
+            Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if the task fails
@@ -1522,7 +1522,7 @@ class Client:
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` each instance of this mapped task requires
+            Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
@@ -2553,7 +2553,7 @@ class Client:
             if retries:
                 annotations["retries"] = retries
             if allow_other_workers not in (True, False, None):
-                raise TypeError("allow_other_workers= must be True or False")
+                raise TypeError("allow_other_workers= must be True, False, or None")
             if allow_other_workers:
                 annotations["allow_other_workers"] = allow_other_workers
             if resources:
@@ -2600,10 +2600,10 @@ class Client:
         dsk: dict
         keys: object, or nested lists of objects
         workers: string or iterable of strings
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
         allow_other_workers: bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
+            Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
@@ -2611,7 +2611,7 @@ class Client:
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
         resources: dict (defaults to {})
-            Defines the `resources` each instance of this mapped task requires
+            Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
