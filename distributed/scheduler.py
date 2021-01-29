@@ -5839,12 +5839,12 @@ class Scheduler(SchedulerState, ServerNode):
     # State Transitions #
     #####################
 
-    def transition(self, key, finish: str, *args, **kwargs):
+    def _transition(self, key, finish: str, *args, **kwargs):
         """Transition a key from its current state to the finish state
 
         Examples
         --------
-        >>> self.transition('x', 'waiting')
+        >>> self._transition('x', 'waiting')
         {'x': 'processing'}
 
         Returns
@@ -5889,7 +5889,7 @@ class Scheduler(SchedulerState, ServerNode):
             elif "released" not in start_finish:
                 func = self._transitions["released", finish]
                 assert not args and not kwargs
-                a: dict = self.transition(key, "released")
+                a: dict = self._transition(key, "released")
                 v = a.get(key)
                 if v is not None:
                     func = self._transitions["released", v]
@@ -5950,6 +5950,24 @@ class Scheduler(SchedulerState, ServerNode):
                 pdb.set_trace()
             raise
 
+    def transition(self, key, finish: str, *args, **kwargs):
+        """Transition a key from its current state to the finish state
+
+        Examples
+        --------
+        >>> self.transition('x', 'waiting')
+        {'x': 'processing'}
+
+        Returns
+        -------
+        Dictionary of recommendations for future transitions
+
+        See Also
+        --------
+        Scheduler.transitions: transitive version of this function
+        """
+        return self._transition(key, finish, *args, **kwargs)
+
     def transitions(self, recommendations: dict):
         """Process transitions until none are left
 
@@ -5963,7 +5981,7 @@ class Scheduler(SchedulerState, ServerNode):
         while recommendations:
             key, finish = recommendations.popitem()
             keys.add(key)
-            new = self.transition(key, finish)
+            new = self._transition(key, finish)
             recommendations.update(new)
 
         if parent._validate:
