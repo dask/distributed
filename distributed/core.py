@@ -7,6 +7,7 @@ import inspect
 import logging
 import threading
 import traceback
+from typing import Callable, Dict, Awaitable
 import uuid
 import weakref
 import warnings
@@ -127,7 +128,7 @@ class Server:
         self,
         handlers,
         blocked_handlers=None,
-        stream_handlers=None,
+        stream_handlers: Dict[str, Callable[..., Awaitable]] = None,
         connection_limit=512,
         deserialize=True,
         serializers=None,
@@ -147,7 +148,7 @@ class Server:
                 "distributed.%s.blocked-handlers" % type(self).__name__.lower(), []
             )
         self.blocked_handlers = blocked_handlers
-        self.stream_handlers = {}
+        self.stream_handlers: Dict[str, Callable[..., Awaitable]] = {}
         self.stream_handlers.update(stream_handlers or {})
 
         self.id = type(self).__name__ + "-" + str(uuid.uuid4())
@@ -547,7 +548,6 @@ class Server:
         extra = extra or {}
         logger.info("Starting established connection")
 
-        io_error = None
         closed = False
         try:
             while not closed:
@@ -565,11 +565,8 @@ class Server:
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            if is_coroutine_function(handler):
-                                self.loop.add_callback(handler, **merge(extra, msg))
-                                await gen.sleep(0)
-                            else:
-                                handler(**merge(extra, msg))
+                            self.loop.add_callback(handler, **merge(extra, msg))
+                            await gen.sleep(0)
                         else:
                             logger.error("odd message %s", msg)
                     await asyncio.sleep(0)
@@ -581,7 +578,7 @@ class Server:
                         func()
 
         except (CommClosedError, EnvironmentError) as e:
-            io_error = e
+            pass
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
