@@ -6,9 +6,9 @@ import uuid
 from dask.utils import stringify
 
 from .client import Future, Client
-from .utils import sync, thread_state
+from .scheduler import Scheduler
+from .utils import sync, thread_state, parse_timedelta
 from .worker import get_client
-from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class QueueExtension:
     *  queue_size
     """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.queues = dict()
         self.client_refcount = dict()
@@ -54,7 +54,7 @@ class QueueExtension:
         else:
             self.client_refcount[name] += 1
 
-    def release(self, comm=None, name=None, client=None):
+    async def release(self, comm=None, name=None, client=None):
         if name not in self.queues:
             return
 
@@ -78,7 +78,7 @@ class QueueExtension:
             record = {"type": "msgpack", "value": data}
         await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
 
-    def future_release(self, name=None, key=None, client=None):
+    async def future_release(self, name=None, key=None, client=None):
         self.future_refcount[name, key] -= 1
         if self.future_refcount[name, key] == 0:
             self.scheduler.client_releases_keys(keys=[key], client="queue-%s" % name)

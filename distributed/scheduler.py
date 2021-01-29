@@ -5,6 +5,7 @@ from collections.abc import Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
+from typing import Awaitable, Callable, Dict
 import inspect
 import itertools
 import json
@@ -3039,7 +3040,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.event_counts = defaultdict(int)
         self.worker_plugins = []
 
-        worker_handlers = {
+        worker_handlers: Dict[str, Callable[..., Awaitable]] = {
             "task-finished": self.handle_task_finished,
             "task-erred": self.handle_task_erred,
             "release": self.handle_release_data,
@@ -3052,7 +3053,7 @@ class Scheduler(SchedulerState, ServerNode):
             "log-event": self.log_worker_event,
         }
 
-        client_handlers = {
+        client_handlers: Dict[str, Callable[..., Awaitable]] = {
             "update-graph": self.update_graph,
             "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,

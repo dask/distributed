@@ -10,6 +10,7 @@ from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, parse_timedelta
+from .scheduler import Scheduler
 
 from tlz import topk
 
@@ -22,7 +23,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
 class WorkStealing(SchedulerPlugin):
-    def __init__(self, scheduler):
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         # { level: { task states } }
         self.stealable_all = [set() for i in range(15)]

@@ -9,6 +9,7 @@ from tlz import merge
 from dask.utils import stringify
 from .client import Future, Client
 from .utils import log_errors, TimeoutError, parse_timedelta
+from .scheduler import Scheduler
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class VariableExtension:
     *  variable-delete
     """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.variables = dict()
         self.waiting = defaultdict(set)

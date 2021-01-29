@@ -15,6 +15,7 @@ from pickle import PicklingError
 import random
 import threading
 import sys
+from typing import Awaitable, Callable, Dict
 import uuid
 import warnings
 import weakref
@@ -676,7 +677,7 @@ class Worker(ServerNode):
             "plugin-add": self.plugin_add,
         }
 
-        stream_handlers = {
+        stream_handlers: Dict[str, Callable[..., Awaitable]] = {
             "close": self.close,
             "compute-task": self.add_task,
             "release-task": partial(self.release_key, report=False),
@@ -1410,7 +1411,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    def delete_data(self, comm=None, keys=None, report=True):
+    async def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1437,7 +1438,7 @@ class Worker(ServerNode):
     # Task Management #
     ###################
 
-    def add_task(
+    async def add_task(
         self,
         key,
         function=None,
@@ -2264,7 +2265,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def steal_request(self, key):
+    async def steal_request(self, key):
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
@@ -2290,7 +2291,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.runspec is None
 
-    def release_key(self, key, cause=None, reason=None, report=True):
+    async def release_key(self, key, cause=None, reason=None, report=True):
         try:
             if self.validate:
                 assert isinstance(key, str)

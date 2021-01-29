@@ -9,6 +9,8 @@ from .core import CommClosedError
 from .metrics import time
 from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
+from .scheduler import Scheduler
+from .worker import Worker
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,7 @@ logger = logging.getLogger(__name__)
 class PubSubSchedulerExtension:
     """ Extend Dask's scheduler with routes to handle PubSub machinery """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler: Scheduler):
         self.scheduler = scheduler
         self.publishers = defaultdict(set)
         self.subscribers = defaultdict(set)
@@ -35,7 +37,7 @@ class PubSubSchedulerExtension:
 
         self.scheduler.extensions["pubsub"] = self
 
-    def add_publisher(self, comm=None, name=None, worker=None):
+    async def add_publisher(self, comm=None, name=None, worker=None):
         logger.debug("Add publisher: %s %s", name, worker)
         self.publishers[name].add(worker)
         return {
@@ -44,7 +46,7 @@ class PubSubSchedulerExtension:
             and len(self.client_subscribers[name]) > 0,
         }
 
-    def add_subscriber(self, comm=None, name=None, worker=None, client=None):
+    async def add_subscriber(self, comm=None, name=None, worker=None, client=None):
         if worker:
             logger.debug("Add worker subscriber: %s %s", name, worker)
             self.subscribers[name].add(worker)
@@ -62,7 +64,7 @@ class PubSubSchedulerExtension:
                 )
             self.client_subscribers[name].add(client)
 
-    def remove_publisher(self, comm=None, name=None, worker=None):
+    async def remove_publisher(self, comm=None, name=None, worker=None):
         if worker in self.publishers[name]:
             logger.debug("Remove publisher: %s %s", name, worker)
             self.publishers[name].remove(worker)
@@ -71,7 +73,7 @@ class PubSubSchedulerExtension:
                 del self.subscribers[name]
                 del self.publishers[name]
 
-    def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
+    async def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
         if worker:
             logger.debug("Remove worker subscriber: %s %s", name, worker)
             self.subscribers[name].remove(worker)
@@ -100,14 +102,14 @@ class PubSubSchedulerExtension:
             del self.subscribers[name]
             del self.publishers[name]
 
-    def handle_message(self, name=None, msg=None, worker=None, client=None):
+    async def handle_message(self, name=None, msg=None, worker=None, client=None):
         for c in list(self.client_subscribers[name]):
             try:
                 self.scheduler.client_comms[c].send(
                     {"op": "pubsub-msg", "name": name, "msg": msg}
                 )
             except (KeyError, CommClosedError):
-                self.remove_subscriber(name=name, client=c)
+                await self.remove_subscriber(name=name, client=c)
 
         if client:
             for sub in self.subscribers[name]:
@@ -119,7 +121,7 @@ class PubSubSchedulerExtension:
 class PubSubWorkerExtension:
     """ Extend Dask's Worker with routes to handle PubSub machinery """
 
-    def __init__(self, worker):
+    def __init__(self, worker: Worker):
         self.worker = worker
         self.worker.stream_handlers.update(
             {
@@ -136,15 +138,15 @@ class PubSubWorkerExtension:
 
         self.worker.extensions["pubsub"] = self  # circular reference
 
-    def add_subscriber(self, name=None, address=None, **info):
+    async def add_subscriber(self, name=None, address=None, **info):
         for pub in self.publishers[name]:
             pub.subscribers[address] = info
 
-    def remove_subscriber(self, name=None, address=None):
+    async def remove_subscriber(self, name=None, address=None):
         for pub in self.publishers[name]:
             del pub.subscribers[address]
 
-    def publish_scheduler(self, name=None, publish=None):
+    async def publish_scheduler(self, name=None, publish=None):
         self.publish_to_scheduler[name] = publish
 
     async def handle_message(self, name=None, msg=None):
@@ -384,6 +386,8 @@ class Sub:
             pubsub = self.worker.extensions["pubsub"]
         elif self.client:
             pubsub = self.client.extensions["pubsub"]
+        else:
+            raise ValueError("Must include a worker or client")
         self.loop.add_callback(pubsub.subscribers[name].add, self)
 
         msg = {"op": "pubsub-add-subscriber", "name": self.name}
