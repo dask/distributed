@@ -5840,9 +5840,8 @@ class Scheduler(SchedulerState, ServerNode):
         dependencies: set
         try:
             recommendations = {}
-            try:
-                ts = parent._tasks[key]
-            except KeyError:
+            ts = parent._tasks.get(key)
+            if ts is None:
                 return recommendations
             start = ts._state
             if start == finish:
