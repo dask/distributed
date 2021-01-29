@@ -11,10 +11,9 @@ import errno
 from functools import partial
 import html
 import inspect
-import itertools
 import json
 import logging
-from numbers import Number, Integral
+from numbers import Number
 import os
 import sys
 import uuid
@@ -1507,13 +1506,13 @@ class Client:
         pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
+        workers: string or iterable of strings
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
         key: str
             Unique identifier for the task.  Defaults to function-name and hash
         allow_other_workers: bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
+            Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if the task fails
@@ -1523,9 +1522,10 @@ class Client:
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` this job requires on the worker; e.g.
-            ``{'GPU': 2}``. See :doc:`worker resources <resources>` for details
-            on defining resources.
+            Defines the ``resources`` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         actor: bool (default False)
             Whether this task should exist on the worker as a stateful actor.
             See :doc:`actors` for additional details.
@@ -1571,12 +1571,6 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if workers is not None:
-            restrictions = {skey: workers}
-            loose_restrictions = [skey] if allow_other_workers else []
-        else:
-            restrictions = {}
-            loose_restrictions = []
 
         if kwargs:
             dsk = {skey: (apply, func, list(args), kwargs)}
@@ -1586,11 +1580,11 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             [skey],
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
-            resources={skey: resources} if resources else None,
+            resources=resources,
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
@@ -1631,7 +1625,7 @@ class Client:
         pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
+        workers: string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
         allow_other_workers: bool (defaults to False)
@@ -1646,8 +1640,8 @@ class Client:
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``. See
-            :doc:`worker resources <resources>` for details on defining
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
             resources.
         actor: bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
@@ -1763,39 +1757,16 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if isinstance(workers, (list, set)):
-            if workers and isinstance(first(workers), (list, set)):
-                if len(workers) != len(keys):
-                    raise ValueError(
-                        "You only provided %d worker restrictions"
-                        " for a sequence of length %d" % (len(workers), len(keys))
-                    )
-                restrictions = dict(zip(keys, workers))
-            else:
-                restrictions = {k: workers for k in keys}
-        elif workers is None:
-            restrictions = {}
-        else:
+        if workers is not None and not isinstance(workers, (list, set)):
             raise TypeError("Workers must be a list or set of workers or None")
-        if allow_other_workers not in (True, False, None):
-            raise TypeError("allow_other_workers= must be True or False")
-        if allow_other_workers is True:
-            loose_restrictions = set(keys)
-        else:
-            loose_restrictions = set()
 
         internal_priority = dict(zip(keys, range(len(keys))))
-
-        if resources:
-            resources = {k: resources for k in keys}
-        else:
-            resources = None
 
         futures = self._graph_to_futures(
             dsk,
             keys,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority=internal_priority,
             resources=resources,
             retries=retries,
@@ -2551,8 +2522,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         priority=None,
         user_priority=0,
         resources=None,
@@ -2561,26 +2532,8 @@ class Client:
         actors=None,
     ):
         with self._refcount_lock:
-            if resources:
-                resources = self._expand_resources(
-                    resources, all_keys=itertools.chain(dsk, keys)
-                )
-                resources = {stringify(k): v for k, v in resources.items()}
-
-            if retries:
-                retries = self._expand_retries(
-                    retries, all_keys=itertools.chain(dsk, keys)
-                )
-
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
-            if restrictions:
-                restrictions = keymap(stringify, restrictions)
-                restrictions = valmap(list, restrictions)
-
-            if loose_restrictions is not None:
-                loose_restrictions = list(map(stringify, loose_restrictions))
 
             keyset = set(keys)
 
@@ -2588,10 +2541,25 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            if isinstance(retries, Number) and retries > 0:
-                retries = {k: retries for k in dsk}
-
             dsk = highlevelgraph_pack(dsk, self, keyset)
+
+            annotations = {}
+            if user_priority:
+                annotations["priority"] = user_priority
+            if workers:
+                if not isinstance(workers, (list, tuple, set)):
+                    workers = [workers]
+                annotations["workers"] = workers
+            if retries:
+                annotations["retries"] = retries
+            if allow_other_workers not in (True, False, None):
+                raise TypeError("allow_other_workers= must be True, False, or None")
+            if allow_other_workers:
+                annotations["allow_other_workers"] = allow_other_workers
+            if resources:
+                annotations["resources"] = resources
+
+            annotations = merge(dask.config.get("annotations", {}), annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
@@ -2600,14 +2568,10 @@ class Client:
                     "op": "update-graph-hlg",
                     "hlg": dsk,
                     "keys": list(map(stringify, keys)),
-                    "restrictions": restrictions or {},
-                    "loose_restrictions": loose_restrictions,
                     "priority": priority,
-                    "user_priority": user_priority,
-                    "resources": resources,
                     "submitting_task": getattr(thread_state, "key", None),
-                    "retries": retries,
                     "fifo_timeout": fifo_timeout,
+                    "annotations": annotations,
                     "actors": actors,
                 }
             )
@@ -2617,8 +2581,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         resources=None,
         sync=True,
         asynchronous=None,
@@ -2635,14 +2599,22 @@ class Client:
         ----------
         dsk: dict
         keys: object, or nested lists of objects
-        restrictions: dict (optional)
-            A mapping of {key: {set of worker hostnames}} that restricts where
-            jobs can take place
+        workers: string or iterable of strings
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with ``workers``. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        resources: dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         sync: bool (optional)
             Returns Futures if False or concrete values if True (default).
         direct: bool
@@ -2664,8 +2636,8 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             keys=set(flatten([keys])),
-            restrictions=restrictions,
-            loose_restrictions=loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             fifo_timeout=fifo_timeout,
             retries=retries,
@@ -2770,15 +2742,12 @@ class Client:
             Returns Futures if False (default) or concrete values if True
         optimize_graph: bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
+        workers: string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
@@ -2792,9 +2761,8 @@ class Client:
             be expensive. If none of the arguments contain any dask objects,
             set ``traverse=False`` to avoid doing this traversal.
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         actors: bool or dict (default None)
@@ -2857,13 +2825,6 @@ class Client:
             else:
                 dsk2[name] = (func, keys) + extra_args
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
-
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
@@ -2878,8 +2839,8 @@ class Client:
         futures_dict = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -2931,15 +2892,12 @@ class Client:
             Collections like dask.array or dataframe or dask.value objects
         optimize_graph: bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
+        workers: string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
         priority: Number
@@ -2948,9 +2906,8 @@ class Client:
         fifo_timeout: timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
         resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         actors: bool or dict (default None)
@@ -2985,18 +2942,11 @@ class Client:
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
-
         futures = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -3880,90 +3830,6 @@ class Client:
                     yield stringify(kkk)
             else:
                 yield stringify(kk)
-
-    @classmethod
-    def _expand_retries(cls, retries, all_keys):
-        """
-        Expand the user-provided "retries" specification
-        to a {task key: Integral} dictionary.
-        """
-        if retries and isinstance(retries, dict):
-            result = {
-                name: value
-                for key, value in retries.items()
-                for name in cls._expand_key(key)
-            }
-        elif isinstance(retries, Integral):
-            # Each task unit may potentially fail, allow retrying all of them
-            result = {name: retries for name in all_keys}
-        else:
-            raise TypeError(
-                "`retries` should be an integer or dict, got %r" % (type(retries))
-            )
-        return keymap(stringify, result)
-
-    def _expand_resources(cls, resources, all_keys):
-        """
-        Expand the user-provided "resources" specification
-        to a {task key: {resource name: Number}} dictionary.
-        """
-        # Resources can either be a single dict such as {'GPU': 2},
-        # indicating a requirement for all keys, or a nested dict
-        # such as {'x': {'GPU': 1}, 'y': {'SSD': 4}} indicating
-        # per-key requirements
-        if not isinstance(resources, dict):
-            raise TypeError("`resources` should be a dict, got %r" % (type(resources)))
-
-        per_key_reqs = {}
-        global_reqs = {}
-        all_keys = list(all_keys)
-        for k, v in resources.items():
-            if isinstance(v, dict):
-                # It's a per-key requirement
-                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
-            else:
-                # It's a global requirement
-                global_reqs.update((kk, {k: v}) for kk in all_keys)
-
-        if global_reqs and per_key_reqs:
-            raise ValueError(
-                "cannot have both per-key and all-key requirements "
-                "in resources dict %r" % (resources,)
-            )
-        return global_reqs or per_key_reqs
-
-    @classmethod
-    def get_restrictions(cls, collections, workers, allow_other_workers):
-        """ Get restrictions from inputs to compute/persist """
-        if isinstance(workers, (str, tuple, list)):
-            workers = {tuple(collections): workers}
-        if isinstance(workers, dict):
-            restrictions = {}
-            for colls, ws in workers.items():
-                if isinstance(ws, str):
-                    ws = [ws]
-                if dask.is_dask_collection(colls):
-                    keys = flatten(colls.__dask_keys__())
-                elif isinstance(colls, str):
-                    keys = [colls]
-                else:
-                    keys = list(
-                        {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
-                    )
-                restrictions.update({k: ws for k in keys})
-        else:
-            restrictions = {}
-
-        if allow_other_workers is True:
-            loose_restrictions = list(restrictions)
-        elif allow_other_workers:
-            loose_restrictions = list(
-                {k for c in flatten(allow_other_workers) for k in c.__dask_keys__()}
-            )
-        else:
-            loose_restrictions = []
-
-        return restrictions, loose_restrictions
 
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):

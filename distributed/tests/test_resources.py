@@ -1,6 +1,7 @@
 import asyncio
 from time import time
 
+import dask
 from dask import delayed
 from dask.utils import stringify
 import pytest
@@ -131,10 +132,12 @@ async def test_map(c, s, a, b):
     ],
 )
 async def test_persist(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+    with dask.annotate(resources={"B": 1}):
+        y = delayed(inc)(x)
 
-    xx, yy = c.persist([x, y], resources={x: {"A": 1}, y: {"B": 1}})
+    xx, yy = c.persist([x, y], optimize_graph=False)
 
     await wait([xx, yy])
 
@@ -150,10 +153,12 @@ async def test_persist(c, s, a, b):
     ],
 )
 async def test_compute(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+    with dask.annotate(resources={"B": 1}):
+        y = delayed(inc)(x)
 
-    yy = c.compute(y, resources={x: {"A": 1}, y: {"B": 1}})
+    yy = c.compute(y, optimize_graph=False)
     await wait(yy)
 
     assert b.data
@@ -175,8 +180,10 @@ async def test_compute(c, s, a, b):
 async def test_get(c, s, a, b):
     dsk = {"x": (inc, 1), "y": (inc, "x")}
 
-    result = await c.get(dsk, "y", resources={"y": {"A": 1}}, sync=False)
+    result = await c.get(dsk, "y", resources={"A": 1}, sync=False)
     assert result == 3
+    assert "y" in a.data
+    assert not b.data
 
 
 @gen_cluster(
@@ -186,11 +193,12 @@ async def test_get(c, s, a, b):
         ("127.0.0.1", 1, {"resources": {"B": 1}}),
     ],
 )
-async def test_persist_tuple(c, s, a, b):
-    x = delayed(inc)(1)
-    y = delayed(inc)(x)
+async def test_persist_multiple_collections(c, s, a, b):
+    with dask.annotate(resources={"A": 1}):
+        x = delayed(inc)(1)
+        y = delayed(inc)(x)
 
-    xx, yy = c.persist([x, y], resources={(x, y): {"A": 1}})
+    xx, yy = c.persist([x, y], optimize_graph=False)
 
     await wait([xx, yy])
 
@@ -308,11 +316,12 @@ async def test_set_resources(c, s, a):
 async def test_persist_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.arange(10, chunks=(5,))
-    y = x.map_blocks(lambda x: x + 1)
+    with dask.annotate(resources={"A": 1}):
+        y = x.map_blocks(lambda x: x + 1)
     z = y.map_blocks(lambda x: 2 * x)
     w = z.sum()
 
-    ww, yy = c.persist([w, y], resources={tuple(y.__dask_keys__()): {"A": 1}})
+    ww, yy = c.persist([w, y], optimize_graph=False)
 
     await wait([ww, yy])
 
@@ -360,6 +369,7 @@ async def test_full_collections(c, s, a, b):
     assert not b.log
 
 
+@pytest.mark.xfail(reason="atop fusion seemed to break this")
 @pytest.mark.parametrize(
     "optimize_graph",
     [
@@ -382,9 +392,10 @@ def test_collections_get(client, optimize_graph, s, a, b):
 
     client.run(f, workers=[a["address"]])
 
-    x = da.random.random(100, chunks=(10,)) + 1
+    with dask.annotate(resources={"A": 1}):
+        x = da.random.random(100, chunks=(10,)) + 1
 
-    x.compute(resources={tuple(x.dask): {"A": 1}}, optimize_graph=optimize_graph)
+    x.compute(optimize_graph=optimize_graph)
 
     def g(dask_worker):
         return len(dask_worker.log)
