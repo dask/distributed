@@ -1961,7 +1961,7 @@ class SchedulerState:
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            worker_msgs[worker] = _task_to_msg(self, ts)
+            worker_msgs[worker] = [_task_to_msg(self, ts)]
 
             return {}, worker_msgs, client_msgs
         except Exception as e:
@@ -2168,11 +2168,13 @@ class SchedulerState:
                 ws._has_what.remove(ts)
                 ws._nbytes -= ts.get_nbytes()
                 ts._group._nbytes_in_memory -= ts.get_nbytes()
-                worker_msgs[ws._address] = {
-                    "op": "delete-data",
-                    "keys": [key],
-                    "report": False,
-                }
+                worker_msgs[ws._address] = [
+                    {
+                        "op": "delete-data",
+                        "keys": [key],
+                        "report": False,
+                    }
+                ]
 
             ts._who_has.clear()
 
@@ -2181,7 +2183,7 @@ class SchedulerState:
             report_msg = {"op": "lost-data", "key": key}
             cs: ClientState
             for cs in ts._who_wants:
-                client_msgs[cs._client_key] = report_msg
+                client_msgs[cs._client_key] = [report_msg]
 
             if not ts._run_spec:  # pure data
                 recommendations[key] = "forgotten"
@@ -2234,7 +2236,7 @@ class SchedulerState:
             }
             cs: ClientState
             for cs in ts._who_wants:
-                client_msgs[cs._client_key] = report_msg
+                client_msgs[cs._client_key] = [report_msg]
 
             ts.state = "erred"
 
@@ -2276,7 +2278,7 @@ class SchedulerState:
             report_msg = {"op": "task-retried", "key": key}
             cs: ClientState
             for cs in ts._who_wants:
-                client_msgs[cs._client_key] = report_msg
+                client_msgs[cs._client_key] = [report_msg]
 
             ts.state = "released"
 
@@ -2343,7 +2345,7 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = {"op": "release-task", "key": key}
+                worker_msgs[w] = [{"op": "release-task", "key": key}]
 
             ts.state = "released"
 
@@ -2432,7 +2434,7 @@ class SchedulerState:
             }
             cs: ClientState
             for cs in ts._who_wants:
-                client_msgs[cs._client_key] = report_msg
+                client_msgs[cs._client_key] = [report_msg]
 
             cs = self._clients["fire-and-forget"]
             if ts in cs._wants_what:
@@ -5838,6 +5840,7 @@ class Scheduler(SchedulerState, ServerNode):
         recommendations: dict
         worker_msgs: dict
         client_msgs: dict
+        msgs: list
         dependents: set
         dependencies: set
         try:
@@ -5876,10 +5879,12 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
-            for worker, msg in worker_msgs.items():
-                self.worker_send(worker, msg)
-            for client, msg in client_msgs.items():
-                self.client_send(client, msg)
+            for worker, msgs in worker_msgs.items():
+                for msg in msgs:
+                    self.worker_send(worker, msg)
+            for client, msgs in client_msgs.items():
+                for msg in msgs:
+                    self.client_send(client, msg)
 
             finish2 = ts._state
             self.transition_log.append((key, start, finish2, recommendations, time()))
@@ -6523,7 +6528,7 @@ def _add_to_memory(
             report_msg["type"] = type
 
         for cs in ts._who_wants:
-            client_msgs[cs._client_key] = report_msg
+            client_msgs[cs._client_key] = [report_msg]
 
     ts.state = "memory"
     ts._type = typename
@@ -6577,7 +6582,7 @@ def _propagate_forgotten(
         ws._nbytes -= ts.get_nbytes()
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = {"op": "delete-data", "keys": [key], "report": False}
+            worker_msgs[w] = [{"op": "delete-data", "keys": [key], "report": False}]
     ts._who_has.clear()
 
 
@@ -6684,7 +6689,7 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 
     client_msgs: dict = {}
     for k in client_keys:
-        client_msgs[k] = report_msg
+        client_msgs[k] = [report_msg]
 
     return client_msgs
 
