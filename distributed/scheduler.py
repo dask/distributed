@@ -5867,9 +5867,8 @@ class Scheduler(SchedulerState, ServerNode):
                     func = self._transitions["released", v]
                 b: dict
                 b, worker_msgs, client_msgs = func(key)
-                a = a.copy()
-                a.update(b)
-                recommendations = a
+                recommendations.update(a)
+                recommendations.update(b)
                 start = "released"
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
