@@ -5907,7 +5907,12 @@ class Scheduler(SchedulerState, ServerNode):
             tg: TaskGroup = ts._group
             if ts._state == "forgotten" and tg._name in parent._task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
-                if not any([tg._states.get(s) for s in ALL_TASK_STATES]):
+                all_forgotten: bint = True
+                for s in ALL_TASK_STATES:
+                    if tg._states.get(s):
+                        all_forgotten = False
+                        break
+                if all_forgotten:
                     ts._prefix._groups.remove(tg)
                     del parent._task_groups[tg._name]
 
