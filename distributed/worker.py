@@ -1550,13 +1550,8 @@ class Worker(ServerNode):
                 for key, value in nbytes.items():
                     self.tasks[key].nbytes = value
 
-            # If a worker dies there can be a scheduler-triggered reassignment
-            # of the task leading to a state change from `fetch` -> `waiting`
-            # This can cause problems if a worker goes looking for who has a
-            # dependency when the answer is suddenly "me"
-            # To stop this, update who has what after all dependencies
-            # have been (re)created.
             # TODO: move this into the appropriate transition functions
+            # or remove it altogether
             self.update_who_has(who_has)
             if not ts.waiting_for_data:
                 self.transition(ts, "ready")
@@ -2359,6 +2354,7 @@ class Worker(ServerNode):
         else:
             state = None
 
+        print(f"stealing {key}")
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
 
@@ -2366,8 +2362,8 @@ class Worker(ServerNode):
             # Resetting the runspec should be reset by the transition. However,
             # the waiting->waiting transition results in a no-op which would not
             # reset.
-            self.transition(ts, "waiting")
             ts.runspec = None
+            self.transition(ts, "waiting")
             if not ts.dependents:
                 self.release_key(ts.key)
                 if self.validate:
@@ -2399,6 +2395,7 @@ class Worker(ServerNode):
                 if not dependency.dependents and dependency.state in (
                     "waiting",
                     "flight",
+                    "fetch",
                 ):
                     self.release_key(dependency.key)
 
