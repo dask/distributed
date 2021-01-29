@@ -5839,19 +5839,19 @@ class Scheduler(SchedulerState, ServerNode):
         dependents: set
         dependencies: set
         try:
+            recommendations = {}
             try:
                 ts = parent._tasks[key]
             except KeyError:
-                return {}
+                return recommendations
             start = ts._state
             if start == finish:
-                return {}
+                return recommendations
 
             if self.plugins:
                 dependents = set(ts._dependents)
                 dependencies = set(ts._dependencies)
 
-            recommendations = {}
             worker_msgs = {}
             client_msgs = {}
             if (start, finish) in self._transitions:
