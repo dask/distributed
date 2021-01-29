@@ -1537,7 +1537,6 @@ class Worker(ServerNode):
                     # wait for its dependencies to arrive
                     if dep_ts.state in ("fetch", "flight"):
                         ts.waiting_for_data.add(dep_ts.key)
-                        self.data_needed.append(ts.key)
 
                 dep_ts.who_has.update(workers)
 
@@ -1553,7 +1552,9 @@ class Worker(ServerNode):
             # TODO: move this into the appropriate transition functions
             # or remove it altogether
             self.update_who_has(who_has)
-            if not ts.waiting_for_data:
+            if ts.waiting_for_data:
+                self.data_needed.append(ts.key)
+            else:
                 self.transition(ts, "ready")
             if self.validate:
                 for worker, keys in self.has_what.items():
@@ -2354,7 +2355,6 @@ class Worker(ServerNode):
         else:
             state = None
 
-        print(f"stealing {key}")
         response = {"op": "steal-response", "key": key, "state": state}
         self.batched_stream.send(response)
 
