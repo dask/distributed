@@ -4708,6 +4708,31 @@ class Scheduler(SchedulerState, ServerNode):
             if self.status == Status.running:
                 logger.critical("Tried writing to closed comm: %s", msg)
 
+    def send_all(self, client_msgs: dict, worker_msgs: dict):
+        """Send messages to client and workers"""
+        stream_comms: dict = self.stream_comms
+        client_comms: dict = self.client_comms
+        msgs: list
+
+        for worker, msgs in worker_msgs.items():
+            try:
+                w = stream_comms[worker]
+                for msg in msgs:
+                    w.send(msg)
+            except (CommClosedError, AttributeError):
+                self.loop.add_callback(self.remove_worker, address=worker)
+
+        for client, msgs in client_msgs.items():
+            c = client_comms.get(client)
+            if c is None:
+                continue
+            for msg in msgs:
+                try:
+                    c.send(msg)
+                except CommClosedError:
+                    if self.status == Status.running:
+                        logger.critical("Tried writing to closed comm: %s", msg)
+
     ############################
     # Less common interactions #
     ############################
@@ -5879,12 +5904,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
 
-            for worker, msgs in worker_msgs.items():
-                for msg in msgs:
-                    self.worker_send(worker, msg)
-            for client, msgs in client_msgs.items():
-                for msg in msgs:
-                    self.client_send(client, msg)
+            self.send_all(client_msgs, worker_msgs)
 
             finish2 = ts._state
             self.transition_log.append((key, start, finish2, recommendations, time()))
