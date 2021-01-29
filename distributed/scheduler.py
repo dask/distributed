@@ -5861,9 +5861,10 @@ class Scheduler(SchedulerState, ServerNode):
             elif "released" not in start_finish:
                 func = self._transitions["released", finish]
                 assert not args and not kwargs
-                a = self.transition(key, "released")
+                a: dict = self.transition(key, "released")
                 if key in a:
                     func = self._transitions["released", a[key]]
+                b: dict
                 b, worker_msgs, client_msgs = func(key)
                 a = a.copy()
                 a.update(b)
