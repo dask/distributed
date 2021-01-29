@@ -1559,8 +1559,7 @@ class Worker(ServerNode):
             if self.validate:
                 for worker, keys in self.has_what.items():
                     for k in keys:
-                        # TODO: is this getting tripped up by stealing?
-                        assert worker in self.tasks[k].who_has, breakpoint()
+                        assert worker in self.tasks[k].who_has
                         pass
                 if who_has:
                     assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
@@ -1582,11 +1581,7 @@ class Worker(ServerNode):
         start = ts.state
         if start == finish:
             return
-        try:
-            func = self._transitions[start, finish]
-        except KeyError:
-            breakpoint()
-            pass
+        func = self._transitions[start, finish]
         state = func(ts, **kwargs)
         self.log.append((ts.key, start, state or finish))
         ts.state = state or finish
@@ -1598,7 +1593,7 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.state == "new"
             assert ts.runspec is not None
-            assert not ts.who_has, breakpoint()
+            assert not ts.who_has
 
     def transition_new_fetch(self, ts):
         if self.validate:
@@ -1640,7 +1635,6 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "flight"
 
-            breakpoint()
             self.in_flight_tasks -= 1
             ts.coming_from = None
             ts.runspec = runspec or ts.runspec
@@ -1709,7 +1703,7 @@ class Worker(ServerNode):
                 assert all(
                     dep.key in self.data or dep.key in self.actors
                     for dep in ts.dependencies
-                ), breakpoint()
+                )
                 assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.ready
 
@@ -3042,9 +3036,7 @@ class Worker(ServerNode):
         assert ts.key not in self.data
         assert ts.state == "waiting"
         if ts.dependencies and ts.runspec:
-            assert not all(
-                dep.key in self.data for dep in ts.dependencies
-            ), breakpoint()
+            assert not all(dep.key in self.data for dep in ts.dependencies)
 
     def validate_task_flight(self, ts):
         assert ts.key not in self.data
@@ -3104,8 +3096,7 @@ class Worker(ServerNode):
 
             for worker, keys in self.has_what.items():
                 for k in keys:
-                    # assert worker in self.tasks[k].who_has, breakpoint()
-                    pass
+                    assert worker in self.tasks[k].who_has
 
             for ts in self.tasks.values():
                 self.validate_task(ts)
