@@ -5855,8 +5855,8 @@ class Scheduler(SchedulerState, ServerNode):
             start_finish = (start, finish)
             worker_msgs = {}
             client_msgs = {}
-            if start_finish in self._transitions:
-                func = self._transitions[start_finish]
+            func = self._transitions.get(start_finish)
+            if func is not None:
                 recommendations, worker_msgs, client_msgs = func(key, *args, **kwargs)
             elif "released" not in start_finish:
                 func = self._transitions["released", finish]
