@@ -5864,45 +5864,78 @@ class Scheduler(SchedulerState, ServerNode):
         worker_msgs: dict
         client_msgs: dict
         msgs: list
+        new_msgs: list
         dependents: set
         dependencies: set
         try:
             recommendations = {}
+            worker_msgs = {}
+            client_msgs = {}
+
             ts = parent._tasks.get(key)
             if ts is None:
-                return recommendations
+                return recommendations, worker_msgs, client_msgs
             start = ts._state
             if start == finish:
-                return recommendations
+                return recommendations, worker_msgs, client_msgs
 
             if self.plugins:
                 dependents = set(ts._dependents)
                 dependencies = set(ts._dependencies)
 
             start_finish = (start, finish)
-            worker_msgs = {}
-            client_msgs = {}
             func = self._transitions.get(start_finish)
             if func is not None:
-                t: tuple = func(key, *args, **kwargs)
-                recommendations, worker_msgs, client_msgs = t
+                a: tuple = func(key, *args, **kwargs)
+                recommendations, worker_msgs, client_msgs = a
             elif "released" not in start_finish:
                 func = self._transitions["released", finish]
                 assert not args and not kwargs
-                a: dict = self._transition(key, "released")
-                v = a.get(key)
+                a_recs: dict
+                a_wmsgs: dict
+                a_cmsgs: dict
+                a: tuple = self._transition(key, "released")
+                a_recs, a_wmsgs, a_cmsgs = a
+                v = a_recs.get(key)
                 if v is not None:
                     func = self._transitions["released", v]
-                b: dict
-                t: tuple = func(key)
-                b, worker_msgs, client_msgs = t
-                recommendations.update(a)
-                recommendations.update(b)
+                b_recs: dict
+                b_wmsgs: dict
+                b_cmsgs: dict
+                b: tuple = func(key)
+                b_recs, b_wmsgs, b_cmsgs = b
+
+                recommendations.update(a_recs)
+                for w, new_msgs in a_wmsgs.items():
+                    msgs = worker_msgs.get(w)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        worker_msgs[w] = new_msgs
+                for c, new_msgs in a_cmsgs.items():
+                    msgs = client_msgs.get(c)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        client_msgs[c] = new_msgs
+
+                recommendations.update(b_recs)
+                for w, new_msgs in b_wmsgs.items():
+                    msgs = worker_msgs.get(w)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        worker_msgs[w] = new_msgs
+                for c, new_msgs in b_cmsgs.items():
+                    msgs = client_msgs.get(c)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        client_msgs[c] = new_msgs
+
                 start = "released"
             else:
                 raise RuntimeError("Impossible transition from %r to %r" % start_finish)
-
-            self.send_all(client_msgs, worker_msgs)
 
             finish2 = ts._state
             self.transition_log.append((key, start, finish2, recommendations, time()))
@@ -5941,7 +5974,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ts._prefix._groups.remove(tg)
                     del parent._task_groups[tg._name]
 
-            return recommendations
+            return recommendations, worker_msgs, client_msgs
         except Exception as e:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
@@ -5966,7 +5999,13 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.transitions: transitive version of this function
         """
-        return self._transition(key, finish, *args, **kwargs)
+        recommendations: dict
+        worker_msgs: dict
+        client_msgs: dict
+        a: tuple = self._transition(key, finish, *args, **kwargs)
+        recommendations, worker_msgs, client_msgs = a
+        self.send_all(client_msgs, worker_msgs)
+        return recommendations
 
     def transitions(self, recommendations: dict):
         """Process transitions until none are left
@@ -5977,12 +6016,36 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         keys: set = set()
         recommendations = recommendations.copy()
-        new: dict
+        worker_msgs: dict = {}
+        client_msgs: dict = {}
+        msgs: list
+        new_msgs: list
+        new: tuple
+        new_recs: dict
+        new_wmsgs: dict
+        new_cmsgs: dict
         while recommendations:
             key, finish = recommendations.popitem()
             keys.add(key)
+
             new = self._transition(key, finish)
-            recommendations.update(new)
+            new_recs, new_wmsgs, new_cmsgs = new
+
+            recommendations.update(new_recs)
+            for w, new_msgs in new_wmsgs.items():
+                msgs = worker_msgs.get(w)
+                if msgs is not None:
+                    msgs.extend(new_msgs)
+                else:
+                    worker_msgs[w] = new_msgs
+            for c, new_msgs in new_cmsgs.items():
+                msgs = client_msgs.get(c)
+                if msgs is not None:
+                    msgs.extend(new_msgs)
+                else:
+                    client_msgs[c] = new_msgs
+
+        self.send_all(client_msgs, worker_msgs)
 
         if parent._validate:
             for key in keys:
