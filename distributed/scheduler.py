@@ -182,7 +182,10 @@ DEFAULT_EXTENSIONS = [
     EventExtension,
 ]
 
-ALL_TASK_STATES = {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+ALL_TASK_STATES = declare(
+    set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
+)
+globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
 
 
 @final
