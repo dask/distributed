@@ -5862,8 +5862,9 @@ class Scheduler(SchedulerState, ServerNode):
                 func = self._transitions["released", finish]
                 assert not args and not kwargs
                 a: dict = self.transition(key, "released")
-                if key in a:
-                    func = self._transitions["released", a[key]]
+                v = a.get(key)
+                if v is not None:
+                    func = self._transitions["released", v]
                 b: dict
                 b, worker_msgs, client_msgs = func(key)
                 a = a.copy()
