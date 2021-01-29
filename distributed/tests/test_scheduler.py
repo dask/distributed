@@ -1039,11 +1039,12 @@ async def test_no_workers_to_memory(c, s):
 
 @gen_cluster(client=True)
 async def test_no_worker_to_memory_restrictions(c, s, a, b):
-    x = delayed(slowinc)(1, delay=0.4)
-    y = delayed(slowinc)(x, delay=0.4)
-    z = delayed(slowinc)(y, delay=0.4)
+    with dask.annotate(workers="alice"):
+        x = delayed(slowinc)(1, delay=0.4)
+        y = delayed(slowinc)(x, delay=0.4)
+        z = delayed(slowinc)(y, delay=0.4)
 
-    yy, zz = c.persist([y, z], workers={(x, y, z): "alice"})
+    yy, zz = c.persist([y, z], optimize_graph=False)
 
     while not s.tasks:
         await asyncio.sleep(0.01)
