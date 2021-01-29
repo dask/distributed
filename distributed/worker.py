@@ -1506,15 +1506,38 @@ class Worker(ServerNode):
             for dependency, workers in who_has.items():
                 assert workers
                 if dependency not in self.tasks:
+                    # initial state is "new"
+                    # this dependency does not already exist on worker
                     self.tasks[dependency] = dep_ts = TaskState(key=dependency)
 
-                dep_ts = self.tasks[dependency]
-                ts.dependencies.add(dep_ts)
-                dep_ts.dependents.add(ts)
+                    # link up to child / parents
+                    ts.dependencies.add(dep_ts)
+                    dep_ts.dependents.add(ts)
 
-                state = "fetch" if dependency not in self.data else "memory"
-                self.transition(dep_ts, state)
-                self.log.append((dependency, "new-dep", dep_ts.state, ts))
+                    # check to ensure task wasn't already executed and partially released
+                    # # TODO: make this less bad
+                    state = "fetch" if dependency not in self.data else "memory"
+
+                    # transition from new -> fetch handles adding dependency
+                    # to waiting_for_data
+                    self.transition(dep_ts, state)
+
+                    self.log.append((dependency, "new-dep", dep_ts.state, ts))
+
+                else:
+                    # task was already present on worker
+                    dep_ts = self.tasks[dependency]
+
+                    # link up to child / parents
+                    ts.dependencies.add(dep_ts)
+                    dep_ts.dependents.add(ts)
+
+                    # possible that a new task has asked for a dependency we're already
+                    # planning on fetching -- make sure that task knows it has to
+                    # wait for its dependencies to arrive
+                    if dep_ts.state in ("fetch", "flight"):
+                        ts.waiting_for_data.add(dep_ts.key)
+                        self.data_needed.append(ts.key)
 
                 dep_ts.who_has.update(workers)
 
@@ -1541,7 +1564,7 @@ class Worker(ServerNode):
                 for worker, keys in self.has_what.items():
                     for k in keys:
                         # TODO: is this getting tripped up by stealing?
-                        # assert worker in self.tasks[k].who_has, breakpoint()
+                        assert worker in self.tasks[k].who_has, breakpoint()
                         pass
                 if who_has:
                     assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
@@ -1621,6 +1644,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "flight"
 
+            breakpoint()
             self.in_flight_tasks -= 1
             ts.coming_from = None
             ts.runspec = runspec or ts.runspec
