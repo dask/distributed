@@ -5892,11 +5892,8 @@ class Scheduler(SchedulerState, ServerNode):
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
                 if ts._state == "forgotten":
-                    try:
-                        ts._dependents = dependents
-                        ts._dependencies = dependencies
-                    except KeyError:
-                        pass
+                    ts._dependents = dependents
+                    ts._dependencies = dependencies
                     parent._tasks[ts._key] = ts
                 for plugin in list(self.plugins):
                     try:
