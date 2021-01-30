@@ -1,4 +1,3 @@
-from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from contextlib import suppress
@@ -29,7 +28,7 @@ class VariableExtension:
     *  variable-delete
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: "Scheduler"):
         self.scheduler = scheduler
         self.variables = dict()
         self.waiting = defaultdict(set)

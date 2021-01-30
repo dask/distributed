@@ -1,4 +1,3 @@
-from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from contextlib import suppress
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 class PubSubSchedulerExtension:
     """ Extend Dask's scheduler with routes to handle PubSub machinery """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: "Scheduler"):
         self.scheduler = scheduler
         self.publishers = defaultdict(set)
         self.subscribers = defaultdict(set)
@@ -125,7 +124,7 @@ class PubSubSchedulerExtension:
 class PubSubWorkerExtension:
     """ Extend Dask's Worker with routes to handle PubSub machinery """
 
-    def __init__(self, worker: Worker):
+    def __init__(self, worker: "Worker"):
         self.worker = worker
         self.worker.stream_handlers.update(
             {

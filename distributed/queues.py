@@ -1,4 +1,3 @@
-from __future__ import annotations
 import asyncio
 from collections import defaultdict
 import logging
@@ -29,7 +28,7 @@ class QueueExtension:
     *  queue_size
     """
 
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: "Scheduler"):
         self.scheduler = scheduler
         self.queues = dict()
         self.client_refcount = dict()

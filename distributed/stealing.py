@@ -1,4 +1,3 @@
-from __future__ import annotations
 from collections import defaultdict, deque
 import logging
 from math import log2
@@ -27,7 +26,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
 class WorkStealing(SchedulerPlugin):
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: "Scheduler"):
         self.scheduler = scheduler
         # { level: { task states } }
         self.stealable_all = [set() for i in range(15)]
