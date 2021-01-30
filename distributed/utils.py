@@ -27,6 +27,7 @@ import weakref
 import pkgutil
 import base64
 import tblib.pickling_support
+from typing import Awaitable, Callable, TypeVar
 import xml.etree.ElementTree
 
 try:
@@ -287,6 +288,21 @@ async def Any(args, quiet_exceptions=()):
         results[tasks.current_index] = result
         break
     return results
+
+
+T = TypeVar("T")
+
+
+def asyncify(func: Callable[..., T]) -> Callable[..., Awaitable[T]]:
+    """
+    Wrap a synchronous function in an async one
+    """
+
+    @functools.wraps(func)
+    async def wrapped(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return wrapped
 
 
 def sync(loop, func, *args, callback_timeout=None, **kwargs):

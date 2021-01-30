@@ -48,6 +48,7 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
+    asyncify,
     get_ip,
     typename,
     has_arg,
@@ -679,10 +680,10 @@ class Worker(ServerNode):
 
         stream_handlers: Dict[str, Callable[..., Awaitable]] = {
             "close": self.close,
-            "compute-task": self.add_task,
-            "release-task": partial(self.release_key, report=False),
-            "delete-data": self.delete_data,
-            "steal-request": self.steal_request,
+            "compute-task": asyncify(self.add_task),
+            "release-task": asyncify(partial(self.release_key, report=False)),
+            "delete-data": asyncify(self.delete_data),
+            "steal-request": asyncify(self.steal_request),
         }
 
         super().__init__(
@@ -1411,7 +1412,7 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    async def delete_data(self, comm=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
@@ -1438,7 +1439,7 @@ class Worker(ServerNode):
     # Task Management #
     ###################
 
-    async def add_task(
+    def add_task(
         self,
         key,
         function=None,
@@ -2265,7 +2266,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    async def steal_request(self, key):
+    def steal_request(self, key):
         # There may be a race condition between stealing and releasing a task.
         # In this case the self.tasks is already cleared. The `None` will be
         # registered as `already-computing` on the other end
@@ -2291,7 +2292,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.runspec is None
 
-    async def release_key(self, key, cause=None, reason=None, report=True):
+    def release_key(self, key, cause=None, reason=None, report=True):
         try:
             if self.validate:
                 assert isinstance(key, str)
