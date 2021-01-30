@@ -1,14 +1,18 @@
+from __future__ import annotations
 import asyncio
 from collections import defaultdict
 import logging
+import typing
 import uuid
 
 from dask.utils import stringify
 
 from .client import Future, Client
-from .scheduler import Scheduler
 from .utils import sync, thread_state, parse_timedelta
 from .worker import get_client
+
+if typing.TYPE_CHECKING:
+    from .scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 

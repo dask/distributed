@@ -1,16 +1,20 @@
+from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from contextlib import suppress
 import logging
 import threading
+import typing
 import weakref
 
 from .core import CommClosedError
 from .metrics import time
 from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
-from .scheduler import Scheduler
-from .worker import Worker
+
+if typing.TYPE_CHECKING:
+    from .scheduler import Scheduler
+    from .worker import Worker
 
 logger = logging.getLogger(__name__)
 

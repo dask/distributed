@@ -1,7 +1,9 @@
+from __future__ import annotations
 from collections import defaultdict, deque
 import logging
 from math import log2
 from time import time
+import typing
 
 from tornado.ioloop import PeriodicCallback
 
@@ -10,7 +12,9 @@ from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, parse_timedelta
-from .scheduler import Scheduler
+
+if typing.TYPE_CHECKING:
+    from .scheduler import Scheduler
 
 from tlz import topk
 

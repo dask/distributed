@@ -1,7 +1,9 @@
+from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from contextlib import suppress
 import logging
+import typing
 import uuid
 
 from tlz import merge
@@ -9,8 +11,10 @@ from tlz import merge
 from dask.utils import stringify
 from .client import Future, Client
 from .utils import log_errors, TimeoutError, parse_timedelta
-from .scheduler import Scheduler
 from .worker import get_client
+
+if typing.TYPE_CHECKING:
+    from .scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 
