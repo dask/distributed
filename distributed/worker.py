@@ -1488,6 +1488,8 @@ class Worker(ServerNode):
                 )
                 self.transition(ts, "waiting")
 
+            # TODO: move transition of `ts` to end of `add_task`
+
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
                 self.generation -= 1
@@ -1560,7 +1562,6 @@ class Worker(ServerNode):
                 for worker, keys in self.has_what.items():
                     for k in keys:
                         assert worker in self.tasks[k].who_has
-                        pass
                 if who_has:
                     assert all(self.tasks[dep] in ts.dependencies for dep in who_has)
                     assert all(self.tasks[dep.key] for dep in ts.dependencies)
