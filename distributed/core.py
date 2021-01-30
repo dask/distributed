@@ -7,7 +7,7 @@ import inspect
 import logging
 import threading
 import traceback
-from typing import Callable, Dict, Awaitable
+from typing import Awaitable, Callable, Dict, Iterable
 import uuid
 import weakref
 import warnings
@@ -30,7 +30,6 @@ from .metrics import time
 from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
-    is_coroutine_function,
     get_traceback,
     truncate_exception,
     shutting_down,
@@ -544,7 +543,9 @@ class Server:
                         "Failed while closing connection to %r: %s", address, e
                     )
 
-    async def handle_stream(self, comm, extra=None, every_cycle=[]):
+    async def handle_stream(
+        self, comm, extra=None, every_cycle: Iterable[Callable[..., Awaitable]] = []
+    ):
         extra = extra or {}
         logger.info("Starting established connection")
 
@@ -572,10 +573,7 @@ class Server:
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
-                    if is_coroutine_function(func):
-                        self.loop.add_callback(func)
-                    else:
-                        func()
+                    self.loop.add_callback(func)
 
         except (CommClosedError, EnvironmentError) as e:
             pass

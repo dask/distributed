@@ -987,7 +987,11 @@ class Worker(ServerNode):
     async def handle_scheduler(self, comm):
         try:
             await self.handle_stream(
-                comm, every_cycle=[self.ensure_communicating, self.ensure_computing]
+                comm,
+                every_cycle=[
+                    asyncify(self.ensure_communicating),
+                    self.ensure_computing,
+                ],
             )
         except Exception as e:
             logger.exception(e)
