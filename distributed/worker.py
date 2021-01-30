@@ -1546,7 +1546,7 @@ class Worker(ServerNode):
 
                     for worker in workers:
                         self.has_what[worker].add(dep_ts.key)
-                    #if dep_ts.state != "memory":
+                        # if dep_ts.state != "memory":
                         self.pending_data_per_worker[worker].append(dep_ts.key)
 
             if nbytes is not None:
@@ -1555,7 +1555,7 @@ class Worker(ServerNode):
 
             # TODO: move this into the appropriate transition functions
             # or remove it altogether
-            #self.update_who_has(who_has)
+            # self.update_who_has(who_has)
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
             else:
@@ -1714,7 +1714,7 @@ class Worker(ServerNode):
             # TODO this should probably only be set for tasks that are in `fetch`
             # but there's some weirdness with `has_what` being out-of-sync
             # when workers fail
-            #ts.who_has.add(self.address)
+            # ts.who_has.add(self.address)
             self.has_what[self.address].discard(ts.key)
 
             if ts.resource_restrictions is not None:
