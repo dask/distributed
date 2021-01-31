@@ -213,9 +213,9 @@ def serialize(x, serializers=None, on_error="message", context=None):
 
     See Also
     --------
-    deserialize: Convert header and frames back to object
-    to_serialize: Mark that data in a message should be serialized
-    register_serialization: Register custom serialization functions
+    deserialize : Convert header and frames back to object
+    to_serialize : Mark that data in a message should be serialized
+    register_serialization : Register custom serialization functions
     """
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
@@ -322,8 +322,8 @@ def deserialize(header, frames, deserializers=None):
 
     Parameters
     ----------
-    header: dict
-    frames: list of bytes
+    header : dict
+    frames : list of bytes
     deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
@@ -580,9 +580,9 @@ def register_serialization(cls, serialize, deserialize):
 
     Parameters
     ----------
-    cls: type
-    serialize: callable(cls) -> Tuple[Dict, List[bytes]]
-    deserialize: callable(header: Dict, frames: List[bytes]) -> cls
+    cls : type
+    serialize : callable(cls) -> Tuple[Dict, List[bytes]]
+    deserialize : callable(header: Dict, frames: List[bytes]) -> cls
 
     Examples
     --------
