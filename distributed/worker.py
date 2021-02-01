@@ -1776,11 +1776,6 @@ class Worker(ServerNode):
                 assert all(dep.state == "memory" for dep in ts.dependencies)
                 assert ts.key not in self.ready
 
-            # ts.waiting_for_data.clear()
-            # TODO this should probably only be set for tasks that are in `fetch`
-            # but there's some weirdness with `has_what` being out-of-sync
-            # when workers fail
-            # ts.who_has.add(self.address)
             self.has_what[self.address].discard(ts.key)
 
             if ts.resource_restrictions is not None:
