@@ -1089,19 +1089,19 @@ class TaskState:
        into the "processing" state and be sent for execution to another
        connected worker.
 
-    .. attribute: metadata: dict
+    .. attribute:: metadata: dict
 
        Metadata related to task.
 
-    .. attribute: actor: bool
+    .. attribute:: actor: bool
 
        Whether or not this task is an Actor.
 
-    .. attribute: group: TaskGroup
+    .. attribute:: group: TaskGroup
 
         The group of tasks to which this one belongs.
 
-    .. attribute: annotations: dict
+    .. attribute:: annotations: dict
 
         Task annotations
     """
