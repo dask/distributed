@@ -215,7 +215,7 @@ class Queue:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
@@ -228,11 +228,11 @@ class Queue:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
-        batch: boolean, int (optional)
+        batch : boolean, int (optional)
             If True then return all elements currently waiting in the queue.
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time

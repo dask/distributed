@@ -57,7 +57,6 @@ async def progress_stream(address, interval):
 
 def progress_quads(msg, nrows=8, ncols=3):
     """
-
     >>> msg = {'all': {'inc': 5, 'dec': 1, 'add': 4},
     ...        'memory': {'inc': 2, 'dec': 0, 'add': 1},
     ...        'erred': {'inc': 0, 'dec': 1, 'add': 0},

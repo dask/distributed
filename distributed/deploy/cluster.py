@@ -160,7 +160,7 @@ class Cluster:
 
         Parameters
         ----------
-        n: int
+        n : int
             Target number of workers
 
         Examples

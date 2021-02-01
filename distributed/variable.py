@@ -181,7 +181,7 @@ class Variable:
 
         Parameters
         ----------
-        value: Future or object
+        value : Future or object
             Must be either a Future or a msgpack-encodable value
         """
         return self.client.sync(self._set, value, **kwargs)
@@ -211,7 +211,7 @@ class Variable:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".

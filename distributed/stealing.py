@@ -110,7 +110,6 @@ class WorkStealing(SchedulerPlugin):
 
         Returns
         -------
-
         cost_multiplier: The increased cost from moving this task as a factor.
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value

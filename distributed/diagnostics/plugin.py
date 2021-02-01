@@ -67,13 +67,13 @@ class SchedulerPlugin:
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        *args, **kwargs: More options passed when transitioning
+        *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
 
@@ -144,13 +144,13 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        kwargs: More options passed when transitioning
+        kwargs : More options passed when transitioning
         """
 
     def release_key(self, key, state, cause, reason, report):
@@ -159,15 +159,15 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key: string
-        state: string
+        key : string
+        state : string
             State of the released task.
             One of waiting, ready, executing, long-running, memory, error.
-        cause: string or None
+        cause : string or None
             Additional information on what triggered the release of the task.
-        reason: None
+        reason : None
             Not used.
-        report: bool
+        report : bool
             Whether the worker should report the released task to the scheduler.
         """
 
@@ -177,11 +177,11 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        dep: string
-        state: string
+        dep : string
+        state : string
             State of the released dependency.
             One of waiting, flight, memory.
-        report: bool
+        report : bool
             Whether the worker should report the released dependency to the scheduler.
         """
 

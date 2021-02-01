@@ -98,12 +98,12 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        fn: A callable that will take as many arguments as there are
+        fn : A callable that will take as many arguments as there are
             passed iterables.
-        iterables: One iterable for each parameter to *fn*.
-        timeout: The maximum number of seconds to wait. If None, then there
+        iterables : One iterable for each parameter to *fn*.
+        timeout : The maximum number of seconds to wait. If None, then there
             is no limit on the wait time.
-        chunksize: ignored.
+        chunksize : ignored.
 
         Returns
         -------
@@ -155,7 +155,7 @@ class ClientExecutor(cf.Executor):
 
         Parameters
         ----------
-        wait: If True then shutdown will not return until all running
+        wait : If True then shutdown will not return until all running
             futures have finished executing.  If False then all running
             futures are cancelled immediately.
         """

@@ -405,13 +405,13 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
 
     Parameters
     ----------
-    futures: Futures
+    futures : Futures
         A list of futures or keys to track
-    notebook: bool (optional)
+    notebook : bool (optional)
         Running in the notebook or not (defaults to guess)
-    multi: bool (optional)
+    multi : bool (optional)
         Track different functions independently (defaults to True)
-    complete: bool (optional)
+    complete : bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
 
