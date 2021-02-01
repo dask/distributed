@@ -114,13 +114,13 @@ class TaskState:
         The priority this task given by the scheduler.  Determines run order.
     * **state**: ``str``
         The current state of the task. One of ["waiting", "ready", "executing",
-        "memory", "flight", "long-running", "rescheduled", "error"]
+        "fetch", "memory", "flight", "long-running", "rescheduled", "error"]
     * **who_has**: ``set(worker)``
         Workers that we believe have this data
     * **coming_from**: ``str``
         The worker that current task data is coming from if task is in flight
     * **waiting_for_data**: ``set(keys of dependencies)``
-        A dynamic verion of dependencies.  All dependencies that we still don't
+        A dynamic version of dependencies.  All dependencies that we still don't
         have for a particular key.
     * **resource_restrictions**: ``{str: number}``
         Abstract resources required to run a task
@@ -457,7 +457,7 @@ class Worker(ServerNode):
             ("executing", "memory"): self.transition_executing_done,
             ("flight", "memory"): self.transition_flight_memory,
             ("flight", "fetch"): self.transition_flight_fetch,
-            # Scheduler intercession
+            # Scheduler intercession (re-assignment)
             ("fetch", "waiting"): self.transition_fetch_waiting,
             ("flight", "waiting"): self.transition_flight_waiting,
             # Errors, long-running, constrained
@@ -1590,43 +1590,67 @@ class Worker(ServerNode):
         self._notify_plugins("transition", ts.key, start, state or finish, **kwargs)
 
     def transition_new_waiting(self, ts):
-        if self.validate:
-            assert ts.state == "new"
-            assert ts.runspec is not None
-            assert not ts.who_has
+        try:
+            if self.validate:
+                assert ts.state == "new"
+                assert ts.runspec is not None
+                assert not ts.who_has
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
     def transition_new_fetch(self, ts):
-        if self.validate:
-            assert ts.state == "new"
-            assert ts.runspec is None
+        try:
+            if self.validate:
+                assert ts.state == "new"
+                assert ts.runspec is None
 
-        for dependent in ts.dependents:
-            dependent.waiting_for_data.add(ts.key)
+            for dependent in ts.dependents:
+                dependent.waiting_for_data.add(ts.key)
 
-        self.data_needed.append(ts.key)
-        self.waiting_for_data_count += 1
+            self.data_needed.append(ts.key)
+            self.waiting_for_data_count += 1
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
     def transition_fetch_waiting(self, ts, runspec=None):
         """This is a rescheduling transition that occurs after a worker failure.
         A task was available from another worker but that worker died and the
         scheduler reassigned the task for computation here.
         """
-        if self.validate:
-            assert ts.state == "fetch"
-            assert ts.runspec is None
+        try:
+            if self.validate:
+                assert ts.state == "fetch"
+                assert ts.runspec is None
 
-        ts.runspec = runspec
+            ts.runspec = runspec
 
-        # remove any stale entries in `has_what`
-        for worker in self.has_what.keys():
-            self.has_what[worker].discard(ts.key)
+            # remove any stale entries in `has_what`
+            for worker in self.has_what.keys():
+                self.has_what[worker].discard(ts.key)
 
-        # clear `who_has` of stale info
-        ts.who_has.clear()
+            # clear `who_has` of stale info
+            ts.who_has.clear()
 
-        # remove entry from dependents to avoid a spurious `gather_dep` call``
-        for dependent in ts.dependents:
-            dependent.waiting_for_data.discard(ts.key)
+            # remove entry from dependents to avoid a spurious `gather_dep` call``
+            for dependent in ts.dependents:
+                dependent.waiting_for_data.discard(ts.key)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
     def transition_flight_waiting(self, ts, runspec=None):
         """This is a rescheduling transition that occurs after
@@ -1634,22 +1658,30 @@ class Worker(ServerNode):
         worker when that worker died and the scheduler reassigned the task for
         computation here.
         """
-        if self.validate:
-            assert ts.state == "flight"
-            assert ts.runspec is None
+        try:
+            if self.validate:
+                assert ts.state == "flight"
+                assert ts.runspec is None
 
-        ts.runspec = runspec
+            ts.runspec = runspec
 
-        # remove any stale entries in `has_what`
-        for worker in self.has_what.keys():
-            self.has_what[worker].discard(ts.key)
+            # remove any stale entries in `has_what`
+            for worker in self.has_what.keys():
+                self.has_what[worker].discard(ts.key)
 
-        # clear `who_has` of stale info
-        ts.who_has.clear()
+            # clear `who_has` of stale info
+            ts.who_has.clear()
 
-        # remove entry from dependents to avoid a spurious `gather_dep` call``
-        for dependent in ts.dependents:
-            dependent.waiting_for_data.discard(ts.key)
+            # remove entry from dependents to avoid a spurious `gather_dep` call``
+            for dependent in ts.dependents:
+                dependent.waiting_for_data.discard(ts.key)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
     def transition_fetch_flight(self, ts, worker=None):
         try:
