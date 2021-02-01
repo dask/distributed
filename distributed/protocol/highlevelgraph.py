@@ -79,11 +79,11 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
 
     Parameters
     ----------
-    hlg: HighLevelGraph
+    hlg : HighLevelGraph
         The high level graph to pack
-    client: distributed.Client
+    client : distributed.Client
         The client calling this function.
-    client_keys: Iterable
+    client_keys : Iterable
         List of keys requested by the client.
 
     Returns
@@ -134,10 +134,9 @@ def highlevelgraph_unpack(dumped_hlg, annotations: dict):
 
     Parameters
     ----------
-    dumped_hlg: list of header and payload
+    dumped_hlg : list of header and payload
         Packed high level graph serialized by dumps_msgpack
-
-    annotations: dict
+    annotations : dict
         A top-level annotations object which may be partially populated,
         and which may be further filled by annotations from the layers
         of the dumped_hlg.
