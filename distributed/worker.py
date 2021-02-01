@@ -459,6 +459,7 @@ class Worker(ServerNode):
             ("flight", "fetch"): self.transition_flight_fetch,
             # Scheduler intercession
             ("fetch", "waiting"): self.transition_fetch_waiting,
+            ("flight", "waiting"): self.transition_flight_waiting,
             # Errors, long-running, constrained
             ("waiting", "error"): self.transition_waiting_done,
             ("constrained", "executing"): self.transition_constrained_executing,
@@ -469,7 +470,6 @@ class Worker(ServerNode):
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
             # Stealing transitions
-            # ("waiting", "new"): self.transition_waiting_new,
             ("ready", "waiting"): self.transition_ready_waiting,
             ("constrained", "waiting"): self.transition_constrained_waiting,
         }
@@ -1462,7 +1462,6 @@ class Worker(ServerNode):
             runspec = SerializedTask(function, args, kwargs, task)
             if key in self.tasks:
                 ts = self.tasks[key]
-                ts.runspec = runspec
                 if ts.state == "memory":
                     assert key in self.data or key in self.actors
                     logger.debug(
@@ -1476,11 +1475,10 @@ class Worker(ServerNode):
                     ts.exception = None
                     ts.traceback = None
                 else:
+                    # This is a scheduler re-assignment
+                    # Either `fetch` -> `waiting` or `flight` -> `waiting`
                     self.log.append((ts.key, "re-adding key, new TaskState"))
-                    self.tasks[key] = ts = TaskState(
-                        key=key, runspec=SerializedTask(function, args, kwargs, task)
-                    )
-                    self.transition(ts, "waiting")
+                    self.transition(ts, "waiting", runspec=runspec)
             else:
                 self.log.append((key, "new"))
                 self.tasks[key] = ts = TaskState(
@@ -1489,6 +1487,8 @@ class Worker(ServerNode):
                 self.transition(ts, "waiting")
 
             # TODO: move transition of `ts` to end of `add_task`
+            # This will require a chained recommendation transition system like
+            # the scheduler
 
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
@@ -1553,9 +1553,6 @@ class Worker(ServerNode):
                 for key, value in nbytes.items():
                     self.tasks[key].nbytes = value
 
-            # TODO: move this into the appropriate transition functions
-            # or remove it altogether
-            # self.update_who_has(who_has)
             if ts.waiting_for_data:
                 self.data_needed.append(ts.key)
             else:
@@ -1609,11 +1606,48 @@ class Worker(ServerNode):
         self.data_needed.append(ts.key)
         self.waiting_for_data_count += 1
 
-    def transition_fetch_waiting(self, ts):
+    def transition_fetch_waiting(self, ts, runspec=None):
+        """This is a rescheduling transition that occurs after a worker failure.
+        A task was available from another worker but that worker died and the
+        scheduler reassigned the task for computation here.
+        """
         if self.validate:
             assert ts.state == "fetch"
-            assert ts.runspec is not None
+            assert ts.runspec is None
 
+        ts.runspec = runspec
+
+        # remove any stale entries in `has_what`
+        for worker in self.has_what.keys():
+            self.has_what[worker].discard(ts.key)
+
+        # clear `who_has` of stale info
+        ts.who_has.clear()
+
+        # remove entry from dependents to avoid a spurious `gather_dep` call``
+        for dependent in ts.dependents:
+            dependent.waiting_for_data.discard(ts.key)
+
+    def transition_flight_waiting(self, ts, runspec=None):
+        """This is a rescheduling transition that occurs after
+        a worker failure.  A task was in flight from another worker to this
+        worker when that worker died and the scheduler reassigned the task for
+        computation here.
+        """
+        if self.validate:
+            assert ts.state == "flight"
+            assert ts.runspec is None
+
+        ts.runspec = runspec
+
+        # remove any stale entries in `has_what`
+        for worker in self.has_what.keys():
+            self.has_what[worker].discard(ts.key)
+
+        # clear `who_has` of stale info
+        ts.who_has.clear()
+
+        # remove entry from dependents to avoid a spurious `gather_dep` call``
         for dependent in ts.dependents:
             dependent.waiting_for_data.discard(ts.key)
 
