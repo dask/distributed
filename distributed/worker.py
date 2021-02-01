@@ -3083,6 +3083,10 @@ class Worker(ServerNode):
         assert not any(dep.key in self.ready for dep in ts.dependents)
         assert ts.key in self.in_flight_workers[ts.coming_from]
 
+    def validate_task_fetch(self, ts):
+        assert ts.runspec is None
+        assert ts.key not in self.data
+
     def validate_task(self, ts):
         try:
             if ts.state == "memory":
@@ -3095,6 +3099,8 @@ class Worker(ServerNode):
                 self.validate_task_executing(ts)
             elif ts.state == "flight":
                 self.validate_task_flight(ts)
+            elif ts.state == "fetch":
+                self.validate_task_fetch(ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
