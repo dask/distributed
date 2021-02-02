@@ -1534,19 +1534,14 @@ class Worker(ServerNode):
                     ts.dependencies.add(dep_ts)
                     dep_ts.dependents.add(ts)
 
-                    # possible that a new task has asked for a dependency we're already
-                    # planning on fetching -- make sure that task knows it has to
-                    # wait for its dependencies to arrive
-                    if dep_ts.state in ("fetch", "flight"):
-                        ts.waiting_for_data.add(dep_ts.key)
-
                 if dep_ts.state in ("fetch", "flight"):
                     # if we _need_ to grab data or are in the process
+                    ts.waiting_for_data.add(dep_ts.key)
+                    # Ensure we know which workers to grab data from
                     dep_ts.who_has.update(workers)
 
                     for worker in workers:
                         self.has_what[worker].add(dep_ts.key)
-                        # if dep_ts.state != "memory":
                         self.pending_data_per_worker[worker].append(dep_ts.key)
 
             if nbytes is not None:
@@ -1612,8 +1607,9 @@ class Worker(ServerNode):
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
 
-            self.data_needed.append(ts.key)
-            self.waiting_for_data_count += 1
+            if ts.key not in self.data_needed:
+                self.data_needed.append(ts.key)
+                self.waiting_for_data_count += 1
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1631,6 +1627,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "fetch"
                 assert ts.runspec is None
+                assert runspec is not None
 
             ts.runspec = runspec
 
@@ -1662,6 +1659,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "flight"
                 assert ts.runspec is None
+                assert runspec is not None
 
             ts.runspec = runspec
 
