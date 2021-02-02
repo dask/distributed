@@ -1618,7 +1618,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_fetch_waiting(self, ts, runspec=None):
+    def transition_fetch_waiting(self, ts, runspec):
         """This is a rescheduling transition that occurs after a worker failure.
         A task was available from another worker but that worker died and the
         scheduler reassigned the task for computation here.
@@ -1649,7 +1649,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_flight_waiting(self, ts, runspec=None):
+    def transition_flight_waiting(self, ts, runspec):
         """This is a rescheduling transition that occurs after
         a worker failure.  A task was in flight from another worker to this
         worker when that worker died and the scheduler reassigned the task for
