@@ -127,7 +127,7 @@ class BatchedSend:
         self.stopped.set()
         self.abort()
 
-    def send(self, msg):
+    def send(self, *msgs):
         """Schedule a message for sending to the other side
 
         This completes quickly and synchronously
@@ -135,8 +135,8 @@ class BatchedSend:
         if self.comm is not None and self.comm.closed():
             raise CommClosedError
 
-        self.message_count += 1
-        self.buffer.append(msg)
+        self.message_count += len(msgs)
+        self.buffer.extend(msgs)
         # Avoid spurious wakeups if possible
         if self.next_deadline is None:
             self.waker.set()
