@@ -1697,7 +1697,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_flight_fetch(self, ts, worker=None, remove=True):
+    def transition_flight_fetch(self, ts, worker=None, runspec=None):
         try:
             if self.validate:
                 assert ts.state == "flight"
@@ -1705,12 +1705,6 @@ class Worker(ServerNode):
             self.in_flight_tasks -= 1
             ts.coming_from = None
             ts.runspec = runspec or ts.runspec
-            if remove:
-                try:
-                    ts.who_has.remove(worker)
-                    self.has_what[worker].remove(ts.key)
-                except KeyError:
-                    pass
 
             if not ts.who_has:
                 if ts.key not in self._missing_dep_flight:
@@ -1719,10 +1713,7 @@ class Worker(ServerNode):
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
                 if dependent.state == "waiting":
-                    if remove:  # try a new worker immediately
-                        self.data_needed.appendleft(dependent.key)
-                    else:  # worker was probably busy, wait a while
-                        self.data_needed.append(dependent.key)
+                    self.data_needed.append(dependent.key)
 
             if not ts.dependents:
                 self.release_key(ts.key)
@@ -2288,8 +2279,7 @@ class Worker(ServerNode):
                         self.release_key(d)
                         continue
                     elif ts.state not in ("ready", "memory"):
-                        # "waiting" or "fetch"?
-                        self.transition(ts, "fetch", worker=worker, remove=not busy)
+                        self.transition(ts, "fetch", worker=worker)
 
                     if not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
