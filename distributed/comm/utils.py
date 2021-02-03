@@ -1,6 +1,8 @@
+from distributed.protocol.core import dumps_msgpack
 import logging
 import math
 import socket
+import warnings
 
 import dask
 from dask.sizeof import sizeof
@@ -17,6 +19,63 @@ logger = logging.getLogger(__name__)
 OFFLOAD_THRESHOLD = dask.config.get("distributed.comm.offload")
 if isinstance(OFFLOAD_THRESHOLD, str):
     OFFLOAD_THRESHOLD = parse_bytes(OFFLOAD_THRESHOLD)
+
+
+def is_msgpack_serializable(msg) -> bool:
+    """Check if a message is msgpack serializable
+
+    Parameters
+    ----------
+    msg: Any
+        Message to check
+    """
+    typ = type(msg)
+
+    # Only lists and dicts can contain non-msgpack-serializable objects
+    if typ is not list and typ is not dict:
+        return True
+
+    if len(msg) == 0:
+        return True
+
+    if typ is not list:
+        msg_list = (msg,)
+    else:
+        msg_list = msg
+
+    for msg in msg_list:
+        if type(msg) is not dict:
+            return False
+
+        if set(msg.keys()) == {"compression", "python", "pickle-protocol"}:
+            continue
+
+        op = msg.get("op", None)
+        if not op:
+            return False
+
+        if "task" in msg:
+            return False
+        if "data" in msg:
+            return False
+        if msg.get("status", "OK") != "OK":
+            return False
+        if len(msg.get("worker-plugins", ())) > 0:
+            return False
+        if msg.get("actors", ()):
+            return False
+
+        # Operations explicit disallowed
+        if op in (
+            "actor_execute",
+            "actor_attribute",
+            "plugin-add",
+            "proxy",
+            "task-erred",
+        ):
+            return False
+
+    return True
 
 
 async def to_frames(
@@ -45,6 +104,22 @@ async def to_frames(
             msg_size = math.inf
     else:
         msg_size = 0
+
+    if is_msgpack_serializable(msg):
+        # print("to_frames() SIMPLE: ", repr(msg))
+        if context and "compression" in context:
+            compress_opts = {"compression": context["compression"]}
+        else:
+            compress_opts = {}
+        try:
+            return list(dumps_msgpack(msg, **compress_opts))
+        except TypeError as e:
+            warnings.warn(
+                "Message thought to be msgpack serializable but isn't: %s" % e
+            )
+    else:
+        pass
+        # print("to_frames() NON-SIMPLE: ", repr(msg))
 
     if allow_offload and OFFLOAD_THRESHOLD and msg_size > OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
