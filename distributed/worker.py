@@ -469,9 +469,6 @@ class Worker(ServerNode):
             ("long-running", "error"): self.transition_executing_done,
             ("long-running", "memory"): self.transition_executing_done,
             ("long-running", "rescheduled"): self.transition_executing_done,
-            # Stealing transitions
-            ("ready", "waiting"): self.transition_ready_waiting,
-            ("constrained", "waiting"): self.transition_constrained_waiting,
         }
 
         self.incoming_transfer_log = deque(maxlen=100000)
@@ -1832,24 +1829,6 @@ class Worker(ServerNode):
             self.put_key_in_memory(ts, value=value)
         self.send_task_state_to_scheduler(ts)
 
-    def transition_ready_waiting(self, ts):
-        """
-        This transition is common for work stealing
-        """
-        ts.runspec = None
-
-    def transition_waiting_new(self, ts):
-        """
-        Common in work stealing
-        """
-        ts.runspec = None
-
-    def transition_constrained_waiting(self, ts):
-        """
-        Common in work stealing
-        """
-        ts.runspec = None
-
     def transition_constrained_executing(self, ts):
         self.transition_ready_executing(ts)
         for resource, quantity in ts.resource_restrictions.items():
@@ -2408,17 +2387,12 @@ class Worker(ServerNode):
         self.batched_stream.send(response)
 
         if state in ("ready", "waiting", "constrained"):
-            # Resetting the runspec should be reset by the transition. However,
-            # the waiting->waiting transition results in a no-op which would not
-            # reset.
-            ts.runspec = None
-            self.transition(ts, "waiting")
-            if not ts.dependents:
-                self.release_key(ts.key)
-                if self.validate:
-                    assert ts.key not in self.tasks
+            # If task is marked as "constrained" we haven't yet assigned it an
+            # `available_resources` to run on, that happens in
+            # `transition_constrained_executing`
+            self.release_key(ts.key)
             if self.validate:
-                assert ts.runspec is None
+                assert ts.key not in self.tasks
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
