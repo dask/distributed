@@ -5282,19 +5282,19 @@ class Scheduler(SchedulerState, ServerNode):
 
         Parameters
         ----------
-        memory_factor: Number
+        memory_factor : Number
             Amount of extra space we want to have for our stored data.
             Defaults two 2, or that we want to have twice as much memory as we
             currently have data.
-        n: int
+        n : int
             Number of workers to close
-        minimum: int
+        minimum : int
             Minimum number of workers to keep around
-        key: Callable(WorkerState)
+        key : Callable(WorkerState)
             An optional callable mapping a WorkerState object to a group
             affiliation.  Groups will be closed together.  This is useful when
             closing workers must be done collectively, such as by hostname.
-        target: int
+        target : int
             Target number of workers to have after we close
         attribute : str
             The attribute of the WorkerState object to return, like "address"
@@ -5760,7 +5760,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         See Also
         --------
-        Client.run_on_scheduler:
+        Client.run_on_scheduler
         """
         from .worker import run
 
@@ -5856,7 +5856,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         See Also
         --------
-        Scheduler.transitions: transitive version of this function
+        Scheduler.transitions : transitive version of this function
         """
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
@@ -6503,7 +6503,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         Parameters
         ----------
-        target_duration: str
+        target_duration : str
             A desired duration of time for computations to take.  This affects
             how rapidly the scheduler will ask to scale.
 

@@ -1119,7 +1119,7 @@ def error_message(e, status="error"):
 
     See Also
     --------
-    clean_exception: deserialize and unpack message into exception/traceback
+    clean_exception : deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
@@ -1150,7 +1150,7 @@ def clean_exception(exception, traceback, **kwargs):
 
     See Also
     --------
-    error_message: create and serialize errors into message
+    error_message : create and serialize errors into message
     """
     if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:
