@@ -1246,6 +1246,7 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
+@functools.lru_cache(None)
 def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
@@ -1343,8 +1344,7 @@ def parse_ports(port):
     return ports
 
 
-def is_coroutine_function(f):
-    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+is_coroutine_function = iscoroutinefunction
 
 
 class Log(str):
