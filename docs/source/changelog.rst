@@ -1,6 +1,28 @@
 Changelog
 =========
 
+2021.02.0
+---------
+
+Released on February 5, 2021
+
+- Bump minimum Dask to 2021.02.0 (:pr:`4486`) `James Bourbeau`_
+- Update ``TaskState`` documentation about dependents attribute (:pr:`4440`) `Florian Jetter`_
+- DOC: Autoreformat all functions docstrings (:pr:`4475`) `Matthias Bussonnier`_
+- Use cached version of ``is_coroutine_function`` in stream handling to (:pr:`4481`) `Ian Rose`_
+- Optimize ``transitions`` (:pr:`4451`) `jakirkham`_
+- Create ``PULL_REQUEST_TEMPLATE.md`` (:pr:`4476`) `Ray Bell`_
+- DOC: typo, directives ends with 2 colons ``::`` (:pr:`4472`) `Matthias Bussonnier`_
+- DOC: Proper numpydoc syntax for ``distributed/protocol/*.py`` (:pr:`4473`) `Matthias Bussonnier`_
+- Update ``pytest.skip`` usage in ``test_server_listen`` (:pr:`4467`) `James Bourbeau`_
+- Unify annotations (:pr:`4406`) `Ian Rose`_
+- Added worker resources from config (:pr:`4456`) `Tom Augspurger`_
+- Fix var name in worker validation func (:pr:`4457`) `Gil Forsyth`_
+- Refactor ``task_groups`` & ``task_prefixes`` (:pr:`4452`) `jakirkham`_
+- Use ``parent._tasks`` in ``heartbeat`` (:pr:`4450`) `jakirkham`_
+- Refactor ``SchedulerState`` from ``Scheduler`` (:pr:`4365`) `jakirkham`_
+
+
 2021.01.1
 ---------
 
@@ -2170,3 +2192,4 @@ significantly without many new features.
 .. _`Bernhard M. Wiedemann`: https://github.com/bmwiedemann
 .. _`Bruno Pagani`: https://github.com/ArchangeGabriel
 .. _`selshowk`: https://github.com/selshowk
+.. _`Ray Bell`: https://github.com/raybellwaves
