@@ -5,6 +5,7 @@ from time import sleep
 import pytest
 
 from distributed import Client, Queue, Nanny, worker_client, wait, TimeoutError
+from distributed.client import _del_global_client
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, div
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
@@ -276,3 +277,20 @@ async def test_2220(c, s, a, b):
     res = c.submit(get)
 
     await c.gather([res, fut])
+
+
+@gen_cluster(client=True)
+async def test_queue_in_task(c, s, a, b):
+    x = await Queue("x")
+    await x.put(123)
+
+    def foo():
+        y = Queue("x")
+        return y.get()
+
+    # We want to make sure Client.current() will not return c
+    # when called from inside a task
+    _del_global_client(c)
+
+    result = await c.submit(foo)
+    assert result == 123
