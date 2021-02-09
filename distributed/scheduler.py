@@ -2023,7 +2023,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        startstops: list = None,
+        startstops=None,
         **kwargs,
     ):
         ws: WorkerState
