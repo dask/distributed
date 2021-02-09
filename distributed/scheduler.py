@@ -2060,33 +2060,28 @@ class SchedulerState:
                 )
                 return recommendations, worker_msgs, client_msgs
 
+            has_compute_startstop: bool = False
             compute_start: double
             compute_stop: double
             if startstops:
-                L: list = list()
                 startstop: dict
                 for startstop in startstops:
                     stop = startstop["stop"]
                     start = startstop["start"]
                     action = startstop["action"]
-                    if action == "compute":
-                        L.append((start, stop))
+                    if not has_compute_startstop and action == "compute":
+                        compute_start = start
+                        compute_stop = stop
+                        has_compute_startstop = True
 
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
 
-                if len(L) > 0:
-                    compute_start, compute_stop = L[0]
-                else:  # This is very rare
-                    compute_start = compute_stop = 0
-            else:
-                compute_start = compute_stop = 0
-
             #############################
             # Update Timing Information #
             #############################
-            if compute_start and ws._processing.get(ts, True):
+            if has_compute_startstop and ws._processing.get(ts, True):
                 # Update average task duration for worker
                 old_duration = ts._prefix._duration_average
                 new_duration = compute_stop - compute_start
