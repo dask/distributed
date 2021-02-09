@@ -2099,8 +2099,8 @@ class SchedulerState:
                 for tts in s:
                     if tts._processing_on is not None:
                         wws = tts._processing_on
-                        old: double = wws._processing[tts]
                         comm: double = self.get_comm_cost(tts, wws)
+                        old: double = wws._processing[tts]
                         new: double = avg_duration + comm
                         diff: double = new - old
                         wws._processing[tts] = new
