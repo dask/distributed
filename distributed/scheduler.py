@@ -483,7 +483,7 @@ class WorkerState:
 
     @property
     def host(self):
-        return get_address_host(self.address)
+        return get_address_host(self._address)
 
     @property
     def last_seen(self):
