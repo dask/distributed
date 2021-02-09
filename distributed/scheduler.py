@@ -2095,20 +2095,18 @@ class SchedulerState:
                 ts._group._duration += new_duration
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
-                if s is None:
-                    s = set()
-
                 tts: TaskState
-                for tts in s:
-                    if tts._processing_on is not None:
-                        wws = tts._processing_on
-                        comm: double = self.get_comm_cost(tts, wws)
-                        old: double = wws._processing[tts]
-                        new: double = avg_duration + comm
-                        diff: double = new - old
-                        wws._processing[tts] = new
-                        wws._occupancy += diff
-                        self._total_occupancy += diff
+                if s:
+                    for tts in s:
+                        if tts._processing_on is not None:
+                            wws = tts._processing_on
+                            comm: double = self.get_comm_cost(tts, wws)
+                            old: double = wws._processing[tts]
+                            new: double = avg_duration + comm
+                            diff: double = new - old
+                            wws._processing[tts] = new
+                            wws._occupancy += diff
+                            self._total_occupancy += diff
 
             ############################
             # Update State Information #
