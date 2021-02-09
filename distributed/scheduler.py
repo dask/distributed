@@ -6783,9 +6783,7 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 
     report_msg: dict = _task_to_report_msg(state, ts)
 
-    client_msgs: dict = {}
-    for k in client_keys:
-        client_msgs[k] = [report_msg]
+    client_msgs: dict = {k: [report_msg] for k in client_keys}
 
     return client_msgs
 
