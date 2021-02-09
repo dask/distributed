@@ -2308,7 +2308,7 @@ class SchedulerState:
 
             dts: TaskState
             for dts in ts._dependencies:
-                s = dts._waiters
+                s: set = dts._waiters
                 if ts in s:
                     s.discard(ts)
                     if not s and not dts._who_wants:
@@ -2362,7 +2362,7 @@ class SchedulerState:
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
                     if dts._state != "released":
-                        s = dts._waiters
+                        s: set = dts._waiters
                         s.discard(ts)
                         if not s and not dts._who_wants:
                             recommendations[dts._key] = "released"
@@ -2420,7 +2420,7 @@ class SchedulerState:
                 recommendations[dts._key] = "erred"
 
             for dts in ts._dependencies:
-                s = dts._waiters
+                s: set = dts._waiters
                 s.discard(ts)
                 if not s and not dts._who_wants:
                     recommendations[dts._key] = "released"
