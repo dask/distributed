@@ -2610,8 +2610,7 @@ class SchedulerState:
 
         nc: Py_ssize_t = ws._nthreads
         p: Py_ssize_t = len(ws._processing)
-        total_occupancy: double = self._total_occupancy
-        avg: double = total_occupancy / self._total_nthreads
+        avg: double = self._total_occupancy / self._total_nthreads
 
         idle = self._idle
         saturated: set = self._saturated
