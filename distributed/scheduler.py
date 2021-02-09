@@ -2023,7 +2023,7 @@ class SchedulerState:
         type=None,
         typename: str = None,
         worker=None,
-        startstops=None,
+        startstops: list = None,
         **kwargs,
     ):
         ws: WorkerState
@@ -2061,7 +2061,8 @@ class SchedulerState:
                 return recommendations, worker_msgs, client_msgs
 
             if startstops:
-                L = list()
+                L: list = list()
+                startstop: dict
                 for startstop in startstops:
                     stop = startstop["stop"]
                     start = startstop["start"]
