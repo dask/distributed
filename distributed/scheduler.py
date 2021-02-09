@@ -2637,10 +2637,9 @@ class SchedulerState:
         dts: TaskState
         deps: set = ts._dependencies - ws._has_what
         nbytes: Py_ssize_t = 0
-        bandwidth: double = self._bandwidth
         for dts in deps:
             nbytes += dts._nbytes
-        return nbytes / bandwidth
+        return nbytes / self._bandwidth
 
     @ccall
     def get_task_duration(self, ts: TaskState, default: double = -1) -> double:
