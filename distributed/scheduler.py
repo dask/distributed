@@ -2083,8 +2083,9 @@ class SchedulerState:
             #############################
             if has_compute_startstop and ws._processing.get(ts, True):
                 # Update average task duration for worker
-                old_duration = ts._prefix._duration_average
-                new_duration = compute_stop - compute_start
+                old_duration: double = ts._prefix._duration_average
+                new_duration: double = compute_stop - compute_start
+                avg_duration: double
                 if old_duration < 0:
                     avg_duration = new_duration
                 else:
@@ -2097,8 +2098,8 @@ class SchedulerState:
                 for tts in self._unknown_durations.pop(ts._prefix._name, ()):
                     if tts._processing_on:
                         wws = tts._processing_on
-                        old = wws._processing[tts]
-                        comm = self.get_comm_cost(tts, wws)
+                        old: double = wws._processing[tts]
+                        comm: double = self.get_comm_cost(tts, wws)
                         wws._processing[tts] = avg_duration + comm
                         wws._occupancy += avg_duration + comm - old
                         self._total_occupancy += avg_duration + comm - old
