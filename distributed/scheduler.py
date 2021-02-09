@@ -4580,12 +4580,11 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None or not ts._who_has:
             return
-        if errant_worker in parent._workers_dv:
-            ws: WorkerState = parent._workers_dv[errant_worker]
-            if ws in ts._who_has:
-                ts._who_has.remove(ws)
-                ws._has_what.remove(ts)
-                ws._nbytes -= ts.get_nbytes()
+        ws: WorkerState = parent._workers_dv.get(errant_worker)
+        if ws is not None and ws in ts._who_has:
+            ts._who_has.remove(ws)
+            ws._has_what.remove(ts)
+            ws._nbytes -= ts.get_nbytes()
         if not ts._who_has:
             if ts._run_spec:
                 self.transitions({key: "released"})
