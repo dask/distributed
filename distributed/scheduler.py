@@ -2060,6 +2060,8 @@ class SchedulerState:
                 )
                 return recommendations, worker_msgs, client_msgs
 
+            compute_start: double
+            compute_stop: double
             if startstops:
                 L: list = list()
                 startstop: dict
