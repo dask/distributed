@@ -4594,15 +4594,15 @@ class Scheduler(SchedulerState, ServerNode):
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
-        tasks = {parent._tasks[k] for k in keys}
-        removed_tasks = tasks & ws._has_what
+        tasks: set = {parent._tasks[k] for k in keys}
+        removed_tasks: set = tasks & ws._has_what
         ws._has_what -= removed_tasks
 
         ts: TaskState
         recommendations: dict = {}
         for ts in removed_tasks:
             ws._nbytes -= ts.get_nbytes()
-            wh = ts._who_has
+            wh: set = ts._who_has
             wh.remove(ws)
             if not wh:
                 recommendations[ts._key] = "released"
