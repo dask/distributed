@@ -4532,7 +4532,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
-    def send_task_to_worker(self, worker, ts: TaskState, duration=None):
+    def send_task_to_worker(self, worker, ts: TaskState, duration: double = -1):
         """ Send a single computational task to a worker """
         parent: SchedulerState = cast(SchedulerState, self)
         try:
@@ -6710,12 +6710,12 @@ def _client_releases_keys(
 
 @cfunc
 @exceptval(check=False)
-def _task_to_msg(state: SchedulerState, ts: TaskState, duration=None) -> dict:
+def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) -> dict:
     """ Convert a single computational task to a message """
     ws: WorkerState
     dts: TaskState
 
-    if duration is None:
+    if duration < 0:
         duration = state.get_task_duration(ts)
 
     msg: dict = {
