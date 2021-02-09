@@ -4623,8 +4623,9 @@ class Scheduler(SchedulerState, ServerNode):
             return
 
         if compute_duration:
-            old_duration = ts._prefix._duration_average
-            new_duration = compute_duration
+            old_duration: double = ts._prefix._duration_average
+            new_duration: double = compute_duration
+            avg_duration: double
             if old_duration < 0:
                 avg_duration = new_duration
             else:
