@@ -1593,7 +1593,7 @@ class SchedulerState:
     _task_metadata: dict
     _total_nthreads: Py_ssize_t
     _total_occupancy: double
-    _unknown_durations: object
+    _unknown_durations: dict
     _unrunnable: set
     _validate: bint
     _workers: object
@@ -1645,7 +1645,7 @@ class SchedulerState:
         self._task_metadata = dict()
         self._total_nthreads = 0
         self._total_occupancy = 0
-        self._unknown_durations = defaultdict(set)
+        self._unknown_durations = dict()
         if unrunnable is not None:
             self._unrunnable = unrunnable
         else:
@@ -2645,8 +2645,11 @@ class SchedulerState:
         """
         duration: double = ts._prefix._duration_average
         if duration < 0:
-            s: set = self._unknown_durations[ts._prefix._name]
+            s: set = self._unknown_durations.get(ts._prefix._name)
+            if s is None:
+                self._unknown_durations[ts._prefix._name] = s = set()
             s.add(ts)
+
             if default < 0:
                 duration = UNKNOWN_TASK_DURATION
             else:
