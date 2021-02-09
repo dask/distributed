@@ -2732,7 +2732,8 @@ class SchedulerState:
         """
         alias = self._aliases.get(host)
         if alias is not None:
-            return self._workers_dv[alias].host
+            ws: WorkerState = self._workers_dv[alias]
+            return ws.host
         else:
             return host
 
