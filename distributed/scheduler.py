@@ -2097,7 +2097,7 @@ class SchedulerState:
                 s: set = self._unknown_durations.pop(ts._prefix._name, set())
                 tts: TaskState
                 for tts in s:
-                    if tts._processing_on:
+                    if tts._processing_on is not None:
                         wws = tts._processing_on
                         old: double = wws._processing[tts]
                         comm: double = self.get_comm_cost(tts, wws)
