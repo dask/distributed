@@ -4637,8 +4637,9 @@ class Scheduler(SchedulerState, ServerNode):
 
             ts._prefix._duration_average = avg_duration
 
-        ws._occupancy -= ws._processing[ts]
-        parent._total_occupancy -= ws._processing[ts]
+        occ: double = ws._processing[ts]
+        ws._occupancy -= occ
+        parent._total_occupancy -= occ
         ws._processing[ts] = 0
         self.check_idle_saturated(ws)
 
