@@ -2094,7 +2094,10 @@ class SchedulerState:
                 ts._prefix._duration_average = avg_duration
                 ts._group._duration += new_duration
 
-                s: set = self._unknown_durations.pop(ts._prefix._name, set())
+                s: set = self._unknown_durations.pop(ts._prefix._name, None)
+                if s is None:
+                    s = set()
+
                 tts: TaskState
                 for tts in s:
                     if tts._processing_on is not None:
