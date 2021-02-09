@@ -3925,16 +3925,18 @@ class Scheduler(SchedulerState, ServerNode):
     def new_task(self, key, spec, state):
         """ Create a new task, and associated states """
         parent: SchedulerState = cast(SchedulerState, self)
+
         ts: TaskState = TaskState(key, spec)
-        tp: TaskPrefix
-        tg: TaskGroup
         ts._state = state
+
+        tp: TaskPrefix
         prefix_key = key_split(key)
         tp = parent._task_prefixes.get(prefix_key)
         if tp is None:
             parent._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
         ts._prefix = tp
 
+        tg: TaskGroup
         group_key = ts._group_key
         tg = parent._task_groups.get(group_key)
         if tg is None:
@@ -3942,7 +3944,9 @@ class Scheduler(SchedulerState, ServerNode):
             tg._prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
+
         parent._tasks[key] = ts
+
         return ts
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
