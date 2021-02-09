@@ -1518,7 +1518,7 @@ def _legacy_worker_key_set(workers):
     return {ws._address for ws in workers}
 
 
-def _legacy_task_key_dict(task_dict):
+def _legacy_task_key_dict(task_dict: dict):
     """
     Transform a dict of {task state: value} into a dict of {task key: value}.
     """
@@ -1526,8 +1526,8 @@ def _legacy_task_key_dict(task_dict):
     return {ts._key: value for ts, value in task_dict.items()}
 
 
-def _task_key_or_none(task):
-    return task.key if task is not None else None
+def _task_key_or_none(task: TaskState):
+    return task._key if task is not None else None
 
 
 @cclass
