@@ -2679,9 +2679,12 @@ class SchedulerState:
             # may not be connected when host_restrictions is populated
             hr: list = [self.coerce_hostname(h) for h in ts._host_restrictions]
             # XXX need HostState?
-            sl: list = [
-                self._host_info[h]["addresses"] for h in hr if h in self._host_info
-            ]
+            sl: list = []
+            for h in hr:
+                dh: dict = self._host_info.get(h)
+                if dh is not None:
+                    sl.append(dh["addresses"])
+
             ss: set = set.union(*sl) if sl else set()
             if s is None:
                 s = ss
@@ -2689,14 +2692,14 @@ class SchedulerState:
                 s |= ss
 
         if ts._resource_restrictions:
-            dw: dict = {
-                resource: {
-                    w
-                    for w, supplied in self._resources[resource].items()
-                    if supplied >= required
-                }
-                for resource, required in ts._resource_restrictions.items()
-            }
+            dw: dict = {}
+            for resource, required in ts._resource_restrictions.items():
+                dr: dict = self._resources[resource]
+                sw: set = set()
+                dw[resource] = sw
+                for w, supplied in dr.items():
+                    if supplied >= required:
+                        sw.add(w)
 
             ww: set = set.intersection(*dw.values())
             if s is None:
