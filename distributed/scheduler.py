@@ -2100,9 +2100,11 @@ class SchedulerState:
                         wws = tts._processing_on
                         old: double = wws._processing[tts]
                         comm: double = self.get_comm_cost(tts, wws)
-                        wws._processing[tts] = avg_duration + comm
-                        wws._occupancy += avg_duration + comm - old
-                        self._total_occupancy += avg_duration + comm - old
+                        new: double = avg_duration + comm
+                        diff: double = new - old
+                        wws._processing[tts] = new
+                        wws._occupancy += diff
+                        self._total_occupancy += diff
 
             ############################
             # Update State Information #
