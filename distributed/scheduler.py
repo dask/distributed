@@ -3922,7 +3922,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    def new_task(self, key, spec, state):
+    def new_task(self, key: str, spec: object, state: str):
         """ Create a new task, and associated states """
         parent: SchedulerState = cast(SchedulerState, self)
 
