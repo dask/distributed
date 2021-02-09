@@ -1997,7 +1997,6 @@ class SchedulerState:
             self.check_idle_saturated(ws)
 
             recommendations: dict = {}
-            client_msgs: dict = {}
 
             _add_to_memory(
                 self, ts, ws, recommendations, client_msgs, type=type, typename=typename
@@ -2111,7 +2110,6 @@ class SchedulerState:
                 ts.set_nbytes(nbytes)
 
             recommendations: dict = {}
-            client_msgs: dict = {}
 
             _remove_from_processing(self, ts)
 
