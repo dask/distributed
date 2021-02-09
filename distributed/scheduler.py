@@ -2730,8 +2730,9 @@ class SchedulerState:
         """
         Coerce the hostname of a worker.
         """
-        if host in self._aliases:
-            return self._workers_dv[self._aliases[host]].host
+        alias = self._aliases.get(host)
+        if alias is not None:
+            return self._workers_dv[alias].host
         else:
             return host
 
