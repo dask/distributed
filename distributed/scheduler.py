@@ -2077,9 +2077,9 @@ class SchedulerState:
                 if len(L) > 0:
                     compute_start, compute_stop = L[0]
                 else:  # This is very rare
-                    compute_start = compute_stop = None
+                    compute_start = compute_stop = 0
             else:
-                compute_start = compute_stop = None
+                compute_start = compute_stop = 0
 
             #############################
             # Update Timing Information #
