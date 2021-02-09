@@ -2603,8 +2603,7 @@ class SchedulerState:
 
         This is useful for load balancing and adaptivity.
         """
-        total_nthreads: Py_ssize_t = self._total_nthreads
-        if total_nthreads == 0 or ws.status == Status.closed:
+        if self._total_nthreads == 0 or ws.status == Status.closed:
             return
         if occ < 0:
             occ = ws._occupancy
@@ -2612,7 +2611,7 @@ class SchedulerState:
         nc: Py_ssize_t = ws._nthreads
         p: Py_ssize_t = len(ws._processing)
         total_occupancy: double = self._total_occupancy
-        avg: double = total_occupancy / total_nthreads
+        avg: double = total_occupancy / self._total_nthreads
 
         idle = self._idle
         saturated: set = self._saturated
