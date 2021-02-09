@@ -4617,8 +4617,9 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
-        if "stealing" in self._extensions:
-            self._extensions["stealing"].remove_key_from_stealable(ts)
+        steal = self._extensions.get("stealing")
+        if steal is not None:
+            steal.remove_key_from_stealable(ts)
 
         ws: WorkerState = ts._processing_on
         if ws is None:
