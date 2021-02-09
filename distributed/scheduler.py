@@ -6693,7 +6693,6 @@ def _client_releases_keys(
     """ Remove keys from client desired list """
     logger.debug("Client %s releases keys: %s", cs._client_key, keys)
     ts: TaskState
-    tasks2: set = set()
     for key in keys:
         ts = state._tasks.get(key)
         if ts is not None and ts in cs._wants_what:
@@ -6701,14 +6700,11 @@ def _client_releases_keys(
             s: set = ts._who_wants
             s.remove(cs)
             if not s:
-                tasks2.add(ts)
-
-    for ts in tasks2:
-        if not ts._dependents:
-            # No live dependents, can forget
-            recommendations[ts._key] = "forgotten"
-        elif ts._state != "erred" and not ts._waiters:
-            recommendations[ts._key] = "released"
+                if not ts._dependents:
+                    # No live dependents, can forget
+                    recommendations[ts._key] = "forgotten"
+                elif ts._state != "erred" and not ts._waiters:
+                    recommendations[ts._key] = "released"
 
 
 @cfunc
