@@ -6559,7 +6559,7 @@ def _remove_from_processing(state: SchedulerState, ts: TaskState) -> str:
     ts._processing_on = None
     w: str = ws._address
     if w in state._workers_dv:  # may have been removed
-        duration = ws._processing.pop(ts)
+        duration: double = ws._processing.pop(ts)
         if not ws._processing:
             state._total_occupancy -= ws._occupancy
             ws._occupancy = 0
