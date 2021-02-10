@@ -6870,7 +6870,7 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
-    ws: WorkerState
+    ws: WorkerState = None
     wws: WorkerState
     dts: TaskState
     deps: set = ts._dependencies
@@ -6891,9 +6891,9 @@ def decide_worker(
                 if ts._loose_restrictions:
                     return decide_worker(ts, all_workers, None, objective)
                 else:
-                    return None
+                    return ws
     if not candidates:
-        return None
+        return ws
 
     if len(candidates) == 1:
         for ws in candidates:
