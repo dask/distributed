@@ -3567,8 +3567,7 @@ class Scheduler(SchedulerState, ServerNode):
             recommendations: dict
             if nbytes:
                 for key in nbytes:
-                    tasks: dict = parent._tasks
-                    ts: TaskState = tasks.get(key)
+                    ts: TaskState = parent._tasks.get(key)
                     if ts is not None and ts._state in ("processing", "waiting"):
                         recommendations = self.transition(
                             key,
@@ -3978,8 +3977,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
-        tasks: dict = parent._tasks
-        ts: TaskState = tasks.get(key)
+        ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return {}
         ws: WorkerState = parent._workers_dv[worker]
@@ -5607,8 +5605,7 @@ class Scheduler(SchedulerState, ServerNode):
     def report_on_key(self, key: str = None, ts: TaskState = None, client: str = None):
         parent: SchedulerState = cast(SchedulerState, self)
         if ts is None:
-            tasks: dict = parent._tasks
-            ts = tasks.get(key)
+            ts = parent._tasks.get(key)
         elif key is None:
             key = ts._key
         else:
