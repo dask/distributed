@@ -6453,8 +6453,10 @@ class Scheduler(SchedulerState, ServerNode):
                         next_time = timedelta(seconds=duration * 5)  # 25ms gap
                         break
 
-            self.loop.add_timeout(
-                next_time, self.reevaluate_occupancy, worker_index=worker_index
+            self.loop.call_later(
+                next_time.total_seconds(),
+                self.reevaluate_occupancy,
+                worker_index,
             )
 
         except Exception:
