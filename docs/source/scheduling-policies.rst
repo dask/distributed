@@ -78,7 +78,7 @@ can be used to break ties and helps us to prioritize nodes with longer critical
 paths and nodes with many children.  The actual algorithms used are somewhat
 more complex and are described in detail in `dask/order.py`_
 
-.. _`dask/order.py`: https://github.com/dask/dask/blob/main/dask/order.py
+.. _`dask/order.py`: https://github.com/dask/dask/blob/master/dask/order.py
 
 Initial Task Placement
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -122,7 +122,7 @@ scheduler, and workers at various points in the computation.
     computing deeply before broadly, preferring critical paths, preferring
     nodes with many dependencies, etc..  This is the same logic used by the
     single-machine scheduler and lives in `dask/order.py
-    <https://github.com/dask/dask/blob/main/dask/order.py>`_.
+    <https://github.com/dask/dask/blob/master/dask/order.py>`_.
 2.  When the graph reaches the scheduler the scheduler changes each of these
     numeric priorities into a tuple of two numbers, the first of which is an
     increasing counter, the second of which is the client-generated priority

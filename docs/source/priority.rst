@@ -69,7 +69,7 @@ Dask uses the following priorities, in order:
 3.  **Graph Structure**: Within any given computation (a compute or persist
     call) Dask orders tasks in such a way as to minimize the memory-footprint
     of the computation.  This is discussed in more depth in the
-    `task ordering documentation <https://github.com/dask/dask/blob/main/dask/order.py>`_.
+    `task ordering documentation <https://github.com/dask/dask/blob/master/dask/order.py>`_.
 
 If multiple tasks each have exactly the same priorities outlined above, then
 the order in which tasks arrive at a worker, in a last in first out manner,
