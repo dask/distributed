@@ -2699,10 +2699,11 @@ class SchedulerState:
                     self._resources[resource] = dr = dict()
 
                 sw: set = set()
-                dw[resource] = sw
                 for w, supplied in dr.items():
                     if supplied >= required:
                         sw.add(w)
+
+                dw[resource] = sw
 
             ww: set = set.intersection(*dw.values())
             if s is None:
