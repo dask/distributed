@@ -147,7 +147,7 @@ class MultiLock:
 
         Returns
         -------
-        True or False whether or not it sucessfully acquired the lock
+        True or False whether or not it successfully acquired the lock
         """
         timeout = parse_timedelta(timeout)
 
@@ -169,11 +169,11 @@ class MultiLock:
         """ Release the lock if already acquired """
         if not self.locked():
             raise ValueError("Lock is not yet acquired")
-        result = self.client.sync(
+        ret = self.client.sync(
             self.client.scheduler.multi_lock_release, locks=self.lock_names, id=self.id
         )
         self._locked = False
-        return result
+        return ret
 
     def locked(self):
         return self._locked
