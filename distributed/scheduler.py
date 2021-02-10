@@ -6889,9 +6889,8 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    return decide_worker(ts, all_workers, None, objective)
-                else:
-                    return ws
+                    ws = decide_worker(ts, all_workers, None, objective)
+                return ws
     if not candidates:
         return ws
 
