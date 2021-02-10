@@ -6891,10 +6891,10 @@ def decide_worker(
                 if ts._loose_restrictions:
                     ws = decide_worker(ts, all_workers, None, objective)
                 return ws
-    if not candidates:
-        return ws
 
-    if len(candidates) == 1:
+    if not candidates:
+        pass
+    elif len(candidates) == 1:
         for ws in candidates:
             break
     else:
