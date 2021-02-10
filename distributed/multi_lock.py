@@ -99,19 +99,18 @@ class MultiLock:
 
     Parameters
     ----------
-    name: string (optional)
-        Name of the lock to acquire.  Choosing the same name allows two
-        disconnected processes to coordinate a lock.  If not given, a random
-        name will be generated.
+    lock_names: List[str]
+        Names of the locks to acquire.  Choosing the same name allows two
+        disconnected processes to coordinate a lock.
     client: Client (optional)
         Client to use for communication with the scheduler.  If not given, the
         default global client will be used.
 
     Examples
     --------
-    >>> lock = Lock('x')  # doctest: +SKIP
+    >>> lock = Lock(['x', 'y'])  # doctest: +SKIP
     >>> lock.acquire(timeout=1)  # doctest: +SKIP
-    >>> # do things with protected resource
+    >>> # do things with protected resource 'x' and 'y'
     >>> lock.release()  # doctest: +SKIP
     """
 
@@ -142,7 +141,7 @@ class MultiLock:
 
         Examples
         --------
-        >>> lock = Lock('x')  # doctest: +SKIP
+        >>> lock = Lock(['x', 'y'])  # doctest: +SKIP
         >>> lock.acquire(timeout="1s")  # doctest: +SKIP
 
         Returns
