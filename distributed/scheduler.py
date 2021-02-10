@@ -6892,9 +6892,10 @@ def decide_worker(
                     ws = decide_worker(ts, all_workers, None, objective)
                 return ws
 
-    if not candidates:
+    ncandidates: Py_ssize_t = len(candidates)
+    if ncandidates == 0:
         pass
-    elif len(candidates) == 1:
+    elif ncandidates == 1:
         for ws in candidates:
             break
     else:
