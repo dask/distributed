@@ -1581,11 +1581,11 @@ class SchedulerState:
     _bandwidth: double
     _clients: dict
     _extensions: dict
-    _host_info: object
+    _host_info: dict
     _idle: object
     _idle_dv: dict
     _n_tasks: Py_ssize_t
-    _resources: object
+    _resources: dict
     _saturated: set
     _tasks: dict
     _task_groups: dict
@@ -1627,14 +1627,14 @@ class SchedulerState:
         if host_info is not None:
             self._host_info = host_info
         else:
-            self._host_info = defaultdict(dict)
+            self._host_info = dict()
         self._idle = sortedcontainers.SortedDict()
         self._idle_dv: dict = cast(dict, self._idle)
         self._n_tasks = 0
         if resources is not None:
             self._resources = resources
         else:
-            self._resources = defaultdict(dict)
+            self._resources = dict()
         self._saturated = set()
         if tasks is not None:
             self._tasks = tasks
@@ -2694,7 +2694,10 @@ class SchedulerState:
         if ts._resource_restrictions:
             dw: dict = {}
             for resource, required in ts._resource_restrictions.items():
-                dr: dict = self._resources[resource]
+                dr: dict = self._resources.get(resource)
+                if dr is None:
+                    self._resources[resource] = dr = dict()
+
                 sw: set = set()
                 dw[resource] = sw
                 for w, supplied in dr.items():
@@ -3020,8 +3023,8 @@ class Scheduler(SchedulerState, ServerNode):
                 func = compose(wrap, func)
             setattr(self, old_attr, _StateLegacyMapping(workers, func))
 
-        host_info = defaultdict(dict)
-        resources = defaultdict(dict)
+        host_info = dict()
+        resources = dict()
         aliases = dict()
 
         self._task_state_collections = [unrunnable]
@@ -3400,7 +3403,11 @@ class Scheduler(SchedulerState, ServerNode):
         assert metrics
         host_info = host_info or {}
 
-        parent._host_info[host]["last-seen"] = local_now
+        dh: dict = parent._host_info.get(host)
+        if dh is None:
+            parent._host_info[host] = dh = dict()
+        dh["last-seen"] = local_now
+
         frac = 1 / len(parent._workers)
         parent._bandwidth = (
             parent._bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
@@ -3435,7 +3442,10 @@ class Scheduler(SchedulerState, ServerNode):
             ws._metrics = metrics
 
         if host_info:
-            parent._host_info[host].update(host_info)
+            dh: dict = parent._host_info.get(host)
+            if dh is None:
+                parent._host_info[host] = dh = dict()
+            dh.update(host_info)
 
         delay = time() - now
         ws._time_delay = delay
@@ -3510,11 +3520,15 @@ class Scheduler(SchedulerState, ServerNode):
                 extra=extra,
             )
 
-            if "addresses" not in parent._host_info[host]:
-                parent._host_info[host].update({"addresses": set(), "nthreads": 0})
+            dh: dict = parent._host_info.get(host)
+            if dh is None:
+                parent._host_info[host] = dh = dict()
 
-            parent._host_info[host]["addresses"].add(address)
-            parent._host_info[host]["nthreads"] += nthreads
+            if "addresses" not in dh:
+                dh.update({"addresses": set(), "nthreads": 0})
+
+            dh["addresses"].add(address)
+            dh["nthreads"] += nthreads
 
             parent._total_nthreads += nthreads
             parent._aliases[name] = address
@@ -4121,11 +4135,16 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.remove_resources(address)
 
-            parent._host_info[host]["nthreads"] -= ws._nthreads
-            parent._host_info[host]["addresses"].remove(address)
+            dh: dict = parent._host_info.get(host)
+            if dh is None:
+                parent._host_info[host] = dh = dict()
+
+            dh["nthreads"] -= ws._nthreads
+            dh["addresses"].remove(address)
             parent._total_nthreads -= ws._nthreads
 
-            if not parent._host_info[host]["addresses"]:
+            if not dh["addresses"]:
+                dh = None
                 del parent._host_info[host]
 
             self.rpc.remove(address)
@@ -4959,8 +4978,9 @@ class Scheduler(SchedulerState, ServerNode):
                 workers = []
         if hosts is not None:
             for host in hosts:
-                if host in parent._host_info:
-                    workers.extend(parent._host_info[host]["addresses"])
+                dh: dict = parent._host_info.get(host)
+                if dh is not None:
+                    workers.extend(dh["addresses"])
         # TODO replace with worker_list
 
         if nanny:
@@ -6103,14 +6123,20 @@ class Scheduler(SchedulerState, ServerNode):
         ws._used_resources = {}
         for resource, quantity in ws._resources.items():
             ws._used_resources[resource] = 0
-            parent._resources[resource][worker] = quantity
+            dr: dict = parent._resources.get(resource, None)
+            if dr is None:
+                parent._resources[resource] = dr = dict()
+            dr[worker] = quantity
         return "OK"
 
     def remove_resources(self, worker):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
         for resource, quantity in ws._resources.items():
-            del parent._resources[resource][worker]
+            dr: dict = parent._resources.get(resource, None)
+            if dr is None:
+                parent._resources[resource] = dr = dict()
+            del dr[worker]
 
     def coerce_address(self, addr, resolve=True):
         """
