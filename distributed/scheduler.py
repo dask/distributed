@@ -6871,6 +6871,7 @@ def decide_worker(
     *objective* function.
     """
     ws: WorkerState
+    wws: WorkerState
     dts: TaskState
     deps: set = ts._dependencies
     candidates: set
@@ -6878,7 +6879,7 @@ def decide_worker(
     if ts._actor:
         candidates = set(all_workers)
     else:
-        candidates = {ws for dts in deps for ws in dts._who_has}
+        candidates = {wws for dts in deps for wws in dts._who_has}
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
