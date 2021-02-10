@@ -80,6 +80,7 @@ from .queues import QueueExtension
 from .semaphore import SemaphoreExtension
 from .recreate_exceptions import ReplayExceptionScheduler
 from .lock import LockExtension
+from .multi_lock import MultiLockExtension
 from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
@@ -173,6 +174,7 @@ UNKNOWN_TASK_DURATION = declare(
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
+    MultiLockExtension,
     PublishExtension,
     ReplayExceptionScheduler,
     QueueExtension,
