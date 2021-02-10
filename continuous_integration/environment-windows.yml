@@ -32,4 +32,4 @@ dependencies:
   - pip:
       - git+https://github.com/dask/dask.git@master
       - git+https://github.com/joblib/joblib.git@master
-      - git+https://github.com/dask/zict.git@master
+      - git+https://github.com/dask/zict.git@main
