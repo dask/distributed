@@ -24,10 +24,11 @@ async def test_single_lock(c, s, a, b):
 
     futures = c.map(f, range(20))
     await c.gather(futures)
-    assert not s.extensions["multi_locks"].events
-    assert not s.extensions["multi_locks"].waiters
-    for lock in s.extensions["multi_locks"].locks.values():
-        assert not lock
+    ext: MultiLockExtension = s.extensions["multi_locks"]
+    assert not ext.events
+    assert not ext.requests
+    assert not ext.requests_left
+    assert all(len(l) == 0 for l in ext.locks.values())
 
 
 @gen_cluster(client=True)
@@ -36,7 +37,7 @@ async def test_timeout(c, s, a, b):
     lock1 = MultiLock(lock_names=["x"])
     result = await lock1.acquire()
     assert result is True
-    assert not ext.waiters[lock1.id]
+    assert ext.requests_left[lock1.id] == 0
     assert ext.locks["x"] == [lock1.id]
     assert not ext.events
 
@@ -66,18 +67,19 @@ async def test_multiple_locks(c, s, a, b):
     assert await l2.acquire()
     assert list(ext.locks.keys()) == ["l1", "l2"]
     assert list(ext.locks.values()) == [[l1.id], [l2.id]]
-    assert list(ext.waiters.keys()) == [l1.id, l2.id]
-    assert all(len(w) == 0 for w in ext.waiters.values())
+    assert list(ext.requests.keys()) == [l1.id, l2.id]
+    assert list(ext.requests_left.values()) == [0, 0]
     assert not ext.events
 
     # Since `l3` requires both `l1` and `l2`, it isn't available immediately
-    l3_acquire = l3.acquire()
+    l3_acquire = asyncio.ensure_future(l3.acquire())
     try:
         await asyncio.wait_for(asyncio.shield(l3_acquire), 0.1)
     except asyncio.TimeoutError:
         assert list(ext.locks.keys()) == ["l1", "l2"]
         assert list(ext.locks.values()) == [[l1.id, l3.id], [l2.id, l3.id]]
-        assert ext.waiters[l3.id] == {"l1", "l2"}
+        assert ext.requests[l3.id] == {"l1", "l2"}
+        assert ext.requests_left[l3.id] == 2
         assert l3.id in ext.events
     else:
         assert False  # We except a TimeoutError since `l3` isn't availabe
@@ -90,7 +92,8 @@ async def test_multiple_locks(c, s, a, b):
         # `l3` now only wait on `l2`
         assert list(ext.locks.keys()) == ["l1", "l2"]
         assert list(ext.locks.values()) == [[l3.id], [l2.id, l3.id]]
-        assert ext.waiters[l3.id] == {"l2"}
+        assert ext.requests[l3.id] == {"l1", "l2"}
+        assert ext.requests_left[l3.id] == 1
         assert l3.id in ext.events
     else:
         assert False
@@ -99,9 +102,79 @@ async def test_multiple_locks(c, s, a, b):
     await l2.release()
     assert list(ext.locks.keys()) == ["l1", "l2"]
     assert list(ext.locks.values()) == [[l3.id], [l3.id]]
-    assert not ext.waiters[l3.id]
+    assert ext.requests[l3.id] == {"l1", "l2"}
+    assert ext.requests_left[l3.id] == 0
 
     await l3.release()
     assert not ext.events
-    assert not ext.waiters
+    assert not ext.requests
+    assert not ext.requests_left
+    assert all(len(l) == 0 for l in ext.locks.values())
+
+
+@gen_cluster(client=True)
+async def test_num_locks(c, s, a, b):
+    ext: MultiLockExtension = s.extensions["multi_locks"]
+    l1 = MultiLock(lock_names=["l1", "l2", "l3"])
+    l2 = MultiLock(lock_names=["l1", "l2", "l3"])
+    l3 = MultiLock(lock_names=["l1", "l2", "l3", "l4"])
+
+    # Even though `l1` and `l2` uses the same lock names they
+    # only requires a subset of the locks
+    assert await l1.acquire(num_locks=1)
+    assert await l2.acquire(num_locks=2)
+    assert list(ext.locks.keys()) == ["l1", "l2", "l3"]
+    assert list(ext.locks.values()) == [[l1.id], [l2.id], [l2.id]]
+    assert list(ext.requests.keys()) == [l1.id, l2.id]
+    assert list(ext.requests_left.values()) == [0, 0]
+    assert not ext.events
+
+    # Since `l3` requires three out of four locks it has to wait
+    l3_acquire = asyncio.ensure_future(l3.acquire(num_locks=3))
+    try:
+        await asyncio.wait_for(asyncio.shield(l3_acquire), 0.1)
+    except asyncio.TimeoutError:
+        assert list(ext.locks.keys()) == ["l1", "l2", "l3", "l4"]
+        assert list(ext.locks.values()) == [
+            [l1.id, l3.id],
+            [l2.id, l3.id],
+            [l2.id, l3.id],
+            [l3.id],
+        ]
+        assert list(ext.requests_left.values()) == [0, 0, 2]
+        assert l3.id in ext.events
+    else:
+        assert False  # We except a TimeoutError since `l3` isn't availabe
+
+    # Releasing `l1` isn't enough since `l3` also requires three locks
+    await l1.release()
+    try:
+        await asyncio.wait_for(asyncio.shield(l3_acquire), 0.1)
+    except asyncio.TimeoutError:
+        assert list(ext.locks.keys()) == ["l1", "l2", "l3", "l4"]
+        assert list(ext.locks.values()) == [
+            [l3.id],
+            [l2.id, l3.id],
+            [l2.id, l3.id],
+            [l3.id],
+        ]
+        assert list(ext.requests.keys()) == [l2.id, l3.id]
+        assert list(ext.requests_left.values()) == [0, 1]
+        assert l3.id in ext.events
+    else:
+        assert False
+
+    # Releasing `l2` is enough to release `l3`
+    await l2.release()
+    await asyncio.sleep(0.1)  # Give `l3` a change to wake up and acquire its locks
+    assert list(ext.locks.keys()) == ["l1", "l2", "l3", "l4"]
+    assert list(ext.locks.values()) == [[l3.id], [l3.id], [l3.id], [l3.id]]
+    assert list(ext.requests.keys()) == [l3.id]
+    assert list(ext.requests_left.values()) == [0]
+    assert l3.id not in ext.events
+
+    await l3.release()
+    assert not ext.events
+    assert not ext.requests
+    assert not ext.requests_left
     assert all(len(l) == 0 for l in ext.locks.values())

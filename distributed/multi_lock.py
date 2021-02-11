@@ -25,8 +25,9 @@ class MultiLockExtension:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.locks = defaultdict(list)
-        self.waiters = defaultdict(set)
+        self.locks = defaultdict(list)  # lock -> users
+        self.requests = {}  # user -> locks
+        self.requests_left = {}  # user -> locks still needed
         self.events = {}
 
         self.scheduler.handlers.update(
@@ -35,29 +36,42 @@ class MultiLockExtension:
 
         self.scheduler.extensions["multi_locks"] = self
 
-    def _request_locks(self, locks, id):
-        assert id not in self.waiters
-        self.waiters[id] = set()
-        all_locks_acquired = True
-        for lock in locks:
+    def _request_locks(self, locks, id, num_locks):
+        assert id not in self.requests
+        self.requests[id] = set(locks)
+        assert len(locks) >= num_locks and num_locks > 0
+        self.requests_left[id] = num_locks
+
+        locks = sorted(locks, key=lambda x: len(self.locks[x]))
+        for i, lock in enumerate(locks):
             self.locks[lock].append(id)
-            if len(self.locks[lock]) > 1:
-                self.waiters[id].add(lock)
-                all_locks_acquired = False
-        return all_locks_acquired
+            if len(self.locks[lock]) == 1:  # The lock was free
+                self.requests_left[id] -= 1
+                if self.requests_left[id] == 0:  # Got all locks needed
+                    # Since we got all locks need, we can remove the rest of the requests
+                    self.requests[id] -= set(locks[i + 1 :])
+                    return True
+        return False
 
-    def _refain_locks(self, locks, id):
+    def _refain_locks(self, locks, id):  # TODO: add test
         for lock in locks:
-            self.locks[lock].remove(id)
+            if self.locks[lock][0] == id:
+                self.locks[lock].pop(0)
+                if self.locks[lock]:
+                    self.requests_left[self.locks[lock][0]] -= 1
+                    # TODO: maybe wake up `self.locks[lock][0]`
+            else:
+                self.locks[lock].remove(id)
             assert id not in self.locks[lock]
-        del self.waiters[id]
+        del self.requests[id]
+        del self.requests_left[id]
 
-    async def acquire(self, comm=None, locks=None, id=None, timeout=None):
-        print(
-            f"acquire() - locks: {locks}, id: {id}, self.locks: {dict(self.locks)}, self.waiters: {dict(self.waiters)}"
-        )
+    async def acquire(
+        self, comm=None, locks=None, id=None, timeout=None, num_locks=None
+    ):
+
         with log_errors():
-            if not self._request_locks(locks, id):
+            if not self._request_locks(locks, id, num_locks):
                 assert id not in self.events
                 event = asyncio.Event()
                 self.events[id] = event
@@ -72,23 +86,24 @@ class MultiLockExtension:
                 finally:
                     del self.events[id]
             # At this point `id` acquired all `locks`
+            assert self.requests_left[id] == 0
             return True
 
-    def release(self, comm=None, locks=None, id=None):
-        print(
-            f"release() - locks: {locks}, id: {id}, self.locks: {dict(self.locks)}, self.waiters: {dict(self.waiters)}"
-        )
+    def release(self, comm=None, id=None):
         with log_errors():
             waiters_ready = set()
-            for lock in locks:
+            for lock in self.requests[id]:
                 assert self.locks[lock][0] == id
                 self.locks[lock].pop(0)
                 assert id not in self.locks[lock]
                 if len(self.locks[lock]) > 0:
-                    self.waiters[self.locks[lock][0]].remove(lock)
-                    if len(self.waiters[self.locks[lock][0]]) == 0:
-                        waiters_ready.add(self.locks[lock][0])
-            del self.waiters[id]
+                    new_first = self.locks[lock][0]
+                    self.requests_left[new_first] -= 1
+                    if self.requests_left[new_first] <= 0:
+                        self.requests_left[new_first] = 0
+                        waiters_ready.add(new_first)
+            del self.requests[id]
+            del self.requests_left[id]
 
             for waiter in waiters_ready:
                 self.scheduler.loop.add_callback(self.events[waiter].set)
@@ -100,7 +115,7 @@ class MultiLock:
     Parameters
     ----------
     lock_names: List[str]
-        Names of the locks to acquire.  Choosing the same name allows two
+        Names of the locks to acquire. Choosing the same name allows two
         disconnected processes to coordinate a lock.
     client: Client (optional)
         Client to use for communication with the scheduler.  If not given, the
@@ -122,10 +137,10 @@ class MultiLock:
             self.client = get_worker().client
 
         self.lock_names = lock_names
-        self.id = uuid.uuid4().hex[0:6]
+        self.id = uuid.uuid4().hex[0:6]  # TODO: remove [0:6]
         self._locked = False
 
-    def acquire(self, blocking=True, timeout=None):
+    def acquire(self, blocking=True, timeout=None, num_locks=None):
         """Acquire the lock
 
         Parameters
@@ -138,6 +153,8 @@ class MultiLock:
             It is forbidden to specify a timeout when blocking is false.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
+        num_locks : int, optional
+            Number of locks needed. If None, all locks are needed
 
         Examples
         --------
@@ -160,6 +177,7 @@ class MultiLock:
             locks=self.lock_names,
             id=self.id,
             timeout=timeout,
+            num_locks=num_locks or len(self.lock_names),
         )
         self._locked = True
         return result
@@ -168,9 +186,7 @@ class MultiLock:
         """ Release the lock if already acquired """
         if not self.locked():
             raise ValueError("Lock is not yet acquired")
-        ret = self.client.sync(
-            self.client.scheduler.multi_lock_release, locks=self.lock_names, id=self.id
-        )
+        ret = self.client.sync(self.client.scheduler.multi_lock_release, id=self.id)
         self._locked = False
         return ret
 
