@@ -10,9 +10,8 @@ from tornado.ioloop import IOLoop
 from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
 from distributed.metrics import time
 from distributed.compatibility import WINDOWS
-from distributed.utils_test import gen_cluster, inc, div
+from distributed.utils_test import gen_cluster, inc, div, captured_logger, popen
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
-from distributed.utils_test import captured_logger
 
 
 @gen_cluster(client=True)
@@ -38,6 +37,25 @@ async def test_variable(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+
+def test_variable_in_task(loop):
+    # Ensure that we can create a Variable inside a task on a
+    # worker in a separate Python process than the client
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with popen(["dask-worker", "127.0.0.1:8786"]):
+            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+                c.wait_for_workers(1)
+
+                x = Variable("x")
+                x.set(123)
+
+                def foo():
+                    y = Variable("x")
+                    return y.get()
+
+                result = c.submit(foo).result()
+                assert result == 123
 
 
 @gen_cluster(client=True)

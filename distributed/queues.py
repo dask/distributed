@@ -7,7 +7,7 @@ from dask.utils import stringify
 
 from .client import Future, Client
 from .utils import sync, thread_state
-from .worker import get_client
+from .worker import get_client, get_worker
 from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
@@ -150,8 +150,8 @@ class Queue:
         Name used by other clients and the scheduler to identify the queue. If
         not given, a random name will be generated.
     client: Client (optional)
-        Client used for communication with the scheduler. Defaults to the
-        value of ``Client.current()``.
+        Client used for communication with the scheduler.
+        If not given, the default global client will be used.
     maxsize: int (optional)
         Number of items allowed in the queue. If 0 (the default), the queue
         size is unbounded.
@@ -170,7 +170,11 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or Client.current()
+        try:
+            self.client = client or Client.current()
+        except ValueError:
+            # Initialise new client
+            self.client = get_worker().client
         self.name = name or "queue-" + uuid.uuid4().hex
         self._event_started = asyncio.Event()
         if self.client.asynchronous or getattr(
