@@ -248,13 +248,15 @@ class TCP(Comm):
             nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
             length_bytes = struct.pack(f"Q{nframes}Q", nframes, *lengths)
+
+            frames = [length_bytes, *frames]
+            lengths = [len(length_bytes), *lengths]
+
             if sum(lengths) < 2 ** 17:  # 128kiB
                 # small enough, send in one go
-                stream.write(b"".join([length_bytes, *frames]))
+                stream.write(b"".join(frames))
             else:
                 # avoid large memcpy, send in many
-                stream.write(length_bytes)
-
                 for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
