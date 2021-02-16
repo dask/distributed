@@ -251,24 +251,22 @@ class TCP(Comm):
         frames = [header, *frames]
         frames_nbytes += nbytes(header)
 
+        if frames_nbytes < 2 ** 17:  # 128kiB
+            # small enough, send in one go
+            frames = [b"".join(frames)]
+
         try:
-            if frames_nbytes < 2 ** 17:  # 128kiB
-                # small enough, send in one go
-                frames = b"".join(frames)
-                stream.write(frames)
-            else:
-                # avoid large memcpy, send in many
-                for each_frame in frames:
-                    # Can't wait for the write() Future as it may be lost
-                    # ("If write is called again before that Future has resolved,
-                    #   the previous future will be orphaned and will never resolve")
-                    each_frame_nbytes = nbytes(each_frame)
-                    if each_frame_nbytes:
-                        future = stream.write(each_frame)
-                        bytes_since_last_yield += each_frame_nbytes
-                        if bytes_since_last_yield > 32e6:
-                            await future
-                            bytes_since_last_yield = 0
+            for each_frame in frames:
+                # Can't wait for the write() Future as it may be lost
+                # ("If write is called again before that Future has resolved,
+                #   the previous future will be orphaned and will never resolve")
+                each_frame_nbytes = nbytes(each_frame)
+                if each_frame_nbytes:
+                    future = stream.write(each_frame)
+                    bytes_since_last_yield += each_frame_nbytes
+                    if bytes_since_last_yield > 32e6:
+                        await future
+                        bytes_since_last_yield = 0
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
