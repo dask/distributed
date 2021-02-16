@@ -240,13 +240,13 @@ class TCP(Comm):
                 **self.handshake_options,
             },
         )
+        frames_nbytes = sum(map(nbytes, frames))
 
         header = pack_frames_prelude(frames)
-        frames_nbytes = nbytes(header) + sum(map(nbytes, frames))
+        header = struct.pack("Q", nbytes(header) + frames_nbytes) + header
 
-        header = struct.pack("Q", frames_nbytes) + header
-        frames_nbytes += 8
         frames = [header, *frames]
+        frames_nbytes += nbytes(header)
 
         try:
             if frames_nbytes < 2 ** 17:  # 128kiB
