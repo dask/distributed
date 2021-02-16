@@ -188,20 +188,19 @@ class TCP(Comm):
             raise CommClosedError
 
         try:
-            all_nbytes_nframes = await stream.read_bytes(16)
-            all_nbytes, nframes = struct.unpack("QQ", all_nbytes_nframes)
+            all_nbytes = await stream.read_bytes(8)
+            (all_nbytes,) = struct.unpack("Q", all_nbytes)
 
             all_frames = bytearray(all_nbytes)
             n = await stream.read_into(all_frames)
             assert n == all_nbytes, (n, all_nbytes)
             all_frames = memoryview(all_frames)
 
-            pos_frames = 8 * nframes
-            lengths, all_frames = all_frames[:pos_frames], all_frames[pos_frames:]
-            lengths = struct.unpack(f"{nframes}Q", lengths)
+            (nframes,) = struct.unpack_from("Q", all_frames)
+            lengths = struct.unpack_from(f"{nframes}Q", all_frames, 8)
 
             frames = []
-            start = 0
+            start = 8 * (1 + nframes)
             for length in lengths:
                 end = start + length
                 frames.append(all_frames[start:end])
@@ -253,7 +252,7 @@ class TCP(Comm):
         try:
             nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
-            all_nbytes = 8 * nframes + sum(lengths)
+            all_nbytes = 8 * (1 + nframes) + sum(lengths)
 
             header = struct.pack(f"QQ{nframes}Q", all_nbytes, nframes, *lengths)
             frames = [header, *frames]
