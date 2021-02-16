@@ -27,6 +27,7 @@ from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
 from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
+from ..protocol.utils import pack_frames_prelude, unpack_frames
 
 
 logger = logging.getLogger(__name__)
@@ -194,17 +195,8 @@ class TCP(Comm):
             all_frames = bytearray(all_nbytes)
             n = await stream.read_into(all_frames)
             assert n == all_nbytes, (n, all_nbytes)
-            all_frames = memoryview(all_frames)
 
-            (nframes,) = struct.unpack_from("Q", all_frames)
-            lengths = struct.unpack_from(f"{nframes}Q", all_frames, 8)
-
-            frames = []
-            start = 8 * (1 + nframes)
-            for length in lengths:
-                end = start + length
-                frames.append(all_frames[start:end])
-                start = end
+            frames = unpack_frames(all_frames)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -250,24 +242,24 @@ class TCP(Comm):
         )
 
         try:
-            nframes = len(frames)
-            lengths = [nbytes(frame) for frame in frames]
-            all_nbytes = 8 * (1 + nframes) + sum(lengths)
+            header = pack_frames_prelude(frames)
+            all_nbytes = nbytes(header) + sum(map(nbytes, frames))
 
-            header = struct.pack(f"QQ{nframes}Q", all_nbytes, nframes, *lengths)
+            header = struct.pack("Q", all_nbytes) + header
+            all_nbytes += 8
             frames = [header, *frames]
-            lengths = [len(header), *lengths]
 
-            if sum(lengths) < 2 ** 17:  # 128kiB
+            if all_nbytes < 2 ** 17:  # 128kiB
                 # small enough, send in one go
                 frames = b"".join(frames)
                 stream.write(frames)
             else:
                 # avoid large memcpy, send in many
-                for frame, frame_bytes in zip(frames, lengths):
+                for frame in frames:
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
                     #   the previous future will be orphaned and will never resolve")
+                    frame_bytes = nbytes(frame)
                     if frame_bytes:
                         future = stream.write(frame)
                         bytes_since_last_yield += frame_bytes
@@ -289,7 +281,7 @@ class TCP(Comm):
             self.abort()
             raise
 
-        return sum(lengths)
+        return all_nbytes
 
     @gen.coroutine
     def close(self):
