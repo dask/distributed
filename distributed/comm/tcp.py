@@ -189,14 +189,14 @@ class TCP(Comm):
             raise CommClosedError
 
         try:
-            all_nbytes = await stream.read_bytes(8)
-            (all_nbytes,) = struct.unpack("Q", all_nbytes)
+            frames_nbytes = await stream.read_bytes(8)
+            (frames_nbytes,) = struct.unpack("Q", frames_nbytes)
 
-            all_frames = bytearray(all_nbytes)
-            n = await stream.read_into(all_frames)
-            assert n == all_nbytes, (n, all_nbytes)
+            frames = bytearray(frames_nbytes)
+            n = await stream.read_into(frames)
+            assert n == frames_nbytes, (n, frames_nbytes)
 
-            frames = unpack_frames(all_frames)
+            frames = unpack_frames(frames)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -243,26 +243,26 @@ class TCP(Comm):
 
         try:
             header = pack_frames_prelude(frames)
-            all_nbytes = nbytes(header) + sum(map(nbytes, frames))
+            frames_nbytes = nbytes(header) + sum(map(nbytes, frames))
 
-            header = struct.pack("Q", all_nbytes) + header
-            all_nbytes += 8
+            header = struct.pack("Q", frames_nbytes) + header
+            frames_nbytes += 8
             frames = [header, *frames]
 
-            if all_nbytes < 2 ** 17:  # 128kiB
+            if frames_nbytes < 2 ** 17:  # 128kiB
                 # small enough, send in one go
                 frames = b"".join(frames)
                 stream.write(frames)
             else:
                 # avoid large memcpy, send in many
-                for frame in frames:
+                for each_frame in frames:
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
                     #   the previous future will be orphaned and will never resolve")
-                    frame_bytes = nbytes(frame)
-                    if frame_bytes:
-                        future = stream.write(frame)
-                        bytes_since_last_yield += frame_bytes
+                    each_frame_nbytes = nbytes(each_frame)
+                    if each_frame_nbytes:
+                        future = stream.write(each_frame)
+                        bytes_since_last_yield += each_frame_nbytes
                         if bytes_since_last_yield > 32e6:
                             await future
                             bytes_since_last_yield = 0
@@ -281,7 +281,7 @@ class TCP(Comm):
             self.abort()
             raise
 
-        return all_nbytes
+        return frames_nbytes
 
     @gen.coroutine
     def close(self):
