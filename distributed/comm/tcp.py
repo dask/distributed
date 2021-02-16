@@ -188,16 +188,17 @@ class TCP(Comm):
             raise CommClosedError
 
         try:
-            n_frames = await stream.read_bytes(8)
-            n_frames = struct.unpack("Q", n_frames)[0]
-            lengths = await stream.read_bytes(8 * n_frames)
-            lengths = struct.unpack("Q" * n_frames, lengths)
+            all_nbytes_nframes = await stream.read_bytes(16)
+            all_nbytes, nframes = struct.unpack("QQ", all_nbytes_nframes)
 
-            len_all_frames = sum(lengths)
-            all_frames = bytearray(len_all_frames)
+            all_frames = bytearray(all_nbytes)
             n = await stream.read_into(all_frames)
-            assert n == len_all_frames, (n, len_all_frames)
+            assert n == all_nbytes, (n, all_nbytes)
             all_frames = memoryview(all_frames)
+
+            pos_frames = 8 * nframes
+            lengths, all_frames = all_frames[:pos_frames], all_frames[pos_frames:]
+            lengths = struct.unpack(f"{nframes}Q", lengths)
 
             frames = []
             start = 0
@@ -252,10 +253,11 @@ class TCP(Comm):
         try:
             nframes = len(frames)
             lengths = [nbytes(frame) for frame in frames]
-            length_bytes = struct.pack(f"Q{nframes}Q", nframes, *lengths)
+            all_nbytes = 8 * nframes + sum(lengths)
 
-            frames = [length_bytes, *frames]
-            lengths = [len(length_bytes), *lengths]
+            header = struct.pack(f"QQ{nframes}Q", all_nbytes, nframes, *lengths)
+            frames = [header, *frames]
+            lengths = [len(header), *lengths]
 
             if sum(lengths) < 2 ** 17:  # 128kiB
                 # small enough, send in one go
