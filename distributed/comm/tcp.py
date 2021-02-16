@@ -195,8 +195,6 @@ class TCP(Comm):
             frames = bytearray(frames_nbytes)
             n = await stream.read_into(frames)
             assert n == frames_nbytes, (n, frames_nbytes)
-
-            frames = unpack_frames(frames)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -211,6 +209,8 @@ class TCP(Comm):
             raise
         else:
             try:
+                frames = unpack_frames(frames)
+
                 msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
@@ -241,14 +241,14 @@ class TCP(Comm):
             },
         )
 
+        header = pack_frames_prelude(frames)
+        frames_nbytes = nbytes(header) + sum(map(nbytes, frames))
+
+        header = struct.pack("Q", frames_nbytes) + header
+        frames_nbytes += 8
+        frames = [header, *frames]
+
         try:
-            header = pack_frames_prelude(frames)
-            frames_nbytes = nbytes(header) + sum(map(nbytes, frames))
-
-            header = struct.pack("Q", frames_nbytes) + header
-            frames_nbytes += 8
-            frames = [header, *frames]
-
             if frames_nbytes < 2 ** 17:  # 128kiB
                 # small enough, send in one go
                 frames = b"".join(frames)
