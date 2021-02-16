@@ -193,13 +193,18 @@ class TCP(Comm):
             lengths = await stream.read_bytes(8 * n_frames)
             lengths = struct.unpack("Q" * n_frames, lengths)
 
+            len_all_frames = sum(lengths)
+            all_frames = bytearray(len_all_frames)
+            n = await stream.read_into(all_frames)
+            assert n == len_all_frames, (n, len_all_frames)
+            all_frames = memoryview(all_frames)
+
             frames = []
+            start = 0
             for length in lengths:
-                frame = bytearray(length)
-                if length:
-                    n = await stream.read_into(frame)
-                    assert n == length, (n, length)
-                frames.append(frame)
+                end = start + length
+                frames.append(all_frames[start:end])
+                start = end
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
