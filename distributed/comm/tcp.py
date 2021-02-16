@@ -254,7 +254,8 @@ class TCP(Comm):
 
             if sum(lengths) < 2 ** 17:  # 128kiB
                 # small enough, send in one go
-                stream.write(b"".join(frames))
+                frames = b"".join(frames)
+                stream.write(frames)
             else:
                 # avoid large memcpy, send in many
                 for frame, frame_bytes in zip(frames, lengths):
