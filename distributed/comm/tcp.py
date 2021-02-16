@@ -256,17 +256,15 @@ class TCP(Comm):
             frames = [b"".join(frames)]
 
         try:
+            # trick to enque all frames for writing beforehand
             for each_frame in frames:
-                # Can't wait for the write() Future as it may be lost
-                # ("If write is called again before that Future has resolved,
-                #   the previous future will be orphaned and will never resolve")
                 each_frame_nbytes = nbytes(each_frame)
                 if each_frame_nbytes:
-                    future = stream.write(each_frame)
-                    bytes_since_last_yield += each_frame_nbytes
-                    if bytes_since_last_yield > 32e6:
-                        await future
-                        bytes_since_last_yield = 0
+                    stream._write_buffer.append(each_frame)
+                    stream._total_write_index += each_frame_nbytes
+
+            # start writing frames
+            stream.write(b"")
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
