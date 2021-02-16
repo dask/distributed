@@ -188,9 +188,12 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError
 
+        fmt = "Q"
+        fmt_size = struct.calcsize(fmt)
+
         try:
-            frames_nbytes = await stream.read_bytes(8)
-            (frames_nbytes,) = struct.unpack("Q", frames_nbytes)
+            frames_nbytes = await stream.read_bytes(fmt_size)
+            (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
             frames = bytearray(frames_nbytes)
             n = await stream.read_into(frames)
