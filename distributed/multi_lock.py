@@ -18,6 +18,17 @@ class MultiLockExtension:
 
     *  multi_lock_acquire
     *  multi_lock_release
+
+    The approach is to maintain `self.locks` that maps a lock (unique name given to
+    `MultiLock(names=, ...)` at creation) to a list of users (instances of `MultiLock`)
+    that "requests" the lock. Additionally, `self.requests` maps a user to its requested
+    locks and `self.requests_left` maps a user to the number of locks still need.
+
+    Every time a user `x` gets to the front in `self.locks[name] = [x, ...]` it means
+    that `x` now holds the lock `name` and when it holds all the requested locks
+    `acquire()` can return.
+
+    Finally, `self.events` contains all the events users are waiting on to finish.
     """
 
     def __init__(self, scheduler):
