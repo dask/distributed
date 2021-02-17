@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 import logging
+from typing import Hashable, List
 import uuid
 
 from .client import Client
@@ -44,7 +45,23 @@ class MultiLockExtension:
 
         self.scheduler.extensions["multi_locks"] = self
 
-    def _request_locks(self, locks, id, num_locks):
+    def _request_locks(self, locks: List[str], id: Hashable, num_locks: int):
+        """Request locks
+
+        Parameters
+        ----------
+        locks: List[str]
+            Names of the locks to request.
+        id: Hashable
+            Identifier of the `MultiLock` instance requesting the locks.
+        num_locks: int
+            Number of locks in `locks` requesting
+
+        Return
+        ------
+        result: bool
+            Whether `num_locks` requested locks are free immediately or not.
+        """
         assert id not in self.requests
         self.requests[id] = set(locks)
         assert len(locks) >= num_locks and num_locks > 0
@@ -62,6 +79,15 @@ class MultiLockExtension:
         return False
 
     def _refain_locks(self, locks, id):
+        """Cancel/release previously requested/acquired locks
+
+        Parameters
+        ----------
+        locks: List[str]
+            Names of the locks to refain.
+        id: Hashable
+            Identifier of the `MultiLock` instance refraining the locks.
+        """
         waiters_ready = set()
         for lock in locks:
             if self.locks[lock][0] == id:
@@ -107,24 +133,7 @@ class MultiLockExtension:
 
     def release(self, comm=None, id=None):
         with log_errors():
-            waiters_ready = set()
-            for lock in self.requests[id]:
-                assert self.locks[lock][0] == id
-                self.locks[lock].pop(0)
-                assert id not in self.locks[lock]
-                if len(self.locks[lock]) > 0:
-                    new_first = self.locks[lock][0]
-                    self.requests_left[new_first] -= 1
-                    if self.requests_left[new_first] <= 0:
-                        # Notice, `self.requests_left[new_first]` might go below zero
-                        # if more locks are freed than requested.
-                        self.requests_left[new_first] = 0
-                        waiters_ready.add(new_first)
-            del self.requests[id]
-            del self.requests_left[id]
-
-            for waiter in waiters_ready:
-                self.scheduler.loop.add_callback(self.events[waiter].set)
+            self._refain_locks(self.requests[id], id)
 
 
 class MultiLock:
