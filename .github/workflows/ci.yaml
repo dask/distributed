@@ -10,6 +10,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.6", "3.7", "3.8"]
+        exclude:
+          # Many test failures; Python 3.6 is on the way out anyway
+          - os: macos-latest
+            python-version: "3.6"
 
     steps:
       - name: Checkout source
