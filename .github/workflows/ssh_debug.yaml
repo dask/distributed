@@ -1,7 +1,7 @@
 name: Debug SSH to localhost
 
-# on: []
-on: [pull_request]  # Uncomment to enable
+on: []
+# on: [pull_request]  # Uncomment to enable
 
 jobs:
   test:
@@ -15,15 +15,9 @@ jobs:
           # - windows-latest  # FIXME https://github.com/dask/distributed/issues/4509
 
     steps:
-      # Keep this aligned to the same step in ci.yaml
       - name: Setup SSH
         shell: bash -l {0}
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~ ~/.ssh
-          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" -q
-          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-          ssh-keyscan -H localhost 127.0.0.1 $(hostname) >> ~/.ssh/known_hosts
+        run: bash continuous_integration/scripts/setup_ssh.sh
 
       - name: Dump SSH config
         shell: bash -l {0}

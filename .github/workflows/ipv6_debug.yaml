@@ -1,6 +1,7 @@
 name: Debug ipv6 on Ubuntu CI
 
-on: [pull_request]
+on: []
+# on: [pull_request]  # Uncomment to enable
 
 jobs:
   test:

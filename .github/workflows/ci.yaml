@@ -49,16 +49,10 @@ jobs:
           echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
           conda env export | grep -E -v '^prefix:.*$'
 
-      # Keep this aligned to the same step in ssh_debug.yaml
       - name: Setup SSH
         shell: bash -l {0}
         if: ${{ matrix.os != 'windows-latest' }}
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~ ~/.ssh
-          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" -q
-          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-          ssh-keyscan -H localhost 127.0.0.1 $(hostname) >> ~/.ssh/known_hosts
+        run: bash continuous_integration/scripts/setup_ssh.sh
 
       - name: Test
         shell: bash -l {0}
