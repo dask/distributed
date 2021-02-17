@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "windows-latest", "macos-latest"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.6", "3.7", "3.8"]
 
     steps:
@@ -18,7 +18,7 @@ jobs:
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v2
         with:
-          miniconda-version: "latest"
+          miniconda-version: latest
           python-version: ${{ matrix.python-version }}
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
