@@ -202,6 +202,7 @@ async def test_as_completed_with_results_async(c, s, a, b):
     assert str(exc.value) == "hello!"
 
 
+@pytest.mark.xfail(reason="flaky on CI")
 def test_as_completed_with_results_no_raise(client):
     x = client.submit(throws, 1)
     y = client.submit(inc, 5)
@@ -212,7 +213,7 @@ def test_as_completed_with_results_no_raise(client):
     res = list(ac)
 
     dd = {r[0]: r[1:] for r in res}
-    assert set(dd.keys()) == {y, x, z}
+    assert dd.keys() == {x, y, z}
     assert x.status == "error"
     assert y.status == "cancelled"
     assert z.status == "finished"

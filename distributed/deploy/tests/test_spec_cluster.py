@@ -209,11 +209,9 @@ async def test_restart(cleanup):
                 cluster.scale(2)
                 await cluster
                 assert len(cluster.workers) == 2
-
                 await client.restart()
-                await asyncio.sleep(3)
-
-                assert len(cluster.workers) == 2
+                while len(cluster.workers) != 2:
+                    await asyncio.sleep(0.5)
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")

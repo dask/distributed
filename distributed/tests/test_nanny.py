@@ -77,7 +77,7 @@ async def test_str(s, a, b):
     assert str(a.nthreads) in repr(a)
 
 
-@gen_cluster(nthreads=[], timeout=20, client=True)
+@gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
     first_dir = n.worker_dir

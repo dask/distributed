@@ -1,0 +1,53 @@
+name: Debug SSH to localhost
+
+# on: []
+on: [pull_request]  # Uncomment to enable
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          # - windows-latest  # FIXME https://github.com/dask/distributed/issues/4509
+
+    steps:
+      # Keep this aligned to the same step in ci.yaml
+      - name: Setup SSH
+        shell: bash -l {0}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~ ~/.ssh
+          ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" -q
+          cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+          ssh-keyscan -H localhost 127.0.0.1 $(hostname) >> ~/.ssh/known_hosts
+
+      - name: Dump SSH config
+        shell: bash -l {0}
+        run: |
+          ls -ld ~ ~/.ssh ~/.ssh/*
+          for f in ~/.ssh/* /etc/ssh/sshd_config; do
+            echo ==================================
+            echo $f
+            echo ==================================
+            cat $f
+          done
+
+      - name: Test SSH vs. localhost
+        shell: bash -l {0}
+        run: ssh -vvv localhost 'echo hello world'
+
+      - name: Test SSH vs. 127.0.0.1
+        shell: bash -l {0}
+        run: ssh -vvv 127.0.0.1 'echo hello world'
+
+      - name: Test SSH vs. hostname
+        shell: bash -l {0}
+        run: ssh -vvv $(hostname) 'echo hello world'
+
+      - name: Debug with tmate on failure
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3

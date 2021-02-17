@@ -228,7 +228,7 @@ def test_retries(client):
 
 
 def test_shutdown(loop):
-    with cluster(disconnect_timeout=10) as (s, [a, b]):
+    with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as client:
             # shutdown(wait=True) waits for pending tasks to finish
             e = client.get_executor()

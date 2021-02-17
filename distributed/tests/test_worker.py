@@ -708,6 +708,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
     assert len(transfers) == 2
 
 
+@pytest.mark.xfail(reason="flaky on CI")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(mul, b"1", int(w3.target_message_size + 1), workers=w1.address)
@@ -721,6 +722,7 @@ async def test_share_communication(c, s, w1, w2, w3):
     assert w2.outgoing_transfer_log
 
 
+@pytest.mark.xfail(reason="flaky on CI")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     x = c.submit(mul, b"1", int(b.target_message_size + 1), workers=a.address)
@@ -734,7 +736,7 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with tmpfile() as fn:
@@ -1308,6 +1310,7 @@ async def test_scheduler_address_config(c, s):
     await worker.close()
 
 
+@pytest.mark.xfail(reason="flaky on CI")
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_wait_for_outgoing(c, s, a, b):
@@ -1727,13 +1730,12 @@ async def test_bad_local_directory(cleanup):
         try:
             async with Worker(s.address, local_directory="/not/a/valid-directory"):
                 pass
-        except PermissionError:
+        except OSError:
+            # On Linux: [Errno 13] Permission denied: '/not'
+            # On MacOSX: [Errno 30] Read-only file system: '/not'
             pass
         else:
-            if WINDOWS:
-                pass
-            else:
-                assert False
+            assert WINDOWS
 
         assert not any("error" in log for log in s.get_logs())
 

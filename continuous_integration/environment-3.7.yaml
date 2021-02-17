@@ -1,0 +1,46 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.7
+  - pip
+  - asyncssh
+  - bokeh
+  - click
+  - cloudpickle
+  - coverage
+  - coveralls
+  - cython  # Only tested here; also a dependency of crick
+  - dask  # overridden by git tip below
+  - filesystem-spec
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - joblib
+  - jupyter_client
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pickle5  # Backport from Python 3.8
+  - prometheus_client
+  - psutil
+  - pytest
+  - pytest-asyncio<0.14.0
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-timeout
+  - requests
+  - s3fs
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado=6
+  - zict
+  - zstandard
+  - pip:
+      - git+https://github.com/dask/dask
+      - git+https://github.com/jcrist/crick  # Only tested here
+      - keras

@@ -10,7 +10,7 @@ from distributed.metrics import time
 from distributed.utils_test import loop  # noqa: F401
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 def test_cluster(loop):
     with SSHCluster(
         scheduler_addr="127.0.0.1",

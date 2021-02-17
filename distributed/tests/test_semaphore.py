@@ -136,7 +136,7 @@ async def test_async_ctx(s, a, b):
 
 @pytest.mark.slow
 def test_worker_dies():
-    with cluster(disconnect_timeout=10) as (scheduler, workers):
+    with cluster() as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             sem = Semaphore(name="x", max_leases=1)
 

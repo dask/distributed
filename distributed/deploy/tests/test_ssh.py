@@ -19,6 +19,7 @@ def test_ssh_hosts_empty_list():
         SSHCluster(hosts=[])
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_basic():
     async with SSHCluster(
@@ -37,6 +38,7 @@ async def test_basic():
         assert "SSH" in repr(cluster)
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_keywords():
     async with SSHCluster(
@@ -61,7 +63,8 @@ async def test_keywords():
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.ssh
+@pytest.mark.avoid_ci
 def test_defer_to_old(loop):
     with pytest.warns(Warning):
         with SSHCluster(
@@ -74,7 +77,8 @@ def test_defer_to_old(loop):
             assert isinstance(c, OldSSHCluster)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.ssh
+@pytest.mark.avoid_ci
 def test_old_ssh_wih_local_dir(loop):
     with pytest.warns(Warning):
         from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
@@ -92,6 +96,7 @@ def test_old_ssh_wih_local_dir(loop):
                 assert result == 11
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_config_inherited_by_subprocess(loop):
     def f(x):
@@ -110,6 +115,7 @@ async def test_config_inherited_by_subprocess(loop):
                 assert result == 101
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_unimplemented_options():
     with pytest.raises(Exception):
@@ -128,6 +134,7 @@ async def test_unimplemented_options():
             assert cluster
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_list_of_connect_options():
     async with SSHCluster(
@@ -146,6 +153,7 @@ async def test_list_of_connect_options():
         assert "SSH" in repr(cluster)
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_list_of_connect_options_raises():
     with pytest.raises(RuntimeError):
@@ -159,6 +167,7 @@ async def test_list_of_connect_options_raises():
             pass
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_remote_python():
     async with SSHCluster(
@@ -172,6 +181,7 @@ async def test_remote_python():
         assert cluster.workers[0].remote_python == sys.executable
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_remote_python_as_dict():
     async with SSHCluster(
@@ -185,6 +195,7 @@ async def test_remote_python_as_dict():
         assert cluster.workers[0].remote_python == sys.executable
 
 
+@pytest.mark.ssh
 @pytest.mark.asyncio
 async def test_list_of_remote_python_raises():
     with pytest.raises(RuntimeError):

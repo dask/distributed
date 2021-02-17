@@ -413,6 +413,7 @@ def test_version_option():
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(reason="flaky on CI")
 def test_idle_timeout(loop):
     start = time()
     runner = CliRunner()

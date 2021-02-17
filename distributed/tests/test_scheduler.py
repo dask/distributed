@@ -1104,7 +1104,7 @@ async def test_close_worker(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny, timeout=20)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_close_nanny(c, s, a, b):
     assert len(s.workers) == 2
 
@@ -1135,7 +1135,7 @@ async def test_close_nanny(c, s, a, b):
         assert time() < start + 10
 
 
-@gen_cluster(client=True, timeout=20)
+@gen_cluster(client=True)
 async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers
@@ -1143,7 +1143,7 @@ async def test_retire_workers_close(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, timeout=20, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
     await s.retire_workers(close_workers=True, remove=True)
@@ -1419,7 +1419,7 @@ async def test_retries(c, s, a, b):
 
 
 @pytest.mark.xfail(reason="second worker also errant for some reason")
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, timeout=5)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_mising_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         np = pytest.importorskip("numpy")
@@ -1608,6 +1608,7 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
+@pytest.mark.xfail(reason="flaky on CI")
 @gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "500ms"})
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
@@ -2168,7 +2169,7 @@ async def test_unknown_task_duration_config(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True, timeout=None)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))

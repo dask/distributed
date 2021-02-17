@@ -171,7 +171,7 @@ def vsum(*args):
     return sum(args)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
 async def test_stress_communication(c, s, *workers):
@@ -244,7 +244,7 @@ async def test_close_connections(c, s, *workers):
     reason="IOStream._handle_write blocks on large write_buffer"
     " https://github.com/tornadoweb/tornado/issues/2110"
 )
-@gen_cluster(client=True, timeout=20, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_no_delay_during_large_transfer(c, s, w):
     pytest.importorskip("crick")
     np = pytest.importorskip("numpy")
