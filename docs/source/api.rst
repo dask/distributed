@@ -87,6 +87,7 @@ API
 .. autosummary::
    Event
    Lock
+   MultiLock
    Queue
    Variable
 
@@ -201,6 +202,8 @@ Other
 .. autoclass:: Event
    :members:
 .. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
    :members:
 .. autoclass:: Semaphore
    :members:
