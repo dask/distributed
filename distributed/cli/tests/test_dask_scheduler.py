@@ -315,6 +315,19 @@ def test_preload_remote_module(loop, tmp_path):
                 )
 
 
+def test_preload_config(loop):
+    # Ensure dask-scheduler pulls the preload from the Dask config if
+    # not specified via a command line option
+    with tmpfile() as fn:
+        env = {"DASK_DISTRIBUTED__SCHEDULER__PRELOAD": PRELOAD_TEXT}
+        with popen(["dask-scheduler", "--scheduler-file", fn], env=env):
+            with Client(scheduler_file=fn, loop=loop) as c:
+                assert (
+                    c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.foo)
+                    == "bar"
+                )
+
+
 PRELOAD_COMMAND_TEXT = """
 import click
 _config = {}
