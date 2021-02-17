@@ -873,7 +873,7 @@ def gen_cluster(
                 async def coro():
                     with dask.config.set(config):
                         s = False
-                        for i in range(10):
+                        for _ in range(60):
                             try:
                                 s, ws = await start_cluster(
                                     nthreads,
@@ -887,10 +887,10 @@ def gen_cluster(
                             except Exception as e:
                                 logger.error(
                                     "Failed to start gen_cluster: "
-                                    f"{e.__class__.__name__}: {e}, retrying",
+                                    f"{e.__class__.__name__}: {e}; retrying",
                                     exc_info=True,
                                 )
-                                await asyncio.sleep(5)
+                                await asyncio.sleep(1)
                             else:
                                 workers[:] = ws
                                 args = [s] + workers
