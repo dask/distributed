@@ -1,4 +1,4 @@
-name: Debug SSH to localhost
+name: Debug passwordless `ssh localhost`
 
 on: []
 # on: [pull_request]  # Uncomment to enable

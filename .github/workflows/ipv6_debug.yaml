@@ -1,4 +1,7 @@
-name: Debug ipv6 on Ubuntu CI
+# ipv6 causes several tests to fail on ubuntu-latest;
+# see https://github.com/dask/distributed/issues/4514
+# This workflow demonstrates the issue.
+name: "Debug ipv6 issue #4514"
 
 on: []
 # on: [pull_request]  # Uncomment to enable

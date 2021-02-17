@@ -61,9 +61,8 @@ jobs:
           MARKERS: not avoid_ci
         run: |
           if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6 trouble on Ubuntu github actions CI, which causes tests to
-              # fail, e.g. distributed/cli/tests/test_dask_scheduler.py::test_defaults
-              # TODO github ref.
+              # FIXME ipv6-related failures on Ubuntu github actions CI
+              # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
           elif [[ "${{ matrix.os }}" = "windows-latest" ]]; then
               # FIXME no SSH available on Windows
