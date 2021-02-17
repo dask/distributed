@@ -15,7 +15,7 @@ async def test_single_lock(c, s, a, b):
 
     def f(_):
         client = get_client()
-        with MultiLock(lock_names=["x"]):
+        with MultiLock(names=["x"]):
             assert client.get_metadata("locked") is False
             client.set_metadata("locked", True)
             sleep(0.05)
@@ -34,14 +34,14 @@ async def test_single_lock(c, s, a, b):
 @gen_cluster(client=True)
 async def test_timeout(c, s, a, b):
     ext: MultiLockExtension = s.extensions["multi_locks"]
-    lock1 = MultiLock(lock_names=["x"])
+    lock1 = MultiLock(names=["x"])
     result = await lock1.acquire()
     assert result is True
     assert ext.requests_left[lock1.id] == 0
     assert ext.locks["x"] == [lock1.id]
     assert not ext.events
 
-    lock2 = MultiLock(lock_names=["x"])
+    lock2 = MultiLock(names=["x"])
     assert lock1.id != lock2.id
 
     start = time()
@@ -58,9 +58,9 @@ async def test_timeout(c, s, a, b):
 @gen_cluster(client=True)
 async def test_multiple_locks(c, s, a, b):
     ext: MultiLockExtension = s.extensions["multi_locks"]
-    l1 = MultiLock(lock_names=["l1"])
-    l2 = MultiLock(lock_names=["l2"])
-    l3 = MultiLock(lock_names=["l1", "l2"])
+    l1 = MultiLock(names=["l1"])
+    l2 = MultiLock(names=["l2"])
+    l3 = MultiLock(names=["l1", "l2"])
 
     # Both `l1` and `l2` are free to acquire
     assert await l1.acquire()
@@ -115,9 +115,9 @@ async def test_multiple_locks(c, s, a, b):
 @gen_cluster(client=True)
 async def test_num_locks(c, s, a, b):
     ext: MultiLockExtension = s.extensions["multi_locks"]
-    l1 = MultiLock(lock_names=["l1", "l2", "l3"])
-    l2 = MultiLock(lock_names=["l1", "l2", "l3"])
-    l3 = MultiLock(lock_names=["l1", "l2", "l3", "l4"])
+    l1 = MultiLock(names=["l1", "l2", "l3"])
+    l2 = MultiLock(names=["l1", "l2", "l3"])
+    l3 = MultiLock(names=["l1", "l2", "l3", "l4"])
 
     # Even though `l1` and `l2` uses the same lock names they
     # only requires a subset of the locks

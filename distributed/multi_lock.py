@@ -20,7 +20,6 @@ class MultiLockExtension:
     *  multi_lock_release
     """
 
-
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.locks = defaultdict(list)  # lock -> users
@@ -112,7 +111,7 @@ class MultiLock:
 
     Parameters
     ----------
-    lock_names: List[str]
+    names: List[str]
         Names of the locks to acquire. Choosing the same name allows two
         disconnected processes to coordinate a lock.
     client: Client (optional)
@@ -127,14 +126,14 @@ class MultiLock:
     >>> lock.release()  # doctest: +SKIP
     """
 
-    def __init__(self, lock_names=[], client=None):
+    def __init__(self, names=[], client=None):
         try:
             self.client = client or Client.current()
         except ValueError:
             # Initialise new client
             self.client = get_worker().client
 
-        self.lock_names = lock_names
+        self.names = names
         self.id = uuid.uuid4().hex
         self._locked = False
 
@@ -172,10 +171,10 @@ class MultiLock:
 
         result = self.client.sync(
             self.client.scheduler.multi_lock_acquire,
-            locks=self.lock_names,
+            locks=self.names,
             id=self.id,
             timeout=timeout,
-            num_locks=num_locks or len(self.lock_names),
+            num_locks=num_locks or len(self.names),
         )
         self._locked = True
         return result
@@ -206,4 +205,4 @@ class MultiLock:
         await self.release()
 
     def __reduce__(self):
-        return (type(self), (self.lock_names,))
+        return (type(self), (self.names,))
