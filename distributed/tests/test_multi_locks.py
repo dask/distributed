@@ -56,6 +56,36 @@ async def test_timeout(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_timeout_wake_waiter(c, s, a, b):
+    ext: MultiLockExtension = s.extensions["multi_locks"]
+    l1 = MultiLock(names=["x"])
+    l2 = MultiLock(names=["x", "y"])
+    l3 = MultiLock(names=["y"])
+    await l1.acquire()
+
+    l2_acquire = asyncio.ensure_future(l2.acquire(timeout=1))
+    try:
+        await asyncio.wait_for(asyncio.shield(l2_acquire), 0.1)
+    except asyncio.TimeoutError:
+        pass
+    else:
+        assert False
+
+    l3_acquire = asyncio.ensure_future(l3.acquire())
+    try:
+        await asyncio.wait_for(asyncio.shield(l3_acquire), 0.1)
+    except asyncio.TimeoutError:
+        pass
+    else:
+        assert False
+
+    assert await l2_acquire is False
+    assert await l3_acquire
+    l1.release()
+    l3.release()
+
+
+@gen_cluster(client=True)
 async def test_multiple_locks(c, s, a, b):
     ext: MultiLockExtension = s.extensions["multi_locks"]
     l1 = MultiLock(names=["l1"])

@@ -61,23 +61,31 @@ class MultiLockExtension:
                     return True
         return False
 
-    def _refain_locks(self, locks, id):  # TODO: add test
+    def _refain_locks(self, locks, id):
+        waiters_ready = set()
         for lock in locks:
             if self.locks[lock][0] == id:
                 self.locks[lock].pop(0)
                 if self.locks[lock]:
-                    self.requests_left[self.locks[lock][0]] -= 1
-                    # TODO: maybe wake up `self.locks[lock][0]`
+                    new_first = self.locks[lock][0]
+                    self.requests_left[new_first] -= 1
+                    if self.requests_left[new_first] <= 0:
+                        # Notice, `self.requests_left[new_first]` might go below zero
+                        # if more locks are freed than requested.
+                        self.requests_left[new_first] = 0
+                        waiters_ready.add(new_first)
             else:
                 self.locks[lock].remove(id)
             assert id not in self.locks[lock]
         del self.requests[id]
         del self.requests_left[id]
 
+        for waiter in waiters_ready:
+            self.scheduler.loop.add_callback(self.events[waiter].set)
+
     async def acquire(
         self, comm=None, locks=None, id=None, timeout=None, num_locks=None
     ):
-
         with log_errors():
             if not self._request_locks(locks, id, num_locks):
                 assert id not in self.events
@@ -108,6 +116,8 @@ class MultiLockExtension:
                     new_first = self.locks[lock][0]
                     self.requests_left[new_first] -= 1
                     if self.requests_left[new_first] <= 0:
+                        # Notice, `self.requests_left[new_first]` might go below zero
+                        # if more locks are freed than requested.
                         self.requests_left[new_first] = 0
                         waiters_ready.add(new_first)
             del self.requests[id]
