@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class MultiLockExtension:
-    """An extension for the scheduler to manage Locks
+    """An extension for the scheduler to manage MultiLocks
 
     This adds the following routes to the scheduler
 
@@ -20,8 +20,6 @@ class MultiLockExtension:
     *  multi_lock_release
     """
 
-    # self.locks: Dict[Hashable, List[Hashable]] = {}
-    # self.waiters: Dict[Hashable, List[Hashable]] = {}
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
@@ -123,7 +121,7 @@ class MultiLock:
 
     Examples
     --------
-    >>> lock = Lock(['x', 'y'])  # doctest: +SKIP
+    >>> lock = MultiLock(['x', 'y'])  # doctest: +SKIP
     >>> lock.acquire(timeout=1)  # doctest: +SKIP
     >>> # do things with protected resource 'x' and 'y'
     >>> lock.release()  # doctest: +SKIP
@@ -137,7 +135,7 @@ class MultiLock:
             self.client = get_worker().client
 
         self.lock_names = lock_names
-        self.id = uuid.uuid4().hex[0:6]  # TODO: remove [0:6]
+        self.id = uuid.uuid4().hex
         self._locked = False
 
     def acquire(self, blocking=True, timeout=None, num_locks=None):
@@ -158,7 +156,7 @@ class MultiLock:
 
         Examples
         --------
-        >>> lock = Lock(['x', 'y'])  # doctest: +SKIP
+        >>> lock = MultiLock(['x', 'y'])  # doctest: +SKIP
         >>> lock.acquire(timeout="1s")  # doctest: +SKIP
 
         Returns
