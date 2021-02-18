@@ -62,6 +62,11 @@ def test_shutdown_wait():
 
 def test_secede_rejoin_busy():
     with ThreadPoolExecutor(2) as e:
+        # Prime threads
+        f1 = e.submit(sleep, 0.1)
+        f2 = e.submit(sleep, 0.1)
+        f1.result()
+        f2.result()
 
         def f():
             assert threading.current_thread() in e._threads
@@ -74,7 +79,8 @@ def test_secede_rejoin_busy():
             return threading.current_thread()
 
         future = e.submit(f)
-        L = [e.submit(sleep, 0.2) for i in range(10)]
+        for _ in range(6):
+            e.submit(sleep, 0.2)
         start = time()
         special_thread = future.result()
         stop = time()
