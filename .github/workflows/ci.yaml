@@ -77,13 +77,13 @@ jobs:
           source continuous_integration/scripts/set_ulimit.sh
           coverage run -m pytest distributed -m "$MARKERS" --runslow
 
-      - name: Coverage
-        shell: bash -l {0}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          coverage report
-          coveralls
+      # - name: Coverage
+      #   shell: bash -l {0}
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     coverage report
+      #     coveralls
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
