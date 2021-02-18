@@ -935,7 +935,7 @@ def gen_cluster(
 
                         try:
                             start = time()
-                            while time() < start + 5:
+                            while time() < start + 60:
                                 gc.collect()
                                 if not get_unclosed():
                                     break

@@ -12,6 +12,7 @@ import pytest
 from tornado import gen
 from tornado.locks import Event
 
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import mp_context
@@ -159,7 +160,7 @@ async def test_exitcode():
     assert proc.exitcode == 5
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX only")
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
 @gen_test()
 async def test_signal():
     proc = AsyncProcess(target=exit_with_signal, args=(signal.SIGINT,))
@@ -190,7 +191,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30.0)
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 

@@ -71,7 +71,7 @@ def test_secede_rejoin_busy():
         def f():
             assert threading.current_thread() in e._threads
             secede()
-            sleep(0.1)
+            sleep(0.2)
             assert threading.current_thread() not in e._threads
             rejoin()
             assert len(e._threads) == 2
@@ -80,12 +80,12 @@ def test_secede_rejoin_busy():
 
         future = e.submit(f)
         for _ in range(6):
-            e.submit(sleep, 0.2)
+            e.submit(sleep, 0.4)
         start = time()
         special_thread = future.result()
         stop = time()
 
-        assert 0.1 < stop - start < 0.3
+        assert 0.2 < stop - start < 0.6
 
         assert len(e._threads) == 2
         assert special_thread in e._threads

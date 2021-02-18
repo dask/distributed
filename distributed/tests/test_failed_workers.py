@@ -10,6 +10,7 @@ from tlz import partition_all, first
 from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
+from distributed.compatibility import MACOS
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils import sync, CancelledError
@@ -73,6 +74,7 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
+@pytest.mark.xfail(MACOS, reason="flaky")
 @gen_cluster(
     client=True,
     Worker=Nanny,

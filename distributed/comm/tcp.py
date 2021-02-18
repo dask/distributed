@@ -271,12 +271,12 @@ class TCP(Comm):
             if not shutting_down():
                 convert_stream_closed_error(self, e)
         except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already written to the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
+            # Some OSError or a another "low-level" exception. We do not really know
+            # what was already written to the underlying socket, so it is not even safe
+            # to retry here using the same stream. The only safe thing to do is to
+            # abort. (See also GitHub #4133).
             if stream._write_buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
+                logger.info(f"tried to write message {msg} on closed stream")
             self.abort()
             raise
 
