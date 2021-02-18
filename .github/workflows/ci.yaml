@@ -10,6 +10,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.6", "3.7", "3.8"]
+        # Uncomment to stress-test the test suite for random failures
+        # This will take a LONG time!
+        run: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         exclude:
           # Many test failures; Python 3.6 is on the way out anyway
           - os: macos-latest
@@ -75,7 +78,8 @@ jobs:
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          coverage run -m pytest distributed -m "$MARKERS" --runslow
+          # coverage run -m pytest distributed -m "$MARKERS" --runslow
+          pytest distributed -m "$MARKERS" --runslow
 
       # - name: Coverage
       #   shell: bash -l {0}
