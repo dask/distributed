@@ -4983,7 +4983,9 @@ async def test_secede_balances(c, s, a, b):
     start = time()
     while not all(f.status == "finished" for f in futures):
         await asyncio.sleep(0.01)
-        assert threading.active_count() <= count + 50
+        # Tolerate a slight inbalance, otherwise the test will occasionally fail on
+        # this line with messages such as `assert 75 < 24 + 50`
+        assert threading.active_count() < count + 55
         assert time() < start + 60
 
     assert len(a.log) < 2 * len(b.log)
