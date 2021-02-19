@@ -219,7 +219,12 @@ class Future(WrappedKey):
         return self._state.status
 
     def done(self):
-        """Is the computation complete?"""
+        """ 
+        Is the computation complete?
+        
+        Returns
+        -------
+        """
         return self._state.done()
 
     def result(self, timeout=None):
@@ -227,6 +232,10 @@ class Future(WrappedKey):
 
         If *timeout* seconds are elapsed before returning, a
         ``dask.distributed.TimeoutError`` is raised.
+        Returns
+        -------
+        result: 
+            The result
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -273,6 +282,9 @@ class Future(WrappedKey):
         If *timeout* seconds are elapsed before returning, a
         ``dask.distributed.TimeoutError`` is raised.
 
+        Returns
+        -------
+
         See Also
         --------
         Future.traceback
@@ -311,6 +323,9 @@ class Future(WrappedKey):
     def cancel(self, **kwargs):
         """Cancel request to run this future
 
+        Returns
+        -------
+
         See Also
         --------
         Client.cancel
@@ -320,6 +335,9 @@ class Future(WrappedKey):
     def retry(self, **kwargs):
         """Retry this future if it has failed
 
+        Returns
+        -------
+
         See Also
         --------
         Client.retry
@@ -327,7 +345,13 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """Returns True if the future has been cancelled"""
+        """ Returns True if the future has been cancelled
+
+        Returns
+        -------
+        _ : bool
+            True if the status is 'canceled', otherwise False
+        """
         return self._state.status == "cancelled"
 
     async def _traceback(self):
@@ -353,6 +377,9 @@ class Future(WrappedKey):
         >>> tb = future.traceback()  # doctest: +SKIP
         >>> traceback.format_tb(tb)  # doctest: +SKIP
         [...]
+
+        Returns
+        -------
 
         See Also
         --------
@@ -791,6 +818,10 @@ class Client(SyncMethodMixin):
         If no Client instances exist, raise ValueError.
         If allow_global is set to False, raise ValueError if running outside of the
         `as_client` context manager.
+
+        Returns
+        -------
+
         """
         out = _current_client.get()
         if out:
@@ -1361,6 +1392,10 @@ class Client(SyncMethodMixin):
         If you started a client without arguments like ``Client()`` then this
         will also close the local cluster that was started at the same time.
 
+        Returns 
+        ------- 
+        future: asyncio.Future
+
         See Also
         --------
         Client.restart
@@ -1416,6 +1451,9 @@ class Client(SyncMethodMixin):
         Note, this may disrupt other clients that may be using the same
         scheduler and workers.
 
+        Returns 
+        ------- 
+
         See Also
         --------
         Client.close : close only this client
@@ -1434,8 +1472,9 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        An Executor object that's fully compatible with the concurrent.futures
-        API.
+        _ : ClientExecutor
+            An Executor object that's fully compatible with the concurrent.futures
+            API.
         """
         return ClientExecutor(self, **kwargs)
 
