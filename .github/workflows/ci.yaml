@@ -5,18 +5,26 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.6", "3.7", "3.8"]
+        experimental: [false]
+        include:
+          # Note: there are many deterministic test failures on MacOS w/ Python 3.6
+          - os: macos-latest
+            python-version: "3.7"
+            experimental: true
+          - os: macos-latest
+            python-version: "3.8"
+            experimental: true
+
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # run: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        exclude:
-          # Many test failures; Python 3.6 is on the way out anyway
-          - os: macos-latest
-            python-version: "3.6"
 
     steps:
       - name: Checkout source
