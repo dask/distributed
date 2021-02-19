@@ -125,8 +125,7 @@ def unpack_frames(b):
     start = fmt_size * (1 + n_frames)
     for length in lengths:
         end = start + length
-        frame = b[start:end]
-        frames.append(frame)
+        frames.append(b[start:end])
         start = end
 
     return frames
