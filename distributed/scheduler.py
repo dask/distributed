@@ -2169,17 +2169,16 @@ class SchedulerState:
 
             # XXX factor this out?
             ts_nbytes: Py_ssize_t = ts.get_nbytes()
+            worker_msg = {
+                "op": "delete-data",
+                "keys": [key],
+                "report": False,
+            }
             for ws in ts._who_has:
                 ws._has_what.remove(ts)
                 ws._nbytes -= ts_nbytes
                 ts._group._nbytes_in_memory -= ts_nbytes
-                worker_msgs[ws._address] = [
-                    {
-                        "op": "delete-data",
-                        "keys": [key],
-                        "report": False,
-                    }
-                ]
+                worker_msgs[ws._address] = [worker_msg]
 
             ts._who_has.clear()
 
