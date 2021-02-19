@@ -5566,7 +5566,12 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def update_data(
-        self, comm=None, who_has=None, nbytes=None, client=None, serializers=None
+        self,
+        comm=None,
+        who_has=None,
+        nbytes: dict = None,
+        client=None,
+        serializers=None,
     ):
         """
         Learn that new data has entered the network from an external source
