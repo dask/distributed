@@ -473,7 +473,7 @@ def _scrub_ucx_config():
         ]
     ):
         if dask.config.get("ucx.rdmacm"):
-            tls = "tcp,rdmacm"
+            tls = "tcp"
             tls_priority = "rdmacm"
         else:
             tls = "tcp"
