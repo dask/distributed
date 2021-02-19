@@ -93,7 +93,7 @@ async def test_simple():
 
     # child should be stopping now
     t1 = time()
-    await proc.join(timeout=10)
+    await proc.join(timeout=30)
     dt = time() - t1
     assert dt <= 1.0
     assert not proc.is_alive()
@@ -155,7 +155,7 @@ async def test_exitcode():
     assert proc.exitcode is None
 
     q.put(5)
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
     assert not proc.is_alive()
     assert proc.exitcode == 5
 
@@ -169,7 +169,7 @@ async def test_signal():
     assert proc.exitcode is None
 
     await proc.start()
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
 
     assert not proc.is_alive()
     # Can be 255 with forkserver, see https://bugs.python.org/issue30589
@@ -178,7 +178,7 @@ async def test_signal():
     proc = AsyncProcess(target=wait)
     await proc.start()
     os.kill(proc.pid, signal.SIGTERM)
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
 
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
@@ -191,7 +191,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=30.0)
+    await proc.join(timeout=30)
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 

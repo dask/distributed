@@ -16,6 +16,7 @@ from tornado.ioloop import IOLoop
 import dask
 from distributed.diagnostics import SchedulerPlugin
 from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
+from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -568,6 +569,7 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
+@pytest.mark.xfail(MACOS, reason="flaky")
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:

@@ -701,7 +701,7 @@ def cluster(
             scheduler.join(2)
             del scheduler
             for proc in [w["proc"] for w in workers]:
-                proc.join(timeout=2)
+                proc.join(timeout=30)
 
             with suppress(UnboundLocalError):
                 del worker, w, proc
