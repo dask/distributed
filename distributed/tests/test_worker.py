@@ -708,7 +708,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
     assert len(transfers) == 2
 
 
-@pytest.mark.xfail(reason="flaky on CI")
+@pytest.mark.flaky(reruns=5)
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(mul, b"1", int(w3.target_message_size + 1), workers=w1.address)
@@ -722,7 +722,7 @@ async def test_share_communication(c, s, w1, w2, w3):
     assert w2.outgoing_transfer_log
 
 
-@pytest.mark.xfail(reason="flaky on CI")
+@pytest.mark.flaky(reruns=5)
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     x = c.submit(mul, b"1", int(b.target_message_size + 1), workers=a.address)
@@ -760,6 +760,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
             logger.removeHandler(fh)
 
 
+@pytest.mark.flaky(reruns=5)
 @gen_cluster(client=True)
 async def test_clean_up_dependencies(c, s, a, b):
     x = delayed(inc)(1)
@@ -779,6 +780,7 @@ async def test_clean_up_dependencies(c, s, a, b):
     assert set(a.data) | set(b.data) == {zz.key}
 
 
+@pytest.mark.flaky(reruns=5)
 @gen_cluster(client=True)
 async def test_hold_onto_dependents(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
@@ -1147,11 +1149,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1310,7 +1308,7 @@ async def test_scheduler_address_config(c, s):
     await worker.close()
 
 
-@pytest.mark.xfail(reason="flaky on CI")
+@pytest.mark.flaky(reruns=5)
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_wait_for_outgoing(c, s, a, b):

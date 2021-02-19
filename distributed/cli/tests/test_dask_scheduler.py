@@ -187,7 +187,7 @@ def test_interface(loop):
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
-@pytest.mark.xfail(reason="flaky")
+@pytest.mark.flaky(reruns=5)
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
@@ -411,13 +411,11 @@ def test_version_option():
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(reason="flaky on CI")
+@pytest.mark.flaky(reruns=5)
 def test_idle_timeout(loop):
     start = time()
     runner = CliRunner()
-    result = runner.invoke(
-        distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
-    )
+    runner.invoke(distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"])
     stop = time()
     assert 1 < stop - start < 10
 

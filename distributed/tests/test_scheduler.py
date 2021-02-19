@@ -1184,7 +1184,7 @@ async def test_scheduler_file():
         await s.close()
 
 
-@pytest.mark.xfail(reason="")
+@pytest.mark.xfail()
 @gen_cluster(client=True, nthreads=[])
 async def test_non_existent_worker(c, s):
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
@@ -1419,7 +1419,7 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@pytest.mark.xfail(reason="second worker also errant for some reason")
+@pytest.mark.flaky(reruns=5, reason="second worker also errant for some reason")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
@@ -1609,7 +1609,7 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
-@pytest.mark.xfail(reason="flaky on CI")
+@pytest.mark.flaky(reruns=5)
 @gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "500ms"})
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
@@ -2013,7 +2013,7 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@pytest.mark.xfail(MACOS, reason="flaky")
+@pytest.mark.flaky(reruns=5, condition=MACOS)
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
 async def test_gather_allow_worker_reconnect(c, s, a, b):
     """

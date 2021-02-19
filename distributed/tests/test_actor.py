@@ -465,7 +465,6 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.xfail(reason="unknown")
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed

@@ -240,7 +240,9 @@ async def test_close_connections(c, s, *workers):
     await wait(future)
 
 
-@pytest.mark.xfail(
+@pytest.mark.slow
+@pytest.mark.flaky(
+    reruns=5,
     reason="IOStream._handle_write blocks on large write_buffer"
     " https://github.com/tornadoweb/tornado/issues/2110"
 )

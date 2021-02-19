@@ -107,7 +107,7 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@pytest.mark.xfail(reason="GH#3574")
+@pytest.mark.flaky(reruns=5, reason="GH#3574")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
@@ -563,6 +563,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
         pytest.param(
             [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
             [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            # Can't mark as flaky as when it fails it does so every time for some reason
             marks=pytest.mark.xfail(
                 reason="Some uncertainty based on executing stolen task"
             ),
@@ -737,11 +738,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
         ) <= 1
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 5)] * 2)
 async def test_cleanup_repeated_tasks(c, s, a, b):
     class Foo:

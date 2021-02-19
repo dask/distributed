@@ -569,7 +569,7 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
-@pytest.mark.xfail(MACOS, reason="flaky")
+@pytest.mark.flaky(reruns=5, condition=MACOS)
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:
