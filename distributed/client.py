@@ -61,7 +61,6 @@ from .core import (
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
-from .protocol.highlevelgraph import highlevelgraph_pack
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
@@ -2540,7 +2539,7 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, self, keyset)
+            dsk = dsk.__dask_distributed_pack__(self, keyset)
 
             annotations = {}
             if user_priority:

@@ -35,6 +35,7 @@ from tlz import (
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.highlevelgraph import HighLevelGraph
 
 from . import profile
 from .batched import BatchedSend
@@ -84,7 +85,6 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
-from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
     from cython import compiled
@@ -3635,8 +3635,10 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         annotations=None,
     ):
-
-        dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        dsk = unpacked_graph["dsk"]
+        dependencies = unpacked_graph["deps"]
+        annotations = unpacked_graph["anno"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
