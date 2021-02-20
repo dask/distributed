@@ -1764,6 +1764,33 @@ class SchedulerState:
             "host_info": self._host_info,
         }
 
+    @ccall
+    @exceptval(check=False)
+    def new_task(self, key: str, spec: object, state: str) -> TaskState:
+        """ Create a new task, and associated states """
+        ts: TaskState = TaskState(key, spec)
+        ts._state = state
+
+        tp: TaskPrefix
+        prefix_key = key_split(key)
+        tp = self._task_prefixes.get(prefix_key)
+        if tp is None:
+            self._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
+        ts._prefix = tp
+
+        tg: TaskGroup
+        group_key = ts._group_key
+        tg = self._task_groups.get(group_key)
+        if tg is None:
+            self._task_groups[group_key] = tg = TaskGroup(group_key)
+            tg._prefix = tp
+            tp._groups.append(tg)
+        tg.add(ts)
+
+        self._tasks[key] = ts
+
+        return ts
+
     def transition_released_waiting(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -3771,7 +3798,7 @@ class Scheduler(SchedulerState, ServerNode):
             # XXX Have a method get_task_state(self, k) ?
             ts = parent._tasks.get(k)
             if ts is None:
-                ts = self.new_task(k, tasks.get(k), "released")
+                ts = parent.new_task(k, tasks.get(k), "released")
             elif not ts._run_spec:
                 ts._run_spec = tasks.get(k)
 
@@ -3944,33 +3971,6 @@ class Scheduler(SchedulerState, ServerNode):
             self.digests["update-graph-duration"].add(end - start)
 
         # TODO: balance workers
-
-    def new_task(self, key: str, spec: object, state: str):
-        """ Create a new task, and associated states """
-        parent: SchedulerState = cast(SchedulerState, self)
-
-        ts: TaskState = TaskState(key, spec)
-        ts._state = state
-
-        tp: TaskPrefix
-        prefix_key = key_split(key)
-        tp = parent._task_prefixes.get(prefix_key)
-        if tp is None:
-            parent._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
-        ts._prefix = tp
-
-        tg: TaskGroup
-        group_key = ts._group_key
-        tg = parent._task_groups.get(group_key)
-        if tg is None:
-            parent._task_groups[group_key] = tg = TaskGroup(group_key)
-            tg._prefix = tp
-            tp._groups.append(tg)
-        tg.add(ts)
-
-        parent._tasks[key] = ts
-
-        return ts
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
@@ -4267,7 +4267,7 @@ class Scheduler(SchedulerState, ServerNode):
             ts = parent._tasks.get(k)
             if ts is None:
                 # For publish, queues etc.
-                ts = self.new_task(k, None, "released")
+                ts = parent.new_task(k, None, "released")
             ts._who_wants.add(cs)
             cs._wants_what.add(ts)
 
@@ -5585,7 +5585,7 @@ class Scheduler(SchedulerState, ServerNode):
             for key, workers in who_has.items():
                 ts: TaskState = parent._tasks.get(key)
                 if ts is None:
-                    ts: TaskState = self.new_task(key, None, "memory")
+                    ts: TaskState = parent.new_task(key, None, "memory")
                 ts.state = "memory"
                 if key in nbytes:
                     ts.set_nbytes(nbytes[key])
