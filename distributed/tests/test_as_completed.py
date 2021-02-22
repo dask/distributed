@@ -202,7 +202,7 @@ async def test_as_completed_with_results_async(c, s, a, b):
     assert str(exc.value) == "hello!"
 
 
-@pytest.mark.flaky(reruns=5)
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_as_completed_with_results_no_raise(client):
     x = client.submit(throws, 1)
     y = client.submit(inc, 5)

@@ -117,7 +117,7 @@ def test_pickle_numpy():
         assert (deserialize(h, f) == x).all()
 
 
-@pytest.mark.flaky(reruns=5, condition=sys.version_info[:2] == (3, 8))
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 def test_pickle_functions():
     def make_closure():
         value = 1

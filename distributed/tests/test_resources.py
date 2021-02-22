@@ -379,7 +379,7 @@ async def test_full_collections(c, s, a, b):
             ),
         ),
         pytest.param(
-            False, marks=pytest.mark.flaky(reruns=5, condition=WINDOWS)
+            False, marks=pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
         ),
     ],
 )

@@ -110,6 +110,7 @@ def test_gc_diagnosis_cpu_time():
         assert not sio.getvalue()
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_gc_diagnosis_rss_win():
     diag = GCDiagnosis(info_over_rss_win=10e6)
 

@@ -242,9 +242,10 @@ async def test_close_connections(c, s, *workers):
 
 @pytest.mark.slow
 @pytest.mark.flaky(
-    reruns=5,
+    reruns=10,
+    reruns_delay=5,
     reason="IOStream._handle_write blocks on large write_buffer"
-    " https://github.com/tornadoweb/tornado/issues/2110"
+    " https://github.com/tornadoweb/tornado/issues/2110",
 )
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_no_delay_during_large_transfer(c, s, w):

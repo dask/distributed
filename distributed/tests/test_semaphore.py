@@ -341,7 +341,7 @@ async def test_retry_acquire(c, s, a, b):
         assert result is False
 
 
-@pytest.mark.flaky(reruns=5, condition=WINDOWS)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={
@@ -554,7 +554,7 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
-@pytest.mark.flaky(reruns=5, condition=WINDOWS)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

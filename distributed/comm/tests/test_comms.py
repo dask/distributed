@@ -1105,7 +1105,7 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.flaky(reruns=5, condition=WINDOWS)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @pytest.mark.asyncio
 async def test_tcp_deserialize():
     await check_deserialize("tcp://")
