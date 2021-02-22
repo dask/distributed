@@ -4,23 +4,25 @@ on: [push, pull_request]
 
 jobs:
   test:
+    # MacOS tests are currently afflicted by a very high level of flakiness.
+    # On Linux and Windows, run on merge to master and on all pull requests.
+    # On MacOS, run only on merge to master; on pull request, run only if the latest
+    # commit contains the word "MacOS".
+    if: matrix.os != 'macos-latest'
+      || github.event.type.name == 'push'
+      || contains(github.event.head_commit.message, 'MacOS')
+
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.6", "3.7", "3.8"]
-        experimental: [false]
-        include:
-          # Note: there are many deterministic test failures on MacOS w/ Python 3.6
+        exclude:
+          # Many deterministic test failures; Python 3.6 is on the way out anyway
           - os: macos-latest
-            python-version: "3.7"
-            experimental: true
-          - os: macos-latest
-            python-version: "3.8"
-            experimental: true
+            python-version: "3.6"
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
