@@ -411,7 +411,6 @@ def test_version_option():
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_idle_timeout(loop):
     start = time()
     runner = CliRunner()
