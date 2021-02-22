@@ -9,8 +9,6 @@ dependencies:
   - bokeh
   - click
   - cloudpickle
-  - coverage
-  - coveralls
   - cython  # Only tested here; also a dependency of crick
   - dask  # overridden by git tip below
   - filesystem-spec

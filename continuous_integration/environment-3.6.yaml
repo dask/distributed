@@ -10,8 +10,6 @@ dependencies:
   - click
   - cloudpickle
   - contextvars  # Backport from Python 3.7
-  - coverage
-  - coveralls
   - dask  # overridden by git tip below
   - filesystem-spec
   - h5py
