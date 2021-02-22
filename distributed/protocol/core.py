@@ -6,8 +6,8 @@ import msgpack
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import (
-    serialize,
-    deserialize,
+    serialize as protocol_serialize,
+    deserialize as protocol_deserialize,
     Serialize,
     Serialized,
     extract_serialize,
@@ -16,8 +16,6 @@ from .serialize import (
 )
 from .utils import frame_split_size, merge_frames, msgpack_opts
 from ..utils import is_writeable, nbytes
-
-_deserialize = deserialize
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +46,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         }
 
         data = {
-            key: serialize(
+            key: protocol_serialize(
                 value.data, serializers=serializers, on_error=on_error, context=context
             )
             for key, value in data.items()
@@ -148,7 +146,7 @@ def loads(frames, deserialize=True, deserializers=None):
                     fs = decompress(head, fs)
                 if not any(hasattr(f, "__cuda_array_interface__") for f in fs):
                     fs = merge_frames(head, fs)
-                value = _deserialize(head, fs, deserializers=deserializers)
+                value = protocol_deserialize(head, fs, deserializers=deserializers)
             else:
                 value = Serialized(head, fs)
 
