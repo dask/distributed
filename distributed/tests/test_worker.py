@@ -29,7 +29,7 @@ from distributed import (
     wait,
 )
 from distributed.diagnostics.plugin import PipInstall
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
@@ -1682,6 +1682,7 @@ async def test_update_latency(cleanup):
                 assert w.digests["latency"].size() > 0
 
 
+@pytest.mark.skipf(MACOS, reason="occasionally hangs")
 @pytest.mark.asyncio
 async def test_workerstate_executing(cleanup):
     async with await Scheduler() as s:

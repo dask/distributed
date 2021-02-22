@@ -95,6 +95,7 @@ def test_wait(client):
         assert "hello" in str(errors[0])
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_cancellation(client):
     with client.get_executor(pure=False) as e:
         fut = e.submit(time.sleep, 2.0)

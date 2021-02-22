@@ -55,7 +55,7 @@ from distributed.client import (
     temp_default_client,
     get_task_metadata,
 )
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
@@ -4487,6 +4487,7 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
