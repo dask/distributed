@@ -1,19 +1,20 @@
-name: CI
+name: MacOS tests
 
-on: [push, pull_request]
+on:
+  - push
+  # MacOS tests are currently afflicted by a very high level of flakiness; do not run on
+  # PR unless this line is uncommented.
+  - pull_request
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-latest
 
     strategy:
       fail-fast: false
       matrix:
-        # MacOS tests are currently afflicted by a very high level of flakiness. On
-        # Linux and Windows, run on merge to master and on all pull requests.
-        # On MacOS, run only on merge to master (see twin workflow ci-macos.yaml).
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.6", "3.7", "3.8"]
+        # Many deterministic test failures on Python 3.6
+        python-version: ["3.7", "3.8"]
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
@@ -31,12 +32,6 @@ jobs:
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
           auto-activate-base: false
-
-      - name: Install stacktrace
-        shell: bash -l {0}
-        # stacktrace for Python 3.8 has not been released at the moment of writing
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
-        run: conda install -c conda-forge -c defaults -c numba libunwind stacktrace
 
       - name: Cythonize
         shell: bash -l {0}
@@ -59,7 +54,6 @@ jobs:
 
       - name: Setup SSH
         shell: bash -l {0}
-        if: ${{ matrix.os != 'windows-latest' }}
         run: bash continuous_integration/scripts/setup_ssh.sh
 
       - name: Test
@@ -68,18 +62,8 @@ jobs:
           PYTHONFAULTHANDLER: 1
           MARKERS: not avoid_ci
         run: |
-          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
-              # FIXME ipv6-related failures on Ubuntu github actions CI
-              # https://github.com/dask/distributed/issues/4514
-              export DISABLE_IPV6=1
-          elif [[ "${{ matrix.os }}" = "windows-latest" ]]; then
-              # FIXME no SSH available on Windows
-              # https://github.com/dask/distributed/issues/4509
-              export MARKERS="$MARKERS and not ssh"
-          fi
-
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "$MARKERS" --runslow
+          pytest distributed -m "not avoid_ci" --runslow
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}

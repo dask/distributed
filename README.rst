@@ -1,15 +1,15 @@
 Distributed
 ===========
 
-|Linux Build Status| |Windows Build Status| |Doc Status| |Gitter| |Version Status| |NumFOCUS|
+|Linux/Windows Build Status| |MacOS Build Status| |Doc Status| |Gitter| |Version Status| |NumFOCUS|
 
 A library for distributed computation.  See documentation_ for more details.
 
 .. _documentation: https://distributed.dask.org
-.. |Linux Build Status| image:: https://travis-ci.org/dask/distributed.svg?branch=master
-   :target: https://travis-ci.org/dask/distributed
-.. |Windows Build Status| image:: https://github.com/dask/distributed/workflows/Windows%20CI/badge.svg?branch=master
-   :target: https://github.com/dask/distributed/actions?query=workflow%3A%22Windows+CI%22
+.. |Linux/Windows Build Status| image:: https://github.com/dask/distributed/workflows/Tests/badge.svg?branch=master
+   :target: https://github.com/dask/distributed/actions?query=workflow%3A%22Tests%22
+.. |MacOS Build Status| image:: https://github.com/dask/distributed/workflows/MacOS%20tests/badge.svg?branch=master
+   :target: https://github.com/dask/distributed/actions?query=workflow%3A%22MacOS+tests%22
 .. |Doc Status| image:: https://readthedocs.org/projects/distributed/badge/?version=latest
    :target: https://distributed.dask.org
    :alt: Documentation Status
