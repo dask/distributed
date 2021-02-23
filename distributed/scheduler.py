@@ -6086,11 +6086,11 @@ class Scheduler(SchedulerState, ServerNode):
                 else:
                     client_msgs[c] = new_msgs
 
-        self.send_all(client_msgs, worker_msgs)
-
         if parent._validate:
             for key in keys:
                 self.validate_key(key)
+
+        self.send_all(client_msgs, worker_msgs)
 
     def story(self, *keys):
         """ Get all transitions that touch one of the input keys """
