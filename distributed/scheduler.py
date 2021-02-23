@@ -3978,15 +3978,19 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
+        recommendations: dict = {}
+        client_msgs: dict = {}
+        worker_msgs: dict = {}
+
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
-            return {}
+            return recommendations, client_msgs, worker_msgs
         ws: WorkerState = parent._workers_dv[worker]
         ts._metadata.update(kwargs["metadata"])
 
-        recommendations: dict
         if ts._state == "processing":
-            recommendations = self._transition(key, "memory", worker=worker, **kwargs)
+            r: tuple = self._transition(key, "memory", worker=worker, **kwargs)
+            recommendations, client_msgs, worker_msgs = r
 
             if ts._state == "memory":
                 assert ws in ts._who_has
@@ -4000,10 +4004,9 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                self.worker_send(worker, {"op": "release-task", "key": key})
-            recommendations = {}
+                worker_msgs[worker] = [{"op": "release-task", "key": key}]
 
-        return recommendations
+        return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
         self, key=None, worker=None, exception=None, traceback=None, **kwargs
@@ -4589,8 +4592,16 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return
         validate_key(key)
-        r = self.stimulus_task_finished(key=key, worker=worker, **msg)
-        self.transitions(r)
+
+        recommendations: dict
+        client_msgs: dict
+        worker_msgs: dict
+
+        r: tuple = self.stimulus_task_finished(key=key, worker=worker, **msg)
+        recommendations, client_msgs, worker_msgs = r
+        self._transitions(recommendations, client_msgs, worker_msgs)
+
+        self.send_all(client_msgs, worker_msgs)
 
     def handle_task_erred(self, key=None, **msg):
         r = self.stimulus_task_erred(key=key, **msg)
