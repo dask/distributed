@@ -3565,18 +3565,21 @@ class Scheduler(SchedulerState, ServerNode):
                     logger.exception(e)
 
             recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
             if nbytes:
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
                     if ts is not None and ts._state in ("processing", "waiting"):
-                        recommendations = self.transition(
+                        t: tuple = self._transition(
                             key,
                             "memory",
                             worker=address,
                             nbytes=nbytes[key],
                             typename=types[key],
                         )
-                        self.transitions(recommendations)
+                        recommendations, client_msgs, worker_msgs = t
+                        self._transitions(recommendations, client_msgs, worker_msgs)
                         recommendations = {}
 
             for ts in list(parent._unrunnable):
@@ -3585,8 +3588,10 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts._key] = "waiting"
 
             if recommendations:
-                self.transitions(recommendations)
+                self._transitions(recommendations, client_msgs, worker_msgs)
                 recommendations = {}
+
+            self.send_all(client_msgs, worker_msgs)
 
             self.log_event(address, {"action": "add-worker"})
             self.log_event("all", {"action": "add-worker", "worker": address})
