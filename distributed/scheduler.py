@@ -3564,7 +3564,7 @@ class Scheduler(SchedulerState, ServerNode):
                 except Exception as e:
                     logger.exception(e)
 
-            recommendations: dict
+            recommendations: dict = {}
             if nbytes:
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
@@ -3577,8 +3577,8 @@ class Scheduler(SchedulerState, ServerNode):
                             typename=types[key],
                         )
                         self.transitions(recommendations)
+                        recommendations = {}
 
-            recommendations = {}
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
                 if valid is None or ws in valid:
@@ -3586,6 +3586,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             if recommendations:
                 self.transitions(recommendations)
+                recommendations = {}
 
             self.log_event(address, {"action": "add-worker"})
             self.log_event("all", {"action": "add-worker", "worker": address})
