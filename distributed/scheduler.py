@@ -3929,7 +3929,12 @@ class Scheduler(SchedulerState, ServerNode):
             if tasks[k] is k:
                 del tasks[k]
 
+        cs: ClientState = parent._clients[client]
         dependencies = dependencies or {}
+
+        recommendations: dict = {}
+        client_msgs: dict = {}
+        worker_msgs: dict = {}
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -3943,8 +3948,19 @@ class Scheduler(SchedulerState, ServerNode):
                     del dependencies[k]
                     if k in keys:
                         keys.remove(k)
-                    self.report({"op": "cancelled-key", "key": k}, client=client)
-                    self.client_releases_keys(keys=[k], client=client)
+
+                    ccs: ClientState
+                    tts: TaskState = parent._tasks[k]
+                    report_msg: dict = {"op": "cancelled-key", "key": k}
+                    for ccs in tts._who_wants:
+                        if ccs._client_key != client:
+                            client_msgs[ccs._client_key] = [report_msg]
+                    client_msgs[client] = [report_msg]
+
+                    _client_releases_keys(
+                        parent, keys=[k], cs=cs, recommendations=recommendations
+                    )
+                    self._transitions(recommendations, client_msgs, worker_msgs)
 
         # Avoid computation that is already finished
         ts: TaskState
@@ -4124,8 +4140,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._retries = v
 
         # Compute recommendations
-        recommendations: dict = {}
-
         for ts in sorted(runnables, key=operator.attrgetter("priority"), reverse=True):
             if ts._state == "released" and ts._run_spec:
                 recommendations[ts._key] = "waiting"
@@ -4154,17 +4168,25 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        self.transitions(recommendations)
+        self._transitions(recommendations, client_msgs, worker_msgs)
 
         for ts in touched_tasks:
             if ts._state in ("memory", "erred"):
-                self.report_on_key(ts=ts, client=client)
+                cmsgs: dict = _task_to_client_msgs(parent, ts, cs)
+                for c, new_msgs in cmsgs.items():
+                    msgs: list = client_msgs.get(c)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        client_msgs[k] = new_msgs
 
         end = time()
         if self.digests is not None:
             self.digests["update-graph-duration"].add(end - start)
 
         # TODO: balance workers
+
+        self.send_all(client_msgs, worker_msgs)
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
