@@ -4057,10 +4057,12 @@ class Scheduler(SchedulerState, ServerNode):
             logger.debug("Stimulus missing data %s, %s", key, worker)
 
             recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             ts: TaskState = parent._tasks.get(key)
             if ts is None or ts._state == "memory":
-                return recommendations
+                return recommendations, client_msgs, worker_msgs
             cts: TaskState = parent._tasks.get(cause)
 
             if cts is not None and cts._state == "memory":  # couldn't find this
@@ -4075,13 +4077,13 @@ class Scheduler(SchedulerState, ServerNode):
             if key:
                 recommendations[key] = "released"
 
-            self.transitions(recommendations)
+            self._transitions(recommendations, client_msgs, worker_msgs)
             recommendations = {}
 
             if parent._validate:
                 assert cause not in self.who_has
 
-            return recommendations
+            return recommendations, client_msgs, worker_msgs
 
     def stimulus_retry(self, comm=None, keys=None, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -4631,8 +4633,16 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv[worker]
         if ts._processing_on != ws:
             return
-        r = self.stimulus_missing_data(key=key, ensure=False, **msg)
-        self.transitions(r)
+
+        recommendations: dict
+        client_msgs: dict
+        worker_msgs: dict
+
+        r: tuple = self.stimulus_missing_data(key=key, ensure=False, **msg)
+        recommendations, client_msgs, worker_msgs = r
+        self._transitions(recommendations, client_msgs, worker_msgs)
+
+        self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
