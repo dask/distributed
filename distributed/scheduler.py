@@ -1769,8 +1769,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert ts._run_spec
@@ -1781,7 +1781,7 @@ class SchedulerState:
 
             if ts._has_lost_dependencies:
                 recommendations[key] = "forgotten"
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
 
             ts.state = "waiting"
 
@@ -1790,7 +1790,7 @@ class SchedulerState:
                 if dts._exception_blame:
                     ts._exception_blame = dts._exception_blame
                     recommendations[key] = "erred"
-                    return recommendations, worker_msgs, client_msgs
+                    return recommendations, client_msgs, worker_msgs
 
             for dts in ts._dependencies:
                 dep = dts._key
@@ -1810,7 +1810,7 @@ class SchedulerState:
                     self._unrunnable.add(ts)
                     ts.state = "no-worker"
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1824,8 +1824,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert ts in self._unrunnable
@@ -1837,7 +1837,7 @@ class SchedulerState:
 
             if ts._has_lost_dependencies:
                 recommendations[key] = "forgotten"
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
 
             for dts in ts._dependencies:
                 dep = dts._key
@@ -1857,7 +1857,7 @@ class SchedulerState:
                     self._unrunnable.add(ts)
                     ts.state = "no-worker"
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1934,8 +1934,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert not ts._waiting_on
@@ -1948,7 +1948,7 @@ class SchedulerState:
 
             ws: WorkerState = self.decide_worker(ts)
             if ws is None:
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
             worker = ws._address
 
             duration_estimate = self.set_duration_estimate(ts, ws)
@@ -1967,7 +1967,7 @@ class SchedulerState:
 
             worker_msgs[worker] = [_task_to_msg(self, ts)]
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1983,8 +1983,8 @@ class SchedulerState:
             ws: WorkerState = self._workers_dv[worker]
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert not ts._processing_on
@@ -2007,7 +2007,7 @@ class SchedulerState:
                 assert not ts._waiting_on
                 assert ts._who_has
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2029,8 +2029,8 @@ class SchedulerState:
         ws: WorkerState
         wws: WorkerState
         recommendations: dict = {}
-        worker_msgs: dict = {}
         client_msgs: dict = {}
+        worker_msgs: dict = {}
         try:
             ts: TaskState = self._tasks[key]
             assert worker
@@ -2048,7 +2048,7 @@ class SchedulerState:
             ws = self._workers_dv.get(worker)
             if ws is None:
                 recommendations[key] = "released"
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
 
             if ws != ts._processing_on:  # someone else has this task
                 logger.info(
@@ -2058,7 +2058,7 @@ class SchedulerState:
                     ws,
                     key,
                 )
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
 
             has_compute_startstop: bool = False
             compute_start: double
@@ -2124,7 +2124,7 @@ class SchedulerState:
                 assert not ts._processing_on
                 assert not ts._waiting_on
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2139,8 +2139,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert not ts._waiting_on
@@ -2157,8 +2157,8 @@ class SchedulerState:
                     recommendations[ts._key] = "erred"
                     return (
                         recommendations,
-                        worker_msgs,
                         client_msgs,
+                        worker_msgs,
                     )  # don't try to recreate
 
             for dts in ts._waiters:
@@ -2199,7 +2199,7 @@ class SchedulerState:
             if self._validate:
                 assert not ts._waiting_on
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2214,8 +2214,8 @@ class SchedulerState:
             dts: TaskState
             failing_ts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 with log_errors(pdb=LOG_PDB):
@@ -2244,7 +2244,7 @@ class SchedulerState:
             ts.state = "erred"
 
             # TODO: waiting data?
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2258,8 +2258,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 with log_errors(pdb=LOG_PDB):
@@ -2284,7 +2284,7 @@ class SchedulerState:
 
             ts.state = "released"
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2297,8 +2297,8 @@ class SchedulerState:
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert not ts._who_has
@@ -2322,7 +2322,7 @@ class SchedulerState:
             else:
                 ts._waiters.clear()
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2336,8 +2336,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert ts._processing_on
@@ -2368,7 +2368,7 @@ class SchedulerState:
             if self._validate:
                 assert not ts._processing_on
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2386,8 +2386,8 @@ class SchedulerState:
             dts: TaskState
             failing_ts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert cause or ts._exception_blame
@@ -2447,7 +2447,7 @@ class SchedulerState:
             if self._validate:
                 assert not ts._processing_on
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2461,8 +2461,8 @@ class SchedulerState:
             ts: TaskState = self._tasks[key]
             dts: TaskState
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert self._tasks[key].state == "no-worker"
@@ -2477,7 +2477,7 @@ class SchedulerState:
 
             ts._waiters.clear()
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2504,8 +2504,8 @@ class SchedulerState:
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert ts._state == "memory"
@@ -2532,7 +2532,7 @@ class SchedulerState:
             client_msgs = _task_to_client_msgs(self, ts)
             self.remove_key(key)
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2545,8 +2545,8 @@ class SchedulerState:
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
-            worker_msgs: dict = {}
             client_msgs: dict = {}
+            worker_msgs: dict = {}
 
             if self._validate:
                 assert ts._state in ("released", "erred")
@@ -2570,7 +2570,7 @@ class SchedulerState:
             client_msgs = _task_to_client_msgs(self, ts)
             self.remove_key(key)
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -3986,7 +3986,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: dict
         if ts._state == "processing":
-            recommendations = self.transition(key, "memory", worker=worker, **kwargs)
+            recommendations = self._transition(key, "memory", worker=worker, **kwargs)
 
             if ts._state == "memory":
                 assert ws in ts._who_has
@@ -4743,16 +4743,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def send_all(self, client_msgs: dict, worker_msgs: dict):
         """Send messages to client and workers"""
-        stream_comms: dict = self.stream_comms
         client_comms: dict = self.client_comms
+        stream_comms: dict = self.stream_comms
         msgs: list
-
-        for worker, msgs in worker_msgs.items():
-            try:
-                w = stream_comms[worker]
-                w.send(*msgs)
-            except (CommClosedError, AttributeError):
-                self.loop.add_callback(self.remove_worker, address=worker)
 
         for client, msgs in client_msgs.items():
             c = client_comms.get(client)
@@ -4763,6 +4756,13 @@ class Scheduler(SchedulerState, ServerNode):
             except CommClosedError:
                 if self.status == Status.running:
                     logger.critical("Tried writing to closed comm: %s", msgs)
+
+        for worker, msgs in worker_msgs.items():
+            try:
+                w = stream_comms[worker]
+                w.send(*msgs)
+            except (CommClosedError, AttributeError):
+                self.loop.add_callback(self.remove_worker, address=worker)
 
     ############################
     # Less common interactions #
@@ -5916,10 +5916,10 @@ class Scheduler(SchedulerState, ServerNode):
 
             ts = parent._tasks.get(key)
             if ts is None:
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
             start = ts._state
             if start == finish:
-                return recommendations, worker_msgs, client_msgs
+                return recommendations, client_msgs, worker_msgs
 
             if self.plugins:
                 dependents = set(ts._dependents)
@@ -5929,51 +5929,51 @@ class Scheduler(SchedulerState, ServerNode):
             func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
-                recommendations, worker_msgs, client_msgs = a
+                recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
-                a_wmsgs: dict
                 a_cmsgs: dict
+                a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
-                a_recs, a_wmsgs, a_cmsgs = a
+                a_recs, a_cmsgs, a_wmsgs = a
                 v = a_recs.get(key)
                 if v is not None:
                     func = self._transitions_table["released", v]
                 b_recs: dict
-                b_wmsgs: dict
                 b_cmsgs: dict
+                b_wmsgs: dict
                 b: tuple = func(key)
-                b_recs, b_wmsgs, b_cmsgs = b
+                b_recs, b_cmsgs, b_wmsgs = b
 
                 recommendations.update(a_recs)
-                for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
                 for c, new_msgs in a_cmsgs.items():
                     msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
-
-                recommendations.update(b_recs)
-                for w, new_msgs in b_wmsgs.items():
+                for w, new_msgs in a_wmsgs.items():
                     msgs = worker_msgs.get(w)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         worker_msgs[w] = new_msgs
+
+                recommendations.update(b_recs)
                 for c, new_msgs in b_cmsgs.items():
                     msgs = client_msgs.get(c)
                     if msgs is not None:
                         msgs.extend(new_msgs)
                     else:
                         client_msgs[c] = new_msgs
+                for w, new_msgs in b_wmsgs.items():
+                    msgs = worker_msgs.get(w)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        worker_msgs[w] = new_msgs
 
                 start = "released"
             else:
@@ -6016,7 +6016,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ts._prefix._groups.remove(tg)
                     del parent._task_groups[tg._name]
 
-            return recommendations, worker_msgs, client_msgs
+            return recommendations, client_msgs, worker_msgs
         except Exception as e:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
@@ -6045,7 +6045,7 @@ class Scheduler(SchedulerState, ServerNode):
         worker_msgs: dict
         client_msgs: dict
         a: tuple = self._transition(key, finish, *args, **kwargs)
-        recommendations, worker_msgs, client_msgs = a
+        recommendations, client_msgs, worker_msgs = a
         self.send_all(client_msgs, worker_msgs)
         return recommendations
 
@@ -6058,34 +6058,34 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         keys: set = set()
         recommendations = recommendations.copy()
-        worker_msgs: dict = {}
         client_msgs: dict = {}
+        worker_msgs: dict = {}
         msgs: list
         new_msgs: list
         new: tuple
         new_recs: dict
-        new_wmsgs: dict
         new_cmsgs: dict
+        new_wmsgs: dict
         while recommendations:
             key, finish = recommendations.popitem()
             keys.add(key)
 
             new = self._transition(key, finish)
-            new_recs, new_wmsgs, new_cmsgs = new
+            new_recs, new_cmsgs, new_wmsgs = new
 
             recommendations.update(new_recs)
-            for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    worker_msgs[w] = new_msgs
             for c, new_msgs in new_cmsgs.items():
                 msgs = client_msgs.get(c)
                 if msgs is not None:
                     msgs.extend(new_msgs)
                 else:
                     client_msgs[c] = new_msgs
+            for w, new_msgs in new_wmsgs.items():
+                msgs = worker_msgs.get(w)
+                if msgs is not None:
+                    msgs.extend(new_msgs)
+                else:
+                    worker_msgs[w] = new_msgs
 
         if parent._validate:
             for key in keys:
