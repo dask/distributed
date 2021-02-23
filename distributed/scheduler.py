@@ -4893,6 +4893,10 @@ class Scheduler(SchedulerState, ServerNode):
                         for worker in missing_workers
                     ]
                 )
+
+                recommendations: dict
+                client_msgs: dict = {}
+                worker_msgs: dict = {}
                 for key, workers in missing_keys.items():
                     # Task may already be gone if it was held by a
                     # `missing_worker`
@@ -4905,13 +4909,15 @@ class Scheduler(SchedulerState, ServerNode):
                     if not workers or ts is None:
                         continue
                     ts_nbytes: Py_ssize_t = ts.get_nbytes()
+                    recommendations: dict = {key: "released"}
                     for worker in workers:
                         ws = parent._workers_dv.get(worker)
                         if ws is not None and ts in ws._has_what:
                             ws._has_what.remove(ts)
                             ts._who_has.remove(ws)
                             ws._nbytes -= ts_nbytes
-                            self.transitions({key: "released"})
+                            self._transitions(recommendations, client_msgs, worker_msgs)
+                self.send_all(client_msgs, worker_msgs)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
