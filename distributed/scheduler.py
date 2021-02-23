@@ -4043,12 +4043,12 @@ class Scheduler(SchedulerState, ServerNode):
         with log_errors():
             logger.debug("Stimulus missing data %s, %s", key, worker)
 
+            recommendations: dict = {}
+
             ts: TaskState = parent._tasks.get(key)
             if ts is None or ts._state == "memory":
-                return {}
+                return recommendations
             cts: TaskState = parent._tasks.get(cause)
-
-            recommendations: dict = {}
 
             if cts is not None and cts._state == "memory":  # couldn't find this
                 ws: WorkerState
@@ -4063,11 +4063,12 @@ class Scheduler(SchedulerState, ServerNode):
                 recommendations[key] = "released"
 
             self.transitions(recommendations)
+            recommendations = {}
 
             if parent._validate:
                 assert cause not in self.who_has
 
-            return {}
+            return recommendations
 
     def stimulus_retry(self, comm=None, keys=None, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
