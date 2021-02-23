@@ -4017,7 +4017,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         recommendations: dict
         if ts._state == "processing":
-            retries = ts._retries
+            retries: Py_ssize_t = ts._retries
             if retries > 0:
                 ts._retries = retries - 1
                 recommendations = self.transition(key, "waiting")
