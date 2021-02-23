@@ -6876,16 +6876,26 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
 
 @cfunc
 @exceptval(check=False)
-def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
+def _task_to_client_msgs(
+    state: SchedulerState, ts: TaskState, cs: ClientState = None
+) -> dict:
     report_msg: dict = _task_to_report_msg(state, ts)
     client_msgs: dict
+    ccs: ClientState
     if ts is None:
         # Notify all clients
         client_msgs = {k: [report_msg] for k in state._clients}
-    else:
+    elif cs is None:
         # Notify clients interested in key
-        cs: ClientState
-        client_msgs = {cs._client_key: [report_msg] for cs in ts._who_wants}
+        client_msgs = {ccs._client_key: [report_msg] for ccs in ts._who_wants}
+    else:
+        # Notify clients interested in key (including `client`)
+        client_msgs = {
+            ccs._client_key: [report_msg]
+            for ccs in ts._who_wants
+            if ccs._client_key != cs._client_key
+        }
+        client_msgs[cs._client_key] = [report_msg]
     return client_msgs
 
 
