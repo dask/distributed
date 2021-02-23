@@ -10,6 +10,7 @@ from tlz import partition_all, first
 from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
+from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.utils import sync, CancelledError
 from distributed.utils_test import (
@@ -285,6 +286,7 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
+@pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
     import gc
