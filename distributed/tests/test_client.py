@@ -4967,6 +4967,7 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
 async def test_secede_balances(c, s, a, b):
@@ -4984,9 +4985,7 @@ async def test_secede_balances(c, s, a, b):
     start = time()
     while not all(f.status == "finished" for f in futures):
         await asyncio.sleep(0.01)
-        # Tolerate a slight inbalance, otherwise the test will occasionally fail on
-        # this line with messages such as `assert 75 < 24 + 50`
-        assert threading.active_count() < count + 55
+        assert threading.active_count() < count + 50
         assert time() < start + 60
 
     assert len(a.log) < 2 * len(b.log)

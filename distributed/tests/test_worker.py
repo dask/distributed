@@ -1682,7 +1682,7 @@ async def test_update_latency(cleanup):
                 assert w.digests["latency"].size() > 0
 
 
-@pytest.mark.skipf(MACOS, reason="occasionally hangs")
+@pytest.mark.skipif(MACOS, reason="frequently hangs")
 @pytest.mark.asyncio
 async def test_workerstate_executing(cleanup):
     async with await Scheduler() as s:
