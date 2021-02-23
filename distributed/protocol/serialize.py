@@ -54,7 +54,6 @@ def dask_loads(header, frames):
 
 
 def pickle_dumps(x, context=None):
-    header = {"serializer": "pickle"}
     frames = [None]
     buffer_callback = lambda f: frames.append(memoryview(f))
     frames[0] = pickle.dumps(
@@ -62,11 +61,24 @@ def pickle_dumps(x, context=None):
         buffer_callback=buffer_callback,
         protocol=context.get("pickle-protocol", None) if context else None,
     )
+
+    header = {
+        "serializer": "pickle",
+        "pickle-writeable": tuple(not f.readonly for f in frames[1:]),
+    }
     return header, frames
 
 
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
+    writeable = header["pickle-writeable"]
+    for i in range(len(buffers)):
+        readonly = memoryview(buffers[i]).readonly
+        if writeable[i]:
+            if readonly:
+                buffers[i] = bytearray(buffers[i])
+        elif not readonly:
+            buffers[i] = bytes(buffers[i])
     return pickle.loads(x, buffers=buffers)
 
 
