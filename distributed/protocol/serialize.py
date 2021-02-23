@@ -386,6 +386,18 @@ def deserialize(header, frames, deserializers=None):
 
 
 def serialize_and_split(x, serializers=None, on_error="message", context=None):
+    """Serialize and split compressable frames
+
+    This function is a drop-in replacement of `serialize()` that calls `serialize()`
+    followed by `frame_split_size()` on frames that should be compressed.
+
+    Use `merge_and_deserialize()` to merge and deserialize the frames back.
+
+    See Also
+    --------
+    serialize
+    merge_and_deserialize
+    """
     header, frames = serialize(x, serializers, on_error, context)
     num_sub_frames = []
     offsets = []
@@ -409,6 +421,16 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
 
 
 def merge_and_deserialize(header, frames, deserializers=None):
+    """Merge and deserialize frames
+
+    This function is a drop-in replacement of `deserialize()` that merges
+    frames that were split by `serialize_and_split()`
+
+    See Also
+    --------
+    deserialize
+    serialize_and_split
+    """
     merged_frames = []
     if "split-num-sub-frames" not in header:
         merged_frames = frames
