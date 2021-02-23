@@ -6049,7 +6049,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
         return recommendations
 
-    def transitions(self, recommendations: dict):
+    def _transitions(self, recommendations: dict, client_msgs: dict, worker_msgs: dict):
         """Process transitions until none are left
 
         This includes feedback from previous transitions and continues until we
@@ -6058,8 +6058,6 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         keys: set = set()
         recommendations = recommendations.copy()
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
         msgs: list
         new_msgs: list
         new: tuple
@@ -6091,6 +6089,15 @@ class Scheduler(SchedulerState, ServerNode):
             for key in keys:
                 self.validate_key(key)
 
+    def transitions(self, recommendations: dict):
+        """Process transitions until none are left
+
+        This includes feedback from previous transitions and continues until we
+        reach a steady state
+        """
+        client_msgs: dict = {}
+        worker_msgs: dict = {}
+        self._transitions(recommendations, client_msgs, worker_msgs)
         self.send_all(client_msgs, worker_msgs)
 
     def story(self, *keys):
