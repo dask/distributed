@@ -3120,7 +3120,7 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
         }
 
-        self._transitions = {
+        self._transitions_table = {
             ("released", "waiting"): self.transition_released_waiting,
             ("waiting", "released"): self.transition_waiting_released,
             ("waiting", "processing"): self.transition_waiting_processing,
@@ -5926,12 +5926,12 @@ class Scheduler(SchedulerState, ServerNode):
                 dependencies = set(ts._dependencies)
 
             start_finish = (start, finish)
-            func = self._transitions.get(start_finish)
+            func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, worker_msgs, client_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions["released", finish]
+                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_wmsgs: dict
@@ -5940,7 +5940,7 @@ class Scheduler(SchedulerState, ServerNode):
                 a_recs, a_wmsgs, a_cmsgs = a
                 v = a_recs.get(key)
                 if v is not None:
-                    func = self._transitions["released", v]
+                    func = self._transitions_table["released", v]
                 b_recs: dict
                 b_wmsgs: dict
                 b_cmsgs: dict
