@@ -93,7 +93,12 @@ def serialize_numpy_ndarray(x, context=None):
         # "ValueError: cannot include dtype 'M' in a buffer"
         data = data.view("u%d" % math.gcd(x.dtype.itemsize, 8)).data
 
-    header = {"dtype": dt, "shape": x.shape, "strides": strides}
+    header = {
+        "dtype": dt,
+        "shape": x.shape,
+        "strides": strides,
+        "writeable": [x.flags.writeable],
+    }
 
     if broadcast_to is not None:
         header["broadcast_to"] = broadcast_to
@@ -112,6 +117,7 @@ def deserialize_numpy_ndarray(header, frames):
             return pickle.loads(frames[0], buffers=frames[1:])
 
         (frame,) = frames
+        (writeable,) = header["writeable"]
 
         is_custom, dt = header["dtype"]
         if is_custom:
@@ -125,6 +131,10 @@ def deserialize_numpy_ndarray(header, frames):
             shape = header["shape"]
 
         x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
+        if not writeable:
+            x.flags.writeable = False
+        elif not x.flags.writeable:
+            x = x.copy()
 
         return x
 
