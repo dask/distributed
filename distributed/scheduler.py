@@ -4021,18 +4021,21 @@ class Scheduler(SchedulerState, ServerNode):
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
         recommendations: dict = {}
+        client_msgs: dict = {}
+        worker_msgs: dict = {}
 
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
-            return recommendations
+            return recommendations, client_msgs, worker_msgs
 
         if ts._state == "processing":
             retries: Py_ssize_t = ts._retries
+            r: tuple
             if retries > 0:
                 ts._retries = retries - 1
-                recommendations = self.transition(key, "waiting")
+                r = self._transition(key, "waiting")
             else:
-                recommendations = self.transition(
+                r = self._transition(
                     key,
                     "erred",
                     cause=key,
@@ -4041,8 +4044,9 @@ class Scheduler(SchedulerState, ServerNode):
                     worker=worker,
                     **kwargs,
                 )
+            recommendations, client_msgs, worker_msgs = r
 
-        return recommendations
+        return recommendations, client_msgs, worker_msgs
 
     def stimulus_missing_data(
         self, cause=None, key=None, worker=None, ensure=True, **kwargs
@@ -4609,8 +4613,15 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def handle_task_erred(self, key=None, **msg):
-        r = self.stimulus_task_erred(key=key, **msg)
-        self.transitions(r)
+        recommendations: dict
+        client_msgs: dict
+        worker_msgs: dict
+
+        r: tuple = self.stimulus_task_erred(key=key, **msg)
+        recommendations, client_msgs, worker_msgs = r
+        self._transitions(recommendations, client_msgs, worker_msgs)
+
+        self.send_all(client_msgs, worker_msgs)
 
     def handle_release_data(self, key=None, worker=None, client=None, **msg):
         parent: SchedulerState = cast(SchedulerState, self)
