@@ -4011,11 +4011,12 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
+        recommendations: dict = {}
+
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
-            return {}
+            return recommendations
 
-        recommendations: dict
         if ts._state == "processing":
             retries: Py_ssize_t = ts._retries
             if retries > 0:
@@ -4031,8 +4032,6 @@ class Scheduler(SchedulerState, ServerNode):
                     worker=worker,
                     **kwargs,
                 )
-        else:
-            recommendations = {}
 
         return recommendations
 
