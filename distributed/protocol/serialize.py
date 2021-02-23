@@ -61,7 +61,6 @@ def pickle_dumps(x, context=None):
         buffer_callback=buffer_callback,
         protocol=context.get("pickle-protocol", None) if context else None,
     )
-
     header = {
         "serializer": "pickle",
         "pickle-writeable": tuple(not f.readonly for f in frames[1:]),
@@ -384,6 +383,43 @@ def deserialize(header, frames, deserializers=None):
         )
     dumps, loads, wants_context = families[name]
     return loads(header, frames)
+
+
+def serialize_and_split(x, serializers=None, on_error="message", context=None):
+    header, frames = serialize(x, serializers, on_error, context)
+    num_sub_frames = []
+    offsets = []
+    out_frames = []
+    for frame, compression in zip(
+        frames, header.get("compression") or [None] * len(frames)
+    ):
+        if compression is None:  # default behavior
+            sub_frames = frame_split_size(frame)
+            num_sub_frames.append(len(sub_frames))
+            offsets.append(len(out_frames))
+            out_frames.extend(sub_frames)
+        else:
+            num_sub_frames.append(1)
+            offsets.append(len(out_frames))
+            out_frames.append(frame)
+
+    header["split-num-sub-frames"] = num_sub_frames
+    header["split-offsets"] = offsets
+    return header, out_frames
+
+
+def merge_and_deserialize(header, frames, deserializers=None):
+    merged_frames = []
+    if "split-num-sub-frames" not in header:
+        merged_frames = frames
+    else:
+        for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
+            if n == 1:
+                merged_frames.append(frames[offset])
+            else:
+                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+
+    return deserialize(header, merged_frames, deserializers=deserializers)
 
 
 class Serialize:
