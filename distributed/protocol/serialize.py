@@ -16,7 +16,6 @@ from .utils import (
     unpack_frames,
     pack_frames_prelude,
     frame_split_size,
-    merge_frames,
     msgpack_opts,
 )
 
@@ -604,13 +603,12 @@ def nested_deserialize(x):
 
 
 def serialize_bytelist(x, **kwargs):
-    header, frames = serialize(x, **kwargs)
+    header, frames = serialize_and_split(x, **kwargs)
     if "writeable" not in header:
         header["writeable"] = tuple(map(is_writeable, frames))
     if "lengths" not in header:
         header["lengths"] = tuple(map(nbytes, frames))
     if frames:
-        frames = sum(map(frame_split_size, frames), [])
         compression, frames = zip(*map(maybe_compress, frames))
     else:
         compression = []
@@ -636,8 +634,7 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
-    frames = merge_frames(header, frames)
-    return deserialize(header, frames)
+    return merge_and_deserialize(header, frames)
 
 
 ################################
