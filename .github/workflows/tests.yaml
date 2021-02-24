@@ -59,6 +59,8 @@ jobs:
 
       - name: Setup SSH
         shell: bash -l {0}
+        # FIXME no SSH available on Windows
+        # https://github.com/dask/distributed/issues/4509
         if: ${{ matrix.os != 'windows-latest' }}
         run: bash continuous_integration/scripts/setup_ssh.sh
 
@@ -66,20 +68,15 @@ jobs:
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
-          MARKERS: not avoid_ci
         run: |
           if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
               # FIXME ipv6-related failures on Ubuntu github actions CI
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
-          elif [[ "${{ matrix.os }}" = "windows-latest" ]]; then
-              # FIXME no SSH available on Windows
-              # https://github.com/dask/distributed/issues/4509
-              export MARKERS="$MARKERS and not ssh"
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "$MARKERS" --runslow
+          pytest distributed -m "not avoid_ci" --runslow
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}

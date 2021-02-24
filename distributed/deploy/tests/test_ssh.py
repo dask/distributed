@@ -4,11 +4,15 @@ pytest.importorskip("asyncssh")
 
 import sys
 import dask
-from dask.distributed import Client
+from distributed import Client
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.deploy.ssh import SSHCluster
 from distributed.utils_test import loop  # noqa: F401
 
-pytestmark = pytest.mark.ssh
+pytestmark = [
+    pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/pull/4504"),
+    pytest.mark.skipif(WINDOWS, reason="no CI support; see distributed/issues/4509"),
+]
 
 
 def test_ssh_hosts_None():
