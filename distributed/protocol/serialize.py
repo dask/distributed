@@ -414,8 +414,10 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
             offsets.append(len(out_frames))
             out_frames.append(frame)
 
-    header["split-num-sub-frames"] = num_sub_frames
-    header["split-offsets"] = offsets
+    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # we convert to tuples here as well.
+    header["split-num-sub-frames"] = tuple(num_sub_frames)
+    header["split-offsets"] = tuple(offsets)
     return header, out_frames
 
 
