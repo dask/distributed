@@ -3668,6 +3668,7 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         annotations=None,
     ):
+
         dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
