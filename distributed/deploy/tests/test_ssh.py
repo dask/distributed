@@ -10,7 +10,7 @@ from distributed.deploy.ssh import SSHCluster
 from distributed.utils_test import loop  # noqa: F401
 
 pytestmark = [
-    pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/pull/4504"),
+    pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/issues/4543"),
     pytest.mark.skipif(WINDOWS, reason="no CI support; see distributed/issues/4509"),
 ]
 
