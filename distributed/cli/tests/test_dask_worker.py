@@ -73,7 +73,7 @@ def test_nanny_worker_port_range(loop):
                 start = time()
                 while len(c.scheduler_info()["workers"]) < nprocs:
                     sleep(0.1)
-                    assert time() - start < 5
+                    assert time() - start < 60
 
                 def get_port(dask_worker):
                     return dask_worker.port

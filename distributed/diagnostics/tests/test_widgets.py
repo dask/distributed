@@ -2,6 +2,7 @@ import pytest
 
 pytest.importorskip("ipywidgets")
 
+from distributed.compatibility import WINDOWS
 from ipykernel.comm import Comm
 from ipywidgets import Widget
 
@@ -144,6 +145,7 @@ async def test_multi_progressbar_widget(c, s, a, b):
     assert sorted(capacities, reverse=True) == capacities
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster()
 async def test_multi_progressbar_widget_after_close(s, a, b):
     s.update_graph(

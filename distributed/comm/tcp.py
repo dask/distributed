@@ -186,7 +186,7 @@ class TCP(Comm):
     async def read(self, deserializers=None):
         stream = self.stream
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
 
         fmt = "Q"
         fmt_size = struct.calcsize(fmt)
@@ -228,9 +228,8 @@ class TCP(Comm):
 
     async def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
-        bytes_since_last_yield = 0
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
 
         frames = await to_frames(
             msg,
@@ -260,6 +259,8 @@ class TCP(Comm):
             for each_frame in frames:
                 each_frame_nbytes = nbytes(each_frame)
                 if each_frame_nbytes:
+                    if stream._write_buffer is None:
+                        raise StreamClosedError()
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes
 
@@ -271,12 +272,10 @@ class TCP(Comm):
             if not shutting_down():
                 convert_stream_closed_error(self, e)
         except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already written to the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
-            if stream._write_buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
+            # Some OSError or a another "low-level" exception. We do not really know
+            # what was already written to the underlying socket, so it is not even safe
+            # to retry here using the same stream. The only safe thing to do is to
+            # abort. (See also GitHub #4133).
             self.abort()
             raise
 

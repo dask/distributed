@@ -369,7 +369,6 @@ async def test_full_collections(c, s, a, b):
     assert not b.log
 
 
-@pytest.mark.xfail(reason="atop fusion seemed to break this")
 @pytest.mark.parametrize(
     "optimize_graph",
     [
@@ -380,7 +379,7 @@ async def test_full_collections(c, s, a, b):
             ),
         ),
         pytest.param(
-            False, marks=pytest.mark.skipif(WINDOWS, reason="intermittent failure")
+            False, marks=pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
         ),
     ],
 )

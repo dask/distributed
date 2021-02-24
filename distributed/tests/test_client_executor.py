@@ -95,6 +95,7 @@ def test_wait(client):
         assert "hello" in str(errors[0])
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_cancellation(client):
     with client.get_executor(pure=False) as e:
         fut = e.submit(time.sleep, 2.0)
@@ -228,7 +229,7 @@ def test_retries(client):
 
 
 def test_shutdown(loop):
-    with cluster(disconnect_timeout=10) as (s, [a, b]):
+    with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as client:
             # shutdown(wait=True) waits for pending tasks to finish
             e = client.get_executor()
