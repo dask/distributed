@@ -401,6 +401,7 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
     num_sub_frames = []
     offsets = []
     out_frames = []
+    out_compression = []
     for frame, compression in zip(
         frames, header.get("compression") or [None] * len(frames)
     ):
@@ -409,15 +410,19 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
             num_sub_frames.append(len(sub_frames))
             offsets.append(len(out_frames))
             out_frames.extend(sub_frames)
+            out_compression.extend([None] * len(sub_frames))
         else:
             num_sub_frames.append(1)
             offsets.append(len(out_frames))
             out_frames.append(frame)
+            out_compression.append(compression)
+    assert len(out_compression) == len(out_frames)
 
     # Notice, in order to match msgpack's implicit convertion to tuples,
     # we convert to tuples here as well.
     header["split-num-sub-frames"] = tuple(num_sub_frames)
     header["split-offsets"] = tuple(offsets)
+    header["compression"] = tuple(out_compression)
     return header, out_frames
 
 
