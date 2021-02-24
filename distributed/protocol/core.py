@@ -15,7 +15,6 @@ from .serialize import (
     serialize_and_split,
 )
 from .utils import msgpack_opts
-from ..utils import is_writeable, nbytes
 
 
 logger = logging.getLogger(__name__)
@@ -58,11 +57,6 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         out_frames = []
 
         for key, (head, frames) in data.items():
-            if "writeable" not in head:
-                head["writeable"] = tuple(map(is_writeable, frames))
-            if "lengths" not in head:
-                head["lengths"] = tuple(map(nbytes, frames))
-
             # Compress frames that are not yet compressed
             out_compression = []
             for frame, compression in zip(
@@ -80,10 +74,6 @@ def dumps(msg, serializers=None, on_error="message", context=None):
             header["keys"].append(key)
 
         for key, (head, frames) in pre.items():
-            if "writeable" not in head:
-                head["writeable"] = tuple(map(is_writeable, frames))
-            if "lengths" not in head:
-                head["lengths"] = tuple(map(nbytes, frames))
             head["count"] = len(frames)
             header["headers"][key] = head
             header["keys"].append(key)

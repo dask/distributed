@@ -4,7 +4,7 @@ import numpy as np
 from .serialize import dask_serialize, dask_deserialize
 from . import pickle
 
-from ..utils import log_errors, nbytes
+from ..utils import log_errors
 
 
 def itemsize(dt):
@@ -29,7 +29,6 @@ def serialize_numpy_ndarray(x, context=None):
             buffer_callback=buffer_callback,
             protocol=(context or {}).get("pickle-protocol", None),
         )
-        header["lengths"] = tuple(map(nbytes, frames))
         return header, frames
 
     # We cannot blindly pickle the dtype as some may fail pickling,
@@ -104,9 +103,6 @@ def serialize_numpy_ndarray(x, context=None):
         header["broadcast_to"] = broadcast_to
 
     frames = [data]
-
-    header["lengths"] = [x.nbytes]
-
     return header, frames
 
 

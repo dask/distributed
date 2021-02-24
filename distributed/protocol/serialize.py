@@ -10,7 +10,7 @@ from dask.base import normalize_token
 import msgpack
 
 from . import pickle
-from ..utils import has_keyword, nbytes, typename, ensure_bytes, is_writeable
+from ..utils import has_keyword, typename, ensure_bytes
 from .compression import maybe_compress, decompress
 from .utils import (
     unpack_frames,
@@ -29,7 +29,7 @@ _cached_allowed_modules = {}
 
 
 def dask_dumps(x, context=None):
-    """Serialise object using the class-based registry"""
+    """Serialize object using the class-based registry"""
     type_name = typename(type(x))
     try:
         dumps = dask_serialize.dispatch(type(x))
@@ -62,14 +62,14 @@ def pickle_dumps(x, context=None):
     )
     header = {
         "serializer": "pickle",
-        "pickle-writeable": tuple(not f.readonly for f in frames[1:]),
+        "writeable": tuple(not f.readonly for f in frames[1:]),
     }
     return header, frames
 
 
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
-    writeable = header["pickle-writeable"]
+    writeable = header["writeable"]
     for i in range(len(buffers)):
         readonly = memoryview(buffers[i]).readonly
         if writeable[i]:
@@ -604,10 +604,6 @@ def nested_deserialize(x):
 
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize_and_split(x, **kwargs)
-    if "writeable" not in header:
-        header["writeable"] = tuple(map(is_writeable, frames))
-    if "lengths" not in header:
-        header["lengths"] = tuple(map(nbytes, frames))
     if frames:
         compression, frames = zip(*map(maybe_compress, frames))
     else:
