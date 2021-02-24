@@ -133,8 +133,8 @@ def deserialize_numpy_ndarray(header, frames):
         x = np.ndarray(shape, dtype=dt, buffer=frame, strides=header["strides"])
         if not writeable:
             x.flags.writeable = False
-        elif not x.flags.writeable:
-            x = x.copy()
+        else:
+            x = np.require(x, requirements=["W"])
 
         return x
 
