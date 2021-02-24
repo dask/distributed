@@ -4,7 +4,7 @@ on:
   - push
   # MacOS tests are currently afflicted by a very high level of flakiness; do not run on
   # PR unless this line is uncommented.
-  - pull_request
+  # - pull_request
 
 jobs:
   test:
@@ -18,7 +18,7 @@ jobs:
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
-        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     steps:
       - name: Checkout source
