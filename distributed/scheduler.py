@@ -3668,7 +3668,6 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         annotations=None,
     ):
-
         dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
@@ -3854,8 +3853,11 @@ class Scheduler(SchedulerState, ServerNode):
 
             for a, kv in annotations.items():
                 for k, v in kv.items():
-                    ts = parent._tasks[k]
-                    ts._annotations[a] = v
+                    # Tasks might have been culled, in which case
+                    # we have nothing to annotate.
+                    if k in parent._tasks:
+                        ts = parent._tasks[k]
+                        ts._annotations[a] = v
 
         # Add actors
         if actors is True:
