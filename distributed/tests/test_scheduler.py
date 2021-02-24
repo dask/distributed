@@ -180,19 +180,19 @@ async def test_retire_workers_empty(s):
     await s.retire_workers(workers=[])
 
 
-@gen_cluster()
-async def test_remove_client(s, a, b):
+@gen_cluster(client=True)
+async def test_remove_client(client, s, a, b):
     s.update_graph(
         tasks={"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
         dependencies={"x": [], "y": ["x"]},
         keys=["y"],
-        client="ident",
+        client=client.id,
     )
 
     assert s.tasks
     assert s.dependencies
 
-    s.remove_client(client="ident")
+    s.remove_client(client=client.id)
 
     assert not s.tasks
     assert not s.dependencies
