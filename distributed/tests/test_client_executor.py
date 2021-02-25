@@ -1,5 +1,4 @@
 import random
-import sys
 import time
 
 from concurrent.futures import (
@@ -15,7 +14,6 @@ import pytest
 from tlz import take
 
 from distributed import Client
-from distributed.compatibility import WINDOWS
 from distributed.utils import CancelledError
 from distributed.utils_test import (
     slowinc,
@@ -97,7 +95,6 @@ def test_wait(client):
         assert "hello" in str(errors[0])
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 9) and WINDOWS, reason="#TODO")
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_cancellation(client):
     with client.get_executor(pure=False) as e:

@@ -16,7 +16,6 @@ import pytest
 
 from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
-from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
@@ -457,7 +456,6 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
-@pytest.mark.skipif(sys.version_info >= (3, 9) and WINDOWS, reason="#TODO")
 @pytest.mark.xfail(
     sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
     reason="Known issue with Python 3.8 and Tornado < 6.0.3. "
