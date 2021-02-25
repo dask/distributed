@@ -12,6 +12,7 @@ from multiprocessing import cpu_count
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
+from distributed.compatibility import WINDOWS
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile, parse_ports
@@ -247,6 +248,7 @@ def test_nprocs_negative(loop):
                 c.wait_for_workers(cpu_count(), timeout="10 seconds")
 
 
+@pytest.mark.skipif(sys.version_info >= (3, 9) and WINDOWS, reason="#TODO")
 def test_nprocs_auto(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=auto"]) as worker:
