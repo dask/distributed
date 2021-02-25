@@ -3856,8 +3856,8 @@ class Scheduler(SchedulerState, ServerNode):
                 for k, v in kv.items():
                     # Tasks might have been culled, in which case
                     # we have nothing to annotate.
-                    if k in parent._tasks:
-                        ts = parent._tasks[k]
+                    ts = parent._tasks.get(k)
+                    if ts is not None:
                         ts._annotations[a] = v
 
         # Add actors
