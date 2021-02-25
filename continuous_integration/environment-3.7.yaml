@@ -40,6 +40,6 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://https://github.com/madsbk/dask.git@hlg_pack_move_to_dask
+      - git+https://github.com/madsbk/dask.git@hlg_pack_move_to_dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
