@@ -3671,7 +3671,7 @@ class Scheduler(SchedulerState, ServerNode):
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
-        annotations = unpacked_graph["anno"]
+        annotations = unpacked_graph["annotations"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
