@@ -7,6 +7,7 @@ from dask.distributed import Client
 from time import time, sleep
 from distributed import Semaphore, fire_and_forget
 from distributed.comm import Comm
+from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
@@ -136,7 +137,7 @@ async def test_async_ctx(s, a, b):
 
 @pytest.mark.slow
 def test_worker_dies():
-    with cluster(disconnect_timeout=10) as (scheduler, workers):
+    with cluster() as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             sem = Semaphore(name="x", max_leases=1)
 
@@ -340,6 +341,7 @@ async def test_retry_acquire(c, s, a, b):
         assert result is False
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={
@@ -552,6 +554,7 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

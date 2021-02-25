@@ -55,7 +55,7 @@ from distributed.client import (
     temp_default_client,
     get_task_metadata,
 )
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
@@ -3665,6 +3665,7 @@ async def test_reconnect_timeout(c, s):
     assert "Failed to reconnect" in text
 
 
+@pytest.mark.avoid_ci(reason="hangs on github actions ubuntu-latest CI")
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.skipif(sys.version_info < (3, 7), reason="TODO: intermittent failures")
@@ -4486,6 +4487,7 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
@@ -4965,6 +4967,7 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
 async def test_secede_balances(c, s, a, b):
@@ -4983,6 +4986,7 @@ async def test_secede_balances(c, s, a, b):
     while not all(f.status == "finished" for f in futures):
         await asyncio.sleep(0.01)
         assert threading.active_count() < count + 50
+        assert time() < start + 60
 
     assert len(a.log) < 2 * len(b.log)
     assert len(b.log) < 2 * len(a.log)

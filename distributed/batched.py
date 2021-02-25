@@ -133,7 +133,7 @@ class BatchedSend:
         This completes quickly and synchronously
         """
         if self.comm is not None and self.comm.closed():
-            raise CommClosedError
+            raise CommClosedError()
 
         self.message_count += len(msgs)
         self.buffer.extend(msgs)

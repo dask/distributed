@@ -530,7 +530,7 @@ async def test_TaskGraph_limit(c, s, a, b):
     assert len(gp.node_source.data["x"]) == 0
 
 
-@gen_cluster(client=True, timeout=30)
+@gen_cluster(client=True)
 async def test_TaskGraph_complex(c, s, a, b):
     da = pytest.importorskip("dask.array")
     gp = TaskGraph(s)

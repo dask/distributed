@@ -1,0 +1,47 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.6
+  - pip
+  - asyncssh
+  - bokeh
+  - click
+  - cloudpickle
+  - contextvars  # Backport from Python 3.7
+  - dask  # overridden by git tip below
+  - filesystem-spec
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - joblib
+  - jupyter_client
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - pickle5  # Backport from Python 3.8
+  - prometheus_client
+  - psutil
+  - pytest
+  - pytest-asyncio<0.14.0
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - requests
+  - s3fs
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado=5  # Only tested here
+  - zict
+  - zstandard
+  - pip:
+      # The '.git@master' is a hack needed to work around the failure
+      #     ERROR: Package 'dask' requires a different Python: 3.6.12 not in '>=3.6'
+      # It only happens in CI; cannot reproduce locally
+      - git+https://github.com/dask/dask.git@master
+      - keras

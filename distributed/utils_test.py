@@ -591,8 +591,8 @@ def cluster(
     nworkers=2,
     nanny=False,
     worker_kwargs={},
-    active_rpc_timeout=1,
-    disconnect_timeout=3,
+    active_rpc_timeout=10,
+    disconnect_timeout=20,
     scheduler_kwargs={},
 ):
     ws = weakref.WeakSet()
@@ -701,7 +701,7 @@ def cluster(
             scheduler.join(2)
             del scheduler
             for proc in [w["proc"] for w in workers]:
-                proc.join(timeout=2)
+                proc.join(timeout=30)
 
             with suppress(UnboundLocalError):
                 del worker, w, proc
@@ -829,7 +829,7 @@ def gen_cluster(
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
     ncores=None,
     scheduler="127.0.0.1",
-    timeout=10,
+    timeout=30,
     security=None,
     Worker=Worker,
     client=False,
@@ -873,7 +873,7 @@ def gen_cluster(
                 async def coro():
                     with dask.config.set(config):
                         s = False
-                        for i in range(5):
+                        for _ in range(60):
                             try:
                                 s, ws = await start_cluster(
                                     nthreads,
@@ -886,7 +886,8 @@ def gen_cluster(
                                 )
                             except Exception as e:
                                 logger.error(
-                                    "Failed to start gen_cluster, retrying",
+                                    "Failed to start gen_cluster: "
+                                    f"{e.__class__.__name__}: {e}; retrying",
                                     exc_info=True,
                                 )
                                 await asyncio.sleep(1)
@@ -934,7 +935,7 @@ def gen_cluster(
 
                         try:
                             start = time()
-                            while time() < start + 5:
+                            while time() < start + 60:
                                 gc.collect()
                                 if not get_unclosed():
                                     break
@@ -1073,6 +1074,9 @@ def has_ipv6():
     Return whether IPv6 is locally functional.  This doesn't guarantee IPv6
     is properly configured outside of localhost.
     """
+    if os.getenv("DISABLE_IPV6") == "1":
+        return False
+
     serv = cli = None
     try:
         serv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
