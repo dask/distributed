@@ -13,7 +13,7 @@ jobs:
         # Linux and Windows, run on merge to master and on all pull requests.
         # On MacOS, run only on merge to master (see twin workflow tests-macos.yaml).
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.6", "3.7", "3.8"]
+        python-version: ["3.6", "3.7", "3.8", "3.9"]
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!

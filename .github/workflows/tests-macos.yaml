@@ -4,7 +4,7 @@ on:
   - push
   # MacOS tests are currently afflicted by a very high level of flakiness; do not run on
   # PR unless this line is uncommented.
-  # - pull_request
+  - pull_request
 
 jobs:
   test:
@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         # Many deterministic test failures on Python 3.6
-        python-version: ["3.7", "3.8"]
+        python-version: ["3.7", "3.8", "3.9"]
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
