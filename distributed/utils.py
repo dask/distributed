@@ -10,6 +10,7 @@ from hashlib import md5
 import html
 import json
 import logging
+import multiprocessing
 import os
 import re
 import shutil
@@ -63,6 +64,12 @@ try:
 except ImportError:
     thread_state = threading.local()
 
+# For some reason this is required in python >= 3.9
+if WINDOWS:
+    import multiprocessing.popen_spawn_win32
+else:
+    import multiprocessing.popen_spawn_posix
+
 logger = _logger = logging.getLogger(__name__)
 
 
@@ -70,12 +77,6 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    import multiprocessing  # noqa: F401
-
-    if not WINDOWS:
-        # For some reason this is required in python >= 3.9
-        import multiprocessing.popen_spawn_posix
-
     if WINDOWS or PYPY:
         return multiprocessing
     else:
