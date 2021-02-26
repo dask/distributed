@@ -1019,7 +1019,7 @@ async def check_deserialize(addr):
     msg = {
         "op": "update",
         "x": b"abc",
-        "to_ser": (to_serialize(123),),
+        "to_ser": [to_serialize(123)],
         "ser": Serialized(*serialize(456)),
     }
     msg_orig = msg.copy()
@@ -1037,7 +1037,7 @@ async def check_deserialize(addr):
         assert isinstance(ser, Serialized)
         assert deserialize(ser.header, ser.frames) == 456
 
-        assert isinstance(to_ser, tuple) and len(to_ser) == 1
+        assert isinstance(to_ser, (tuple, list)) and len(to_ser) == 1
         (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
         # or not (it's a transport-specific optimization)
@@ -1050,7 +1050,9 @@ async def check_deserialize(addr):
         # Check output with deserialize=True
         expected_msg = msg.copy()
         expected_msg["ser"] = 456
-        expected_msg["to_ser"] = (123,)
+        expected_msg["to_ser"] = [123]
+        # Notice, we allow "to_ser" to be a tuple or a list
+        assert list(out_value.pop("to_ser")) == expected_msg.pop("to_ser")
         assert out_value == expected_msg
 
     await check_listener_deserialize(addr, False, msg, check_out_false)
