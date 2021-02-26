@@ -79,9 +79,9 @@ def _import_module(name, file_dir=None) -> ModuleType:
 
     Parameters
     ----------
-    name: str
+    name : str
         Module name, file path, or text of module or script
-    file_dir: string
+    file_dir : string
         Path of a directory where files should be copied
 
     Returns

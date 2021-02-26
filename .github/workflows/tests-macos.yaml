@@ -1,0 +1,70 @@
+name: MacOS tests
+
+on:
+  - push
+  # MacOS tests are currently afflicted by a very high level of flakiness; do not run on
+  # PR unless this line is uncommented.
+  # - pull_request
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Many deterministic test failures on Python 3.6
+        python-version: ["3.7", "3.8"]
+
+        # Uncomment to stress-test the test suite for random failures
+        # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v2
+
+      - name: Setup Conda Environment
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniconda-version: latest
+          python-version: ${{ matrix.python-version }}
+          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
+          activate-environment: dask-distributed
+          auto-activate-base: false
+
+      - name: Cythonize
+        shell: bash -l {0}
+        if: ${{ matrix.python-version == '3.7' }}
+        run: python setup.py build_ext --with-cython
+
+      - name: Install
+        shell: bash -l {0}
+        run: python -m pip install --no-deps -e .
+
+      - name: conda list
+        shell: bash -l {0}
+        run: conda list
+
+      - name: conda env export
+        shell: bash -l {0}
+        run: |
+          echo -e "--\n--Conda Environment (re-create this with \`conda env create --name <name> -f <output_file>\`)\n--"
+          conda env export | grep -E -v '^prefix:.*$'
+
+      - name: Setup SSH
+        shell: bash -l {0}
+        run: bash continuous_integration/scripts/setup_ssh.sh
+
+      - name: Test
+        shell: bash -l {0}
+        env:
+          PYTHONFAULTHANDLER: 1
+          MARKERS: not avoid_ci
+        run: |
+          source continuous_integration/scripts/set_ulimit.sh
+          pytest distributed -m "not avoid_ci" --runslow
+
+      # - name: Debug with tmate on failure
+      #   if: ${{ failure() }}
+      #   uses: mxschmitt/action-tmate@v3

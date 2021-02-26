@@ -37,13 +37,13 @@ class WebsocketPlugin(SchedulerPlugin):
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        *args, **kwargs: More options passed when transitioning
+        *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
         if key not in self.scheduler.tasks:

@@ -33,7 +33,13 @@ class Workers(RequestHandler):
                 "workers.html",
                 title="Workers",
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -49,7 +55,13 @@ class Worker(RequestHandler):
                 title="Worker: " + worker,
                 scheduler=self.server,
                 Worker=worker,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -65,7 +77,13 @@ class Task(RequestHandler):
                 title="Task: " + task,
                 Task=task,
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 

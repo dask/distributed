@@ -1,4 +1,3 @@
-import msgpack
 from tlz import valmap
 
 from dask.core import keys_in_tasks
@@ -10,12 +9,8 @@ from ..worker import dumps_task
 
 from ..utils import CancelledError
 
-from .utils import msgpack_opts
-from .serialize import (
-    import_allowed_module,
-    msgpack_encode_default,
-    msgpack_decode_default,
-)
+from .core import dumps_msgpack, loads_msgpack
+from .serialize import import_allowed_module
 
 
 def _materialized_layer_pack(
@@ -84,17 +79,17 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
 
     Parameters
     ----------
-    hlg: HighLevelGraph
+    hlg : HighLevelGraph
         The high level graph to pack
-    client: distributed.Client
+    client : distributed.Client
         The client calling this function.
-    client_keys: Iterable
+    client_keys : Iterable
         List of keys requested by the client.
 
     Returns
     -------
-    data: bytes
-        Packed high level graph serialized by msgpack
+    data: list of header and payload
+        Packed high level graph serialized by dumps_msgpack
     """
     layers = []
 
@@ -126,22 +121,10 @@ def highlevelgraph_pack(hlg: HighLevelGraph, client, client_keys):
                 ),
             }
         )
-
-    return msgpack.dumps({"layers": layers}, default=msgpack_encode_default)
-
-
-def _materialized_layer_unpack(state, dsk, dependencies, annotations):
-    dsk.update(state["dsk"])
-    for k, v in state["dependencies"].items():
-        dependencies[k] = list(set(dependencies.get(k, ())) | set(v))
-
-    if state["annotations"]:
-        annotations.update(
-            Layer.expand_annotations(state["annotations"], state["dsk"].keys())
-        )
+    return dumps_msgpack({"layers": layers})
 
 
-def highlevelgraph_unpack(dumped_hlg):
+def highlevelgraph_unpack(dumped_hlg, annotations: dict):
     """Unpack the high level graph for Scheduler -> Worker communication
 
     The approach is to delegate the packaging to each layer in the high
@@ -151,8 +134,12 @@ def highlevelgraph_unpack(dumped_hlg):
 
     Parameters
     ----------
-    dumped_hlg: bytes
-        Packed high level graph serialized by msgpack
+    dumped_hlg : list of header and payload
+        Packed high level graph serialized by dumps_msgpack
+    annotations : dict
+        A top-level annotations object which may be partially populated,
+        and which may be further filled by annotations from the layers
+        of the dumped_hlg.
 
     Returns
     -------
@@ -163,21 +150,21 @@ def highlevelgraph_unpack(dumped_hlg):
     annotations: dict
         Annotations for `dsk`
     """
-
-    # Notice, we set `use_list=False`, which makes msgpack convert lists to tuples
-    hlg = msgpack.loads(
-        dumped_hlg, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
-    )
+    hlg = loads_msgpack(*dumped_hlg)
 
     dsk = {}
     deps = {}
-    annotations = {}
+    out_annotations = {}
     for layer in hlg["layers"]:
+        if annotations:
+            if layer["state"]["annotations"] is None:
+                layer["state"]["annotations"] = {}
+            layer["state"]["annotations"].update(annotations)
         if layer["__module__"] is None:  # Default implementation
-            unpack_func = _materialized_layer_unpack
+            unpack_func = Layer.__dask_distributed_unpack__
         else:
             mod = import_allowed_module(layer["__module__"])
             unpack_func = getattr(mod, layer["__name__"]).__dask_distributed_unpack__
-        unpack_func(layer["state"], dsk, deps, annotations)
+        unpack_func(layer["state"], dsk, deps, out_annotations)
 
-    return dsk, deps, annotations
+    return dsk, deps, out_annotations

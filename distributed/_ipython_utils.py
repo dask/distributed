@@ -187,12 +187,11 @@ def start_ipython(ip=None, ns=None, log=None):
 
     Parameters
     ----------
-
-    ip: str
+    ip : str
         The IP address to listen on (likely the parent object's ip).
-    ns: dict
+    ns : dict
         Any names that should be injected into the IPython namespace.
-    log: logger instance
+    log : logger instance
         Hook up IPython's logging to an existing logger instead of the default.
     """
     from IPython import get_ipython
