@@ -1593,6 +1593,7 @@ class SchedulerState:
     _task_metadata: dict
     _total_nthreads: Py_ssize_t
     _total_occupancy: double
+    _transitions_table: dict
     _unknown_durations: dict
     _unrunnable: set
     _validate: bint
@@ -1645,6 +1646,23 @@ class SchedulerState:
         self._task_metadata = dict()
         self._total_nthreads = 0
         self._total_occupancy = 0
+        self._transitions_table = {
+            ("released", "waiting"): self.transition_released_waiting,
+            ("waiting", "released"): self.transition_waiting_released,
+            ("waiting", "processing"): self.transition_waiting_processing,
+            ("waiting", "memory"): self.transition_waiting_memory,
+            ("processing", "released"): self.transition_processing_released,
+            ("processing", "memory"): self.transition_processing_memory,
+            ("processing", "erred"): self.transition_processing_erred,
+            ("no-worker", "released"): self.transition_no_worker_released,
+            ("no-worker", "waiting"): self.transition_no_worker_waiting,
+            ("released", "forgotten"): self.transition_released_forgotten,
+            ("memory", "forgotten"): self.transition_memory_forgotten,
+            ("erred", "forgotten"): self.transition_released_forgotten,
+            ("erred", "released"): self.transition_erred_released,
+            ("memory", "released"): self.transition_memory_released,
+            ("released", "erred"): self.transition_released_erred,
+        }
         self._unknown_durations = dict()
         if unrunnable is not None:
             self._unrunnable = unrunnable
@@ -1790,6 +1808,194 @@ class SchedulerState:
         self._tasks[key] = ts
 
         return ts
+
+    #####################
+    # State Transitions #
+    #####################
+
+    def _transition(self, key, finish: str, *args, **kwargs):
+        """Transition a key from its current state to the finish state
+
+        Examples
+        --------
+        >>> self._transition('x', 'waiting')
+        {'x': 'processing'}
+
+        Returns
+        -------
+        Dictionary of recommendations for future transitions
+
+        See Also
+        --------
+        Scheduler.transitions : transitive version of this function
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        ts: TaskState
+        start: str
+        start_finish: tuple
+        finish2: str
+        recommendations: dict
+        worker_msgs: dict
+        client_msgs: dict
+        msgs: list
+        new_msgs: list
+        dependents: set
+        dependencies: set
+        try:
+            recommendations = {}
+            worker_msgs = {}
+            client_msgs = {}
+
+            ts = parent._tasks.get(key)
+            if ts is None:
+                return recommendations, client_msgs, worker_msgs
+            start = ts._state
+            if start == finish:
+                return recommendations, client_msgs, worker_msgs
+
+            if self.plugins:
+                dependents = set(ts._dependents)
+                dependencies = set(ts._dependencies)
+
+            start_finish = (start, finish)
+            func = self._transitions_table.get(start_finish)
+            if func is not None:
+                a: tuple = func(key, *args, **kwargs)
+                recommendations, client_msgs, worker_msgs = a
+            elif "released" not in start_finish:
+                func = self._transitions_table["released", finish]
+                assert not args and not kwargs
+                a_recs: dict
+                a_cmsgs: dict
+                a_wmsgs: dict
+                a: tuple = self._transition(key, "released")
+                a_recs, a_cmsgs, a_wmsgs = a
+                v = a_recs.get(key)
+                if v is not None:
+                    func = self._transitions_table["released", v]
+                b_recs: dict
+                b_cmsgs: dict
+                b_wmsgs: dict
+                b: tuple = func(key)
+                b_recs, b_cmsgs, b_wmsgs = b
+
+                recommendations.update(a_recs)
+                for c, new_msgs in a_cmsgs.items():
+                    msgs = client_msgs.get(c)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        client_msgs[c] = new_msgs
+                for w, new_msgs in a_wmsgs.items():
+                    msgs = worker_msgs.get(w)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        worker_msgs[w] = new_msgs
+
+                recommendations.update(b_recs)
+                for c, new_msgs in b_cmsgs.items():
+                    msgs = client_msgs.get(c)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        client_msgs[c] = new_msgs
+                for w, new_msgs in b_wmsgs.items():
+                    msgs = worker_msgs.get(w)
+                    if msgs is not None:
+                        msgs.extend(new_msgs)
+                    else:
+                        worker_msgs[w] = new_msgs
+
+                start = "released"
+            else:
+                raise RuntimeError("Impossible transition from %r to %r" % start_finish)
+
+            finish2 = ts._state
+            self.transition_log.append((key, start, finish2, recommendations, time()))
+            if parent._validate:
+                logger.debug(
+                    "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
+                    key,
+                    start,
+                    finish2,
+                    ts._state,
+                    dict(recommendations),
+                )
+            if self.plugins:
+                # Temporarily put back forgotten key for plugin to retrieve it
+                if ts._state == "forgotten":
+                    ts._dependents = dependents
+                    ts._dependencies = dependencies
+                    parent._tasks[ts._key] = ts
+                for plugin in list(self.plugins):
+                    try:
+                        plugin.transition(key, start, finish2, *args, **kwargs)
+                    except Exception:
+                        logger.info("Plugin failed with exception", exc_info=True)
+                if ts._state == "forgotten":
+                    del parent._tasks[ts._key]
+
+            tg: TaskGroup = ts._group
+            if ts._state == "forgotten" and tg._name in parent._task_groups:
+                # Remove TaskGroup if all tasks are in the forgotten state
+                all_forgotten: bint = True
+                for s in ALL_TASK_STATES:
+                    if tg._states.get(s):
+                        all_forgotten = False
+                        break
+                if all_forgotten:
+                    ts._prefix._groups.remove(tg)
+                    del parent._task_groups[tg._name]
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception("Error transitioning %r from %r to %r", key, start, finish)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def _transitions(self, recommendations: dict, client_msgs: dict, worker_msgs: dict):
+        """Process transitions until none are left
+
+        This includes feedback from previous transitions and continues until we
+        reach a steady state
+        """
+        parent: SchedulerState = cast(SchedulerState, self)
+        keys: set = set()
+        recommendations = recommendations.copy()
+        msgs: list
+        new_msgs: list
+        new: tuple
+        new_recs: dict
+        new_cmsgs: dict
+        new_wmsgs: dict
+        while recommendations:
+            key, finish = recommendations.popitem()
+            keys.add(key)
+
+            new = self._transition(key, finish)
+            new_recs, new_cmsgs, new_wmsgs = new
+
+            recommendations.update(new_recs)
+            for c, new_msgs in new_cmsgs.items():
+                msgs = client_msgs.get(c)
+                if msgs is not None:
+                    msgs.extend(new_msgs)
+                else:
+                    client_msgs[c] = new_msgs
+            for w, new_msgs in new_wmsgs.items():
+                msgs = worker_msgs.get(w)
+                if msgs is not None:
+                    msgs.extend(new_msgs)
+                else:
+                    worker_msgs[w] = new_msgs
+
+        if parent._validate:
+            for key in keys:
+                self.validate_key(key)
 
     def transition_released_waiting(self, key):
         try:
@@ -3147,24 +3353,6 @@ class Scheduler(SchedulerState, ServerNode):
             "stop_task_metadata": self.stop_task_metadata,
         }
 
-        self._transitions_table = {
-            ("released", "waiting"): self.transition_released_waiting,
-            ("waiting", "released"): self.transition_waiting_released,
-            ("waiting", "processing"): self.transition_waiting_processing,
-            ("waiting", "memory"): self.transition_waiting_memory,
-            ("processing", "released"): self.transition_processing_released,
-            ("processing", "memory"): self.transition_processing_memory,
-            ("processing", "erred"): self.transition_processing_erred,
-            ("no-worker", "released"): self.transition_no_worker_released,
-            ("no-worker", "waiting"): self.transition_no_worker_waiting,
-            ("released", "forgotten"): self.transition_released_forgotten,
-            ("memory", "forgotten"): self.transition_memory_forgotten,
-            ("erred", "forgotten"): self.transition_released_forgotten,
-            ("erred", "released"): self.transition_erred_released,
-            ("memory", "released"): self.transition_memory_released,
-            ("released", "erred"): self.transition_released_erred,
-        }
-
         connection_limit = get_fileno_limit() / 2
 
         super().__init__(
@@ -3598,7 +3786,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
                     if ts is not None and ts._state in ("processing", "waiting"):
-                        t: tuple = self._transition(
+                        t: tuple = parent._transition(
                             key,
                             "memory",
                             worker=address,
@@ -3606,7 +3794,7 @@ class Scheduler(SchedulerState, ServerNode):
                             typename=types[key],
                         )
                         recommendations, client_msgs, worker_msgs = t
-                        self._transitions(recommendations, client_msgs, worker_msgs)
+                        parent._transitions(recommendations, client_msgs, worker_msgs)
                         recommendations = {}
 
             for ts in list(parent._unrunnable):
@@ -3615,7 +3803,7 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts._key] = "waiting"
 
             if recommendations:
-                self._transitions(recommendations, client_msgs, worker_msgs)
+                parent._transitions(recommendations, client_msgs, worker_msgs)
                 recommendations = {}
 
             self.send_all(client_msgs, worker_msgs)
@@ -3994,7 +4182,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts._metadata.update(kwargs["metadata"])
 
         if ts._state == "processing":
-            r: tuple = self._transition(key, "memory", worker=worker, **kwargs)
+            r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
             if ts._state == "memory":
@@ -4033,9 +4221,9 @@ class Scheduler(SchedulerState, ServerNode):
             r: tuple
             if retries > 0:
                 ts._retries = retries - 1
-                r = self._transition(key, "waiting")
+                r = parent._transition(key, "waiting")
             else:
-                r = self._transition(
+                r = parent._transition(
                     key,
                     "erred",
                     cause=key,
@@ -4077,7 +4265,7 @@ class Scheduler(SchedulerState, ServerNode):
             if key:
                 recommendations[key] = "released"
 
-            self._transitions(recommendations, client_msgs, worker_msgs)
+            parent._transitions(recommendations, client_msgs, worker_msgs)
             recommendations = {}
 
             if parent._validate:
@@ -4610,18 +4798,18 @@ class Scheduler(SchedulerState, ServerNode):
 
         r: tuple = self.stimulus_task_finished(key=key, worker=worker, **msg)
         recommendations, client_msgs, worker_msgs = r
-        self._transitions(recommendations, client_msgs, worker_msgs)
+        parent._transitions(recommendations, client_msgs, worker_msgs)
 
         self.send_all(client_msgs, worker_msgs)
 
     def handle_task_erred(self, key=None, **msg):
+        parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict
         client_msgs: dict
         worker_msgs: dict
-
         r: tuple = self.stimulus_task_erred(key=key, **msg)
         recommendations, client_msgs, worker_msgs = r
-        self._transitions(recommendations, client_msgs, worker_msgs)
+        parent._transitions(recommendations, client_msgs, worker_msgs)
 
         self.send_all(client_msgs, worker_msgs)
 
@@ -4640,7 +4828,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         r: tuple = self.stimulus_missing_data(key=key, ensure=False, **msg)
         recommendations, client_msgs, worker_msgs = r
-        self._transitions(recommendations, client_msgs, worker_msgs)
+        parent._transitions(recommendations, client_msgs, worker_msgs)
 
         self.send_all(client_msgs, worker_msgs)
 
@@ -4916,7 +5104,9 @@ class Scheduler(SchedulerState, ServerNode):
                             ws._has_what.remove(ts)
                             ts._who_has.remove(ws)
                             ws._nbytes -= ts_nbytes
-                            self._transitions(recommendations, client_msgs, worker_msgs)
+                            parent._transitions(
+                                recommendations, client_msgs, worker_msgs
+                            )
                 self.send_all(client_msgs, worker_msgs)
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
@@ -5920,154 +6110,6 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return responses
 
-    #####################
-    # State Transitions #
-    #####################
-
-    def _transition(self, key, finish: str, *args, **kwargs):
-        """Transition a key from its current state to the finish state
-
-        Examples
-        --------
-        >>> self._transition('x', 'waiting')
-        {'x': 'processing'}
-
-        Returns
-        -------
-        Dictionary of recommendations for future transitions
-
-        See Also
-        --------
-        Scheduler.transitions : transitive version of this function
-        """
-        parent: SchedulerState = cast(SchedulerState, self)
-        ts: TaskState
-        start: str
-        start_finish: tuple
-        finish2: str
-        recommendations: dict
-        worker_msgs: dict
-        client_msgs: dict
-        msgs: list
-        new_msgs: list
-        dependents: set
-        dependencies: set
-        try:
-            recommendations = {}
-            worker_msgs = {}
-            client_msgs = {}
-
-            ts = parent._tasks.get(key)
-            if ts is None:
-                return recommendations, client_msgs, worker_msgs
-            start = ts._state
-            if start == finish:
-                return recommendations, client_msgs, worker_msgs
-
-            if self.plugins:
-                dependents = set(ts._dependents)
-                dependencies = set(ts._dependencies)
-
-            start_finish = (start, finish)
-            func = self._transitions_table.get(start_finish)
-            if func is not None:
-                a: tuple = func(key, *args, **kwargs)
-                recommendations, client_msgs, worker_msgs = a
-            elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
-                assert not args and not kwargs
-                a_recs: dict
-                a_cmsgs: dict
-                a_wmsgs: dict
-                a: tuple = self._transition(key, "released")
-                a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
-                b_recs: dict
-                b_cmsgs: dict
-                b_wmsgs: dict
-                b: tuple = func(key)
-                b_recs, b_cmsgs, b_wmsgs = b
-
-                recommendations.update(a_recs)
-                for c, new_msgs in a_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in a_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
-
-                recommendations.update(b_recs)
-                for c, new_msgs in b_cmsgs.items():
-                    msgs = client_msgs.get(c)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        client_msgs[c] = new_msgs
-                for w, new_msgs in b_wmsgs.items():
-                    msgs = worker_msgs.get(w)
-                    if msgs is not None:
-                        msgs.extend(new_msgs)
-                    else:
-                        worker_msgs[w] = new_msgs
-
-                start = "released"
-            else:
-                raise RuntimeError("Impossible transition from %r to %r" % start_finish)
-
-            finish2 = ts._state
-            self.transition_log.append((key, start, finish2, recommendations, time()))
-            if parent._validate:
-                logger.debug(
-                    "Transitioned %r %s->%s (actual: %s).  Consequence: %s",
-                    key,
-                    start,
-                    finish2,
-                    ts._state,
-                    dict(recommendations),
-                )
-            if self.plugins:
-                # Temporarily put back forgotten key for plugin to retrieve it
-                if ts._state == "forgotten":
-                    ts._dependents = dependents
-                    ts._dependencies = dependencies
-                    parent._tasks[ts._key] = ts
-                for plugin in list(self.plugins):
-                    try:
-                        plugin.transition(key, start, finish2, *args, **kwargs)
-                    except Exception:
-                        logger.info("Plugin failed with exception", exc_info=True)
-                if ts._state == "forgotten":
-                    del parent._tasks[ts._key]
-
-            tg: TaskGroup = ts._group
-            if ts._state == "forgotten" and tg._name in parent._task_groups:
-                # Remove TaskGroup if all tasks are in the forgotten state
-                all_forgotten: bint = True
-                for s in ALL_TASK_STATES:
-                    if tg._states.get(s):
-                        all_forgotten = False
-                        break
-                if all_forgotten:
-                    ts._prefix._groups.remove(tg)
-                    del parent._task_groups[tg._name]
-
-            return recommendations, client_msgs, worker_msgs
-        except Exception as e:
-            logger.exception("Error transitioning %r from %r to %r", key, start, finish)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
     def transition(self, key, finish: str, *args, **kwargs):
         """Transition a key from its current state to the finish state
 
@@ -6084,53 +6126,14 @@ class Scheduler(SchedulerState, ServerNode):
         --------
         Scheduler.transitions: transitive version of this function
         """
+        parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict
         worker_msgs: dict
         client_msgs: dict
-        a: tuple = self._transition(key, finish, *args, **kwargs)
+        a: tuple = parent._transition(key, finish, *args, **kwargs)
         recommendations, client_msgs, worker_msgs = a
         self.send_all(client_msgs, worker_msgs)
         return recommendations
-
-    def _transitions(self, recommendations: dict, client_msgs: dict, worker_msgs: dict):
-        """Process transitions until none are left
-
-        This includes feedback from previous transitions and continues until we
-        reach a steady state
-        """
-        parent: SchedulerState = cast(SchedulerState, self)
-        keys: set = set()
-        recommendations = recommendations.copy()
-        msgs: list
-        new_msgs: list
-        new: tuple
-        new_recs: dict
-        new_cmsgs: dict
-        new_wmsgs: dict
-        while recommendations:
-            key, finish = recommendations.popitem()
-            keys.add(key)
-
-            new = self._transition(key, finish)
-            new_recs, new_cmsgs, new_wmsgs = new
-
-            recommendations.update(new_recs)
-            for c, new_msgs in new_cmsgs.items():
-                msgs = client_msgs.get(c)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    client_msgs[c] = new_msgs
-            for w, new_msgs in new_wmsgs.items():
-                msgs = worker_msgs.get(w)
-                if msgs is not None:
-                    msgs.extend(new_msgs)
-                else:
-                    worker_msgs[w] = new_msgs
-
-        if parent._validate:
-            for key in keys:
-                self.validate_key(key)
 
     def transitions(self, recommendations: dict):
         """Process transitions until none are left
@@ -6138,9 +6141,10 @@ class Scheduler(SchedulerState, ServerNode):
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
+        parent: SchedulerState = cast(SchedulerState, self)
         client_msgs: dict = {}
         worker_msgs: dict = {}
-        self._transitions(recommendations, client_msgs, worker_msgs)
+        parent._transitions(recommendations, client_msgs, worker_msgs)
         self.send_all(client_msgs, worker_msgs)
 
     def story(self, *keys):
