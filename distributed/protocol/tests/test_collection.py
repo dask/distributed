@@ -47,4 +47,4 @@ def test_nested_types():
     header, frames = serialize([[[x]]])
     assert "dask" in str(header)
     assert len(frames) == 1
-    assert x.data in frames
+    assert x.data == np.frombuffer(frames[0]).data
