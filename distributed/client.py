@@ -3663,6 +3663,7 @@ class Client:
         return futures_of(futures, client=self)
 
     def start_ipython(self, *args, **kwargs):
+        """Deprecated - Method moved to start_ipython_workers"""
         raise Exception("Method moved to start_ipython_workers")
 
     async def _start_ipython_workers(self, workers):
@@ -3827,6 +3828,7 @@ class Client:
 
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):
+        """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(

@@ -6471,6 +6471,27 @@ async def test_annotations_resources(c, s, a, b):
     assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
+    ],
+)
+async def test_annotations_resources_culled(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.ones((2, 2, 2), chunks=1)
+    with dask.annotate(resources={"GPU": 1}):
+        y = x.map_blocks(lambda x0: x0, meta=x._meta)
+
+    z = y[0, 0, 0]
+
+    (z,) = c.compute([z], optimize_graph=False)
+    await z
+    # it worked!
+
+
 @gen_cluster(client=True)
 async def test_annotations_loose_restrictions(c, s, a, b):
     da = pytest.importorskip("dask.array")
