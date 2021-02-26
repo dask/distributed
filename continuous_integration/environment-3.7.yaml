@@ -40,6 +40,6 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask.git@master
+      - git+https://github.com/dask/dask
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
