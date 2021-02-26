@@ -168,7 +168,10 @@ class Nanny(ServerNode):
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
             if not os.path.exists(local_directory):
                 os.makedirs(local_directory)
+            self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
+        else:
+            self._original_local_dir = local_directory
 
         self.local_directory = local_directory
 
@@ -333,9 +336,7 @@ class Nanny(ServerNode):
             worker_kwargs = dict(
                 scheduler_ip=self.scheduler_addr,
                 nthreads=self.nthreads,
-                # on the line below we undo the following in init
-                # os.path.join(local_directory, "dask-worker-space")
-                local_directory=os.path.dirname(self.local_directory),
+                local_directory=self._original_local_dir,
                 services=self.services,
                 nanny=self.address,
                 name=self.name,
