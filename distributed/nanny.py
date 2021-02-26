@@ -333,7 +333,9 @@ class Nanny(ServerNode):
             worker_kwargs = dict(
                 scheduler_ip=self.scheduler_addr,
                 nthreads=self.nthreads,
-                local_directory=self.local_directory,
+                # on the line below we undo the following in init
+                # os.path.join(local_directory, "dask-worker-space")
+                local_directory=os.path.dirname(self.local_directory),
                 services=self.services,
                 nanny=self.address,
                 name=self.name,
