@@ -34,7 +34,7 @@ teardown_module = nodebug_teardown_module
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)], timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)])
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
@@ -73,7 +73,7 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -107,7 +107,7 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@pytest.mark.xfail(reason="GH#3574")
+@pytest.mark.flaky(reruns=10, reruns_delay=5, reason="GH#3574")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
@@ -198,7 +198,7 @@ async def test_dont_steal_fast_tasks_blacklist(c, s, a, b):
     assert len(s.has_what[b.address]) == 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_new_worker_steals(c, s, a):
     await wait(c.submit(slowinc, 1, delay=0.01))
 
@@ -220,7 +220,7 @@ async def test_new_worker_steals(c, s, a):
     await b.close()
 
 
-@gen_cluster(client=True, timeout=20)
+@gen_cluster(client=True)
 async def test_work_steal_no_kwargs(c, s, a, b):
     await wait(c.submit(slowinc, 1, delay=0.05))
 
@@ -380,7 +380,7 @@ async def test_steal_resource_restrictions(c, s, a):
     await b.close()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5, timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5)
 async def test_balance_without_dependencies(c, s, *workers):
     s.extensions["stealing"]._pc.callback_time = 20
 
@@ -563,6 +563,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
         pytest.param(
             [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
             [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            # Can't mark as flaky as when it fails it does so every time for some reason
             marks=pytest.mark.xfail(
                 reason="Some uncertainty based on executing stolen task"
             ),
@@ -585,7 +586,7 @@ def test_balance(inp, expected):
     test()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny)
 async def test_restart(c, s, a, b):
     futures = c.map(
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
@@ -737,11 +738,7 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
         ) <= 1
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 5)] * 2)
 async def test_cleanup_repeated_tasks(c, s, a, b):
     class Foo:

@@ -110,7 +110,7 @@ def test_gc_diagnosis_cpu_time():
         assert not sio.getvalue()
 
 
-@pytest.mark.xfail(reason="unknown")
+@pytest.mark.xfail(reason="flaky and re-fails on rerun")
 def test_gc_diagnosis_rss_win():
     diag = GCDiagnosis(info_over_rss_win=10e6)
 

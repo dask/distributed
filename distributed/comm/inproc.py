@@ -187,13 +187,13 @@ class InProc(Comm):
 
     async def read(self, deserializers="ignored"):
         if self._closed:
-            raise CommClosedError
+            raise CommClosedError()
 
         msg = await self._read_q.get()
         if msg is _EOF:
             self._closed = True
             self._finalizer.detach()
-            raise CommClosedError
+            raise CommClosedError()
 
         if self.deserialize:
             msg = nested_deserialize(msg)
@@ -201,7 +201,7 @@ class InProc(Comm):
 
     async def write(self, msg, serializers=None, on_error=None):
         if self.closed():
-            raise CommClosedError
+            raise CommClosedError()
 
         # Ensure we feed the queue in the same thread it is read from.
         self._write_loop.add_callback(self._write_q.put_nowait, msg)
