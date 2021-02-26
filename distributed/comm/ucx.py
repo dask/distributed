@@ -53,12 +53,15 @@ def init_once():
     if ucp is not None:
         return
 
+    # remove/process dask.ucx flags for valid ucx options
+    ucx_config = _scrub_ucx_config()
+    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+        import numba.cuda
+        numba.cuda.current_context()
+
     import ucp as _ucp
 
     ucp = _ucp
-
-    # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _scrub_ucx_config()
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
