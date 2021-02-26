@@ -278,12 +278,6 @@ def test_compression_takes_advantage_of_itemsize():
     assert sum(map(nbytes, aa)) < sum(map(nbytes, bb))
 
 
-def test_large_numpy_array():
-    x = np.ones((100000000,), dtype="u4")
-    header, frames = serialize(x)
-    assert sum(header["lengths"]) == sum(map(nbytes, frames))
-
-
 @pytest.mark.parametrize(
     "x",
     [
