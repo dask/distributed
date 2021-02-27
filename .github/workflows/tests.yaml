@@ -9,11 +9,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # MacOS tests are currently afflicted by a very high level of flakiness. On
-        # Linux and Windows, run on merge to master and on all pull requests.
-        # On MacOS, run only on merge to master (see twin workflow tests-macos.yaml).
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.6", "3.7", "3.8", "3.9"]
+        exclude:
+          # Several failures; Python 3.6 to be phased out soon
+          - os: macos-latest
+            python-version: "3.6"
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
