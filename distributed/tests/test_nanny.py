@@ -410,6 +410,7 @@ async def test_local_directory(s):
             w = await Nanny(s.address)
             assert w.local_directory.startswith(fn)
             assert "dask-worker-space" in w.local_directory
+            assert w.process.worker_dir.count("dask-worker-space") == 1
             await w.close()
 
 
