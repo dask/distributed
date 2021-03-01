@@ -106,7 +106,7 @@ def serialize_numpy_ndarray(x, context=None):
     # memoryviews to bytes implicitly, which triggers a communication BUG.
     # My guess is that somewhere we are using `len(buffer)` instead of
     # `buffer.nbytes`. Casting to bytes here fixes the issue.
-    data = memoryview(data).cast("B")
+    #data = memoryview(data).cast("B")
 
     frames = [data]
     return header, frames
