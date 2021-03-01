@@ -17,7 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 def dumps(msg, serializers=None, on_error="message", context=None) -> list:
-    """ Transform Python message to bytestream suitable for communication """
+    """Transform Python message to bytestream suitable for communication
+
+    Developer Notes
+    ---------------
+    The approach here is to use `msgpack.dumps()` to serialize `msg` and
+    write the result to the first output frame. If `msgpack.dumps()`
+    encounters an object it cannot serialize like a NumPy array, it is handled
+    out-of-band by `_encode_default()` and appended to the output frame list.
+    """
     try:
         if context and "compression" in context:
             compress_opts = {"compression": context["compression"]}
@@ -53,7 +61,6 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                         sub_header, default=msgpack_encode_default, use_bin_type=True
                     )
                 )
-
                 frames.extend(sub_frames)
                 return {"__Serialized__": offset}
             else:
