@@ -35,6 +35,7 @@ from tlz import (
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.highlevelgraph import HighLevelGraph
 
 from . import profile
 from .batched import BatchedSend
@@ -85,7 +86,6 @@ from .event import EventExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
-from .protocol.highlevelgraph import highlevelgraph_unpack
 
 try:
     from cython import compiled
@@ -3858,8 +3858,10 @@ class Scheduler(SchedulerState, ServerNode):
         fifo_timeout=0,
         annotations=None,
     ):
-
-        dsk, dependencies, annotations = highlevelgraph_unpack(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        dsk = unpacked_graph["dsk"]
+        dependencies = unpacked_graph["deps"]
+        annotations = unpacked_graph["annotations"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -4044,8 +4046,11 @@ class Scheduler(SchedulerState, ServerNode):
 
             for a, kv in annotations.items():
                 for k, v in kv.items():
-                    ts = parent._tasks[k]
-                    ts._annotations[a] = v
+                    # Tasks might have been culled, in which case
+                    # we have nothing to annotate.
+                    ts = parent._tasks.get(k)
+                    if ts is not None:
+                        ts._annotations[a] = v
 
         # Add actors
         if actors is True:

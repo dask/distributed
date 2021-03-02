@@ -2184,6 +2184,16 @@ def individual_graph_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+def individual_systemmonitor_doc(scheduler, extra, doc):
+    with log_errors():
+        sysmon = SystemMonitor(scheduler, sizing_mode="stretch_both")
+        doc.title = "Dask: Scheduler System Monitor"
+        add_periodic_callback(doc, sysmon, 500)
+
+        doc.add_root(sysmon.root)
+        doc.theme = BOKEH_THEME
+
+
 def individual_profile_doc(scheduler, extra, doc):
     with log_errors():
         prof = ProfileTimePlot(scheduler, sizing_mode="scale_width", doc=doc)

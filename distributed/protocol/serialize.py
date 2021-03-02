@@ -10,13 +10,12 @@ from dask.base import normalize_token
 import msgpack
 
 from . import pickle
-from ..utils import has_keyword, nbytes, typename, ensure_bytes, is_writeable
+from ..utils import has_keyword, typename, ensure_bytes
 from .compression import maybe_compress, decompress
 from .utils import (
     unpack_frames,
     pack_frames_prelude,
     frame_split_size,
-    merge_frames,
     msgpack_opts,
 )
 
@@ -30,7 +29,7 @@ _cached_allowed_modules = {}
 
 
 def dask_dumps(x, context=None):
-    """Serialise object using the class-based registry"""
+    """Serialize object using the class-based registry"""
     type_name = typename(type(x))
     try:
         dumps = dask_serialize.dispatch(type(x))
@@ -54,7 +53,6 @@ def dask_loads(header, frames):
 
 
 def pickle_dumps(x, context=None):
-    header = {"serializer": "pickle"}
     frames = [None]
     buffer_callback = lambda f: frames.append(memoryview(f))
     frames[0] = pickle.dumps(
@@ -62,11 +60,23 @@ def pickle_dumps(x, context=None):
         buffer_callback=buffer_callback,
         protocol=context.get("pickle-protocol", None) if context else None,
     )
+    header = {
+        "serializer": "pickle",
+        "writeable": tuple(not f.readonly for f in frames[1:]),
+    }
     return header, frames
 
 
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
+    writeable = header["writeable"]
+    for i in range(len(buffers)):
+        mv = memoryview(buffers[i])
+        if writeable[i] == mv.readonly:
+            if mv.readonly:
+                buffers[i] = memoryview(bytearray(mv)).cast(mv.format, mv.shape)
+            else:
+                buffers[i] = memoryview(bytes(mv)).cast(mv.format, mv.shape)
     return pickle.loads(x, buffers=buffers)
 
 
@@ -374,6 +384,72 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
+def serialize_and_split(x, serializers=None, on_error="message", context=None):
+    """Serialize and split compressable frames
+
+    This function is a drop-in replacement of `serialize()` that calls `serialize()`
+    followed by `frame_split_size()` on frames that should be compressed.
+
+    Use `merge_and_deserialize()` to merge and deserialize the frames back.
+
+    See Also
+    --------
+    serialize
+    merge_and_deserialize
+    """
+    header, frames = serialize(x, serializers, on_error, context)
+    num_sub_frames = []
+    offsets = []
+    out_frames = []
+    out_compression = []
+    for frame, compression in zip(
+        frames, header.get("compression") or [None] * len(frames)
+    ):
+        if compression is None:  # default behavior
+            sub_frames = frame_split_size(frame)
+            num_sub_frames.append(len(sub_frames))
+            offsets.append(len(out_frames))
+            out_frames.extend(sub_frames)
+            out_compression.extend([None] * len(sub_frames))
+        else:
+            num_sub_frames.append(1)
+            offsets.append(len(out_frames))
+            out_frames.append(frame)
+            out_compression.append(compression)
+    assert len(out_compression) == len(out_frames)
+
+    # Notice, in order to match msgpack's implicit convertion to tuples,
+    # we convert to tuples here as well.
+    header["split-num-sub-frames"] = tuple(num_sub_frames)
+    header["split-offsets"] = tuple(offsets)
+    header["compression"] = tuple(out_compression)
+    return header, out_frames
+
+
+def merge_and_deserialize(header, frames, deserializers=None):
+    """Merge and deserialize frames
+
+    This function is a drop-in replacement of `deserialize()` that merges
+    frames that were split by `serialize_and_split()`
+
+    See Also
+    --------
+    deserialize
+    serialize_and_split
+    """
+    merged_frames = []
+    if "split-num-sub-frames" not in header:
+        merged_frames = frames
+    else:
+        for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
+            if n == 1:
+                merged_frames.append(frames[offset])
+            else:
+                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+
+    return deserialize(header, merged_frames, deserializers=deserializers)
+
+
 class Serialize:
     """Mark an object that should be serialized
 
@@ -534,13 +610,8 @@ def nested_deserialize(x):
 
 
 def serialize_bytelist(x, **kwargs):
-    header, frames = serialize(x, **kwargs)
-    if "writeable" not in header:
-        header["writeable"] = tuple(map(is_writeable, frames))
-    if "lengths" not in header:
-        header["lengths"] = tuple(map(nbytes, frames))
+    header, frames = serialize_and_split(x, **kwargs)
     if frames:
-        frames = sum(map(frame_split_size, frames), [])
         compression, frames = zip(*map(maybe_compress, frames))
     else:
         compression = []
@@ -566,8 +637,7 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
-    frames = merge_frames(header, frames)
-    return deserialize(header, frames)
+    return merge_and_deserialize(header, frames)
 
 
 ################################
