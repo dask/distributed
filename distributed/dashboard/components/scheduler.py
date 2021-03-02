@@ -870,7 +870,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-cpu-worker-plot",
                 width=int(width / 2),
                 name="cpu_hist",
-                x_range=(0, None),
+                x_range=(0, 100),
                 **kwargs,
             )
             rect = cpu.rect(

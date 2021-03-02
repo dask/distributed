@@ -187,7 +187,7 @@ class ProfileTimePlot(DashboardComponent):
                 self.key = self.key[0]
             if isinstance(self.key, bytes):
                 self.key = self.key.decode()
-            self.task_names = ["All", self.key]
+            self.task_names = ["All", self.key] if self.key else ["All"]
         else:
             self.key = None
             self.task_names = ["All"]
