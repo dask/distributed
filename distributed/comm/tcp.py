@@ -257,7 +257,8 @@ class TCP(Comm):
         try:
             # trick to enque all frames for writing beforehand
             for each_frame in frames:
-                if len(each_frame):
+                each_frame_nbytes = nbytes(each_frame)
+                if each_frame_nbytes:
                     if stream._write_buffer is None:
                         raise StreamClosedError()
 
@@ -267,7 +268,7 @@ class TCP(Comm):
                         each_frame = memoryview(each_frame).cast("B")
 
                     stream._write_buffer.append(each_frame)
-                    stream._total_write_index += len(each_frame)
+                    stream._total_write_index += each_frame_nbytes
 
             # start writing frames
             stream.write(b"")
