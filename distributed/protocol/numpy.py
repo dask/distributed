@@ -102,12 +102,6 @@ def serialize_numpy_ndarray(x, context=None):
     if broadcast_to is not None:
         header["broadcast_to"] = broadcast_to
 
-    # TODO: the new protocol.dumps() implementation doesn't convert
-    # memoryviews to bytes implicitly, which triggers a communication BUG.
-    # My guess is that somewhere we are using `len(buffer)` instead of
-    # `buffer.nbytes`. Casting to bytes here fixes the issue.
-    data = memoryview(data).cast("B")
-
     frames = [data]
     return header, frames
 
