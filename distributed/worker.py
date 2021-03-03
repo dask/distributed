@@ -2418,12 +2418,14 @@ class Worker(ServerNode):
             # for any dependencies of key we are releasing remove task as dependent
             for dependency in ts.dependencies:
                 dependency.dependents.discard(ts)
+                # don't boot keys that are in flight
+                # we don't know if they're already queued up for transit
+                # in a gather_dep callback
                 if not dependency.dependents and dependency.state in (
                     "waiting",
-                    "flight",
                     "fetch",
                 ):
-                    self.release_key(dependency.key)
+                    self.release_key(dependency.key, cause=f"Dependent {ts} released")
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
