@@ -261,7 +261,7 @@ class Worker(ServerNode):
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
     * **data_needed**: deque(keys)
-        The keys whose data we still lack, arranged in a deque
+        The keys which still require data in order to execute, arranged in a deque
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
     * **constrained**: [keys]
@@ -1970,7 +1970,7 @@ class Worker(ServerNode):
                 if self.validate:
                     assert all(dep.key in self.tasks for dep in deps)
 
-                deps = [dep for dep in deps if dep.state == "fetch"]
+                deps = {dep for dep in deps if dep.state == "fetch"}
 
                 missing_deps = {dep for dep in deps if not dep.who_has}
                 if missing_deps:
@@ -2436,7 +2436,9 @@ class Worker(ServerNode):
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
 
-            if report and ts.state in PROCESSING:  # not finished
+            # Inform the scheduler of keys which will have gone missing
+            # We are releasing them before they have completed
+            if report and ts.state in PROCESSING:
                 self.batched_stream.send({"op": "release", "key": key, "cause": cause})
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
