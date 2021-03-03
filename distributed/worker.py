@@ -1711,9 +1711,6 @@ class Worker(ServerNode):
                 if dependent.state == "waiting":
                     self.data_needed.append(dependent.key)
 
-            if not ts.dependents:
-                self.release_key(ts.key, cause="transition flight->fetch")
-
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
