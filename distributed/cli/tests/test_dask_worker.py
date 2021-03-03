@@ -41,7 +41,7 @@ def test_nanny_worker_ports(loop):
                     if d["workers"]:
                         break
                     else:
-                        assert time() - start < 5
+                        assert time() - start < 60
                         sleep(0.1)
                 assert (
                     d["workers"]["tcp://127.0.0.1:9684"]["nanny"]

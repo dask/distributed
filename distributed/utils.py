@@ -64,6 +64,12 @@ try:
 except ImportError:
     thread_state = threading.local()
 
+# For some reason this is required in python >= 3.9
+if WINDOWS:
+    import multiprocessing.popen_spawn_win32
+else:
+    import multiprocessing.popen_spawn_posix
+
 logger = _logger = logging.getLogger(__name__)
 
 
