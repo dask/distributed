@@ -1417,7 +1417,7 @@ class Worker(ServerNode):
         if keys:
             for key in list(keys):
                 self.log.append((key, "delete"))
-                self.release_key(key)
+                self.release_key(key, cause="delete data")
 
             logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
         return "OK"
@@ -1521,7 +1521,9 @@ class Worker(ServerNode):
                     # to waiting_for_data
                     self.transition(dep_ts, state)
 
-                    self.log.append((dependency, "new-dep", dep_ts.state, ts))
+                    self.log.append(
+                        (dependency, "new-dep", dep_ts.state, f"requested by {ts.key}")
+                    )
 
                 else:
                     # task was already present on worker
@@ -1713,7 +1715,8 @@ class Worker(ServerNode):
                     self.data_needed.append(dependent.key)
 
             if not ts.dependents:
-                self.release_key(ts.key)
+                self.release_key(ts.key, cause="transition flight->fetch")
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2255,7 +2258,7 @@ class Worker(ServerNode):
                     if not busy and d in data:
                         self.transition(ts, "memory", value=data[d])
                     elif ts is None or ts.state == "executing":
-                        self.release_key(d)
+                        self.release_key(d, cause="already executing at gather")
                         continue
                     elif ts.state not in ("ready", "memory"):
                         self.transition(ts, "fetch", worker=worker)
@@ -2291,7 +2294,7 @@ class Worker(ServerNode):
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
             self.transition(ts, "error")
-        self.release_key(dep.key)
+        self.release_key(dep.key, cause="bad dep")
 
     async def handle_missing_dep(self, *deps, **kwargs):
         self.log.append(("handle-missing", deps))
@@ -2390,7 +2393,7 @@ class Worker(ServerNode):
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.release_key(ts.key)
+            self.release_key(ts.key, cause="stolen")
             if self.validate:
                 assert ts.key not in self.tasks
 
