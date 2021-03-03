@@ -1729,18 +1729,15 @@ class Worker(ServerNode):
 
             self.in_flight_tasks -= 1
             ts.coming_from = None
-            if ts.dependents:
-                self.put_key_in_memory(ts, value)
-                for dependent in ts.dependents:
-                    try:
-                        dependent.waiting_for_data.remove(ts.key)
-                        self.waiting_for_data_count -= 1
-                    except KeyError:
-                        pass
+            self.put_key_in_memory(ts, value)
+            for dependent in ts.dependents:
+                try:
+                    dependent.waiting_for_data.remove(ts.key)
+                    self.waiting_for_data_count -= 1
+                except KeyError:
+                    pass
 
-                self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
-            else:
-                self.release_key(ts.key)
+            self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
 
         except Exception as e:
             logger.exception(e)
