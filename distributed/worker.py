@@ -1606,9 +1606,6 @@ class Worker(ServerNode):
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
 
-            if ts.key not in self.data_needed:
-                self.data_needed.append(ts.key)
-                self.waiting_for_data_count += 1
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
