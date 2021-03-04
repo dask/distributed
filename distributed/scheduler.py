@@ -6392,6 +6392,7 @@ class Scheduler(SchedulerState, ServerNode):
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
         source.data.update(rects)
 
+        # Bandwidth
         from distributed.dashboard.components.scheduler import (
             BandwidthWorkers,
             BandwidthTypes,
@@ -6401,6 +6402,12 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_workers.update()
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
+
+        # System monitor
+        from distributed.dashboard.components.shared import SystemMonitor
+
+        sysmon = SystemMonitor(self, sizing_mode="stretch_both")
+        sysmon.update()
 
         from bokeh.models import Panel, Tabs, Div
         import distributed
@@ -6458,11 +6465,13 @@ class Scheduler(SchedulerState, ServerNode):
             child=bandwidth_workers.fig, title="Bandwidth (Workers)"
         )
         bandwidth_types = Panel(child=bandwidth_types.fig, title="Bandwidth (Types)")
+        system = Panel(child=sysmon.root, title="System")
 
         tabs = Tabs(
             tabs=[
                 html,
                 task_stream,
+                system,
                 compute,
                 workers,
                 scheduler,
