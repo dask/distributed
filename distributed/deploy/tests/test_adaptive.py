@@ -302,7 +302,7 @@ async def test_adapt_down():
             start = time()
             while len(cluster.scheduler.workers) != 2:
                 await asyncio.sleep(0.1)
-                assert time() < start + 3
+                assert time() < start + 60
 
 
 @gen_test(timeout=30)

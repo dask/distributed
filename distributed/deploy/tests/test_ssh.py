@@ -81,7 +81,7 @@ def test_defer_to_old(loop):
 
 
 @pytest.mark.avoid_ci
-def test_old_ssh_wih_local_dir(loop):
+def test_old_ssh_with_local_dir(loop):
     with pytest.warns(Warning):
         from distributed.deploy.old_ssh import SSHCluster as OldSSHCluster
 
