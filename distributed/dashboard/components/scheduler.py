@@ -870,7 +870,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-cpu-worker-plot",
                 width=int(width / 2),
                 name="cpu_hist",
-                x_range=(0, None),
+                x_range=(0, 100),
                 **kwargs,
             )
             rect = cpu.rect(
@@ -2181,6 +2181,16 @@ def individual_graph_doc(scheduler, extra, doc):
 
         add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
+        doc.theme = BOKEH_THEME
+
+
+def individual_systemmonitor_doc(scheduler, extra, doc):
+    with log_errors():
+        sysmon = SystemMonitor(scheduler, sizing_mode="stretch_both")
+        doc.title = "Dask: Scheduler System Monitor"
+        add_periodic_callback(doc, sysmon, 500)
+
+        doc.add_root(sysmon.root)
         doc.theme = BOKEH_THEME
 
 

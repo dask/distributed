@@ -55,7 +55,7 @@ from distributed.client import (
     temp_default_client,
     get_task_metadata,
 )
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
@@ -250,21 +250,31 @@ async def test_compute_retries(c, s, a, b):
     x = c.compute(delayed(varying(args))(), retries=2)
     assert await x == 3
 
+
+@gen_cluster(client=True)
+async def test_compute_retries_annotations(c, s, a, b):
     # Per-future retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
     yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
     zargs = [80, 90, 100]
 
-    x, y = [delayed(varying(args))() for args in (xargs, yargs)]
-    x, y = c.compute([x, y], retries={x: 2})
+    with dask.annotate(retries=2):
+        x = delayed(varying(xargs))()
+    y = delayed(varying(yargs))()
+
+    x, y = c.compute([x, y], optimize_graph=False)
     gc.collect()
 
     assert await x == 30
     with pytest.raises(ZeroDivisionError, match="five"):
         await y
 
-    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
-    x, y, z = c.compute([x, y, z], retries={(y, z): 2})
+    x = delayed(varying(xargs))()
+    with dask.annotate(retries=2):
+        y = delayed(varying(yargs))()
+        z = delayed(varying(zargs))()
+
+    x, y, z = c.compute([x, y, z], optimize_graph=False)
 
     with pytest.raises(ZeroDivisionError, match="one"):
         await x
@@ -322,13 +332,20 @@ async def test_persist_retries(c, s, a, b):
     x = c.compute(x)
     assert await x == 3
 
+
+@gen_cluster(client=True)
+async def test_persist_retries_annotations(c, s, a, b):
     # Per-key retries
     xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
     yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
     zargs = [80, 90, 100]
 
-    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
-    x, y, z = c.persist([x, y, z], retries={(y, z): 2})
+    x = delayed(varying(xargs))()
+    with dask.annotate(retries=2):
+        y = delayed(varying(yargs))()
+        z = delayed(varying(zargs))()
+
+    x, y, z = c.persist([x, y, z], optimize_graph=False)
     x, y, z = c.compute([x, y, z])
 
     with pytest.raises(ZeroDivisionError, match="one"):
@@ -910,31 +927,6 @@ async def test_restrictions_ip_port(c, s, a, b):
     assert y.key in b.data
 
 
-@gen_cluster(client=True)
-async def test_restrictions_ip_port_task_key(c, s, a, b):
-    # Create a long dependency list
-    tasks = [delayed(inc)(1)]
-    for _ in range(100):
-        tasks.append(delayed(add)(tasks[-1], random.choice(tasks)))
-
-    last_task = tasks[-1]
-
-    # calculate all dependency keys
-    all_tasks = list(last_task.__dask_graph__())
-    # only restrict to a single worker
-    workers = {d: a.address for d in all_tasks}
-    result = c.compute(last_task, workers=workers)
-    await result
-
-    # all tasks should have been calculated by the first worker
-    for task in tasks:
-        assert s.worker_restrictions[task.key] == {a.address}
-
-    # and the data should also be there
-    assert last_task.key in a.data
-    assert last_task.key not in b.data
-
-
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
 )
@@ -948,16 +940,6 @@ async def test_restrictions_map(c, s, a, b):
     for x in L:
         assert s.host_restrictions[x.key] == {a.ip}
 
-    L = c.map(inc, [10, 11, 12], workers=[{a.ip}, {a.ip, b.ip}, {b.ip}])
-    await wait(L)
-
-    assert s.host_restrictions[L[0].key] == {a.ip}
-    assert s.host_restrictions[L[1].key] == {a.ip, b.ip}
-    assert s.host_restrictions[L[2].key] == {b.ip}
-
-    with pytest.raises(ValueError):
-        c.map(inc, [10, 11, 12], workers=[{a.ip}])
-
 
 @pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
@@ -965,13 +947,28 @@ async def test_restrictions_map(c, s, a, b):
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_restrictions_get(c, s, a, b):
     dsk = {"x": 1, "y": (inc, "x"), "z": (inc, "y")}
-    restrictions = {"y": {a.ip}, "z": {b.ip}}
 
-    futures = c.get(dsk, ["y", "z"], restrictions, sync=False)
+    futures = c.get(dsk, ["y", "z"], workers=a.ip, sync=False)
     result = await c.gather(futures)
     assert result == [2, 3]
     assert "y" in a.data
-    assert "z" in b.data
+    assert "z" in a.data
+    assert len(b.data) == 0
+
+
+@gen_cluster(client=True)
+async def test_restrictions_get_annotate(c, s, a, b):
+    x = 1
+    with dask.annotate(workers=a.address):
+        y = delayed(inc)(x)
+    with dask.annotate(workers=b.address):
+        z = delayed(inc)(y)
+
+    futures = c.get(z.__dask_graph__(), [y.key, z.key], sync=False)
+    result = await c.gather(futures)
+    assert result == [2, 3]
+    assert y.key in a.data
+    assert z.key in b.data
 
 
 @gen_cluster(client=True)
@@ -3668,6 +3665,7 @@ async def test_reconnect_timeout(c, s):
     assert "Failed to reconnect" in text
 
 
+@pytest.mark.avoid_ci(reason="hangs on github actions ubuntu-latest CI")
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
@@ -3788,6 +3786,7 @@ def test_scheduler_info(c):
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
+    assert isinstance(info["started"], float)
 
 
 def test_write_scheduler_file(c):
@@ -4021,7 +4020,7 @@ def test_as_current_is_thread_local(s):
     l4.acquire()
 
     def run1():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.acquire()
                 l2.release()
@@ -4034,7 +4033,7 @@ def test_as_current_is_thread_local(s):
                     l4.release()
 
     def run2():
-        with Client(s.address) as c:
+        with Client(s["address"]) as c:
             with c.as_current():
                 l1.release()
                 l2.acquire()
@@ -4096,6 +4095,29 @@ async def test_as_current_is_task_local(s, a, b):
 
 @nodebug  # test timing is fragile
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+async def test_persist_workers_annotate(e, s, a, b, c):
+    with dask.annotate(workers=a.address, allow_other_workers=False):
+        L1 = [delayed(inc)(i) for i in range(4)]
+    with dask.annotate(workers=b.address, allow_other_workers=False):
+        total = delayed(sum)(L1)
+    with dask.annotate(workers=c.address, allow_other_workers=True):
+        L2 = [delayed(add)(i, total) for i in L1]
+    with dask.annotate(workers=b.address, allow_other_workers=True):
+        total2 = delayed(sum)(L2)
+
+    # TODO: once annotations are faithfully forwarded upon graph optimization,
+    # we shouldn't need to disable that here.
+    out = e.persist(L1 + L2 + [total, total2], optimize_graph=False)
+
+    await wait(out)
+    assert all(v.key in a.data for v in L1)
+    assert total.key in b.data
+
+    assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
+
+
+@nodebug  # test timing is fragile
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers(e, s, a, b, c):
     L1 = [delayed(inc)(i) for i in range(4)]
     total = delayed(sum)(L1)
@@ -4104,20 +4126,40 @@ async def test_persist_workers(e, s, a, b, c):
 
     out = e.persist(
         L1 + L2 + [total, total2],
-        workers={
-            tuple(L1): a.address,
-            total: b.address,
-            tuple(L2): [c.address],
-            total2: b.address,
-        },
-        allow_other_workers=L2 + [total2],
+        workers=[a.address, b.address],
+        allow_other_workers=True,
     )
 
     await wait(out)
-    assert all(v.key in a.data for v in L1)
-    assert total.key in b.data
 
-    assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
+    for v in L1 + L2 + [total, total2]:
+        assert s.worker_restrictions[v.key] == {a.address, b.address}
+    assert not any(c.address in r for r in s.worker_restrictions)
+
+    assert s.loose_restrictions == {total.key, total2.key} | {v.key for v in L1 + L2}
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+async def test_compute_workers_annotate(e, s, a, b, c):
+    with dask.annotate(workers=a.address, allow_other_workers=True):
+        L1 = [delayed(inc)(i) for i in range(4)]
+    with dask.annotate(workers=b.address, allow_other_workers=True):
+        total = delayed(sum)(L1)
+    with dask.annotate(workers=[c.address]):
+        L2 = [delayed(add)(i, total) for i in L1]
+
+    # TODO: once annotations are faithfully forwarded upon graph optimization,
+    # we shouldn't need to disable that here.
+    out = e.compute(L1 + L2 + [total], optimize_graph=False)
+
+    await wait(out)
+    for v in L1:
+        assert s.worker_restrictions[v.key] == {a.address}
+    for v in L2:
+        assert s.worker_restrictions[v.key] == {c.address}
+    assert s.worker_restrictions[total.key] == {b.address}
+
+    assert s.loose_restrictions == {total.key} | {v.key for v in L1}
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
@@ -4128,18 +4170,16 @@ async def test_compute_workers(e, s, a, b, c):
 
     out = e.compute(
         L1 + L2 + [total],
-        workers={tuple(L1): a.address, total: b.address, tuple(L2): [c.address]},
-        allow_other_workers=L1 + [total],
+        workers=[a.address, b.address],
+        allow_other_workers=True,
     )
 
     await wait(out)
-    for v in L1:
-        assert s.worker_restrictions[v.key] == {a.address}
-    for v in L2:
-        assert s.worker_restrictions[v.key] == {c.address}
-    assert s.worker_restrictions[total.key] == {b.address}
+    for v in L1 + L2 + [total]:
+        assert s.worker_restrictions[v.key] == {a.address, b.address}
+    assert not any(c.address in r for r in s.worker_restrictions)
 
-    assert s.loose_restrictions == {total.key} | {v.key for v in L1}
+    assert s.loose_restrictions == {total.key} | {v.key for v in L1 + L2}
 
 
 @gen_cluster(client=True)
@@ -4154,28 +4194,6 @@ async def test_compute_nested_containers(c, s, a, b):
     assert isinstance(result, dict)
     assert (result["x"][0] == np.ones(10) + 1).all()
     assert result["y"] == 123
-
-
-def test_get_restrictions():
-    L1 = [delayed(inc)(i) for i in range(4)]
-    total = delayed(sum)(L1)
-    L2 = [delayed(add)(i, total) for i in L1]
-
-    r1, loose = Client.get_restrictions(L2, "127.0.0.1", False)
-    assert r1 == {d.key: ["127.0.0.1"] for d in L2}
-    assert not loose
-
-    r1, loose = Client.get_restrictions(L2, ["127.0.0.1"], True)
-    assert r1 == {d.key: ["127.0.0.1"] for d in L2}
-    assert set(loose) == {d.key for d in L2}
-
-    r1, loose = Client.get_restrictions(L2, {total: "127.0.0.1"}, True)
-    assert r1 == {total.key: ["127.0.0.1"]}
-    assert loose == [total.key]
-
-    r1, loose = Client.get_restrictions(L2, {(total,): "127.0.0.1"}, True)
-    assert r1 == {total.key: ["127.0.0.1"]}
-    assert loose == [total.key]
 
 
 @gen_cluster(client=True)
@@ -4349,6 +4367,7 @@ def test_normalize_collection_with_released_futures(c):
     assert res == sol
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 @gen_cluster(client=True)
 async def test_auto_normalize_collection(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -4375,6 +4394,7 @@ async def test_auto_normalize_collection(c, s, a, b):
         assert end - start < 1
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/distributed/issues/4404")
 def test_auto_normalize_collection_sync(c):
     da = pytest.importorskip("dask.array")
     x = da.ones(10, chunks=5)
@@ -4462,6 +4482,7 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
@@ -4941,6 +4962,7 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
 async def test_secede_balances(c, s, a, b):
@@ -4959,6 +4981,7 @@ async def test_secede_balances(c, s, a, b):
     while not all(f.status == "finished" for f in futures):
         await asyncio.sleep(0.01)
         assert threading.active_count() < count + 50
+        assert time() < start + 60
 
     assert len(a.log) < 2 * len(b.log)
     assert len(b.log) < 2 * len(a.log)
@@ -6310,6 +6333,43 @@ async def test_annotations_task_state(c, s, a, b):
     )
 
 
+@pytest.mark.parametrize("fn", ["compute", "persist"])
+def test_annotations_compute_time(fn):
+    da = pytest.importorskip("dask.array")
+
+    @gen_cluster(client=True)
+    async def test(c, s, a, b):
+        x = da.ones(10, chunks=(5,))
+
+        with dask.annotate(foo="bar"):
+            # Turn off optimization to avoid rewriting layers and picking up annotations
+            # that way. Instead, we want `compute`/`persist` to be able to pick them up.
+            x = await getattr(c, fn)(x, optimize_graph=False)
+
+        assert all({"foo": "bar"} == ts.annotations for ts in s.tasks.values())
+
+    test()
+
+
+@pytest.mark.xfail(reason="https://github.com/dask/dask/issues/7036")
+@gen_cluster(client=True)
+async def test_annotations_survive_optimization(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    with dask.annotate(foo="bar"):
+        x = da.ones(10, chunks=(5,))
+
+    ann = x.__dask_graph__().layers[x.name].annotations
+    assert ann is not None
+    assert ann.get("foo", None) == "bar"
+
+    (xx,) = dask.optimize(x)
+
+    ann = xx.__dask_graph__().layers[x.name].annotations
+    assert ann is not None
+    assert ann.get("foo", None) == "bar"
+
+
 @gen_cluster(client=True)
 async def test_annotations_priorities(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -6355,6 +6415,37 @@ async def test_annotations_retries(c, s, a, b):
     assert all(ts.annotations == {"retries": 2} for ts in s.tasks.values())
 
 
+@gen_cluster(client=True)
+async def test_annotations_blockwise_unpack(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    from dask.array.utils import assert_eq
+    import numpy as np
+
+    # A flaky doubling function -- need extra args because it is called before
+    # application to establish dtype/meta.
+    scale = varying([ZeroDivisionError("one"), ZeroDivisionError("two"), 2, 2])
+
+    def flaky_double(x):
+        return scale() * x
+
+    # A reliable double function.
+    def reliable_double(x):
+        return 2 * x
+
+    x = da.ones(10, chunks=(5,))
+
+    # The later annotations should not override the earlier annotations
+    with dask.annotate(retries=2):
+        y = x.map_blocks(flaky_double, meta=np.array((), dtype=np.float))
+    with dask.annotate(retries=0):
+        z = y.map_blocks(reliable_double, meta=np.array((), dtype=np.float))
+
+    with dask.config.set(optimization__fuse__active=False):
+        z = await c.compute(z)
+
+    assert_eq(z, np.ones(10) * 4.0)
+
+
 @gen_cluster(
     client=True,
     nthreads=[
@@ -6373,6 +6464,27 @@ async def test_annotations_resources(c, s, a, b):
 
     assert all([{"GPU": 1} == ts.resource_restrictions for ts in s.tasks.values()])
     assert all([{"resources": {"GPU": 1}} == ts.annotations for ts in s.tasks.values()])
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1),
+        ("127.0.0.1", 1, {"resources": {"GPU": 1}}),
+    ],
+)
+async def test_annotations_resources_culled(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.ones((2, 2, 2), chunks=1)
+    with dask.annotate(resources={"GPU": 1}):
+        y = x.map_blocks(lambda x0: x0, meta=x._meta)
+
+    z = y[0, 0, 0]
+
+    (z,) = c.compute([z], optimize_graph=False)
+    await z
+    # it worked!
 
 
 @gen_cluster(client=True)
@@ -6394,3 +6506,12 @@ async def test_annotations_loose_restrictions(c, s, a, b):
             for ts in s.tasks.values()
         ]
     )
+
+
+@gen_cluster(client=True)
+async def test_workers_collection_restriction(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    future = c.compute(da.arange(10), workers=a.address)
+    await future
+    assert a.data and not b.data

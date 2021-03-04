@@ -249,9 +249,9 @@ def pack_data(o, d, key_types=object):
 
     Parameters
     ----------
-    o:
+    o
         core data structures containing literals and keys
-    d: dict
+    d : dict
         mapping of keys to data
 
     Examples
@@ -284,9 +284,9 @@ def subs_multiple(o, d):
 
     Parameters
     ----------
-    o:
+    o
         Core data structures containing literals and keys
-    d: dict
+    d : dict
         Mapping of keys to values
 
     Examples

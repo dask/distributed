@@ -70,6 +70,8 @@ def test_dashboard(loop):
             if b"dashboard at" in line:
                 dashboard_port = int(line.decode().split(":")[-1].strip())
                 break
+        else:
+            raise Exception("dashboard not found")
 
         with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
             pass
@@ -185,6 +187,7 @@ def test_interface(loop):
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
@@ -411,9 +414,7 @@ def test_version_option():
 def test_idle_timeout(loop):
     start = time()
     runner = CliRunner()
-    result = runner.invoke(
-        distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"]
-    )
+    runner.invoke(distributed.cli.dask_scheduler.main, ["--idle-timeout", "1s"])
     stop = time()
     assert 1 < stop - start < 10
 

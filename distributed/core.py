@@ -61,32 +61,6 @@ class Status(Enum):
     undefined = None
     dont_reply = "dont-reply"
 
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status, this avoid comparison with non-existing status.
-        """
-        if isinstance(other, type(self)):
-            return self.value == other.value
-        elif isinstance(other, str) or (other is None):
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            assert other in [
-                s.value for s in type(self)
-            ], f"comparison with non-existing states {other}"
-            return other == self.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
-
 
 class RPCClosed(IOError):
     pass
@@ -161,6 +135,7 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -225,7 +200,13 @@ class Server:
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(
+            self.monitor.update,
+            parse_timedelta(
+                dask.config.get("distributed.admin.system-monitor.interval")
+            )
+            * 1000,
+        )
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
@@ -255,6 +236,8 @@ class Server:
         )
 
         self.__stopped = False
+
+        super().__init__(**kwargs)
 
     @property
     def status(self):
@@ -1136,7 +1119,7 @@ def error_message(e, status="error"):
 
     See Also
     --------
-    clean_exception: deserialize and unpack message into exception/traceback
+    clean_exception : deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
@@ -1167,7 +1150,7 @@ def clean_exception(exception, traceback, **kwargs):
 
     See Also
     --------
-    error_message: create and serialize errors into message
+    error_message : create and serialize errors into message
     """
     if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:

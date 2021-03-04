@@ -6,18 +6,15 @@ import msgpack
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import (
-    serialize,
-    deserialize,
     Serialize,
     Serialized,
     extract_serialize,
     msgpack_decode_default,
     msgpack_encode_default,
+    merge_and_deserialize,
+    serialize_and_split,
 )
-from .utils import frame_split_size, merge_frames, msgpack_opts
-from ..utils import is_writeable, nbytes
-
-_deserialize = deserialize
+from .utils import msgpack_opts
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +45,7 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         }
 
         data = {
-            key: serialize(
+            key: serialize_and_split(
                 value.data, serializers=serializers, on_error=on_error, context=context
             )
             for key, value in data.items()
@@ -60,39 +57,23 @@ def dumps(msg, serializers=None, on_error="message", context=None):
         out_frames = []
 
         for key, (head, frames) in data.items():
-            if "writeable" not in head:
-                head["writeable"] = tuple(map(is_writeable, frames))
-            if "lengths" not in head:
-                head["lengths"] = tuple(map(nbytes, frames))
-
             # Compress frames that are not yet compressed
             out_compression = []
-            _out_frames = []
             for frame, compression in zip(
                 frames, head.get("compression") or [None] * len(frames)
             ):
-                if compression is None:  # default behavior
-                    _frames = frame_split_size(frame)
-                    _compression, _frames = zip(
-                        *[maybe_compress(frame, **compress_opts) for frame in _frames]
-                    )
-                    out_compression.extend(_compression)
-                    _out_frames.extend(_frames)
-                else:  # already specified, so pass
-                    out_compression.append(compression)
-                    _out_frames.append(frame)
+                if compression is None:
+                    compression, frame = maybe_compress(frame, **compress_opts)
+
+                out_compression.append(compression)
+                out_frames.append(frame)
 
             head["compression"] = out_compression
-            head["count"] = len(_out_frames)
+            head["count"] = len(frames)
             header["headers"][key] = head
             header["keys"].append(key)
-            out_frames.extend(_out_frames)
 
         for key, (head, frames) in pre.items():
-            if "writeable" not in head:
-                head["writeable"] = tuple(map(is_writeable, frames))
-            if "lengths" not in head:
-                head["lengths"] = tuple(map(nbytes, frames))
             head["count"] = len(frames)
             header["headers"][key] = head
             header["keys"].append(key)
@@ -146,9 +127,7 @@ def loads(frames, deserialize=True, deserializers=None):
             if deserialize or key in bytestrings:
                 if "compression" in head:
                     fs = decompress(head, fs)
-                if not any(hasattr(f, "__cuda_array_interface__") for f in fs):
-                    fs = merge_frames(head, fs)
-                value = _deserialize(head, fs, deserializers=deserializers)
+                value = merge_and_deserialize(head, fs, deserializers=deserializers)
             else:
                 value = Serialized(head, fs)
 

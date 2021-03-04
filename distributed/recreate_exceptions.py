@@ -27,7 +27,7 @@ class ReplayExceptionScheduler:
 
         Parameters
         ----------
-        keys: list of keys known to the scheduler
+        keys : list of keys known to the scheduler
 
         Returns
         -------
@@ -106,7 +106,6 @@ class ReplayExceptionClient:
 
         Returns
         -------
-
         Tuple:
         - the function that raised an exception
         - argument list (a tuple), may include values and keys

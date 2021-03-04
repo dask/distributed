@@ -64,6 +64,12 @@ try:
 except ImportError:
     thread_state = threading.local()
 
+# For some reason this is required in python >= 3.9
+if WINDOWS:
+    import multiprocessing.popen_spawn_win32
+else:
+    import multiprocessing.popen_spawn_posix
+
 logger = _logger = logging.getLogger(__name__)
 
 
@@ -313,11 +319,15 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     @gen.coroutine
     def f():
+        # We flag the thread state asynchronous, which will make sync() call
+        # within `func` use async semantic. In order to support concurrent
+        # calls to sync(), `asynchronous` is used as a ref counter.
+        thread_state.asynchronous = getattr(thread_state, "asynchronous", 0)
+        thread_state.asynchronous += 1
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
@@ -325,7 +335,8 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         except Exception as exc:
             error[0] = sys.exc_info()
         finally:
-            thread_state.asynchronous = False
+            assert thread_state.asynchronous > 0
+            thread_state.asynchronous -= 1
             e.set()
 
     loop.add_callback(f)
@@ -884,7 +895,6 @@ def ensure_bytes(s):
 
     Examples
     --------
-
     >>> ensure_bytes('123')
     b'123'
     >>> ensure_bytes(b'123')
@@ -905,7 +915,6 @@ def ensure_bytes(s):
 
 def divide_n_among_bins(n, bins):
     """
-
     >>> divide_n_among_bins(12, [1, 1])
     [6, 6]
     >>> divide_n_among_bins(12, [1, 2])
@@ -1246,6 +1255,7 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
+@functools.lru_cache(None)
 def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
@@ -1343,8 +1353,7 @@ def parse_ports(port):
     return ports
 
 
-def is_coroutine_function(f):
-    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+is_coroutine_function = iscoroutinefunction
 
 
 class Log(str):
@@ -1375,11 +1384,11 @@ def cli_keywords(d: dict, cls=None, cmd=None):
 
     Parameters
     ----------
-    d: dict
+    d : dict
         The keywords to convert
-    cls: callable
+    cls : callable
         The callable that consumes these terms to check them for validity
-    cmd: string or object
+    cmd : string or object
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (i.e., arguments that
@@ -1460,11 +1469,11 @@ def serialize_for_cli(data):
 
     Parameters
     ----------
-    data: json-serializable object
+    data : json-serializable object
         The data to serialize
     Returns
     -------
-    serialized_data: str
+    serialized_data : str
         The serialized data as a string
     """
     return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
@@ -1475,11 +1484,11 @@ def deserialize_for_cli(data):
 
     Parameters
     ----------
-    data: str
+    data : str
         String serialied by serialize_for_cli()
     Returns
     -------
-    deserialized_data: obj
+    deserialized_data : obj
         The de-serialized data
     """
     return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
@@ -1523,7 +1532,6 @@ class LRU(UserDict):
 
 def clean_dashboard_address(addr, default_listen_ip=""):
     """
-
     Examples
     --------
     >>> clean_dashboard_address(8787)

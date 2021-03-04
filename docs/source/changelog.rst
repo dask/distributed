@@ -1,6 +1,74 @@
 Changelog
 =========
 
+2021.02.0
+---------
+
+Released on February 5, 2021
+
+- Bump minimum Dask to 2021.02.0 (:pr:`4486`) `James Bourbeau`_
+- Update ``TaskState`` documentation about dependents attribute (:pr:`4440`) `Florian Jetter`_
+- DOC: Autoreformat all functions docstrings (:pr:`4475`) `Matthias Bussonnier`_
+- Use cached version of ``is_coroutine_function`` in stream handling to (:pr:`4481`) `Ian Rose`_
+- Optimize ``transitions`` (:pr:`4451`) `jakirkham`_
+- Create ``PULL_REQUEST_TEMPLATE.md`` (:pr:`4476`) `Ray Bell`_
+- DOC: typo, directives ends with 2 colons ``::`` (:pr:`4472`) `Matthias Bussonnier`_
+- DOC: Proper numpydoc syntax for ``distributed/protocol/*.py`` (:pr:`4473`) `Matthias Bussonnier`_
+- Update ``pytest.skip`` usage in ``test_server_listen`` (:pr:`4467`) `James Bourbeau`_
+- Unify annotations (:pr:`4406`) `Ian Rose`_
+- Added worker resources from config (:pr:`4456`) `Tom Augspurger`_
+- Fix var name in worker validation func (:pr:`4457`) `Gil Forsyth`_
+- Refactor ``task_groups`` & ``task_prefixes`` (:pr:`4452`) `jakirkham`_
+- Use ``parent._tasks`` in ``heartbeat`` (:pr:`4450`) `jakirkham`_
+- Refactor ``SchedulerState`` from ``Scheduler`` (:pr:`4365`) `jakirkham`_
+
+
+2021.01.1
+---------
+
+Released on January 22, 2021
+
+- Make system monitor interval configurable (:pr:`4447`) `Matthew Rocklin`_
+- Add ``uvloop`` config value (:pr:`4448`) `Matthew Rocklin`_
+- Additional optimizations to stealing (:pr:`4445`) `jakirkham`_
+- Give clusters names (:pr:`4426`) `Jacob Tomlinson`_
+- Use worker comm pool in ``Semaphore`` (:pr:`4195`) `Florian Jetter`_
+- Set ``runspec`` on all new tasks to avoid deadlocks (:pr:`4432`) `Florian Jetter`_
+- Support ``TaskState`` objects in story methods (:pr:`4434`) `Matthew Rocklin`_
+- Support missing event loop in ``Client.asynchronous`` (:pr:`4436`) `Matthew Rocklin`_
+- Don't require network to inspect tests (:pr:`4433`) `Matthew Rocklin`_
+
+
+2021.01.0
+---------
+
+Released on January 15, 2021
+
+- Add time started to scheduler info (:pr:`4425`) `Jacob Tomlinson`_
+- Log adaptive error (:pr:`4422`) `Jacob Tomlinson`_
+- Xfail normalization tests (:pr:`4411`) `Jacob Tomlinson`_
+- Use ``dumps_msgpack`` and ``loads_msgpack`` when packing high level graphs (:pr:`4409`) `Mads R. B. Kristensen`_
+- Add ``nprocs`` auto option to ``dask-worker`` CLI (:pr:`4377`) `Jacob Tomlinson`_
+- Type annotation of ``_reevaluate_occupancy_worker`` (:pr:`4398`) `jakirkham`_
+- Type ``TaskGroup`` in ``active_states`` (:pr:`4408`) `jakirkham`_
+- Fix ``test_as_current_is_thread_local`` (:pr:`4402`) `jakirkham`_
+- Use ``list`` comprehensions to bind ``TaskGroup`` type (:pr:`4401`) `jakirkham`_
+- Make tests pass after 2028 (:pr:`4403`) `Bernhard M. Wiedemann`_
+- Fix compilation warnings, ``decide_worker`` now a C func, stealing improvements (:pr:`4375`) `jakirkham`_
+- Drop custom ``__eq__`` from ``Status`` (:pr:`4270`) `jakirkham`_
+- ``test_performance_report``: skip without bokeh (:pr:`4388`) `Bruno Pagani`_
+- ``Nanny`` now respects dask settings from ctx mgr (:pr:`4378`) `Florian Jetter`_
+- Better task duration estimates for outliers (:pr:`4213`) `selshowk`_
+- Dask internal inherit config (:pr:`4364`) `Jacob Tomlinson`_
+- Provide ``setup.py`` option to profile Cython code (:pr:`4362`) `jakirkham`_
+- Optimizations of ``*State`` and ``Task*`` objects and stealing (:pr:`4358`) `jakirkham`_
+- Cast ``SortedDict`` s to ``dict`` s in a few key places & other minor changes (:pr:`4355`) `jakirkham`_
+- Use task annotation priorities for user-level priorities (:pr:`4354`) `James Bourbeau`_
+- Added docs to highlevelgraph pack/unpack (:pr:`4352`) `Mads R. B. Kristensen`_
+- Optimizations in notable functions used by transitions (:pr:`4351`) `jakirkham`_
+- Silence exception when releasing futures on process shutdown (:pr:`4309`) `Benjamin Zaitlen`_
+
+
 2020.12.0
 ---------
 
@@ -2121,3 +2189,7 @@ significantly without many new features.
 .. _`Timost`: https://github.com/Timost
 .. _`Ian Rose`: https://github.com/ian-r-rose
 .. _`marwan116`: https://github.com/marwan116
+.. _`Bernhard M. Wiedemann`: https://github.com/bmwiedemann
+.. _`Bruno Pagani`: https://github.com/ArchangeGabriel
+.. _`selshowk`: https://github.com/selshowk
+.. _`Ray Bell`: https://github.com/raybellwaves

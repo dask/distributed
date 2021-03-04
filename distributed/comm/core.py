@@ -75,7 +75,7 @@ class Comm(ABC):
 
         Parameters
         ----------
-        msg :
+        msg
         on_error : Optional[str]
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.

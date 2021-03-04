@@ -11,10 +11,9 @@ import errno
 from functools import partial
 import html
 import inspect
-import itertools
 import json
 import logging
-from numbers import Number, Integral
+from numbers import Number
 import os
 import sys
 import uuid
@@ -62,7 +61,6 @@ from .core import (
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
-from .protocol.highlevelgraph import highlevelgraph_pack
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
@@ -794,7 +792,10 @@ class Client:
         though the client was originally created in asynchronous mode we may
         find ourselves in contexts when it is better to operate synchronously.
         """
-        return self._asynchronous and self.loop is IOLoop.current()
+        try:
+            return self._asynchronous and self.loop is IOLoop.current()
+        except RuntimeError:
+            return False
 
     @property
     def dashboard_link(self):
@@ -1445,9 +1446,9 @@ class Client:
         Note, this may disrupt other clients that may be using the same
         scheduler and workers.
 
-        See also
+        See Also
         --------
-        Client.close: close only this client
+        Client.close : close only this client
         """
         return self.sync(self._shutdown)
 
@@ -1457,7 +1458,7 @@ class Client:
 
         Parameters
         ----------
-        **kwargs:
+        **kwargs
             Any submit()- or map()- compatible arguments, such as
             `workers` or `resources`.
 
@@ -1489,35 +1490,36 @@ class Client:
 
         Parameters
         ----------
-        func: callable
-        *args:
-        **kwargs:
-        pure: bool (defaults to True)
+        func : callable
+        *args
+        **kwargs
+        pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
-            A set of worker hostnames on which computations may be performed.
-            Leave empty to default to all workers (common case)
-        key: str
+        workers : string or iterable of strings
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
+        key : str
             Unique identifier for the task.  Defaults to function-name and hash
-        allow_other_workers: bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
+        allow_other_workers : bool (defaults to False)
+            Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
-        retries: int (default to 0)
+        retries : int (default to 0)
             Number of allowed automatic retries if the task fails
-        priority: Number
+        priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        fifo_timeout: str timedelta (default '100ms')
+        fifo_timeout : str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
-        resources: dict (defaults to {})
-            Defines the `resources` this job requires on the worker; e.g.
-            ``{'GPU': 2}``. See :doc:`worker resources <resources>` for details
-            on defining resources.
-        actor: bool (default False)
+        resources : dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
+        actor : bool (default False)
             Whether this task should exist on the worker as a stateful actor.
             See :doc:`actors` for additional details.
-        actors: bool (default False)
+        actors : bool (default False)
             Alias for `actor`
 
         Examples
@@ -1530,7 +1532,7 @@ class Client:
 
         See Also
         --------
-        Client.map: Submit on many arguments at once
+        Client.map : Submit on many arguments at once
         """
         if not callable(func):
             raise TypeError("First input to submit must be a callable function")
@@ -1559,12 +1561,6 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if workers is not None:
-            restrictions = {skey: workers}
-            loose_restrictions = [skey] if allow_other_workers else []
-        else:
-            restrictions = {}
-            loose_restrictions = []
 
         if kwargs:
             dsk = {skey: (apply, func, list(args), kwargs)}
@@ -1574,11 +1570,11 @@ class Client:
         futures = self._graph_to_futures(
             dsk,
             [skey],
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority={skey: 0},
             user_priority=priority,
-            resources={skey: resources} if resources else None,
+            resources=resources,
             retries=retries,
             fifo_timeout=fifo_timeout,
             actors=actor,
@@ -1611,43 +1607,43 @@ class Client:
 
         Parameters
         ----------
-        func: callable
-        iterables: Iterables
+        func : callable
+        iterables : Iterables
             List-like objects to map over.  They should have the same length.
-        key: str, list
+        key : str, list
             Prefix for task names if string.  Explicit names if list.
-        pure: bool (defaults to True)
+        pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-        workers: set, iterable of sets
+        workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
-        allow_other_workers: bool (defaults to False)
+        allow_other_workers : bool (defaults to False)
             Used with `workers`. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
-        retries: int (default to 0)
+        retries : int (default to 0)
             Number of allowed automatic retries if a task fails
-        priority: Number
+        priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        fifo_timeout: str timedelta (default '100ms')
+        fifo_timeout : str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
-        resources: dict (defaults to {})
+        resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``. See
-            :doc:`worker resources <resources>` for details on defining
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
             resources.
-        actor: bool (default False)
+        actor : bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
             See :doc:`actors` for additional details.
-        actors: bool (default False)
+        actors : bool (default False)
             Alias for `actor`
         batch_size : int, optional
             Submit tasks to the scheduler in batches of (at most) ``batch_size``.
             Larger batch sizes can be useful for very large ``iterables``,
             as the cluster can start processing tasks while later ones are
             submitted asynchronously.
-        **kwargs: dict
+        **kwargs : dict
             Extra keywords to send to the function.
             Large values will be included explicitly in the task graph.
 
@@ -1660,9 +1656,9 @@ class Client:
         List, iterator, or Queue of futures, depending on the type of the
         inputs.
 
-        See also
+        See Also
         --------
-        Client.submit: Submit a single function
+        Client.submit : Submit a single function
         """
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
@@ -1751,39 +1747,16 @@ class Client:
 
         if isinstance(workers, (str, Number)):
             workers = [workers]
-        if isinstance(workers, (list, set)):
-            if workers and isinstance(first(workers), (list, set)):
-                if len(workers) != len(keys):
-                    raise ValueError(
-                        "You only provided %d worker restrictions"
-                        " for a sequence of length %d" % (len(workers), len(keys))
-                    )
-                restrictions = dict(zip(keys, workers))
-            else:
-                restrictions = {k: workers for k in keys}
-        elif workers is None:
-            restrictions = {}
-        else:
+        if workers is not None and not isinstance(workers, (list, set)):
             raise TypeError("Workers must be a list or set of workers or None")
-        if allow_other_workers not in (True, False, None):
-            raise TypeError("allow_other_workers= must be True or False")
-        if allow_other_workers is True:
-            loose_restrictions = set(keys)
-        else:
-            loose_restrictions = set()
 
         internal_priority = dict(zip(keys, range(len(keys))))
-
-        if resources:
-            resources = {k: resources for k in keys}
-        else:
-            resources = None
 
         futures = self._graph_to_futures(
             dsk,
             keys,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             priority=internal_priority,
             resources=resources,
             retries=retries,
@@ -1935,13 +1908,13 @@ class Client:
 
         Parameters
         ----------
-        futures: Collection of futures
+        futures : Collection of futures
             This can be a possibly nested collection of Future objects.
             Collections can be lists, sets, or dictionaries
-        errors: string
+        errors : string
             Either 'raise' or 'skip' if we should raise if a future has erred
             or skip its inclusion in the output collection
-        direct: boolean
+        direct : boolean
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
@@ -1963,7 +1936,7 @@ class Client:
 
         See Also
         --------
-        Client.scatter: Send data out to cluster
+        Client.scatter : Send data out to cluster
         """
         if isinstance(futures, pyQueue):
             raise TypeError(
@@ -2115,19 +2088,19 @@ class Client:
 
         Parameters
         ----------
-        data: list, dict, or object
+        data : list, dict, or object
             Data to scatter out to workers.  Output type matches input type.
-        workers: list of tuples (optional)
+        workers : list of tuples (optional)
             Optionally constrain locations of data.
             Specify workers as hostname/port pairs, e.g. ``('127.0.0.1', 8787)``.
-        broadcast: bool (defaults to False)
+        broadcast : bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
-        direct: bool (defaults to automatically check)
+        direct : bool (defaults to automatically check)
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        hash: bool (optional)
+        hash : bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
 
@@ -2167,7 +2140,7 @@ class Client:
 
         See Also
         --------
-        Client.gather: Gather data back to local process
+        Client.gather : Gather data back to local process
         """
         if timeout == no_default:
             timeout = self._timeout
@@ -2211,8 +2184,8 @@ class Client:
 
         Parameters
         ----------
-        futures: list of Futures
-        force: boolean (False)
+        futures : list of Futures
+        force : boolean (False)
             Cancel this future even if other clients desire it
         """
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
@@ -2230,7 +2203,7 @@ class Client:
 
         Parameters
         ----------
-        futures: list of Futures
+        futures : list of Futures
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
@@ -2283,7 +2256,7 @@ class Client:
         name : optional name of the dataset to publish
         override : bool (optional, default False)
             if true, override any already present dataset with the same name
-        kwargs: dict
+        kwargs : dict
             named collections to publish on the scheduler
 
         Examples
@@ -2366,7 +2339,7 @@ class Client:
         name : name of the dataset to retrieve
         default : optional, not set by default
             If set, do not raise a KeyError if the name is not present but return this default
-        kwargs: dict
+        kwargs : dict
             additional arguments to _get_dataset
 
         See Also
@@ -2398,7 +2371,6 @@ class Client:
 
         Examples
         --------
-
         >>> def get_number_of_tasks(dask_scheduler=None):
         ...     return len(dask_scheduler.tasks)
 
@@ -2416,8 +2388,8 @@ class Client:
 
         See Also
         --------
-        Client.run: Run a function on all workers
-        Client.start_ipython_scheduler: Start an IPython session on scheduler
+        Client.run : Run a function on all workers
+        Client.start_ipython_scheduler : Start an IPython session on scheduler
         """
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
@@ -2460,12 +2432,12 @@ class Client:
 
         Parameters
         ----------
-        function: callable
-        *args: arguments for remote function
-        **kwargs: keyword arguments for remote function
-        workers: list
+        function : callable
+        *args : arguments for remote function
+        **kwargs : keyword arguments for remote function
+        workers : list
             Workers on which to run the function. Defaults to all known workers.
-        wait: boolean (optional)
+        wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
         nanny : bool, defualt False
@@ -2516,14 +2488,14 @@ class Client:
 
         Parameters
         ----------
-        function: a coroutine function
+        function : a coroutine function
             (typically a function wrapped in gen.coroutine or
              a Python 3.5+ async function)
-        *args: arguments for remote function
-        **kwargs: keyword arguments for remote function
-        wait: boolean (default True)
+        *args : arguments for remote function
+        **kwargs : keyword arguments for remote function
+        wait : boolean (default True)
             Whether to wait for coroutines to end.
-        workers: list
+        workers : list
             Workers on which to run the function. Defaults to all known workers.
 
         """
@@ -2539,8 +2511,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         priority=None,
         user_priority=0,
         resources=None,
@@ -2549,26 +2521,8 @@ class Client:
         actors=None,
     ):
         with self._refcount_lock:
-            if resources:
-                resources = self._expand_resources(
-                    resources, all_keys=itertools.chain(dsk, keys)
-                )
-                resources = {stringify(k): v for k, v in resources.items()}
-
-            if retries:
-                retries = self._expand_retries(
-                    retries, all_keys=itertools.chain(dsk, keys)
-                )
-
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
-
-            if restrictions:
-                restrictions = keymap(stringify, restrictions)
-                restrictions = valmap(list, restrictions)
-
-            if loose_restrictions is not None:
-                loose_restrictions = list(map(stringify, loose_restrictions))
 
             keyset = set(keys)
 
@@ -2576,10 +2530,25 @@ class Client:
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
-            dsk = highlevelgraph_pack(dsk, self, keyset)
+            dsk = dsk.__dask_distributed_pack__(self, keyset)
 
-            if isinstance(retries, Number) and retries > 0:
-                retries = {k: retries for k in dsk}
+            annotations = {}
+            if user_priority:
+                annotations["priority"] = user_priority
+            if workers:
+                if not isinstance(workers, (list, tuple, set)):
+                    workers = [workers]
+                annotations["workers"] = workers
+            if retries:
+                annotations["retries"] = retries
+            if allow_other_workers not in (True, False, None):
+                raise TypeError("allow_other_workers= must be True, False, or None")
+            if allow_other_workers:
+                annotations["allow_other_workers"] = allow_other_workers
+            if resources:
+                annotations["resources"] = resources
+
+            annotations = merge(dask.config.get("annotations", {}), annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
@@ -2588,14 +2557,10 @@ class Client:
                     "op": "update-graph-hlg",
                     "hlg": dsk,
                     "keys": list(map(stringify, keys)),
-                    "restrictions": restrictions or {},
-                    "loose_restrictions": loose_restrictions,
                     "priority": priority,
-                    "user_priority": user_priority,
-                    "resources": resources,
                     "submitting_task": getattr(thread_state, "key", None),
-                    "retries": retries,
                     "fifo_timeout": fifo_timeout,
+                    "annotations": annotations,
                     "actors": actors,
                 }
             )
@@ -2605,8 +2570,8 @@ class Client:
         self,
         dsk,
         keys,
-        restrictions=None,
-        loose_restrictions=None,
+        workers=None,
+        allow_other_workers=None,
         resources=None,
         sync=True,
         asynchronous=None,
@@ -2621,19 +2586,27 @@ class Client:
 
         Parameters
         ----------
-        dsk: dict
-        keys: object, or nested lists of objects
-        restrictions: dict (optional)
-            A mapping of {key: {set of worker hostnames}} that restricts where
-            jobs can take place
-        retries: int (default to 0)
+        dsk : dict
+        keys : object, or nested lists of objects
+        workers : string or iterable of strings
+            A set of worker addresses or hostnames on which computations may be
+            performed. Leave empty to default to all workers (common case)
+        allow_other_workers : bool (defaults to False)
+            Used with ``workers``. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
+        retries : int (default to 0)
             Number of allowed automatic retries if computing a result fails
-        priority: Number
+        priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        sync: bool (optional)
+        resources : dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
+        sync : bool (optional)
             Returns Futures if False or concrete values if True (default).
-        direct: bool
+        direct : bool
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
@@ -2647,13 +2620,13 @@ class Client:
 
         See Also
         --------
-        Client.compute: Compute asynchronous collections
+        Client.compute : Compute asynchronous collections
         """
         futures = self._graph_to_futures(
             dsk,
             keys=set(flatten([keys])),
-            restrictions=restrictions,
-            loose_restrictions=loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             fifo_timeout=fifo_timeout,
             retries=retries,
@@ -2723,7 +2696,7 @@ class Client:
 
         See Also
         --------
-        Client.persist: trigger computation of collection's tasks
+        Client.persist : trigger computation of collection's tasks
         """
         dsk_orig = collection.__dask_graph__()
         dsk = self._optimize_insert_futures(dsk_orig, collection.__dask_keys__())
@@ -2752,44 +2725,40 @@ class Client:
 
         Parameters
         ----------
-        collections: iterable of dask objects or single dask object
+        collections : iterable of dask objects or single dask object
             Collections like dask.array or dataframe or dask.value objects
-        sync: bool (optional)
+        sync : bool (optional)
             Returns Futures if False (default) or concrete values if True
-        optimize_graph: bool
+        optimize_graph : bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
-        retries: int (default to 0)
+        workers : string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers : bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
+        retries : int (default to 0)
             Number of allowed automatic retries if computing a result fails
-        priority: Number
+        priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        fifo_timeout: timedelta str (defaults to '60s')
+        fifo_timeout : timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
-        traverse: bool (defaults to True)
+        traverse : bool (defaults to True)
             By default dask traverses builtin python collections looking for
             dask objects passed to ``compute``. For large collections this can
             be expensive. If none of the arguments contain any dask objects,
             set ``traverse=False`` to avoid doing this traversal.
-        resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+        resources : dict (defaults to {})
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
-        actors: bool or dict (default None)
+        actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
-        **kwargs:
+        **kwargs
             Options to pass to the graph optimize calls
 
         Returns
@@ -2816,7 +2785,7 @@ class Client:
 
         See Also
         --------
-        Client.get: Normal synchronous dask.get function
+        Client.get : Normal synchronous dask.get function
         """
         if isinstance(collections, (list, tuple, set, frozenset)):
             singleton = False
@@ -2845,13 +2814,6 @@ class Client:
             else:
                 dsk2[name] = (func, keys) + extra_args
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
-
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
 
@@ -2866,8 +2828,8 @@ class Client:
         futures_dict = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -2915,37 +2877,33 @@ class Client:
 
         Parameters
         ----------
-        collections: sequence or single dask object
+        collections : sequence or single dask object
             Collections like dask.array or dataframe or dask.value objects
-        optimize_graph: bool
+        optimize_graph : bool
             Whether or not to optimize the underlying graphs
-        workers: str, list, dict
-            Which workers can run which parts of the computation
-            If a string or list then the output collections will run on the listed
-            workers, but other sub-computations can run anywhere
-            If a dict then keys should be (tuples of) collections or
-            task keys and values should be addresses or lists.
-        allow_other_workers: bool, list
-            If True then all restrictions in workers= are considered loose
-            If a list then only the keys for the listed collections are loose
-        retries: int (default to 0)
+        workers : string or iterable of strings
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers : bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
+        retries : int (default to 0)
             Number of allowed automatic retries if computing a result fails
-        priority: Number
+        priority : Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
-        fifo_timeout: timedelta str (defaults to '60s')
+        fifo_timeout : timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
-        resources: dict (defaults to {})
-            Defines the `resources` these tasks require on the worker. Can
-            specify global resources (``{'GPU': 2}``), or per-task resources
-            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+        resources : dict (defaults to {})
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
-        actors: bool or dict (default None)
+        actors : bool or dict (default None)
             Whether these tasks should exist on the worker as stateful actors.
             Specified on a global (True/False) or per-task (``{'x': True,
             'y': False}``) basis. See :doc:`actors` for additional details.
-        **kwargs:
+        **kwargs
             Options to pass to the graph optimize calls
 
         Returns
@@ -2973,18 +2931,11 @@ class Client:
 
         names = {k for c in collections for k in flatten(c.__dask_keys__())}
 
-        restrictions, loose_restrictions = self.get_restrictions(
-            collections, workers, allow_other_workers
-        )
-
-        if not isinstance(priority, Number):
-            priority = {k: p for c, p in priority.items() for k in self._expand_key(c)}
-
         futures = self._graph_to_futures(
             dsk,
             names,
-            restrictions,
-            loose_restrictions,
+            workers=workers,
+            allow_other_workers=allow_other_workers,
             resources=resources,
             retries=retries,
             user_priority=priority,
@@ -3063,7 +3014,7 @@ class Client:
 
         Parameters
         ----------
-        filename: string
+        filename : string
             Filename of .py, .egg or .zip file to send to workers
 
         Examples
@@ -3100,9 +3051,9 @@ class Client:
 
         Parameters
         ----------
-        futures: list, optional
+        futures : list, optional
             A list of futures to balance, defaults all data
-        workers: list, optional
+        workers : list, optional
             A list of workers on which to balance, defaults to all workers
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
@@ -3127,15 +3078,15 @@ class Client:
 
         Parameters
         ----------
-        futures: list of futures
+        futures : list of futures
             Futures we wish to replicate
-        n: int, optional
+        n : int, optional
             Number of processes on the cluster on which to replicate the data.
             Defaults to all.
-        workers: list of worker addresses
+        workers : list of worker addresses
             Workers on which we want to restrict the replication.
             Defaults to all.
-        branching_factor: int, optional
+        branching_factor : int, optional
             The number of workers that can copy data in each generation
 
         Examples
@@ -3147,7 +3098,7 @@ class Client:
         >>> c.replicate([x], n=1, workers=['alice', 'bob'])  # send to one of specific workers  # doctest: +SKIP
         >>> c.replicate([x], n=1)  # reduce replications # doctest: +SKIP
 
-        See also
+        See Also
         --------
         Client.rebalance
         """
@@ -3165,7 +3116,7 @@ class Client:
 
         Parameters
         ----------
-        workers: list (optional)
+        workers : list (optional)
             A list of workers that we care about specifically.
             Leave empty to receive information about all workers.
 
@@ -3197,7 +3148,7 @@ class Client:
 
         Parameters
         ----------
-        futures: list (optional)
+        futures : list (optional)
             A list of futures, defaults to all data
 
         Examples
@@ -3233,7 +3184,7 @@ class Client:
 
         Parameters
         ----------
-        workers: list (optional)
+        workers : list (optional)
             A list of worker addresses, defaults to all
 
         Examples
@@ -3264,7 +3215,7 @@ class Client:
 
         Parameters
         ----------
-        workers: list (optional)
+        workers : list (optional)
             A list of worker addresses, defaults to all
 
         Examples
@@ -3297,9 +3248,9 @@ class Client:
 
         Parameters
         ----------
-        keys: list (optional)
+        keys : list (optional)
             A list of keys, defaults to all keys
-        summary: boolean, (optional)
+        summary : boolean, (optional)
             Summarize keys into key types
 
         Examples
@@ -3329,9 +3280,9 @@ class Client:
 
         Parameters
         ----------
-        futures: list (optional)
+        futures : list (optional)
             List of futures, defaults to all data
-        keys: list (optional)
+        keys : list (optional)
             List of key names, defaults to all data
 
         Examples
@@ -3363,24 +3314,24 @@ class Client:
 
         Parameters
         ----------
-        key: str
+        key : str
             Key prefix to select, this is typically a function name like 'inc'
             Leave as None to collect all data
-        start: time
-        stop: time
-        workers: list
+        start : time
+        stop : time
+        workers : list
             List of workers to restrict profile information
         server : bool
             If true, return the profile of the worker's administrative thread
             rather than the worker threads.
             This is useful when profiling Dask itself, rather than user code.
-        scheduler: bool
+        scheduler : bool
             If true, return the profile information from the scheduler's
             administrative thread rather than the workers.
             This is useful when profiling Dask's scheduling itself.
-        plot: boolean or string
+        plot : boolean or string
             Whether or not to return a plot object
-        filename: str
+        filename : str
             Filename to save the plot
 
         Examples
@@ -3477,7 +3428,7 @@ class Client:
 
         Parameters
         ----------
-        scheduler_file: str
+        scheduler_file : str
             Path to a write the scheduler file.
 
         Examples
@@ -3502,14 +3453,14 @@ class Client:
 
         Parameters
         ----------
-        keys: key or list
+        keys : key or list
             Key to access.  If a list then gets within a nested collection
-        default: optional
+        default : optional
             If the key does not exist then return this value instead.
             If not provided then this raises a KeyError if the key is not
             present
 
-        See also
+        See Also
         --------
         Client.set_metadata
         """
@@ -3559,7 +3510,7 @@ class Client:
 
         Parameters
         ----------
-        topic: str, list
+        topic : str, list
             Name of the topic under which to log an event. To log the same
             event under multiple topics, pass a list of topic names.
         msg
@@ -3577,7 +3528,7 @@ class Client:
 
         Parameters
         ----------
-        topic: str, optional
+        topic : str, optional
             Name of topic log to retrieve events for. If no ``topic`` is
             provided, then logs for all topics will be returned.
         """
@@ -3702,6 +3653,7 @@ class Client:
         return futures_of(futures, client=self)
 
     def start_ipython(self, *args, **kwargs):
+        """Deprecated - Method moved to start_ipython_workers"""
         raise Exception("Method moved to start_ipython_workers")
 
     async def _start_ipython_workers(self, workers):
@@ -3720,18 +3672,15 @@ class Client:
 
         Parameters
         ----------
-        workers: list (optional)
+        workers : list (optional)
             A list of worker addresses, defaults to all
-
-        magic_names: str or list(str) (optional)
+        magic_names : str or list(str) (optional)
             If defined, register IPython magics with these names for
             executing code on the workers.  If string has asterix then expand
             asterix into 0, 1, ..., n for n workers
-
-        qtconsole: bool (optional)
+        qtconsole : bool (optional)
             If True, launch a Jupyter QtConsole connected to the worker(s).
-
-        qtconsole_args: list(str) (optional)
+        qtconsole_args : list(str) (optional)
             Additional arguments to pass to the qtconsole on startup.
 
         Examples
@@ -3762,7 +3711,7 @@ class Client:
 
         See Also
         --------
-        Client.start_ipython_scheduler: start ipython on the scheduler
+        Client.start_ipython_scheduler : start ipython on the scheduler
         """
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -3802,15 +3751,13 @@ class Client:
 
         Parameters
         ----------
-        magic_name: str or None (optional)
+        magic_name : str or None (optional)
             If defined, register IPython magic with this name for
             executing code on the scheduler.
             If not defined, register %scheduler magic if IPython is running.
-
-        qtconsole: bool (optional)
+        qtconsole : bool (optional)
             If True, launch a Jupyter QtConsole connected to the worker(s).
-
-        qtconsole_args: list(str) (optional)
+        qtconsole_args : list(str) (optional)
             Additional arguments to pass to the qtconsole on startup.
 
         Examples
@@ -3830,7 +3777,7 @@ class Client:
 
         See Also
         --------
-        Client.start_ipython_workers: Start IPython on the workers
+        Client.start_ipython_workers : Start IPython on the workers
         """
         info = sync(self.loop, self.scheduler.start_ipython)
         if magic_name == "scheduler_if_ipython":
@@ -3869,92 +3816,9 @@ class Client:
             else:
                 yield stringify(kk)
 
-    @classmethod
-    def _expand_retries(cls, retries, all_keys):
-        """
-        Expand the user-provided "retries" specification
-        to a {task key: Integral} dictionary.
-        """
-        if retries and isinstance(retries, dict):
-            result = {
-                name: value
-                for key, value in retries.items()
-                for name in cls._expand_key(key)
-            }
-        elif isinstance(retries, Integral):
-            # Each task unit may potentially fail, allow retrying all of them
-            result = {name: retries for name in all_keys}
-        else:
-            raise TypeError(
-                "`retries` should be an integer or dict, got %r" % (type(retries))
-            )
-        return keymap(stringify, result)
-
-    def _expand_resources(cls, resources, all_keys):
-        """
-        Expand the user-provided "resources" specification
-        to a {task key: {resource name: Number}} dictionary.
-        """
-        # Resources can either be a single dict such as {'GPU': 2},
-        # indicating a requirement for all keys, or a nested dict
-        # such as {'x': {'GPU': 1}, 'y': {'SSD': 4}} indicating
-        # per-key requirements
-        if not isinstance(resources, dict):
-            raise TypeError("`resources` should be a dict, got %r" % (type(resources)))
-
-        per_key_reqs = {}
-        global_reqs = {}
-        all_keys = list(all_keys)
-        for k, v in resources.items():
-            if isinstance(v, dict):
-                # It's a per-key requirement
-                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
-            else:
-                # It's a global requirement
-                global_reqs.update((kk, {k: v}) for kk in all_keys)
-
-        if global_reqs and per_key_reqs:
-            raise ValueError(
-                "cannot have both per-key and all-key requirements "
-                "in resources dict %r" % (resources,)
-            )
-        return global_reqs or per_key_reqs
-
-    @classmethod
-    def get_restrictions(cls, collections, workers, allow_other_workers):
-        """ Get restrictions from inputs to compute/persist """
-        if isinstance(workers, (str, tuple, list)):
-            workers = {tuple(collections): workers}
-        if isinstance(workers, dict):
-            restrictions = {}
-            for colls, ws in workers.items():
-                if isinstance(ws, str):
-                    ws = [ws]
-                if dask.is_dask_collection(colls):
-                    keys = flatten(colls.__dask_keys__())
-                elif isinstance(colls, str):
-                    keys = [colls]
-                else:
-                    keys = list(
-                        {k for c in flatten(colls) for k in flatten(c.__dask_keys__())}
-                    )
-                restrictions.update({k: ws for k in keys})
-        else:
-            restrictions = {}
-
-        if allow_other_workers is True:
-            loose_restrictions = list(restrictions)
-        elif allow_other_workers:
-            loose_restrictions = list(
-                {k for c in flatten(allow_other_workers) for k in c.__dask_keys__()}
-            )
-        else:
-            loose_restrictions = []
-
-        return restrictions, loose_restrictions
-
     @staticmethod
     def collections_to_dsk(collections, *args, **kwargs):
+        """Convert many collections into a single dask graph, after optimization"""
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(
@@ -3978,22 +3842,22 @@ class Client:
 
         Parameters
         ----------
-        start: Number or string
+        start : Number or string
             When you want to start recording
             If a number it should be the result of calling time()
             If a string then it should be a time difference before now,
             like '60s' or '500 ms'
-        stop: Number or string
+        stop : Number or string
             When you want to stop recording
-        count: int
+        count : int
             The number of desired records, ignored if both start and stop are
             specified
-        plot: boolean, str
+        plot : boolean, str
             If true then also return a Bokeh figure
             If plot == 'save' then save the figure to a file
-        filename: str (optional)
+        filename : str (optional)
             The filename to save to if you set ``plot='save'``
-        bokeh_resources: bokeh.resources.Resources (optional)
+        bokeh_resources : bokeh.resources.Resources (optional)
             Specifies if the resource component is INLINE or CDN
 
         Examples
@@ -4025,7 +3889,7 @@ class Client:
 
         See Also
         --------
-        get_task_stream: a context manager version of this method
+        get_task_stream : a context manager version of this method
         """
         return self.sync(
             self._get_task_stream,
@@ -4120,12 +3984,12 @@ class Client:
 
         Parameters
         ----------
-        plugin: WorkerPlugin
+        plugin : WorkerPlugin
             The plugin object to pass to the workers
-        name: str, optional
+        name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
-        **kwargs: optional
+        **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
 
@@ -4236,10 +4100,10 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
     Parameters
     ----------
-    fs: list of futures
-    timeout: number, optional
+    fs : list of futures
+    timeout : number, optional
         Time in seconds after which to raise a ``dask.distributed.TimeoutError``
-    return_when: str, optional
+    return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
     Returns
@@ -4465,7 +4329,7 @@ class as_completed:
 
         Parameters
         ----------
-        block: bool, optional
+        block : bool, optional
             If True then wait until we have some result, otherwise return
             immediately, even with an empty list.  Defaults to True.
 
@@ -4562,7 +4426,7 @@ def futures_of(o, client=None):
 
     Parameters
     ----------
-    o: collection
+    o : collection
         A possibly nested collection of Dask objects
 
     Examples
@@ -4618,7 +4482,7 @@ def fire_and_forget(obj):
 
     Parameters
     ----------
-    obj: Future, list, dict, dask collection
+    obj : Future, list, dict, dask collection
         The futures that you want to run at least once
 
     Examples

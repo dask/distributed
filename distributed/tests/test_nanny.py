@@ -16,6 +16,7 @@ from tornado.ioloop import IOLoop
 import dask
 from distributed.diagnostics import SchedulerPlugin
 from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
+from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -77,7 +78,7 @@ async def test_str(s, a, b):
     assert str(a.nthreads) in repr(a)
 
 
-@gen_cluster(nthreads=[], timeout=20, client=True)
+@gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
     first_dir = n.worker_dir
@@ -409,6 +410,7 @@ async def test_local_directory(s):
             w = await Nanny(s.address)
             assert w.local_directory.startswith(fn)
             assert "dask-worker-space" in w.local_directory
+            assert w.process.worker_dir.count("dask-worker-space") == 1
             await w.close()
 
 
@@ -568,6 +570,7 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:

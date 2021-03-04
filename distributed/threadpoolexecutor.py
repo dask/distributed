@@ -110,7 +110,7 @@ def secede(adjust=True):
 
     See Also
     --------
-    rejoin: rejoin the thread pool
+    rejoin : rejoin the thread pool
     """
     thread_state.proceed = False
     with threads_lock:
@@ -127,7 +127,7 @@ def rejoin():
 
     See Also
     --------
-    secede: leave the thread pool
+    secede : leave the thread pool
     """
     thread = threading.current_thread()
     event = threading.Event()
