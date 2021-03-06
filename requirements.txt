@@ -1,9 +1,6 @@
 click >= 6.6
 cloudpickle >= 1.5.0
-# TODO: Update our dask version requirement to
-# the latest dask release before releasing distributed
-# xref https://github.com/dask/distributed/pull/4489
-dask @ git+https://github.com/dask/dask.git@master
+dask >= 2021.03.0
 msgpack >= 0.6.0
 psutil >= 5.0
 sortedcontainers !=2.0.0, !=2.0.1

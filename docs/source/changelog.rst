@@ -1,6 +1,41 @@
 Changelog
 =========
 
+2021.03.0
+---------
+
+Released on March 5, 2021
+
+.. note::
+
+    This is the first release with support for Python 3.9 and the
+    last release with support for Python 3.6
+
+- ``tcp.write()``: cast ``memoryview`` to byte itemsize (:pr:`4555`) `Mads R. B. Kristensen`_
+- Refcount the ``thread_state.asynchronous`` flag (:pr:`4557`) `Mads R. B. Kristensen`_
+- Python 3.9 (:pr:`4460`) `crusaderky`_
+- Better bokeh defaults for dashboard (:pr:`4554`) `Benjamin Zaitlen`_
+- Expose system monitor dashboard as individual plot for lab extension (:pr:`4540`) `Jacob Tomlinson`_
+- Pass on original temp dir from nanny to worker (:pr:`4549`) `Martin Durant`_
+- Serialize and split (:pr:`4541`) `Mads R. B. Kristensen`_
+- Use the new HLG pack/unpack API in Dask (:pr:`4489`) `Mads R. B. Kristensen`_
+- Handle annotations for culled tasks (:pr:`4544`) `Tom Augspurger`_
+- Make sphinx autosummary and autoclass consistent (:pr:`4367`) `Casey Clements`_
+- Move ``_transition*`` to ``SchedulerState`` (:pr:`4545`) `jakirkham`_
+- Migrate from travis to GitHub actions (:pr:`4504`) `crusaderky`_
+- Move ``new_task`` to ``SchedulerState`` (:pr:`4527`) `jakirkham`_
+- Batch more Scheduler sends (:pr:`4526`) `jakirkham`_
+- ``transition_memory_released`` and ``get_nbytes()`` optimizations (:pr:`4516`) `jakirkham`_
+- Pin ``black`` pre-commit (:pr:`4533`) `James Bourbeau`_
+- Read & write all frames in one pass (:pr:`4506`) `jakirkham`_
+- Skip ``stream.write`` call for empty frames (:pr:`4507`) `jakirkham`_
+- Prepend frame metadata header (:pr:`4505`) `jakirkham`_
+- ``transition_processing_memory`` optimizations, etc. (:pr:`4487`) `jakirkham`_
+- Attempt to get client from worker in ``Queue`` and ``Variable`` (:pr:`4490`) `James Bourbeau`_
+- Use ``main`` branch for ``zict`` (:pr:`4499`) `jakirkham`_
+- Use a callback to close TCP Comms, rather than check every time (:pr:`4453`) `Matthew Rocklin`_
+
+
 2021.02.0
 ---------
 
@@ -2193,3 +2228,4 @@ significantly without many new features.
 .. _`Bruno Pagani`: https://github.com/ArchangeGabriel
 .. _`selshowk`: https://github.com/selshowk
 .. _`Ray Bell`: https://github.com/raybellwaves
+.. _`Casey Clements`: https://github.com/caseyclements
