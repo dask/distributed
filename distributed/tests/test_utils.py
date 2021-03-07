@@ -10,7 +10,6 @@ import sys
 from time import sleep
 import traceback
 
-import numpy as np
 import pytest
 from tornado.ioloop import IOLoop
 
@@ -271,6 +270,7 @@ def test_ensure_bytes():
 
 
 def test_ensure_bytes_ndarray():
+    np = pytest.importorskip("numpy")
     result = ensure_bytes(np.arange(12))
     assert isinstance(result, bytes)
 
@@ -283,6 +283,8 @@ def test_ensure_bytes_pyarrow_buffer():
 
 
 def test_nbytes():
+    np = pytest.importorskip("numpy")
+
     def check(obj, expected):
         assert nbytes(obj) == expected
         assert nbytes(memoryview(obj)) == expected

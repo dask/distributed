@@ -1,7 +1,8 @@
 from zlib import crc32
 
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
 
 from distributed.protocol import (
     serialize,

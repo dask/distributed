@@ -37,7 +37,7 @@ async def test_speed(c, s, a, b):
             #     print(a, b, i)
         return n
 
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     x = np.random.random(1000)
 

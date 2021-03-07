@@ -3,9 +3,10 @@ import copy
 import pickle
 
 import msgpack
-import numpy as np
 import pytest
 from tlz import identity
+
+np = pytest.importorskip("numpy")
 
 from dask.utils_test import inc
 
