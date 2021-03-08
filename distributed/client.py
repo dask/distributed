@@ -156,6 +156,8 @@ class Future(WrappedKey):
         Client that should own this future.  Defaults to _get_global_client()
     inform: bool
         Do we inform the scheduler that we need an update on this future
+    state: FutureState?
+        The state of the future?
 
     Examples
     --------
@@ -212,30 +214,44 @@ class Future(WrappedKey):
 
     @property
     def executor(self):
+        """The executor
+        """
         return self.client
 
     @property
     def status(self):
+        """The status
+        """
         return self._state.status
 
     def done(self):
-        """ 
-        Is the computation complete?
+        """Is the computation complete?
         
         Returns
         -------
+        _: bool
+            True if the computation is complete, otherwise False
         """
         return self._state.done()
 
     def result(self, timeout=None):
         """Wait until computation completes, gather result to local process.
+        
+        Parameters
+        ----------
+        timeout: int
+            The amount of time in seconds to wait before timing out
 
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        Raises
+        ------
+        dask.distributed.TimeoutError
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
+
         Returns
         -------
-        result: 
-            The result
+        result: future?
+            The result of the computation
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -278,12 +294,18 @@ class Future(WrappedKey):
 
     def exception(self, timeout=None, **kwargs):
         """Return the exception of a failed task
-
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        
+        Parameters
+        ----------
+        timeout: int
+            The amount of time in seconds to wait before timing out
 
         Returns
         -------
+        _: Exception
+            The exception that was raised
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
 
         See Also
         --------
@@ -293,6 +315,11 @@ class Future(WrappedKey):
 
     def add_done_callback(self, fn):
         """Call callback on future when callback has finished
+
+        Parameters
+        ----------
+        fn: callable
+            The method or function to be called
 
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
