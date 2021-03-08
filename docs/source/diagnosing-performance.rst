@@ -39,7 +39,7 @@ The main way to observe these times is with the task stream plot on the
 scheduler's ``/status`` page where the colors of the bars correspond to the
 colors listed above.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/bokeh-task-stream.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/bokeh-task-stream.gif
    :alt: Dask task stream
    :width: 50%
 
@@ -73,7 +73,7 @@ any of the bars in the profile will zoom the user into just that section, as is
 typical with most profiling tools.  There is a timeline at the bottom of the
 page to allow users to select different periods in time.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/daskboard-profile.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/daskboard-profile.gif
    :alt: Dask profiler
    :width: 70%
 
