@@ -407,7 +407,7 @@ class SpecCluster(Cluster):
             for future in self._futures:
                 await future
             async with self._lock:
-                with suppress(CommClosedError):
+                with suppress(CommClosedError, OSError):
                     if self.scheduler_comm:
                         await self.scheduler_comm.close(close_workers=True)
                     else:
