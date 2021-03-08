@@ -1037,7 +1037,7 @@ async def check_deserialize(addr):
         assert isinstance(ser, Serialized)
         assert deserialize(ser.header, ser.frames) == 456
 
-        assert isinstance(to_ser, list)
+        assert isinstance(to_ser, (tuple, list)) and len(to_ser) == 1
         (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
         # or not (it's a transport-specific optimization)
@@ -1051,6 +1051,8 @@ async def check_deserialize(addr):
         expected_msg = msg.copy()
         expected_msg["ser"] = 456
         expected_msg["to_ser"] = [123]
+        # Notice, we allow "to_ser" to be a tuple or a list
+        assert list(out_value.pop("to_ser")) == expected_msg.pop("to_ser")
         assert out_value == expected_msg
 
     await check_listener_deserialize(addr, False, msg, check_out_false)
@@ -1061,13 +1063,14 @@ async def check_deserialize(addr):
 
     # Test with long bytestrings, large enough to be transferred
     # as a separate payload
+    # TODO: currently bytestrings are not transferred as a separate payload
 
     _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 8 MB
 
     msg = {
         "op": "update",
         "x": _uncompressible,
-        "to_ser": [to_serialize(_uncompressible)],
+        "to_ser": (to_serialize(_uncompressible),),
         "ser": Serialized(*serialize(_uncompressible)),
     }
     msg_orig = msg.copy()
@@ -1089,7 +1092,7 @@ async def check_deserialize(addr):
         else:
             assert isinstance(ser, Serialized)
             assert deserialize(ser.header, ser.frames) == _uncompressible
-            assert isinstance(to_ser, list)
+            assert isinstance(to_ser, tuple) and len(to_ser) == 1
             (to_ser,) = to_ser
             # The to_serialize() value could have been actually serialized
             # or not (it's a transport-specific optimization)
