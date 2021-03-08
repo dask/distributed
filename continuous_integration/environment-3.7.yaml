@@ -40,6 +40,7 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask
+      # TODO: Point back to dask/dask before merging
+      - git+https://github.com/jrbourbeau/dask.git@drop-py3.6
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
