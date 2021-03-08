@@ -26,8 +26,9 @@ def test_compression_2():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
-    header, payload = dumps(x.tobytes())
-    assert not header or not msgpack.loads(header, encoding="utf8").get("compression")
+    msg = dumps(to_serialize(x.tobytes()))
+    compression = msgpack.loads(msg[1]).get("compression")
+    assert all(c is None for c in compression)
 
 
 def test_compression_without_deserialization():
@@ -87,13 +88,12 @@ def test_maybe_compress_sample():
 
 def test_large_bytes():
     for tp in (bytes, bytearray):
-        msg = {"x": tp(b"0" * 1000000), "y": 1}
+        msg = {"x": to_serialize(tp(b"0" * 1000000)), "y": 1}
         frames = dumps(msg)
+        msg["x"] = msg["x"].data
         assert loads(frames) == msg
         assert len(frames[0]) < 1000
         assert len(frames[1]) < 1000
-
-        assert loads(frames, deserialize=False) == msg
 
 
 @pytest.mark.slow

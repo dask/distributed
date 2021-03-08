@@ -1,14 +1,10 @@
-from functools import reduce
 import logging
-import operator
-
 import msgpack
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import (
     Serialize,
     Serialized,
-    extract_serialize,
     msgpack_decode_default,
     msgpack_encode_default,
     merge_and_deserialize,
@@ -20,78 +16,59 @@ from .utils import msgpack_opts
 logger = logging.getLogger(__name__)
 
 
-def dumps(msg, serializers=None, on_error="message", context=None):
-    """ Transform Python message to bytestream suitable for communication """
-    try:
-        data = {}
+def dumps(msg, serializers=None, on_error="message", context=None) -> list:
+    """Transform Python message to bytestream suitable for communication
 
+    Developer Notes
+    ---------------
+    The approach here is to use `msgpack.dumps()` to serialize `msg` and
+    write the result to the first output frame. If `msgpack.dumps()`
+    encounters an object it cannot serialize like a NumPy array, it is handled
+    out-of-band by `_encode_default()` and appended to the output frame list.
+    """
+    try:
         if context and "compression" in context:
             compress_opts = {"compression": context["compression"]}
         else:
             compress_opts = {}
 
-        # Only lists and dicts can contain serialized values
-        if isinstance(msg, (list, dict)):
-            msg, data, bytestrings = extract_serialize(msg)
-        small_header, small_payload = dumps_msgpack(msg, **compress_opts)
+        def _inplace_compress_frames(header, frames):
+            compression = list(header.get("compression", [None] * len(frames)))
 
-        if not data:  # fast path without serialized data
-            return small_header, small_payload
+            for i in range(len(frames)):
+                if compression[i] is None:
+                    compression[i], frames[i] = maybe_compress(
+                        frames[i], **compress_opts
+                    )
 
-        pre = {
-            key: (value.header, value.frames)
-            for key, value in data.items()
-            if type(value) is Serialized
-        }
+            header["compression"] = tuple(compression)
 
-        data = {
-            key: serialize_and_split(
-                value.data, serializers=serializers, on_error=on_error, context=context
-            )
-            for key, value in data.items()
-            if type(value) is Serialize
-        }
+        frames = [None]
 
-        header = {"headers": {}, "keys": [], "bytestrings": list(bytestrings)}
+        def _encode_default(obj):
+            typ = type(obj)
+            if typ is Serialize or typ is Serialized:
+                if typ is Serialize:
+                    obj = obj.data
+                offset = len(frames)
+                sub_header, sub_frames = serialize_and_split(
+                    obj, serializers=serializers, on_error=on_error, context=context
+                )
+                sub_header["num-sub-frames"] = len(sub_frames)
+                _inplace_compress_frames(sub_header, sub_frames)
+                frames.append(
+                    msgpack.dumps(
+                        sub_header, default=msgpack_encode_default, use_bin_type=True
+                    )
+                )
+                frames.extend(sub_frames)
+                return {"__Serialized__": offset}
+            else:
+                return msgpack_encode_default(obj)
 
-        out_frames = []
+        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        return frames
 
-        for key, (head, frames) in data.items():
-            # Compress frames that are not yet compressed
-            out_compression = []
-            for frame, compression in zip(
-                frames, head.get("compression") or [None] * len(frames)
-            ):
-                if compression is None:
-                    compression, frame = maybe_compress(frame, **compress_opts)
-
-                out_compression.append(compression)
-                out_frames.append(frame)
-
-            head["compression"] = out_compression
-            head["count"] = len(frames)
-            header["headers"][key] = head
-            header["keys"].append(key)
-
-        for key, (head, frames) in pre.items():
-            head["count"] = len(frames)
-            header["headers"][key] = head
-            header["keys"].append(key)
-            out_frames.extend(frames)
-
-        for i, frame in enumerate(out_frames):
-            if type(frame) is memoryview and frame.strides != (1,):
-                try:
-                    frame = frame.cast("B")
-                except TypeError:
-                    frame = frame.tobytes()
-                out_frames[i] = frame
-
-        return [
-            small_header,
-            small_payload,
-            msgpack.dumps(header, use_bin_type=True),
-        ] + out_frames
     except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise
@@ -99,53 +76,35 @@ def dumps(msg, serializers=None, on_error="message", context=None):
 
 def loads(frames, deserialize=True, deserializers=None):
     """ Transform bytestream back into Python value """
-    frames = frames[::-1]  # reverse order to improve pop efficiency
-    if not isinstance(frames, list):
-        frames = list(frames)
+
     try:
-        small_header = frames.pop()
-        small_payload = frames.pop()
-        msg = loads_msgpack(small_header, small_payload)
-        if not frames:
-            return msg
 
-        header = frames.pop()
-        header = msgpack.loads(header, use_list=False, **msgpack_opts)
-        keys = header["keys"]
-        headers = header["headers"]
-        bytestrings = set(header["bytestrings"])
-
-        for key in keys:
-            head = headers[key]
-            count = head["count"]
-            if count:
-                fs = frames[-count::][::-1]
-                del frames[-count:]
-            else:
-                fs = []
-
-            if deserialize or key in bytestrings:
-                if "compression" in head:
-                    fs = decompress(head, fs)
-                value = merge_and_deserialize(head, fs, deserializers=deserializers)
-            else:
-                value = Serialized(head, fs)
-
-            def put_in(keys, coll, val):
-                """Inverse of get_in, but does type promotion in the case of lists"""
-                if keys:
-                    holder = reduce(operator.getitem, keys[:-1], coll)
-                    if isinstance(holder, tuple):
-                        holder = list(holder)
-                        coll = put_in(keys[:-1], coll, holder)
-                    holder[keys[-1]] = val
+        def _decode_default(obj):
+            offset = obj.get("__Serialized__", 0)
+            if offset > 0:
+                sub_header = msgpack.loads(
+                    frames[offset],
+                    object_hook=msgpack_decode_default,
+                    use_list=False,
+                    **msgpack_opts
+                )
+                offset += 1
+                sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                if deserialize:
+                    if "compression" in sub_header:
+                        sub_frames = decompress(sub_header, sub_frames)
+                    return merge_and_deserialize(
+                        sub_header, sub_frames, deserializers=deserializers
+                    )
                 else:
-                    coll = val
-                return coll
+                    return Serialized(sub_header, sub_frames)
+            else:
+                return msgpack_decode_default(obj)
 
-            msg = put_in(key, msg, value)
+        return msgpack.loads(
+            frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
+        )
 
-        return msg
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)
         raise
