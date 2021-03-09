@@ -1,6 +1,5 @@
 import asyncio
 from collections import defaultdict, deque
-from contextlib import suppress
 import logging
 import threading
 import weakref
@@ -421,8 +420,7 @@ class Sub:
             try:
                 await asyncio.wait_for(_(), timeout2)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 fails here sometimes
-                    self.condition.release()
+                self.condition.release()
 
         return self.buffer.popleft()
 

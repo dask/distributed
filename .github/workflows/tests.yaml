@@ -10,11 +10,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.6", "3.7", "3.8", "3.9"]
-        exclude:
-          # Several failures; Python 3.6 to be phased out soon
-          - os: macos-latest
-            python-version: "3.6"
+        python-version: ["3.7", "3.8", "3.9"]
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
@@ -23,6 +19,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
 
       - name: Setup Conda Environment
         uses: conda-incubator/setup-miniconda@v2
