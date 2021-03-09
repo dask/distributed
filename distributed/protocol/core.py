@@ -85,7 +85,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_header = msgpack.loads(
                     frames[offset],
                     object_hook=msgpack_decode_default,
-                    use_list=False,
+                    use_list=True,
                     **msgpack_opts
                 )
                 offset += 1
@@ -102,7 +102,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 return msgpack_decode_default(obj)
 
         return msgpack.loads(
-            frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
+            frames[0], object_hook=_decode_default, use_list=True, **msgpack_opts
         )
 
     except Exception:
@@ -142,7 +142,7 @@ def loads_msgpack(header, payload):
     header = bytes(header)
     if header:
         header = msgpack.loads(
-            header, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+            header, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
         )
     else:
         header = {}
@@ -158,5 +158,5 @@ def loads_msgpack(header, payload):
             )
 
     return msgpack.loads(
-        payload, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+        payload, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
     )
