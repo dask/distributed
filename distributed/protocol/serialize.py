@@ -113,6 +113,9 @@ def msgpack_decode_default(obj):
     if "__Set__" in obj:
         return set(obj["values"])
 
+    if "__Tuple__" in obj:
+        return tuple(obj["values"])
+
     if "__Serialized__" in obj:
         # Notice, the data here is marked a Serialized rather than deserialized. This
         # is because deserialization requires Pickle which the Scheduler cannot run
@@ -142,6 +145,9 @@ def msgpack_encode_default(obj):
 
     if isinstance(obj, set):
         return {"__Set__": True, "values": list(obj)}
+
+    if isinstance(obj, tuple):
+        return {"__Tuple__": True, "values": list(obj)}
 
     return obj
 
