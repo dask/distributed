@@ -21,6 +21,7 @@ from distributed.protocol import (
     serialize_bytes,
     deserialize_bytes,
     serialize_bytelist,
+    deserialize_bytelist,
     register_serialization_family,
     dask_serialize,
     dumps,
@@ -234,8 +235,10 @@ def test_serialize_list_compress():
     L = serialize_bytelist(x)
     assert sum(map(nbytes, L)) < x.nbytes / 2
 
-    b = b"".join(L)
-    y = deserialize_bytes(b)
+    y = deserialize_bytelist(L)
+    assert (x == y).all()
+
+    y = deserialize_bytes(L)
     assert (x == y).all()
 
 
