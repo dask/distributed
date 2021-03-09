@@ -111,7 +111,7 @@ def msgpack_decode_default(obj):
         return getattr(typ, obj["name"])
 
     if "__Set__" in obj:
-        return set(obj["as-list"])
+        return set(obj["values"])
 
     if "__Serialized__" in obj:
         # Notice, the data here is marked a Serialized rather than deserialized. This
@@ -141,7 +141,7 @@ def msgpack_encode_default(obj):
         }
 
     if isinstance(obj, set):
-        return {"__Set__": True, "as-list": list(obj)}
+        return {"__Set__": True, "values": list(obj)}
 
     return obj
 
