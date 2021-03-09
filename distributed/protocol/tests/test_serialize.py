@@ -453,8 +453,14 @@ def test_check_dask_serializable(data, is_serializable):
     "serializers",
     [["msgpack"], ["pickle"], ["msgpack", "pickle"], ["pickle", "msgpack"]],
 )
-def test_serialize_lists(serializers):
-    data_in = ["a", 2, "c", None, "e", 6]
+@pytest.mark.parametrize(
+    "data_in",
+    [
+        ("a", 2, "c", None, "e", 6),
+        ["a", 2, "c", None, "e", 6],
+    ],
+)
+def test_serialize_sequences(serializers, data_in):
     header, frames = serialize(data_in, serializers=serializers)
     data_out = deserialize(header, frames)
 
