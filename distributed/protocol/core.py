@@ -58,7 +58,10 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                 _inplace_compress_frames(sub_header, sub_frames)
                 frames.append(
                     msgpack.dumps(
-                        sub_header, default=msgpack_encode_default, use_bin_type=True
+                        sub_header,
+                        default=msgpack_encode_default,
+                        strict_types=True,
+                        use_bin_type=True,
                     )
                 )
                 frames.extend(sub_frames)
@@ -66,7 +69,9 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
             else:
                 return msgpack_encode_default(obj)
 
-        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        frames[0] = msgpack.dumps(
+            msg, default=_encode_default, strict_types=True, use_bin_type=True
+        )
         return frames
 
     except Exception:
@@ -119,14 +124,16 @@ def dumps_msgpack(msg, compression=None):
         loads_msgpack
     """
     header = {}
-    payload = msgpack.dumps(msg, default=msgpack_encode_default, use_bin_type=True)
+    payload = msgpack.dumps(
+        msg, default=msgpack_encode_default, strict_types=True, use_bin_type=True
+    )
 
     fmt, payload = maybe_compress(payload, compression=compression)
     if fmt:
         header["compression"] = fmt
 
     if header:
-        header_bytes = msgpack.dumps(header, use_bin_type=True)
+        header_bytes = msgpack.dumps(header, strict_types=True, use_bin_type=True)
     else:
         header_bytes = b""
 
