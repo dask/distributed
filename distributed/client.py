@@ -141,8 +141,8 @@ class Future(WrappedKey):
         Client that should own this future.  Defaults to _get_global_client()
     inform: bool
         Do we inform the scheduler that we need an update on this future
-    state: FutureState?
-        The state of the future?
+    state: FutureState
+        The state of the future
 
     Examples
     --------
@@ -199,22 +199,32 @@ class Future(WrappedKey):
 
     @property
     def executor(self):
-        """The executor
+        """ Returns the executor, which is the client. 
+        
+        Returns
+        -------
+        Client
+            The executor
         """
         return self.client
 
     @property
     def status(self):
-        """The status
+        """Returns the status 
+
+        Returns
+        -------
+        str
+            The status
         """
         return self._state.status
 
     def done(self):
-        """Is the computation complete?
+        """Returns whether or not the computation completed.
         
         Returns
         -------
-        _: bool
+        bool
             True if the computation is complete, otherwise False
         """
         return self._state.done()
@@ -235,8 +245,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        result: future?
-            The result of the computation
+        result: Future
+            The Future that contains the result of the computation
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -287,7 +297,7 @@ class Future(WrappedKey):
 
         Returns
         -------
-        _: Exception
+        Exception
             The exception that was raised
             If *timeout* seconds are elapsed before returning, a
             ``dask.distributed.TimeoutError`` is raised.
@@ -301,16 +311,16 @@ class Future(WrappedKey):
     def add_done_callback(self, fn):
         """Call callback on future when callback has finished
 
-        Parameters
-        ----------
-        fn: callable
-            The method or function to be called
-
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
         errs, or is cancelled
 
         The callback is executed in a separate thread.
+
+        Parameters
+        ----------
+        fn: callable
+            The method or function to be called
         """
         cls = Future
         if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
@@ -333,10 +343,12 @@ class Future(WrappedKey):
         )
 
     def cancel(self, **kwargs):
-        """Cancel request to run this future
+        """Cancel the request to run this future
 
         Returns
         -------
+        Future
+            The Future object that was canceled
 
         See Also
         --------
@@ -349,6 +361,8 @@ class Future(WrappedKey):
 
         Returns
         -------
+        Future
+            The Future object that was retried
 
         See Also
         --------
@@ -361,8 +375,8 @@ class Future(WrappedKey):
 
         Returns
         -------
-        _ : bool
-            True if the status is 'canceled', otherwise False
+        bool
+            True if the future was 'cancelled', otherwise False
         """
         return self._state.status == "cancelled"
 
@@ -380,8 +394,12 @@ class Future(WrappedKey):
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
 
-        If *timeout* seconds are elapsed before returning, a
-        ``dask.distributed.TimeoutError`` is raised.
+        Parameters
+        ----------
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``  
+            If *timeout* seconds are elapsed before returning, a
+            ``dask.distributed.TimeoutError`` is raised.
 
         Examples
         --------
@@ -392,6 +410,8 @@ class Future(WrappedKey):
 
         Returns
         -------
+        Future
+            The Future that contains the traceback
 
         See Also
         --------
@@ -401,11 +421,22 @@ class Future(WrappedKey):
 
     @property
     def type(self):
+        """ Returns the type """
         return self._state.type
 
     def release(self, _in_destructor=False):
-        # NOTE: this method can be called from different threads
-        # (see e.g. Client.get() or Future.__del__())
+        """
+        
+        Parameters
+        ----------
+        _in_destructor: bool
+            Not used
+
+        Notes
+        -----
+        This method can be called from different threads
+        (see e.g. Client.get() or Future.__del__())
+        """
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
