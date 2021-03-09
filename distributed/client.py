@@ -808,6 +808,23 @@ class Client:
 
     @property
     def dashboard_link(self):
+        """Link to the scheduler's dashboard.
+
+        Returns
+        -------
+        str
+            Dashboard URL.
+
+        Examples
+        --------
+        Opening the dashboard in your default web browser:
+
+        >>> import webbrowser
+        >>> from distributed import Client
+        >>> client = Client()
+        >>> webbrowser.open(client.dashboard_link)
+
+        """
         try:
             return self.cluster.dashboard_link
         except AttributeError:
