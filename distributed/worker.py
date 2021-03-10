@@ -18,6 +18,7 @@ import sys
 import uuid
 import warnings
 import weakref
+import traceback
 
 import dask
 from dask.core import istask
@@ -2672,11 +2673,15 @@ class Worker(ServerNode):
                         "Function:  %s\n"
                         "args:      %s\n"
                         "kwargs:    %s\n"
-                        "Exception: %s\n",
+                        "Exception: %s\n"
+                        "Traceback: %s\n",
                         str(funcname(function))[:1000],
                         convert_args_to_str(args2, max_len=1000),
                         convert_kwargs_to_str(kwargs2, max_len=1000),
                         repr(result["exception"].data),
+                        "".join(traceback.format_tb(result["traceback"].data))
+                        if result["traceback"] is not None
+                        else "None",
                     )
                     self.transition(ts, "error")
 
