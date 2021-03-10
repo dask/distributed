@@ -1,3 +1,4 @@
+from tornado import gen
 from tornado.ioloop import IOLoop
 
 
@@ -50,10 +51,13 @@ def install_signal_handlers(loop=None, cleanup=None):
     old_handlers = {}
 
     def handle_signal(sig, frame):
-        async def cleanup_and_stop():
+        @gen.coroutine
+        def cleanup_and_stop():
+            # TODO: This breaks when changed to async / await.
+            # See https://github.com/dask/distributed/pull/3332
             try:
                 if cleanup is not None:
-                    await cleanup(sig)
+                    yield cleanup(sig)
             finally:
                 loop.stop()
 

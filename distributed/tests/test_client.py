@@ -14,6 +14,7 @@ import sys
 import threading
 from threading import Semaphore
 from time import sleep
+import signal
 import traceback
 import warnings
 import weakref
@@ -3613,6 +3614,7 @@ def test_reconnect(loop):
 
         x = c.submit(inc, 1)
         assert x.result() == 2
+        s.send_signal(signal.SIGKILL)
 
     start = time()
     while c.status != "connecting":

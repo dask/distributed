@@ -206,7 +206,10 @@ def main(
     )
     logger.info("-" * 47)
 
-    install_signal_handlers(loop)
+    async def on_signal(signum):
+        await scheduler.close()
+
+    install_signal_handlers(loop, cleanup=on_signal)
 
     async def run():
         await scheduler
@@ -216,7 +219,6 @@ def main(
         loop.run_sync(run)
     finally:
         scheduler.stop()
-
         logger.info("End scheduler at %r", scheduler.address)
 
 
