@@ -5682,7 +5682,7 @@ class Scheduler(SchedulerState, ServerNode):
         workers: list (optional)
             List of worker addresses to retire.
             If not provided we call ``workers_to_close`` which finds a good set
-        workers_names: list (optional)
+        names: list (optional)
             List of worker names to retire.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
@@ -5710,30 +5710,31 @@ class Scheduler(SchedulerState, ServerNode):
         with log_errors():
             async with self._lock if lock else empty_context:
                 if names is not None:
+                    if workers is not None:
+                        raise TypeError("names and workers are mutually exclusive")
                     if names:
                         logger.info("Retire worker names %s", names)
                     names = set(map(str, names))
-                    workers = [
+                    workers = {
                         ws._address
                         for ws in parent._workers_dv.values()
                         if str(ws._name) in names
-                    ]
-                if workers is None:
+                    }
+                elif workers is None:
                     while True:
                         try:
                             workers = self.workers_to_close(**kwargs)
-                            if workers:
-                                workers = await self.retire_workers(
-                                    workers=workers,
-                                    remove=remove,
-                                    close_workers=close_workers,
-                                    lock=False,
-                                )
-                                return workers
-                            else:
+                            if not workers:
                                 return {}
+                            return await self.retire_workers(
+                                workers=workers,
+                                remove=remove,
+                                close_workers=close_workers,
+                                lock=False,
+                            )
                         except KeyError:  # keys left during replicate
                             pass
+
                 workers = {
                     parent._workers_dv[w] for w in workers if w in parent._workers_dv
                 }
@@ -5745,28 +5746,27 @@ class Scheduler(SchedulerState, ServerNode):
                 keys = set.union(*[w.has_what for w in workers])
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
-                other_workers = set(parent._workers_dv.values()) - workers
                 if keys:
-                    if other_workers:
-                        logger.info("Moving %d keys to other workers", len(keys))
-                        await self.replicate(
-                            keys=keys,
-                            workers=[ws._address for ws in other_workers],
-                            n=1,
-                            delete=False,
-                            lock=False,
-                        )
-                    else:
+                    other_workers = set(parent._workers_dv.values()) - workers
+                    if not other_workers:
                         return {}
+                    logger.info("Moving %d keys to other workers", len(keys))
+                    await self.replicate(
+                        keys=keys,
+                        workers=[ws._address for ws in other_workers],
+                        n=1,
+                        delete=False,
+                        lock=False,
+                    )
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
-                if close_workers and worker_keys:
+                if close_workers:
                     await asyncio.gather(
-                        *[self.close_worker(worker=w, safe=True) for w in worker_keys]
+                        *(self.close_worker(worker=w, safe=True) for w in worker_keys)
                     )
                 if remove:
                     await asyncio.gather(
-                        *[self.remove_worker(address=w, safe=True) for w in worker_keys]
+                        *(self.remove_worker(address=w, safe=True) for w in worker_keys)
                     )
 
                 self.log_event(

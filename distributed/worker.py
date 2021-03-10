@@ -2659,26 +2659,25 @@ class Worker(ServerNode):
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
+            elif isinstance(result.pop("actual-exception"), Reschedule):
+                self.batched_stream.send({"op": "reschedule", "key": ts.key})
+                self.transition(ts, "rescheduled", report=False)
+                self.release_key(ts.key, report=False)
             else:
-                if isinstance(result.pop("actual-exception"), Reschedule):
-                    self.batched_stream.send({"op": "reschedule", "key": ts.key})
-                    self.transition(ts, "rescheduled", report=False)
-                    self.release_key(ts.key, report=False)
-                else:
-                    ts.exception = result["exception"]
-                    ts.traceback = result["traceback"]
-                    logger.warning(
-                        " Compute Failed\n"
-                        "Function:  %s\n"
-                        "args:      %s\n"
-                        "kwargs:    %s\n"
-                        "Exception: %s\n",
-                        str(funcname(function))[:1000],
-                        convert_args_to_str(args2, max_len=1000),
-                        convert_kwargs_to_str(kwargs2, max_len=1000),
-                        repr(result["exception"].data),
-                    )
-                    self.transition(ts, "error")
+                ts.exception = result["exception"]
+                ts.traceback = result["traceback"]
+                logger.warning(
+                    "Compute Failed\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n",
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception"].data,
+                )
+                self.transition(ts, "error")
 
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
@@ -3258,8 +3257,6 @@ class Reschedule(Exception):
     load across the cluster has significantly changed since first scheduling
     the task.
     """
-
-    pass
 
 
 def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
