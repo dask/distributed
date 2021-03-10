@@ -5326,7 +5326,7 @@ class Scheduler(SchedulerState, ServerNode):
                     map(first, sorted(worker_bytes.items(), key=second, reverse=True))
                 )
 
-                recipients = iter(reversed(sorted_workers))
+                recipients = reversed(sorted_workers)
                 recipient = next(recipients)
                 msgs = []  # (sender, recipient, key)
                 for sender in sorted_workers[: len(workers) // 2]:
@@ -5338,11 +5338,8 @@ class Scheduler(SchedulerState, ServerNode):
                     )
 
                     try:
-                        while worker_bytes[sender] > avg:
-                            while (
-                                worker_bytes[recipient] < avg
-                                and worker_bytes[sender] > avg
-                            ):
+                        while avg < worker_bytes[sender]:
+                            while worker_bytes[recipient] < avg < worker_bytes[sender]:
                                 ts, nb = next(sender_keys)
                                 if ts not in tasks_by_worker[recipient]:
                                     tasks_by_worker[recipient].add(ts)
@@ -5350,7 +5347,7 @@ class Scheduler(SchedulerState, ServerNode):
                                     msgs.append((sender, recipient, ts))
                                     worker_bytes[sender] -= nb
                                     worker_bytes[recipient] += nb
-                            if worker_bytes[sender] > avg:
+                            if avg < worker_bytes[sender]:
                                 recipient = next(recipients)
                     except StopIteration:
                         break
@@ -5381,7 +5378,7 @@ class Scheduler(SchedulerState, ServerNode):
                     },
                 )
 
-                if not all(r["status"] == "OK" for r in result):
+                if any(r["status"] != "OK" for r in result):
                     return {
                         "status": "missing-data",
                         "keys": tuple(
