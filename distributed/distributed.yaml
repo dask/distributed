@@ -180,6 +180,7 @@ distributed:
     event-loop: tornado
 rmm:
   pool-size: null
+  logging: False
 ucx:
   tcp: null  # enable tcp
   nvlink: null  # enable cuda_ipc
