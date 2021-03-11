@@ -168,7 +168,7 @@ register them with Dask.
 
     @dask_deserialize.register(Human)
     def deserialize(header: Dict, frames: List[bytes]) -> Human:
-        return Human(frames[0].decode())
+        return Human(frames[0].tobytes())
 
 
 Traverse attributes
