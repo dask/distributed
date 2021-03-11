@@ -454,11 +454,14 @@ class ProfileServer(DashboardComponent):
 
 
 class SystemMonitor(DashboardComponent):
-    def __init__(self, worker, height=150, **kwargs):
+    def __init__(self, worker, height=150, last=None, **kwargs):
         self.worker = worker
 
         names = worker.monitor.quantities
         self.last = 0
+        if last is not None:
+            names = worker.monitor.range_query(start=last)
+            self.last = last
         self.source = ColumnDataSource({name: [] for name in names})
         update(self.source, self.get_data())
 
