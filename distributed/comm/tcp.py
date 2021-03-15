@@ -263,7 +263,7 @@ class TCP(Comm):
                         raise StreamClosedError()
 
                     if isinstance(each_frame, memoryview):
-                        # Make sure that len(data) == data.nbytes`
+                        # Make sure that `len(data) == data.nbytes`
                         # See <https://github.com/tornadoweb/tornado/pull/2996>
                         each_frame = memoryview(each_frame).cast("B")
 
