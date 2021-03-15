@@ -311,7 +311,11 @@ class SpecCluster(Cluster):
             getattr(self.scheduler, "external_address", None) or self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
         )
-        await super()._start()
+        try:
+            await super()._start()
+        except Exception as e:
+            await self._close()
+            raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -400,7 +404,7 @@ class SpecCluster(Cluster):
             await asyncio.sleep(0.1)
         if self.status == Status.closed:
             return
-        if self.status == Status.running:
+        if self.status == Status.created or self.status == Status.running:
             self.status = Status.closing
             self.scale(0)
             await self._correct_state()
