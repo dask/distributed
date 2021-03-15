@@ -6352,7 +6352,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None, last=None, code=""):
+    async def performance_report(self, comm=None, start=None, last_count=None, code=""):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
         # Profiles
@@ -6406,7 +6406,7 @@ class Scheduler(SchedulerState, ServerNode):
         # System monitor
         from distributed.dashboard.components.shared import SystemMonitor
 
-        sysmon = SystemMonitor(self, last=last, sizing_mode="stretch_both")
+        sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
         sysmon.update()
 
         from bokeh.models import Panel, Tabs, Div
