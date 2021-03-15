@@ -1693,6 +1693,12 @@ class Client:
             batches = list(
                 zip(*[partition_all(batch_size, iterable) for iterable in iterables])
             )
+            
+            if type(key) == list:
+                keys = [list(element) for element in partition_all(batch_size, key)]
+            else:
+                keys = [key for _ in range(len(batches))]
+            
             return sum(
                 [
                     self.map(
@@ -1710,7 +1716,7 @@ class Client:
                         pure=pure,
                         **kwargs,
                     )
-                    for batch in batches
+                    for key, batch in zip(keys, batches)
                 ],
                 [],
             )
