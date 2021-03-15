@@ -315,6 +315,7 @@ class SpecCluster(Cluster):
             await super()._start()
         except Exception as e:
             await self._close()
+            self.status = Status.failed
             raise RuntimeError(f"Cluster failed to start. {str(e)}") from e
 
     def _correct_state(self):

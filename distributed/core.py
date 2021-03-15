@@ -43,8 +43,8 @@ from . import protocol
 
 class Status(Enum):
     """
-    This Enum contains the various states a worker, scheduler and nanny can be
-    in. Some of the status can only be observed in one of nanny, scheduler or
+    This Enum contains the various states a cluster, worker, scheduler and nanny can be
+    in. Some of the status can only be observed in one of cluster, nanny, scheduler or
     worker but we put them in the same Enum as they are compared with each
     other.
     """
@@ -52,6 +52,7 @@ class Status(Enum):
     closed = "closed"
     closing = "closing"
     closing_gracefully = "closing-gracefully"
+    failed = "failed"
     init = "init"
     created = "created"
     running = "running"
