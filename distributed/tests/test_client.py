@@ -6530,3 +6530,4 @@ async def test_workers_collection_restriction(c, s, a, b):
     await future
     assert a.data and not b.data
 
+
