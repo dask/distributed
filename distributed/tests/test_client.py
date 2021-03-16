@@ -6515,3 +6515,30 @@ async def test_workers_collection_restriction(c, s, a, b):
     future = c.compute(da.arange(10), workers=a.address)
     await future
     assert a.data and not b.data
+
+
+@gen_cluster(client=True)
+async def test_custom_key_with_batches(c, s, a, b):
+    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+
+    futs = c.map(
+        lambda x: x ** 2,
+        list(range(10)),
+        batch_size=5,
+        key=[f"{x}" for x in list(range(10))],
+    )
+    assert len(futs) == 10
+    res = c.gather(futs)  # this is to ensure that the futures are computed
+    assert len(res) == 10
+
+    futs = c.map(lambda x: x ** 2, list(range(10)), batch_size=5)
+    assert len(futs) == 10
+    res = c.gather(futs)  # this is to ensure that the futures are computed
+    assert len(res) == 10
+
+    futs = c.map(
+        lambda x: x ** 2, list(range(10)), key=[f"{x}" for x in list(range(10))]
+    )
+    assert len(futs) == 10
+    res = c.gather(futs)  # this is to ensure that the futures are computed
+    assert len(res) == 10
