@@ -6528,8 +6528,7 @@ async def test_custom_key_with_batches(c, s, a, b):
         key=[f"{x}" for x in list(range(10))],
     )
     assert len(futs) == 10
-    res = c.gather(futs)  # this is to ensure that the futures are computed
-    assert len(res) == 10
+    await wait(futs)
 
     futs = c.map(lambda x: x ** 2, list(range(10)), batch_size=5)
     assert len(futs) == 10
