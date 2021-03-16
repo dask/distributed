@@ -6523,7 +6523,7 @@ async def test_custom_key_with_batches(c, s, a, b):
 
     futs = c.map(
         lambda x: x ** 2,
-        list(range(10)),
+        range(10),
         batch_size=5,
         key=[f"{x}" for x in range(10)],
     )
