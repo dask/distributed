@@ -2,7 +2,6 @@ from unittest import mock
 
 import pytest
 from tlz import first
-import tornado
 
 from distributed import Client
 from distributed.utils_test import cluster, mock_ipython
@@ -15,11 +14,7 @@ def need_functional_ipython(func):
         import jupyter_client  # noqa: F401
     except ImportError:
         return pytest.mark.skip("need ipykernel and jupyter_client installed")(func)
-    if tornado.version_info >= (5,):
-        # https://github.com/ipython/ipykernel/issues/277
-        return pytest.mark.skip("IPython kernel broken with Tornado 5")(func)
-    else:
-        return func
+    return func
 
 
 @pytest.mark.ipython

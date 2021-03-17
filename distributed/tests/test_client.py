@@ -230,6 +230,20 @@ async def test_map_batch_size(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_custom_key_with_batches(c, s, a, b):
+    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+
+    futs = c.map(
+        lambda x: x ** 2,
+        range(10),
+        batch_size=5,
+        key=[str(x) for x in range(10)],
+    )
+    assert len(futs) == 10
+    await wait(futs)
+
+
+@gen_cluster(client=True)
 async def test_compute_retries(c, s, a, b):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
 
