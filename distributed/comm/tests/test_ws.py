@@ -3,6 +3,7 @@ import pytest
 
 import numpy as np
 from distributed import Client, Scheduler, Worker
+from distributed.security import Security
 from distributed.comm.registry import backends, get_backend
 from distributed.comm import ws, listen, connect
 from distributed.utils_test import (  # noqa: F401
@@ -103,10 +104,49 @@ async def test_large_transfer(cleanup):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("dashboard", [True, False])
 async def test_same_http_server(cleanup, dashboard):
-    async with Scheduler(protocol="ws://", dashboard=dashboard) as s:
+    async with Scheduler(protocol="ws://", dashboard=dashboard, port=8787) as s:
         assert s.http_server is s.listener.server
         async with Worker(s.address, protocol="ws://") as w:
             async with Client(s.address, asynchronous=True) as c:
+                result = await c.submit(lambda x: x + 1, 10)
+                assert result == 11
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dashboard", [True, False])
+async def test_different_http_server_by_default(cleanup, dashboard):
+    async with Scheduler(protocol="ws://", dashboard=dashboard) as s:
+        assert s.http_server is not s.listener.server
+        async with Worker(s.address, protocol="ws://") as w:
+            async with Client(s.address, asynchronous=True) as c:
+                result = await c.submit(lambda x: x + 1, 10)
+                assert result == 11
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dashboard", [True, False])
+async def test_same_http_server_wss(cleanup, dashboard):
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", dashboard=dashboard, port=8787, security=security
+    ) as s:
+        assert s.http_server is s.listener.server
+        async with Worker(s.address, protocol="wss://", security=security) as w:
+            async with Client(s.address, asynchronous=True, security=security) as c:
+                result = await c.submit(lambda x: x + 1, 10)
+                assert result == 11
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dashboard", [True, False])
+async def test_different_http_server_by_default_wss(cleanup, dashboard):
+    security = Security.temporary()
+    async with Scheduler(
+        protocol="wss://", dashboard=dashboard, security=security
+    ) as s:
+        assert s.http_server is not s.listener.server
+        async with Worker(s.address, protocol="wss://", security=security) as w:
+            async with Client(s.address, asynchronous=True, security=security) as c:
                 result = await c.submit(lambda x: x + 1, 10)
                 assert result == 11
 

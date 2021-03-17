@@ -285,6 +285,7 @@ class WSListener(Listener):
         self.allow_offload = allow_offload
         self.connection_args = connection_args
         self.bound_address = None
+        self.new_comm_server = True
         self.server_args = self._get_server_args(**connection_args)
 
     def _get_server_args(self, **connection_args):
@@ -309,10 +310,20 @@ class WSListener(Listener):
         ]
         try:
             self.server = self.handler.__self__.http_server
-            self.handler.__self__.http_application.add_handlers(r".*", routes)
+            if self.server.port == self.port:
+                logger.debug(f"Sharing the same server on port {self.port}")
+                ssl_options = self.server_args.get(
+                    "ssl_options", self.server.ssl_options
+                )
+                self.server.ssl_options = ssl_options
+                self.new_comm_server = False
+                self.handler.__self__.http_application.add_handlers(r".*", routes)
         except AttributeError:
-            self.server = HTTPServer(web.Application(routes), **self.server_args)
-            self.server.listen(self.port)
+            logger.debug("No server available. Creating a new one")
+        finally:
+            if self.new_comm_server:
+                self.server = HTTPServer(web.Application(routes), **self.server_args)
+                self.server.listen(self.port)
 
     async def stop(self):
         self.server.stop()
