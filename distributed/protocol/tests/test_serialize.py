@@ -1,35 +1,34 @@
-from array import array
 import copy
 import pickle
+from array import array
 
 import msgpack
 import numpy as np
 import pytest
+from dask.utils_test import inc
 from tlz import identity
 
-from dask.utils_test import inc
-
 from distributed import wait
+from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
-    register_serialization,
-    serialize,
-    deserialize,
-    nested_deserialize,
     Serialize,
     Serialized,
-    to_serialize,
-    serialize_bytes,
-    deserialize_bytes,
-    serialize_bytelist,
-    register_serialization_family,
     dask_serialize,
+    deserialize,
+    deserialize_bytes,
     dumps,
     loads,
+    nested_deserialize,
+    register_serialization,
+    register_serialization_family,
+    serialize,
+    serialize_bytelist,
+    serialize_bytes,
+    to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
-from distributed.utils_test import inc, gen_test
-from distributed.comm.utils import to_frames, from_frames
+from distributed.utils_test import gen_test, inc
 
 
 class MyObj:
@@ -141,8 +140,9 @@ def test_nested_deserialize():
     assert x == x_orig  # x wasn't mutated
 
 
-from distributed.utils_test import gen_cluster
 from dask import delayed
+
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)

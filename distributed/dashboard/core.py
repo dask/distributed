@@ -1,6 +1,6 @@
-from distutils.version import LooseVersion
 import functools
 import warnings
+from distutils.version import LooseVersion
 
 import bokeh
 from bokeh.server.server import BokehTornado
@@ -9,11 +9,11 @@ try:
     from bokeh.server.util import create_hosts_allowlist
 except ImportError:
     from bokeh.server.util import create_hosts_whitelist as create_hosts_allowlist
-from bokeh.application.handlers.function import FunctionHandler
-from bokeh.application import Application
+
 import dask
 import toolz
-
+from bokeh.application import Application
+from bokeh.application.handlers.function import FunctionHandler
 
 if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
     warnings.warn(

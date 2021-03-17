@@ -1,12 +1,15 @@
 import asyncio
-from distributed.multi_lock import MultiLockExtension
 from time import sleep
-
 
 from distributed import MultiLock, get_client
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
+from distributed.multi_lock import MultiLockExtension
+from distributed.utils_test import (  # noqa F401
+    client,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)

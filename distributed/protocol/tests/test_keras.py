@@ -1,10 +1,10 @@
 import numpy as np
-from numpy.testing import assert_allclose
 import pytest
+from numpy.testing import assert_allclose
 
 keras = pytest.importorskip("keras")
 
-from distributed.protocol import serialize, deserialize, dumps, loads, to_serialize
+from distributed.protocol import deserialize, dumps, loads, serialize, to_serialize
 
 
 def test_serialize_deserialize_model():

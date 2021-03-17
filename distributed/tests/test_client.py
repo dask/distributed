@@ -1,102 +1,102 @@
 import asyncio
-from collections import deque
-from contextlib import suppress
-from functools import partial
 import gc
 import logging
-from operator import add
 import os
 import pickle
-import psutil
 import random
 import subprocess
 import sys
 import threading
-from threading import Semaphore
-from time import sleep
 import traceback
 import warnings
 import weakref
 import zipfile
-
-import pytest
-from tlz import identity, isdistinct, concat, pluck, valmap, first, merge
+from collections import deque
+from contextlib import suppress
+from functools import partial
+from operator import add
+from threading import Semaphore
+from time import sleep
 
 import dask
+import psutil
+import pytest
+from dask import bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import stringify
-import dask.bag as db
+from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+
 from distributed import (
-    Worker,
-    Nanny,
-    fire_and_forget,
-    LocalCluster,
-    get_client,
-    secede,
-    get_worker,
-    Executor,
-    profile,
-    performance_report,
-    TimeoutError,
     CancelledError,
+    Executor,
+    LocalCluster,
+    Nanny,
+    TimeoutError,
+    Worker,
+    fire_and_forget,
+    get_client,
+    get_worker,
+    performance_report,
+    profile,
+    secede,
 )
-from distributed.core import Status
-from distributed.comm import CommClosedError
 from distributed.client import (
     Client,
     Future,
-    wait,
-    as_completed,
-    tokenize,
     _get_global_client,
+    as_completed,
     default_client,
     futures_of,
-    temp_default_client,
     get_task_metadata,
+    temp_default_client,
+    tokenize,
+    wait,
 )
+from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS, WINDOWS
-
+from distributed.core import Status
 from distributed.metrics import time
-from distributed.scheduler import Scheduler, KilledWorker, CollectTaskMetaDataPlugin
+from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
-from distributed.utils import mp_context, sync, tmp_text, tmpfile, is_valid_xml
-from distributed.utils_test import (
+from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
+from distributed.utils_test import (  # noqa: F401
+    TaskStateMetadataPlugin,
+    a,
+    async_wait_for,
+    asyncinc,
+    b,
+    captured_logger,
+    cleanup,
+)
+from distributed.utils_test import client as c  # noqa: F401
+from distributed.utils_test import client_secondary as c2  # noqa: F401
+
+from distributed.utils_test import (  # noqa: F401; isort:skip
     cluster,
-    slowinc,
-    slowadd,
-    slowdec,
-    randominc,
-    inc,
+    cluster_fixture,
     dec,
     div,
-    throws,
-    geninc,
-    asyncinc,
+    double,
     gen_cluster,
     gen_test,
-    double,
-    popen,
-    captured_logger,
-    varying,
-    map_varying,
-    wait_for,
-    async_wait_for,
-    pristine_loop,
-    save_sys_modules,
-    TaskStateMetadataPlugin,
-)
-from distributed.utils_test import (  # noqa: F401
-    client as c,
-    client_secondary as c2,
-    cleanup,
-    cluster_fixture,
+    geninc,
+    inc,
     loop,
     loop_in_thread,
+    map_varying,
     nodebug,
+    popen,
+    pristine_loop,
+    randominc,
     s,
-    a,
-    b,
+    save_sys_modules,
+    slowadd,
+    slowdec,
+    slowinc,
+    throws,
+    varying,
+    wait_for,
 )
 
 
@@ -1598,7 +1598,8 @@ async def test_upload_file_zip(c, s, a, b):
 @gen_cluster(client=True)
 async def test_upload_file_egg(c, s, a, b):
     def g():
-        import package_1, package_2
+        import package_1
+        import package_2
 
         return package_1.a, package_2.b
 
@@ -2451,7 +2452,7 @@ def test_Future_exception_sync_2(loop, capsys):
 
 @gen_cluster(timeout=60, client=True)
 async def test_async_persist(c, s, a, b):
-    from dask.delayed import delayed, Delayed
+    from dask.delayed import Delayed, delayed
 
     x = delayed(1)
     y = delayed(inc)(x)
@@ -2485,7 +2486,7 @@ async def test_async_persist(c, s, a, b):
 @gen_cluster(client=True)
 async def test__persist(c, s, a, b):
     pytest.importorskip("dask.array")
-    import dask.array as da
+    from dask import array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
     y = 2 * (x + 1)
@@ -2505,7 +2506,7 @@ async def test__persist(c, s, a, b):
 
 def test_persist(c):
     pytest.importorskip("dask.array")
-    import dask.array as da
+    from dask import array as da
 
     x = da.ones((10, 10), chunks=(5, 10))
     y = 2 * (x + 1)
@@ -5517,8 +5518,8 @@ async def test_client_timeout_2():
 
 @gen_test()
 async def test_client_active_bad_port():
-    import tornado.web
     import tornado.httpserver
+    import tornado.web
 
     application = tornado.web.Application([(r"/", tornado.web.RequestHandler)])
     http_server = tornado.httpserver.HTTPServer(application)
@@ -6432,8 +6433,8 @@ async def test_annotations_retries(c, s, a, b):
 @gen_cluster(client=True)
 async def test_annotations_blockwise_unpack(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    from dask.array.utils import assert_eq
     import numpy as np
+    from dask.array.utils import assert_eq
 
     # A flaky doubling function -- need extra args because it is called before
     # application to establish dtype/meta.

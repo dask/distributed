@@ -1,27 +1,29 @@
 import asyncio
-from datetime import timedelta
+import logging
 import pickle
+from datetime import timedelta
+from time import sleep, time
+
 import dask
 import pytest
 from dask.distributed import Client
-from time import time, sleep
+
 from distributed import Semaphore, fire_and_forget
 from distributed.comm import Comm
 from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
-    client,
-    cleanup,
-    cluster,
     async_wait_for,
     captured_logger,
+    cleanup,
+    client,
+    cluster,
     cluster_fixture,
     gen_cluster,
-    slowidentity,
     loop,
+    slowidentity,
 )
-import logging
 
 
 @gen_cluster(client=True)

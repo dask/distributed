@@ -1,10 +1,10 @@
 import math
+
 import numpy as np
 
-from .serialize import dask_serialize, dask_deserialize
-from . import pickle
-
 from ..utils import log_errors
+from . import pickle
+from .serialize import dask_deserialize, dask_serialize
 
 
 def itemsize(dt):

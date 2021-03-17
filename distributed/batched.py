@@ -1,5 +1,5 @@
-from collections import deque
 import logging
+from collections import deque
 
 import dask
 from tornado import gen, locks
@@ -7,7 +7,6 @@ from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
 from .utils import parse_timedelta
-
 
 logger = logging.getLogger(__name__)
 

@@ -1,14 +1,12 @@
 import ast
 
 import dask
-
-import dask.array as da
-import dask.dataframe as dd
-
-from distributed.utils_test import gen_cluster
-from distributed.diagnostics import SchedulerPlugin
-
 import pytest
+from dask import array as da
+from dask import dataframe as dd
+
+from distributed.diagnostics import SchedulerPlugin
+from distributed.utils_test import gen_cluster
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")

@@ -1,34 +1,34 @@
 import asyncio
+import weakref
 from bisect import bisect
 from operator import add
 from time import time
-import weakref
 
-from bokeh.layouts import row, column
+import dask
+from bokeh.layouts import column, row
 from bokeh.models import (
-    ColumnDataSource,
-    Plot,
-    DataRange1d,
-    LinearAxis,
-    HoverTool,
     BoxZoomTool,
-    ResetTool,
-    PanTool,
-    WheelZoomTool,
-    Range1d,
-    Quad,
-    TapTool,
-    OpenURL,
     Button,
+    ColumnDataSource,
+    DataRange1d,
+    HoverTool,
+    LinearAxis,
+    OpenURL,
+    PanTool,
+    Plot,
+    Quad,
+    Range1d,
+    ResetTool,
     Select,
+    TapTool,
+    WheelZoomTool,
 )
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
-import dask
 from tornado import gen
 
-from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
 from distributed import profile
+from distributed.dashboard.utils import BOKEH_VERSION, without_property_validation
 from distributed.utils import log_errors, parse_timedelta
 
 if dask.config.get("distributed.dashboard.export-tool"):

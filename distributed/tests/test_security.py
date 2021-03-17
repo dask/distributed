@@ -5,13 +5,12 @@ try:
 except ImportError:
     ssl = None
 
+import dask
 import pytest
 
 from distributed.comm import connect, listen
 from distributed.security import Security
 from distributed.utils_test import get_cert
-
-import dask
 
 ca_file = get_cert("tls-ca-cert.pem")
 

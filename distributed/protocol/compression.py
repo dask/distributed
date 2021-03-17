@@ -3,10 +3,10 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
-from contextlib import suppress
-from functools import partial
 import logging
 import random
+from contextlib import suppress
+from functools import partial
 
 import dask
 from tlz import identity
@@ -21,7 +21,6 @@ except ImportError:
     blosc = False
 
 from ..utils import ensure_bytes
-
 
 compressions = {None: {"compress": identity, "decompress": identity}}
 

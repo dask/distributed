@@ -6,7 +6,6 @@ import pytest
 h5py = pytest.importorskip("h5py")
 
 from distributed.protocol import deserialize, serialize
-
 from distributed.utils import tmpfile
 
 
@@ -82,10 +81,9 @@ def test_raise_error_on_serialize_write_permissions():
                 deserialize(*serialize(f))
 
 
+from dask import array as da
+
 from distributed.utils_test import gen_cluster
-
-
-import dask.array as da
 
 
 @silence_h5py_issue775

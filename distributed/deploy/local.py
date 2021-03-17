@@ -4,15 +4,15 @@ import math
 import warnings
 import weakref
 
-from dask.system import CPU_COUNT
 import toolz
+from dask.system import CPU_COUNT
 
-from .spec import SpecCluster
-from .utils import nprocesses_nthreads
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
+from .spec import SpecCluster
+from .utils import nprocesses_nthreads
 
 logger = logging.getLogger(__name__)
 

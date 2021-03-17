@@ -1,11 +1,12 @@
 import asyncio
-import click
 import json
 import os
 import sys
+
+import click
+import dask.config
 import yaml
 
-import dask.config
 from distributed.deploy.spec import run_spec
 from distributed.utils import deserialize_for_cli
 

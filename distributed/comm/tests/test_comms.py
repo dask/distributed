@@ -7,10 +7,12 @@ import warnings
 from functools import partial
 
 import dask
-
-import distributed
 import pkg_resources
 import pytest
+from tornado import ioloop
+from tornado.concurrent import Future
+
+import distributed
 from distributed.comm import (
     CommClosedError,
     connect,
@@ -38,8 +40,6 @@ from distributed.utils_test import (
     has_ipv6,
     requires_ipv6,
 )
-from tornado import ioloop
-from tornado.concurrent import Future
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():

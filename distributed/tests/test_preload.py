@@ -1,17 +1,14 @@
 import os
-import pytest
 import shutil
 import sys
 import tempfile
-import pytest
-
-from tornado import web
 
 import dask
-from distributed import Client, Scheduler, Worker, Nanny
-from distributed.utils_test import cluster, captured_logger
-from distributed.utils_test import loop, cleanup  # noqa F401
+import pytest
+from tornado import web
 
+from distributed import Client, Nanny, Scheduler, Worker
+from distributed.utils_test import captured_logger, cleanup, cluster, loop  # noqa F401
 
 PRELOAD_TEXT = """
 _worker_info = {}

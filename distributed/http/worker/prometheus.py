@@ -1,6 +1,6 @@
-from ..utils import RequestHandler
-
 import logging
+
+from ..utils import RequestHandler
 
 
 class _PrometheusCollector:

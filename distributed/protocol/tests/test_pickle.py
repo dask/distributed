@@ -1,8 +1,8 @@
-from functools import partial
 import gc
-from operator import add
-import weakref
 import sys
+import weakref
+from functools import partial
+from operator import add
 
 import pytest
 

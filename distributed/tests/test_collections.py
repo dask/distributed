@@ -6,21 +6,26 @@ pytest.importorskip("numpy")
 pytest.importorskip("pandas")
 
 import dask
-import dask.dataframe as dd
-import dask.bag as db
-from distributed.client import wait
-from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 import numpy as np
 import pandas as pd
+from dask import bag as db
+from dask import dataframe as dd
+
+from distributed.client import wait
+from distributed.utils_test import (  # noqa F401
+    client,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 PANDAS_VERSION = LooseVersion(pd.__version__)
 PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
 
 if PANDAS_GT_100:
-    import pandas.testing as tm  # noqa: F401
+    from pandas import testing as tm  # noqa: F401
 else:
-    import pandas.util.testing as tm  # noqa: F401
+    from pandas.util import testing as tm  # noqa: F401
 
 
 dfs = [
@@ -78,7 +83,7 @@ async def test_dataframes(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_dask_array_collections(c, s, a, b):
-    import dask.array as da
+    from dask import array as da
 
     s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}

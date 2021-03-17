@@ -1,33 +1,34 @@
 import asyncio
-from asyncio import TimeoutError
 import atexit
-import click
-from collections import deque, OrderedDict, UserDict
-from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
-from contextlib import contextmanager, suppress
+import base64
 import functools
-from hashlib import md5
 import html
+import importlib
+import inspect
 import json
 import logging
 import multiprocessing
 import os
+import pkgutil
 import re
 import shutil
 import socket
-from time import sleep
-import importlib
-from importlib.util import cache_from_source
-import inspect
 import sys
 import tempfile
 import threading
 import warnings
 import weakref
-import pkgutil
-import base64
-import tblib.pickling_support
 import xml.etree.ElementTree
+from asyncio import TimeoutError
+from collections import OrderedDict, UserDict, deque
+from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
+from contextlib import contextmanager, suppress
+from hashlib import md5
+from importlib.util import cache_from_source
+from time import sleep
+
+import click
+import tblib.pickling_support
 
 try:
     import resource
@@ -35,18 +36,17 @@ except ImportError:
     resource = None
 
 import dask
+import tlz as toolz
 from dask import istask
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
     format_bytes,
-    funcname,
     format_time,
+    funcname,
     parse_bytes,
     parse_timedelta,
 )
-
-import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -57,7 +57,6 @@ except ImportError:
 
 from .compatibility import PYPY, WINDOWS
 from .metrics import time
-
 
 try:
     from dask.context import thread_state
@@ -87,7 +86,7 @@ def _initialize_mp_context():
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
 
-        from .versions import required_packages, optional_packages
+        from .versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:

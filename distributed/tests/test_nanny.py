@@ -1,32 +1,31 @@
 import asyncio
-from contextlib import suppress
 import gc
 import logging
+import multiprocessing as mp
 import os
 import random
 import sys
-import multiprocessing as mp
-
-import numpy as np
-
-import pytest
-from tlz import valmap, first
-from tornado.ioloop import IOLoop
+from contextlib import suppress
 
 import dask
-from distributed.diagnostics import SchedulerPlugin
-from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
+import numpy as np
+import pytest
+from tlz import first, valmap
+from tornado.ioloop import IOLoop
+
+from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
+from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import tmpfile, TimeoutError, parse_ports
+from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import (  # noqa: F401
+    captured_logger,
+    cleanup,
     gen_cluster,
     gen_test,
     inc,
-    captured_logger,
-    cleanup,
 )
 
 

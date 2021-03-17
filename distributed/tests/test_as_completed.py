@@ -1,17 +1,23 @@
 import asyncio
-from collections.abc import Iterator
-from operator import add
 import queue
 import random
+from collections.abc import Iterator
+from operator import add
 from time import sleep
 
 import pytest
 
-from distributed.client import _as_completed, as_completed, _first_completed, wait
+from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
-from distributed.utils_test import gen_cluster, inc, throws
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster_fixture,
+    gen_cluster,
+    inc,
+    loop,
+    throws,
+)
 
 
 @gen_cluster(client=True)

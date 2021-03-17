@@ -1,11 +1,11 @@
-from distributed.core import ConnectionPool
-from distributed.comm import Comm
-from distributed.utils_test import gen_cluster, loop  # noqa: F401
-from distributed.utils_comm import pack_data, subs_multiple, gather_from_workers, retry
-
 from unittest import mock
 
 import pytest
+
+from distributed.comm import Comm
+from distributed.core import ConnectionPool
+from distributed.utils_comm import gather_from_workers, pack_data, retry, subs_multiple
+from distributed.utils_test import gen_cluster, loop  # noqa: F401
 
 
 def test_pack_data():

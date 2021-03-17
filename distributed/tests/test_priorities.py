@@ -1,14 +1,13 @@
 import asyncio
 
-import pytest
-
-from dask.core import flatten
 import dask
+import pytest
 from dask import delayed, persist
+from dask.core import flatten
 from dask.utils import stringify
 
-from distributed.utils_test import gen_cluster, inc, slowinc, slowdec
-from distributed import wait, Worker
+from distributed import Worker, wait
+from distributed.utils_test import gen_cluster, inc, slowdec, slowinc
 
 
 @gen_cluster(client=True, nthreads=[])

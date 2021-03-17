@@ -1,5 +1,5 @@
-from ..utils import RequestHandler
 from ...utils import log_errors
+from ..utils import RequestHandler
 
 
 class CountsJSON(RequestHandler):

@@ -1,12 +1,12 @@
-from collections import deque
 import logging
+from collections import deque
 
 import dask
-from .progress_stream import color_of
-from .plugin import SchedulerPlugin
-from ..utils import key_split, format_time, parse_timedelta
-from ..metrics import time
 
+from ..metrics import time
+from ..utils import format_time, key_split, parse_timedelta
+from .plugin import SchedulerPlugin
+from .progress_stream import color_of
 
 logger = logging.getLogger(__name__)
 

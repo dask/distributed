@@ -2,43 +2,42 @@ import asyncio
 import os
 import socket
 import threading
-import weakref
 import warnings
-
-import pytest
+import weakref
 
 import dask
+import pytest
+
 from distributed.core import (
-    pingpong,
+    ConnectionPool,
     Server,
     Status,
-    rpc,
-    connect,
-    send_recv,
     coerce_to_address,
-    ConnectionPool,
+    connect,
+    pingpong,
+    rpc,
+    send_recv,
 )
-from distributed.protocol.compression import compressions
-
 from distributed.metrics import time
 from distributed.protocol import to_serialize
+from distributed.protocol.compression import compressions
 from distributed.utils import get_ip, get_ipv6
+from distributed.utils_test import loop  # noqa F401
 from distributed.utils_test import (
-    gen_cluster,
-    has_ipv6,
     assert_can_connect,
-    assert_cannot_connect,
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_from_everywhere_6,
     assert_can_connect_locally_4,
     assert_can_connect_locally_6,
-    tls_security,
+    assert_cannot_connect,
     captured_logger,
+    gen_cluster,
+    has_ipv6,
     inc,
     throws,
+    tls_security,
 )
-from distributed.utils_test import loop  # noqa F401
 
 
 def echo(comm, x):

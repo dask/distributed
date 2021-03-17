@@ -1,17 +1,16 @@
 import logging
 import sys
-from typing import List, Union
 import warnings
 import weakref
+from typing import List, Union
 
 import dask
 
-from .spec import SpecCluster, ProcessInterface
 from ..core import Status
-from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
+from ..utils import cli_keywords, serialize_for_cli
 from ..worker import Worker as _Worker
-from ..utils import serialize_for_cli
+from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 

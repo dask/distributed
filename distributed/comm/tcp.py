@@ -2,11 +2,12 @@ import errno
 import functools
 import logging
 import socket
-from ssl import SSLError
 import struct
 import sys
-from tornado import gen
 import weakref
+from ssl import SSLError
+
+from tornado import gen
 
 try:
     import ssl
@@ -19,16 +20,14 @@ from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
+from ..protocol.utils import pack_frames_prelude, unpack_frames
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
-
-from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
-from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
-from ..protocol.utils import pack_frames_prelude, unpack_frames
-
+from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
+from .registry import Backend, backends
+from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
 
