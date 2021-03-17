@@ -1,14 +1,60 @@
 from collections import deque
+import threading
 import psutil
+import time
+import weakref
 
 from .compatibility import WINDOWS
-from .metrics import time
+from . import metrics
+
+
+class TrackChildren(threading.Thread):
+    def __init__(self, proc, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.name = "ThreadedTrackChildren"
+        self._proc = proc
+        self._cpu = 0
+        self._mem = 0
+        self._children = set()
+        self._lock = threading.Lock()
+        self._event = threading.Event()
+
+    def metrics(self):
+        with self._lock:
+            return self._cpu, self._mem
+
+    def stop(self):
+        self._event.set()
+
+    def run(self):
+        while not self._event.is_set():
+            children = set(self._proc.children(True))
+            # "self.children" tracks the subprocesses to calculate the CPU
+            # usage correctly. Otherwise, the computed CPU usage would always
+            # be 0 as no time interval would exist for the calculation
+            # (cf. psutil.Process.cpu_percent).
+            cpu = 0
+            mem = 0
+            if children:
+                new_children = children - self._children
+                if new_children:
+                    self._children.update(new_children)
+                for child in list(self._children):
+                    # The inspected process may die during its introspection.
+                    try:
+                        with child.oneshot():
+                            cpu += child.cpu_percent()
+                            mem += child.memory_info().rss
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        self._children.remove(child)
+            with self._lock:
+                self._cpu, self._mem = cpu, mem
+            time.sleep(0.5)
 
 
 class SystemMonitor:
     def __init__(self, n=10000):
         self.proc = psutil.Process()
-
         self.time = deque(maxlen=n)
         self.cpu = deque(maxlen=n)
         self.memory = deque(maxlen=n)
@@ -16,12 +62,16 @@ class SystemMonitor:
 
         self.quantities = {"cpu": self.cpu, "memory": self.memory, "time": self.time}
 
+        self.track_children = TrackChildren(self.proc, daemon=True)
+        self.track_children.start()
+        self.track_children_finalizer = weakref.finalize(self, self.track_children.stop)
+
         try:
             ioc = psutil.net_io_counters()
         except Exception:
             self._collect_net_io_counters = False
         else:
-            self.last_time = time()
+            self.last_time = metrics.time()
             self.read_bytes = deque(maxlen=n)
             self.write_bytes = deque(maxlen=n)
             self.quantities["read_bytes"] = self.read_bytes
@@ -43,9 +93,11 @@ class SystemMonitor:
 
     def update(self):
         with self.proc.oneshot():
-            cpu = self.proc.cpu_percent()
-            memory = self.proc.memory_info().rss
-        now = time()
+            cpu, memory = self.track_children.metrics()
+            cpu += self.proc.cpu_percent()
+            memory += self.proc.memory_info().rss
+
+        now = metrics.time()
 
         self.cpu.append(cpu)
         self.memory.append(memory)
