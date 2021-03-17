@@ -256,6 +256,7 @@ class SpecCluster(Cluster):
         self._i = 0
         self.security = security or Security()
         self._futures = set()
+        self._lock = asyncio.Lock()
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
@@ -288,8 +289,6 @@ class SpecCluster(Cluster):
             return
         if self.status == Status.closed:
             raise ValueError("Cluster is closed")
-
-        self._lock = asyncio.Lock()
 
         if self.scheduler_spec is None:
             try:
