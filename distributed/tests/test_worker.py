@@ -1641,7 +1641,7 @@ async def test_pip_install(c, s, a, b):
 
             args = p2.call_args[0][0]
             assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
 
 
 @gen_cluster(client=True)

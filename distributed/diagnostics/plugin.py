@@ -237,9 +237,8 @@ class PipInstall(WorkerPlugin):
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pip"]
+                [sys.executable, "-m", "pip", "install"]
                 + self.pip_options
-                + ["install"]
                 + self.packages,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
