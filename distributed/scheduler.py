@@ -6367,8 +6367,12 @@ class Scheduler(SchedulerState, ServerNode):
         )
         from . import profile
 
+        profile_interval = parse_timedelta(
+            dask.config.get("distributed.worker.profile.interval"), default="ms"
+        )
+
         def profile_to_figure(state):
-            data = profile.plot_data(state)
+            data = profile.plot_data(state, profile_interval=profile_interval)
             figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
             return figure
 
