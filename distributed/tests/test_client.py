@@ -71,8 +71,7 @@ from distributed.utils_test import (  # noqa: F401
 )
 from distributed.utils_test import client as c  # noqa: F401
 from distributed.utils_test import client_secondary as c2  # noqa: F401
-
-from distributed.utils_test import (  # noqa: F401; isort:skip
+from distributed.utils_test import (  # noqa: F401
     cluster,
     cluster_fixture,
     dec,
