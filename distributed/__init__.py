@@ -1,7 +1,7 @@
+from . import config  # isort:skip
 import dask
 from dask.config import config
 
-from . import config
 from ._version import get_versions
 from .actor import Actor, ActorFuture
 from .client import (
