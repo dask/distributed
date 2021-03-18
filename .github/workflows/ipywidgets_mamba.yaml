@@ -1,0 +1,54 @@
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        python-version: ["3.7", "3.8", "3.9"]
+        use-mamba: [false, true]
+        cmd:
+          - pytest test1.py::test_ipywidgets test1.py::test1
+          - pytest test1.py::test_ipython test1.py::test1
+          - python demo1.py
+          - python demo2.py
+
+        # Uncomment to stress-test the test suite for random failures
+        # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Conda Environment
+        # TODO replace with label as soon as it's available
+        # https://github.com/conda-incubator/setup-miniconda/issues/106
+        uses: conda-incubator/setup-miniconda@77b16ed746da28724c61e1f1ad23395a4b695ef5
+        with:
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
+          use-mamba: ${{ matrix.use-mamba }}
+          python-version: ${{ matrix.python-version }}
+          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
+          activate-environment: dask-distributed
+          auto-activate-base: false
+
+      - name: conda list
+        shell: bash -l {0}
+        run: conda list
+
+      - name: Test
+        shell: bash -l {0}
+        run: ${{ matrix.cmd }}
+
+      # - name: Debug with tmate on failure
+      #   if: ${{ failure() }}
+      #   uses: mxschmitt/action-tmate@v3
