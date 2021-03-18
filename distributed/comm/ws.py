@@ -315,6 +315,9 @@ class WSListener(Listener):
                 ssl_options = self.server_args.get(
                     "ssl_options", self.server.ssl_options
                 )
+                # TODO: I think this should be the other way around
+                # and override `self.server_args` with the server's ssl_options
+                # if available
                 self.server.ssl_options = ssl_options
                 self.new_comm_server = False
                 self.handler.__self__.http_application.add_handlers(r".*", routes)
