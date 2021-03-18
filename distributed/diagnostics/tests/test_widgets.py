@@ -88,10 +88,6 @@ from distributed.diagnostics.progressbar import (
 )
 
 
-def test_dummy1():
-    pass
-
-
 @gen_cluster(client=True)
 async def test_progressbar_widget(c, s, a, b):
     x = c.submit(inc, 1)

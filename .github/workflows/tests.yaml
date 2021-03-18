@@ -12,74 +12,12 @@ jobs:
         os: [windows-latest]
         python-version: ["3.8"]
         target:
-          - distributed/deploy/tests/test_local.py::test_local_cluster_supports_blocked_handlers distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_close_twice distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_procs distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_move_unserializable_data distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_transports_inproc distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_transports_tcp distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_transports_tcp_port distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::LocalTest::test_context_manager distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::LocalTest::test_cores distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::LocalTest::test_no_workers distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::LocalTest::test_submit distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_with_local distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_solo distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_kwargs distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_unused_kwargs_with_cluster distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_unused_kwargs_with_address distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_Client_twice distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_client_constructor_with_temporary_security distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults_2 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults_3 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults_4 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults_5 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_defaults_6 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_worker_params distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_memory_limit_none distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_cleanup distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_repeated distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_bokeh distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_blocks_until_full distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_scale_up_and_down distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_silent_startup distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_only_local_access distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_remote_access distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_memory distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_memory_nanny distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_death_timeout_raises distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_bokeh_kwargs distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_io_loop_periodic_callbacks distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_logging distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
           - distributed/deploy/tests/test_local.py::test_ipywidgets distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_no_ipywidgets distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_scale distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_adapt distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_adapt_then_manual distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_local_tls distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_local_tls_restart distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_asynchronous_property distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_protocol_inproc distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_protocol_tcp distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_protocol_ip distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_worker_class_worker distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_worker_class_nanny distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_worker_class_nanny_async distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_starts_up_sync distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_dont_select_closed_worker distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_client_cluster_synchronous distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_scale_memory_cores distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_repr distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_threads_per_worker_set_to_0 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_capture_security distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_no_danglng_asyncio_tasks distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_async_with distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_no_workers distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_cluster_names distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_duplicate_clients distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/deploy/tests/test_local.py::test_scale_retires_workers distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-          - distributed/diagnostics/tests/test_widgets.py::test_dummy1 distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
+          - test1.py::test_profile_nested_sizeof
+          - test1.py::test_ipywidgets test1.py::test_profile_nested_sizeof
+          - test1.py::test_ipywidgets test1.py::test_offload
+          - test1.py::test_ipywidgets test1.py::test_run1
+          - test1.py::test_ipywidgets test1.py::test_run2
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
