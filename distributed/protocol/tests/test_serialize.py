@@ -446,10 +446,12 @@ def test_compression_numpy_list():
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
         pytest.param(
-            memoryview(np.random.random((3, 4)) 
-                       if np is not None else b"skip np.random"),
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
             True,
-            marks=pytest.mark.skipif(np is None, reason="Test needs numpy")),
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy")
+        ),
     ],
 )
 def test_check_dask_serializable(data, is_serializable):
@@ -476,9 +478,11 @@ def test_serialize_lists(serializers):
     [
         memoryview(b"hello"),
         pytest.param(
-            memoryview(np.random.random((3, 4))
-                       if np is not None else b"skip np.random"),
-            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"))
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy")
+        ),
     ],
 )
 def test_deser_memoryview(data_in):
