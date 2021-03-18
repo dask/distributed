@@ -28,6 +28,7 @@ import pkgutil
 import base64
 import tblib.pickling_support
 import xml.etree.ElementTree
+import zlib
 
 try:
     import resource
@@ -1476,7 +1477,7 @@ def serialize_for_cli(data):
     serialized_data : str
         The serialized data as a string
     """
-    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+    return base64.urlsafe_b64encode(zlib.compress(json.dumps(data).encode())).decode()
 
 
 def deserialize_for_cli(data):
@@ -1491,7 +1492,7 @@ def deserialize_for_cli(data):
     deserialized_data : obj
         The de-serialized data
     """
-    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+    return json.loads(zlib.decompress(base64.urlsafe_b64decode(data.encode())).decode())
 
 
 class EmptyContext:
