@@ -1,7 +1,6 @@
 import asyncio
 import os
 import socket
-import sys
 import threading
 import weakref
 import warnings
@@ -40,11 +39,6 @@ from distributed.utils_test import (
     throws,
 )
 from distributed.utils_test import loop  # noqa F401
-
-
-EXTERNAL_IP4 = get_ip()
-if has_ipv6():
-    EXTERNAL_IP6 = get_ipv6()
 
 
 def echo(comm, x):
@@ -100,15 +94,6 @@ def test_server_status_assign_non_variant_raises():
             server.status = "I do not exists"
 
 
-def test_server_status_compare_non_variant_raises():
-    server = Server({})
-    # turn off warnings into error for assertion checking.
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("default")
-        with pytest.raises(AssertionError):
-            server.status == "You can't compare with me"
-
-
 def test_server_status_assign_with_variant_warns():
     server = Server({})
     with warnings.catch_warnings(record=True) as w:
@@ -117,26 +102,11 @@ def test_server_status_assign_with_variant_warns():
             server.status = "running"
 
 
-def test_server_status_compare_with_variant_warns():
-    server = Server({})
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("default")
-        with pytest.warns(PendingDeprecationWarning):
-            server.status == "running"
-
-
 def test_server_status_assign_with_variant_raises_in_tests():
     """That would be the default in user code"""
     server = Server({})
     with pytest.raises(PendingDeprecationWarning):
         server.status = "running"
-
-
-def test_server_status_compare_with_variant_raises_in_tests():
-    """That would be the default in user code"""
-    server = Server({})
-    with pytest.raises(PendingDeprecationWarning):
-        server.status == "running"
 
 
 def test_server_assign_assign_enum_is_quiet():
@@ -209,15 +179,20 @@ class MyServer(Server):
     default_port = 8756
 
 
-@pytest.mark.skipif(
-    sys.version_info < (3, 7),
-    reason="asynccontextmanager not avaiable before Python 3.7",
-)
 @pytest.mark.asyncio
 async def test_server_listen():
     """
     Test various Server.listen() arguments and their effect.
     """
+    import socket
+
+    try:
+        EXTERNAL_IP4 = get_ip()
+        if has_ipv6():
+            EXTERNAL_IP6 = get_ipv6()
+    except socket.gaierror:
+        raise pytest.skip("no network access")
+
     from contextlib import asynccontextmanager
 
     @asynccontextmanager

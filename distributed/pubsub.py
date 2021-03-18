@@ -1,6 +1,5 @@
 import asyncio
 from collections import defaultdict, deque
-from contextlib import suppress
 import logging
 import threading
 import weakref
@@ -421,8 +420,7 @@ class Sub:
             try:
                 await asyncio.wait_for(_(), timeout2)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 fails here sometimes
-                    self.condition.release()
+                self.condition.release()
 
         return self.buffer.popleft()
 
@@ -433,7 +431,7 @@ class Sub:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".

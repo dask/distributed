@@ -219,13 +219,13 @@ def test_compress_numpy():
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes
 
-    header = msgpack.loads(frames[2], raw=False, use_list=False, strict_map_key=False)
+    header = msgpack.loads(frames[1], raw=False, use_list=False, strict_map_key=False)
     try:
         import blosc  # noqa: F401
     except ImportError:
         pass
     else:
-        assert all(c == "blosc" for c in header["headers"][("x",)]["compression"])
+        assert all(c == "blosc" for c in header["compression"])
 
 
 def test_compress_memoryview():
@@ -276,12 +276,6 @@ def test_compression_takes_advantage_of_itemsize():
     bb = [maybe_compress(frame)[1] for frame in b]
 
     assert sum(map(nbytes, aa)) < sum(map(nbytes, bb))
-
-
-def test_large_numpy_array():
-    x = np.ones((100000000,), dtype="u4")
-    header, frames = serialize(x)
-    assert sum(header["lengths"]) == sum(map(nbytes, frames))
 
 
 @pytest.mark.parametrize(

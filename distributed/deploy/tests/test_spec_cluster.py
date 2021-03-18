@@ -196,6 +196,7 @@ async def test_unexpected_closed_worker(cleanup):
             assert len(cluster.workers) == 2
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_restart(cleanup):
@@ -209,11 +210,11 @@ async def test_restart(cleanup):
                 cluster.scale(2)
                 await cluster
                 assert len(cluster.workers) == 2
-
                 await client.restart()
-                await asyncio.sleep(3)
-
-                assert len(cluster.workers) == 2
+                start = time()
+                while len(cluster.workers) < 2:
+                    await asyncio.sleep(0.5)
+                    assert time() < start + 60
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
@@ -494,7 +495,7 @@ async def test_run_spec_cluster_worker_names(cleanup):
 
     class MyCluster(SpecCluster):
         def _new_worker_name(self, worker_number):
-            return f"prefix-{self._name }-{worker_number}-suffix"
+            return f"prefix-{self.name}-{worker_number}-suffix"
 
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker
