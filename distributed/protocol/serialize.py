@@ -74,9 +74,13 @@ def pickle_loads(header, frames):
         mv = memoryview(buffers[i])
         if writeable[i] == mv.readonly:
             if mv.readonly:
-                buffers[i] = memoryview(bytearray(mv)).cast(mv.format, mv.shape)
+                buf = memoryview(bytearray(mv))
             else:
-                buffers[i] = memoryview(bytes(mv)).cast(mv.format, mv.shape)
+                buf = memoryview(bytes(mv))
+            if buf.nbytes > 0:
+                buffers[i] = buf.cast(mv.format, mv.shape)
+            else:
+                buffers[i] = buf.cast(mv.format)
     return pickle.loads(x, buffers=buffers)
 
 
