@@ -58,3 +58,24 @@ async def test5():
     msg = gen_msg()
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, lambda x: msgpack.dumps(x, use_bin_type=True), msg)
+
+
+@pytest.mark.asyncio
+async def test6():
+    from distributed import protocol
+    from distributed.utils import offload
+
+    msg = gen_msg()
+
+    def _to_frames():
+        return list(protocol.dumps(msg))
+
+    return await offload(_to_frames)
+
+
+def test7():
+    from dask.sizeof import sizeof
+
+    msg = gen_msg()
+    with pytest.raises(RecursionError):
+        sizeof(msg)
