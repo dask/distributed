@@ -5,4 +5,4 @@ channels:
 dependencies:
   - ipython
   - ipywidgets
-  - pytest
+  - ipykernel=5.3.4
