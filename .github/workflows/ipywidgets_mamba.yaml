@@ -11,12 +11,7 @@ jobs:
       matrix:
         os: [windows-latest]
         python-version: ["3.7", "3.8", "3.9"]
-        miniforge-variant: [Miniforge3, Mambaforge]
-        cmd:
-          - pytest test1.py::test_ipywidgets test1.py::test1
-          - pytest test1.py::test_ipython test1.py::test1
-          - python demo1.py
-          - python demo2.py
+        ipykernel-version: ["5.3.4", "5.5.0"]
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
@@ -33,10 +28,10 @@ jobs:
         # https://github.com/conda-incubator/setup-miniconda/issues/106
         uses: conda-incubator/setup-miniconda@77b16ed746da28724c61e1f1ad23395a4b695ef5
         with:
-          miniforge-variant: ${{ matrix.miniforge-variant }}
+          miniforge-variant: Miniforge3
           miniforge-version: latest
           python-version: ${{ matrix.python-version }}
-          environment-file: continuous_integration/demo_ipython.yaml
+          environment-file: continuous_integration/demo_ipython-${{ matrix.ipykernel-version }}.yaml
           activate-environment: demo
           auto-activate-base: false
 
@@ -46,7 +41,7 @@ jobs:
 
       - name: Test
         shell: bash -l {0}
-        run: ${{ matrix.cmd }}
+        run: python demo1.py
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}

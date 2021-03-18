@@ -1,0 +1,9 @@
+name: demo
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - ipython
+  - ipykernel=5.3.4
+  - ipywidgets
+  - pytest
