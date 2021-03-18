@@ -89,8 +89,7 @@ class VariableExtension:
 
                 await asyncio.wait_for(_(), timeout=left)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 loses lock on finally clause
-                    self.started.release()
+                self.started.release()
 
         record = self.variables[name]
         if record["type"] == "Future":

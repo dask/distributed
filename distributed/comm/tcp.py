@@ -242,25 +242,33 @@ class TCP(Comm):
                 **self.handshake_options,
             },
         )
-        frames_nbytes = sum(map(nbytes, frames))
+        frames_nbytes = [nbytes(f) for f in frames]
+        frames_nbytes_total = sum(frames_nbytes)
 
         header = pack_frames_prelude(frames)
-        header = struct.pack("Q", nbytes(header) + frames_nbytes) + header
+        header = struct.pack("Q", nbytes(header) + frames_nbytes_total) + header
 
         frames = [header, *frames]
-        frames_nbytes += nbytes(header)
+        frames_nbytes = [nbytes(header), *frames_nbytes]
+        frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2 ** 17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
+            frames_nbytes = [frames_nbytes_total]
 
         try:
             # trick to enque all frames for writing beforehand
-            for each_frame in frames:
-                each_frame_nbytes = nbytes(each_frame)
+            for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
                     if stream._write_buffer is None:
                         raise StreamClosedError()
+
+                    if isinstance(each_frame, memoryview):
+                        # Make sure that `len(data) == data.nbytes`
+                        # See <https://github.com/tornadoweb/tornado/pull/2996>
+                        each_frame = memoryview(each_frame).cast("B")
+
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes
 
@@ -279,7 +287,7 @@ class TCP(Comm):
             self.abort()
             raise
 
-        return frames_nbytes
+        return frames_nbytes_total
 
     @gen.coroutine
     def close(self):

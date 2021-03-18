@@ -55,7 +55,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS, get_running_loop
+from .compatibility import PYPY, WINDOWS
 from .metrics import time
 
 
@@ -63,6 +63,12 @@ try:
     from dask.context import thread_state
 except ImportError:
     thread_state = threading.local()
+
+# For some reason this is required in python >= 3.9
+if WINDOWS:
+    import multiprocessing.popen_spawn_win32
+else:
+    import multiprocessing.popen_spawn_posix
 
 logger = _logger = logging.getLogger(__name__)
 
@@ -313,11 +319,15 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     @gen.coroutine
     def f():
+        # We flag the thread state asynchronous, which will make sync() call
+        # within `func` use async semantic. In order to support concurrent
+        # calls to sync(), `asynchronous` is used as a ref counter.
+        thread_state.asynchronous = getattr(thread_state, "asynchronous", 0)
+        thread_state.asynchronous += 1
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
@@ -325,7 +335,8 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         except Exception as exc:
             error[0] = sys.exc_info()
         finally:
-            thread_state.asynchronous = False
+            assert thread_state.asynchronous > 0
+            thread_state.asynchronous -= 1
             e.set()
 
     loop.add_callback(f)
@@ -1154,7 +1165,7 @@ if not is_server_extension:
 
     if is_kernel():
         try:
-            get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             is_kernel_and_no_running_loop = True
 

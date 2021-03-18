@@ -199,15 +199,7 @@ def start_ipython(ip=None, ns=None, log=None):
     if get_ipython() is not None:
         raise RuntimeError("Cannot start IPython, it's already running.")
 
-    from zmq.eventloop.ioloop import ZMQIOLoop
     from ipykernel.kernelapp import IPKernelApp
-
-    # save the global IOLoop instance
-    # since IPython relies on it, but we are going to put it in a thread.
-    save_inst = IOLoop.instance()
-    IOLoop.clear_instance()
-    zmq_loop = ZMQIOLoop()
-    zmq_loop.install()
 
     # start IPython, disabling its signal handlers that won't work due to running in a thread:
     app = IPKernelApp.instance(log=log)
@@ -234,20 +226,17 @@ def start_ipython(ip=None, ns=None, log=None):
         app.kernel.pre_handler_hook = noop
         app.kernel.post_handler_hook = noop
         app.kernel.start()
-        app.kernel.loop = IOLoop.instance()
         # save self in the IPython namespace as 'worker'
         # inject things into the IPython namespace
         if ns:
             app.kernel.shell.user_ns.update(ns)
         evt.set()
-        zmq_loop.start()
+        # start the app's IOLoop in its thread
+        IOLoop.current().start()
 
     zmq_loop_thread = Thread(target=_start)
     zmq_loop_thread.daemon = True
     zmq_loop_thread.start()
     assert evt.wait(timeout=5), "IPython didn't start in a reasonable amount of time."
 
-    # put the global IOLoop instance back:
-    IOLoop.clear_instance()
-    save_inst.install()
     return app

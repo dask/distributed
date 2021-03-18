@@ -21,6 +21,7 @@ from .client import (
     get_task_metadata,
 )
 from .lock import Lock
+from .multi_lock import MultiLock
 from .nanny import Nanny
 from .pubsub import Pub, Sub
 from .queues import Queue
