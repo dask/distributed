@@ -660,6 +660,9 @@ async def test_steal_twice(c, s, a, b):
         )
     assert max(map(len, has_what.values())) < 30
 
+    assert a.in_flight_tasks == 0
+    assert b.in_flight_tasks == 0
+
     await c._close()
     await asyncio.gather(*[w.close() for w in workers])
 

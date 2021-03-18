@@ -8,6 +8,7 @@ import pytest
 
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
+from distributed.protocol.serialize import pickle_dumps
 
 if sys.version_info < (3, 8):
     try:
@@ -69,6 +70,16 @@ def test_pickle_out_of_band():
     else:
         assert len(f) == 1
         assert isinstance(f[0], bytes)
+
+
+def test_pickle_empty():
+    np = pytest.importorskip("numpy")
+    x = np.arange(2)[0:0]  # Empty view
+    header, frames = pickle_dumps(x)
+    header["writeable"] = [False] * len(frames)
+    y = deserialize(header, frames)
+    assert memoryview(y).nbytes == 0
+    assert memoryview(y).readonly
 
 
 def test_pickle_numpy():
