@@ -11,7 +11,7 @@ jobs:
       matrix:
         os: [windows-latest]
         python-version: ["3.7", "3.8", "3.9"]
-        use-mamba: [false, true]
+        miniforge-variant: [Miniforge3, Mambaforge]
         cmd:
           - pytest test1.py::test_ipywidgets test1.py::test1
           - pytest test1.py::test_ipython test1.py::test1
@@ -33,12 +33,11 @@ jobs:
         # https://github.com/conda-incubator/setup-miniconda/issues/106
         uses: conda-incubator/setup-miniconda@77b16ed746da28724c61e1f1ad23395a4b695ef5
         with:
-          miniforge-variant: Mambaforge
+          miniforge-variant: ${{ matrix.miniforge-variant }}
           miniforge-version: latest
-          use-mamba: ${{ matrix.use-mamba }}
           python-version: ${{ matrix.python-version }}
-          environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
-          activate-environment: dask-distributed
+          environment-file: demo_ipython.yaml
+          activate-environment: demo
           auto-activate-base: false
 
       - name: conda list

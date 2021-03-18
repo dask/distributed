@@ -1,0 +1,8 @@
+name: demo
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - ipython
+  - ipywidgets
+  - pytest
