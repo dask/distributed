@@ -36,7 +36,7 @@ jobs:
           miniforge-variant: ${{ matrix.miniforge-variant }}
           miniforge-version: latest
           python-version: ${{ matrix.python-version }}
-          environment-file: demo_ipython.yaml
+          environment-file: continuous_integration/demo_ipython.yaml
           activate-environment: demo
           auto-activate-base: false
 
