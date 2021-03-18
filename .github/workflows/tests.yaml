@@ -15,9 +15,11 @@ jobs:
           - distributed/deploy/tests/test_local.py::test_ipywidgets distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
           - test1.py::test_profile_nested_sizeof
           - test1.py::test_ipywidgets test1.py::test_profile_nested_sizeof
-          - test1.py::test_ipywidgets test1.py::test_offload
-          - test1.py::test_ipywidgets test1.py::test_run1
-          - test1.py::test_ipywidgets test1.py::test_run2
+          - test1.py::test_ipywidgets test1.py::test1
+          - test1.py::test_ipywidgets test1.py::test2
+          - test1.py::test_ipywidgets test1.py::test3
+          - test1.py::test_ipywidgets test1.py::test4
+          - test1.py::test_ipywidgets test1.py::test5
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!

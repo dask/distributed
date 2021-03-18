@@ -1,4 +1,17 @@
+import asyncio
 import pytest
+
+
+def gen_msg():
+    n = 500
+    original = outer = {}
+    inner = {}
+
+    for i in range(n):
+        outer["children"] = inner
+        outer, inner = inner, {}
+
+    return {"data": original}
 
 
 def test_ipywidgets():
@@ -8,50 +21,40 @@ def test_ipywidgets():
 @pytest.mark.asyncio
 async def test_profile_nested_sizeof():
     from distributed.comm.utils import to_frames
-
-    # https://github.com/dask/distributed/issues/1674
-    n = 500
-    original = outer = {}
-    inner = {}
-
-    for i in range(n):
-        outer["children"] = inner
-        outer, inner = inner, {}
-
-    msg = {"data": original}
-    frames = await to_frames(msg)
+    msg = gen_msg()
+    await to_frames(msg)
 
 
 @pytest.mark.asyncio
-async def test_offload():
-    from distributed.utils import offload
+async def test1():
+    from distributed import protocol
+    msg = gen_msg()
+    protocol.dumps(msg)
 
-    def f():
-        pass
 
-    await offload(f)
+def test2():
+    from distributed import protocol
+    msg = gen_msg()
+    protocol.dumps(msg)
+
+
+def test3():
+    import msgpack
+    msg = gen_msg()
+    msgpack.dumps(msg, use_bin_type=True)
 
 
 @pytest.mark.asyncio
-async def test_run1():
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
-
-    def f():
-        print("Hello world")
-
+async def test4():
+    from distributed import protocol
+    msg = gen_msg()
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(ex, f)
+    await loop.run_in_executor(None, protocol.dumps, msg)
 
 
 @pytest.mark.asyncio
-async def test_run2():
-    import asyncio
-
-    def f():
-        print("Hello world")
-
+async def test5():
+    import msgpack
+    msg = gen_msg()
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, f)
+    await loop.run_in_executor(None, lambda x: msgpack.dumps(x, use_bin_type=True), msg)
