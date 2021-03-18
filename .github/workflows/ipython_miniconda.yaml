@@ -21,7 +21,7 @@ jobs:
       - name: Setup Conda Environment
         # TODO replace with label as soon as it's available
         # https://github.com/conda-incubator/setup-miniconda/issues/106
-        uses: conda-incubator/setup-miniconda@77b16ed746da28724c61e1f1ad23395a4b695ef5
+        uses: conda-incubator/setup-miniconda@v2
         with:
           miniconda-version: latest
           python-version: ${{ matrix.python-version }}
