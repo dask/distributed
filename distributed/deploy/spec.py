@@ -302,6 +302,7 @@ class SpecCluster(Cluster):
                 options = {"dashboard": True}
             self.scheduler_spec = {"cls": Scheduler, "options": options}
 
+        # Check if scheduler has already been created by a subclass
         if self.scheduler is None:
             cls = self.scheduler_spec["cls"]
             if isinstance(cls, str):
