@@ -1,4 +1,5 @@
 from collections import defaultdict
+from statistics import mean
 import logging
 import math
 from numbers import Number
@@ -1768,8 +1769,9 @@ class WorkerTable(DashboardComponent):
 
     excluded_names = {"executing", "in_flight", "in_memory", "ready", "time"}
 
-    def __init__(self, scheduler, width=800, **kwargs):
+    def __init__(self, scheduler, width=800, report=False, **kwargs):
         self.scheduler = scheduler
+        self.count = 0
         self.names = [
             "name",
             "address",
@@ -1793,6 +1795,26 @@ class WorkerTable(DashboardComponent):
             }
             - self.excluded_names
         )
+        self.stat_names = [
+            "max_cpu",
+            "min_cpu",
+            "mean_cpu",
+            "max_memory",
+            "min_memory",
+            "mean_memory",
+            "max_memory_percent",
+            "min_memory_percent",
+            "mean_memory_percent",
+            "max_num_fds",
+            "min_num_fds",
+            "mean_num_fds",
+            "max_read_bytes",
+            "min_read_bytes",
+            "mean_read_bytes",
+            "max_write_bytes",
+            "min_write_bytes",
+            "mean_write_bytes",
+        ]
 
         table_names = [
             "name",
@@ -1807,7 +1829,9 @@ class WorkerTable(DashboardComponent):
             "write_bytes",
         ]
 
-        self.source = ColumnDataSource({k: [] for k in self.names})
+        self.source = ColumnDataSource(
+            {k: [] for k in self.names + self.extra_names + self.stat_names}
+        )
 
         columns = {
             name: TableColumn(field=name, title=name.replace("_percent", " %"))
@@ -1817,10 +1841,10 @@ class WorkerTable(DashboardComponent):
         formatters = {
             "cpu": NumberFormatter(format="0.0 %"),
             "memory_percent": NumberFormatter(format="0.0 %"),
-            "memory": NumberFormatter(format="0 b"),
-            "memory_limit": NumberFormatter(format="0 b"),
-            "read_bytes": NumberFormatter(format="0 b"),
-            "write_bytes": NumberFormatter(format="0 b"),
+            "memory": NumberFormatter(format="0.0 b"),
+            "memory_limit": NumberFormatter(format="0.0 b"),
+            "read_bytes": NumberFormatter(format="0.0 b"),
+            "write_bytes": NumberFormatter(format="0.0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
         }
@@ -1845,7 +1869,7 @@ class WorkerTable(DashboardComponent):
 
         extra_names = ["name", "address"] + self.extra_names
         extra_columns = {
-            name: TableColumn(field=name, title=name.replace("_percent", "%"))
+            name: TableColumn(field=name, title=name.replace("_percent", " %"))
             for name in extra_names
         }
 
@@ -1857,6 +1881,31 @@ class WorkerTable(DashboardComponent):
             width=width,
             **dt_kwargs,
         )
+
+        stat_names = ["name", "address"] + self.stat_names
+        stat_columns = {
+            name: TableColumn(field=name, title=name.replace("_percent", " %"))
+            for name in stat_names
+        }
+
+        stat_table = DataTable(
+            source=self.source,
+            columns=[stat_columns[n] for n in stat_names],
+            reorderable=True,
+            sortable=True,
+            width=width,
+            **dt_kwargs,
+        )
+
+        for name in stat_names:
+            if name[4:] in formatters:
+                stat_table.columns[stat_names.index(name)].formatter = formatters[
+                    name[4:]
+                ]
+            elif name[5:] in formatters:
+                stat_table.columns[stat_names.index(name)].formatter = formatters[
+                    name[5:]
+                ]
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -1922,7 +1971,9 @@ class WorkerTable(DashboardComponent):
         else:
             sizing_mode = {}
 
-        components = [cpu_plot, mem_plot, table]
+        components = [cpu_plot, mem_plot, table, stat_table]
+        if report:
+            components = [stat_table]
         if self.extra_names:
             components.append(extra_table)
 
@@ -1930,7 +1981,7 @@ class WorkerTable(DashboardComponent):
 
     @without_property_validation
     def update(self):
-        data = {name: [] for name in self.names + self.extra_names}
+        data = {name: [] for name in self.names + self.extra_names + self.stat_names}
         for i, (addr, ws) in enumerate(
             sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
         ):
@@ -1946,8 +1997,28 @@ class WorkerTable(DashboardComponent):
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
+            for name in self.stat_names:
+                if name.startswith("max"):
+                    data[name].append(
+                        max(self.source.data[name][i + 1], data[name[4:]][-1])
+                        if self.source.data[name]
+                        else data[name[4:]][-1]
+                    )
+                elif name.startswith("min"):
+                    data[name].append(
+                        min(self.source.data[name][i + 1], data[name[4:]][-1])
+                        if self.source.data[name]
+                        else data[name[4:]][-1]
+                    )
+                elif name.startswith("mean"):
+                    data[name].append(
+                        (self.source.data[name][i+1] * self.count + data[name[5:]][-1]) / (self.count + 1)
+                        if self.count else data[name[5:]][-1]
+                    )
 
-        for name in self.names + self.extra_names:
+        self.count += 1
+
+        for name in self.names + self.extra_names + self.stat_names:
             if name == "name":
                 data[name].insert(
                     0, "Total ({nworkers})".format(nworkers=len(data[name]))
@@ -1956,6 +2027,12 @@ class WorkerTable(DashboardComponent):
             try:
                 if len(self.scheduler.workers) == 0:
                     total_data = None
+                elif name.startswith("max"):
+                    total_data = max(data[name])
+                elif name.startswith("min"):
+                    total_data = min(data[name])
+                elif name.startswith("mean"):
+                    total_data = mean(data[name])
                 elif name == "memory_percent":
                     total_mem = sum(
                         ws.memory_limit for ws in self.scheduler.workers.values()
@@ -2044,7 +2121,7 @@ def events_doc(scheduler, extra, doc):
 
 def workers_doc(scheduler, extra, doc):
     with log_errors():
-        table = WorkerTable(scheduler)
+        table = WorkerTable(scheduler, sizing_mode="stretch_width")
         table.update()
         add_periodic_callback(doc, table, 500)
         doc.title = "Dask: Workers"
