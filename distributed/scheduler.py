@@ -6408,6 +6408,12 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
 
+        # Workers table
+        from distributed.dashboard.components.scheduler import WorkerTable
+
+        table = WorkerTable(self, report=True, sizing_mode="stretch_width")
+        table.update()
+
         from bokeh.models import Panel, Tabs, Div
         import distributed
 
@@ -6456,10 +6462,11 @@ class Scheduler(SchedulerState, ServerNode):
         html = Div(text=html)
 
         html = Panel(child=html, title="Summary")
+        table = Panel(child=table.root, title="Workers")
+        task_stream = Panel(child=task_stream, title="Task Stream")
         compute = Panel(child=compute, title="Worker Profile (compute)")
         workers = Panel(child=workers, title="Worker Profile (administrative)")
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
-        task_stream = Panel(child=task_stream, title="Task Stream")
         bandwidth_workers = Panel(
             child=bandwidth_workers.fig, title="Bandwidth (Workers)"
         )
@@ -6468,6 +6475,7 @@ class Scheduler(SchedulerState, ServerNode):
         tabs = Tabs(
             tabs=[
                 html,
+                table,
                 task_stream,
                 compute,
                 workers,
