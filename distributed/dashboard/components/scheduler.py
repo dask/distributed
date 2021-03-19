@@ -2012,8 +2012,13 @@ class WorkerTable(DashboardComponent):
                     )
                 elif name.startswith("mean"):
                     data[name].append(
-                        (self.source.data[name][i+1] * self.count + data[name[5:]][-1]) / (self.count + 1)
-                        if self.count else data[name[5:]][-1]
+                        (
+                            self.source.data[name][i + 1] * self.count
+                            + data[name[5:]][-1]
+                        )
+                        / (self.count + 1)
+                        if self.count
+                        else data[name[5:]][-1]
                     )
 
         self.count += 1
