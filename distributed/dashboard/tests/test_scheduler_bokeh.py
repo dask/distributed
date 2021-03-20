@@ -15,9 +15,10 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 import dask
 from dask.core import flatten
 from dask.utils import stringify
-from distributed.utils import format_dashboard_link
 from distributed.client import wait
+from distributed.compatibility import MACOS
 from distributed.metrics import time
+from distributed.utils import format_dashboard_link
 from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
@@ -530,7 +531,7 @@ async def test_TaskGraph_limit(c, s, a, b):
     assert len(gp.node_source.data["x"]) == 0
 
 
-@gen_cluster(client=True, timeout=30)
+@gen_cluster(client=True)
 async def test_TaskGraph_complex(c, s, a, b):
     da = pytest.importorskip("dask.array")
     gp = TaskGraph(s)
@@ -749,6 +750,7 @@ async def test_aggregate_action(c, s, a, b):
     assert ("compute") in mbk.action_source.data["names"]
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
     mbk = ComputePerKey(s)

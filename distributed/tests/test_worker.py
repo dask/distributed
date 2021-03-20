@@ -29,7 +29,7 @@ from distributed import (
     wait,
 )
 from distributed.diagnostics.plugin import PipInstall
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
@@ -708,6 +708,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
     assert len(transfers) == 2
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(mul, b"1", int(w3.target_message_size + 1), workers=w1.address)
@@ -721,6 +722,7 @@ async def test_share_communication(c, s, w1, w2, w3):
     assert w2.outgoing_transfer_log
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     x = c.submit(mul, b"1", int(b.target_message_size + 1), workers=a.address)
@@ -734,7 +736,7 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with tmpfile() as fn:
@@ -758,6 +760,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
             logger.removeHandler(fh)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_clean_up_dependencies(c, s, a, b):
     x = delayed(inc)(1)
@@ -777,6 +780,7 @@ async def test_clean_up_dependencies(c, s, a, b):
     assert set(a.data) | set(b.data) == {zz.key}
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_hold_onto_dependents(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
@@ -1082,6 +1086,7 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -1145,11 +1150,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1308,6 +1309,7 @@ async def test_scheduler_address_config(c, s):
     await worker.close()
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_wait_for_outgoing(c, s, a, b):
@@ -1639,7 +1641,7 @@ async def test_pip_install(c, s, a, b):
 
             args = p2.call_args[0][0]
             assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
 
 
 @gen_cluster(client=True)
@@ -1681,6 +1683,7 @@ async def test_update_latency(cleanup):
                 assert w.digests["latency"].size() > 0
 
 
+@pytest.mark.skipif(MACOS, reason="frequently hangs")
 @pytest.mark.asyncio
 async def test_workerstate_executing(cleanup):
     async with await Scheduler() as s:
@@ -1727,13 +1730,12 @@ async def test_bad_local_directory(cleanup):
         try:
             async with Worker(s.address, local_directory="/not/a/valid-directory"):
                 pass
-        except PermissionError:
+        except OSError:
+            # On Linux: [Errno 13] Permission denied: '/not'
+            # On MacOSX: [Errno 30] Read-only file system: '/not'
             pass
         else:
-            if WINDOWS:
-                pass
-            else:
-                assert False
+            assert WINDOWS
 
         assert not any("error" in log for log in s.get_logs())
 
@@ -1783,3 +1785,12 @@ async def test_executor_offload(cleanup, monkeypatch):
                     return threading.get_ident() == x._thread_ident
 
                 assert await c.submit(f, x)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_story(c, s, w):
+    future = c.submit(inc, 1)
+    await future
+    ts = w.tasks[future.key]
+    assert ts.state in str(w.story(ts))
+    assert w.story(ts) == w.story(ts.key)

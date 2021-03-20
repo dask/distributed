@@ -11,7 +11,7 @@ from unittest import mock
 import pytest
 
 import dask
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
@@ -272,15 +272,15 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
     return n_created, n_purged
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 def test_workspace_concurrency(tmpdir):
     if WINDOWS:
         raise pytest.xfail.Exception("TODO: unknown failure on windows")
-    if sys.version_info < (3, 7):
-        raise pytest.xfail.Exception("TODO: unknown failure on Python 3.6")
     _test_workspace_concurrency(tmpdir, 5.0, 6)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 def test_workspace_concurrency_intense(tmpdir):
     n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)

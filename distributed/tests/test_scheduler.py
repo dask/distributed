@@ -16,6 +16,7 @@ import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.comm import Comm
+from distributed.compatibility import MACOS
 from distributed.core import connect, rpc, ConnectionPool, Status
 from distributed.scheduler import Scheduler
 from distributed.client import wait
@@ -683,6 +684,8 @@ async def test_story(c, s, a, b):
 
     assert len(s.story(x.key, y.key)) > len(story)
 
+    assert s.story(x.key) == s.story(s.tasks[x.key])
+
 
 @gen_cluster(nthreads=[], client=True)
 async def test_scatter_no_workers(c, s):
@@ -1037,11 +1040,12 @@ async def test_no_workers_to_memory(c, s):
 
 @gen_cluster(client=True)
 async def test_no_worker_to_memory_restrictions(c, s, a, b):
-    x = delayed(slowinc)(1, delay=0.4)
-    y = delayed(slowinc)(x, delay=0.4)
-    z = delayed(slowinc)(y, delay=0.4)
+    with dask.annotate(workers="alice"):
+        x = delayed(slowinc)(1, delay=0.4)
+        y = delayed(slowinc)(x, delay=0.4)
+        z = delayed(slowinc)(y, delay=0.4)
 
-    yy, zz = c.persist([y, z], workers={(x, y, z): "alice"})
+    yy, zz = c.persist([y, z], optimize_graph=False)
 
     while not s.tasks:
         await asyncio.sleep(0.01)
@@ -1101,7 +1105,7 @@ async def test_close_worker(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny, timeout=20)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_close_nanny(c, s, a, b):
     assert len(s.workers) == 2
 
@@ -1132,7 +1136,7 @@ async def test_close_nanny(c, s, a, b):
         assert time() < start + 10
 
 
-@gen_cluster(client=True, timeout=20)
+@gen_cluster(client=True)
 async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers
@@ -1140,7 +1144,7 @@ async def test_retire_workers_close(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, timeout=20, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
     await s.retire_workers(close_workers=True, remove=True)
@@ -1180,7 +1184,7 @@ async def test_scheduler_file():
         await s.close()
 
 
-@pytest.mark.xfail(reason="")
+@pytest.mark.xfail()
 @gen_cluster(client=True, nthreads=[])
 async def test_non_existent_worker(c, s):
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
@@ -1415,9 +1419,11 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@pytest.mark.xfail(reason="second worker also errant for some reason")
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, timeout=5)
-async def test_mising_data_errant_worker(c, s, w1, w2, w3):
+@pytest.mark.flaky(
+    reruns=10, reruns_delay=5, reason="second worker also errant for some reason"
+)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         np = pytest.importorskip("numpy")
 
@@ -1605,6 +1611,7 @@ async def test_collect_versions(c, s, a, b):
     assert cs.versions == w1.versions == w2.versions
 
 
+@pytest.mark.xfail(reason="flaky and re-fails on rerun")
 @gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "500ms"})
 async def test_idle_timeout(c, s, a, b):
     beginning = time()
@@ -1811,9 +1818,6 @@ async def test_get_task_duration(c, s, a, b):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
-)
 async def test_no_danglng_asyncio_tasks(cleanup):
     start = asyncio.all_tasks()
     async with Scheduler(port=0) as s:
@@ -2008,6 +2012,7 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
 async def test_gather_allow_worker_reconnect(c, s, a, b):
     """
@@ -2019,7 +2024,7 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     its results instead of recomputing them.
     """
     # GH3246
-    ALREADY_CALCULATED = []
+    already_calculated = []
 
     import time
 
@@ -2027,9 +2032,9 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
         # Once the graph below is rescheduled this computation runs again. We
         # need to sleep for at least 0.5 seconds to give the worker a chance to
         # reconnect (Heartbeat timing)
-        if x in ALREADY_CALCULATED:
+        if x in already_calculated:
             time.sleep(1)
-        ALREADY_CALCULATED.append(x)
+        already_calculated.append(x)
         return x + 1
 
     x = c.submit(inc_slow, 1)
@@ -2062,12 +2067,14 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     client_logger = client_logger.getvalue()
     utils_comm_logger = utils_comm_logger.getvalue()
 
-    # Ensure that the communication was done via the scheduler, i.e. we actually hit a bad connection
+    # Ensure that the communication was done via the scheduler, i.e. we actually hit a
+    # bad connection
     assert s.rpc.cnn_count > 0
 
     assert "Retrying get_data_from_worker after exception" in utils_comm_logger
 
-    # The reducer task was actually not found upon first collection. The client will reschedule the graph
+    # The reducer task was actually not found upon first collection. The client will
+    # reschedule the graph
     assert "Couldn't gather 1 keys, rescheduling" in client_logger
     # There will also be a `Unexpected worker completed task` message but this
     # is rather an artifact and not the intention
@@ -2165,7 +2172,7 @@ async def test_unknown_task_duration_config(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True, timeout=None)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))
@@ -2177,3 +2184,19 @@ async def test_retire_state_change(c, s, a, b):
         step = c.compute(foo)
         c.gather(step)
     await c.retire_workers(workers=[a.address])
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.transition-log-length": 3})
+async def test_configurable_events_log_length(c, s, a, b):
+    s.log_event("test", "dummy message 1")
+    assert len(s.events["test"]) == 1
+    s.log_event("test", "dummy message 2")
+    s.log_event("test", "dummy message 3")
+    assert len(s.events["test"]) == 3
+
+    # adding a forth message will drop the first one and length stays at 3
+    s.log_event("test", "dummy message 4")
+    assert len(s.events["test"]) == 3
+    assert s.events["test"][0][1] == "dummy message 2"
+    assert s.events["test"][1][1] == "dummy message 3"
+    assert s.events["test"][2][1] == "dummy message 4"

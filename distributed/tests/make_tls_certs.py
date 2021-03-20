@@ -34,8 +34,8 @@ req_template = """
     database  = $dir/index.txt
     crlnumber = $dir/crl.txt
     default_md = sha256
-    default_days = 3600
-    default_crl_days = 3600
+    default_days = 360000
+    default_crl_days = 360000
     certificate = tls-ca-cert.pem
     private_key = tls-ca-key.pem
     serial    = $dir/serial
@@ -84,7 +84,7 @@ def make_cert_key(hostname, sign=False):
             "req",
             "-new",
             "-days",
-            "3650",
+            "365242",
             "-nodes",
             "-newkey",
             "rsa:2048",
@@ -154,7 +154,7 @@ def make_ca():
                 "req",
                 "-new",
                 "-days",
-                "3650",
+                "365242",
                 "-extensions",
                 "v3_ca",
                 "-nodes",
@@ -181,7 +181,7 @@ def make_ca():
                 "-keyfile",
                 "tls-ca-key.pem",
                 "-days",
-                "3650",
+                "365242",
                 "-selfsign",
                 "-extensions",
                 "v3_ca",

@@ -138,7 +138,7 @@ async def test_repr(c, s, a, b):
     assert "Sub" in str(sub)
 
 
-@pytest.mark.xfail(reason="out of order execution")
+@pytest.mark.xfail(reason="flaky and re-fails on reruns; out of order execution")
 @gen_cluster(client=True)
 async def test_basic(c, s, a, b):
     async def publish():

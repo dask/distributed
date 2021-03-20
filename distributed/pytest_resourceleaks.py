@@ -30,7 +30,7 @@ Can be 'all' or a comma-separated list of resource names
     group.addoption(
         "--leaks-timeout",
         action="store",
-        type="float",
+        type=float,
         dest="leaks_timeout",
         default=0.5,
         help="""\

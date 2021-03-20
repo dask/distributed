@@ -1,0 +1,42 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - asyncssh
+  - bokeh
+  - click
+  - cloudpickle
+  - dask  # overridden by git tip below
+  - filesystem-spec
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - joblib
+  - jupyter_client
+  - msgpack-python
+  - netcdf4
+  - paramiko
+  - prometheus_client
+  - psutil
+  - pytest
+  - pytest-asyncio<0.14.0
+  - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
+  - requests
+  - s3fs
+  - scikit-learn
+  - scipy
+  - sortedcollections
+  - tblib
+  - toolz
+  - tornado=6
+  - zict
+  - zstandard
+  - pip:
+      - git+https://github.com/dask/dask
+      - keras

@@ -8,6 +8,7 @@ import pytest
 
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
+from distributed.protocol.serialize import pickle_dumps
 
 if sys.version_info < (3, 8):
     try:
@@ -71,6 +72,16 @@ def test_pickle_out_of_band():
         assert isinstance(f[0], bytes)
 
 
+def test_pickle_empty():
+    np = pytest.importorskip("numpy")
+    x = np.arange(2)[0:0]  # Empty view
+    header, frames = pickle_dumps(x)
+    header["writeable"] = [False] * len(frames)
+    y = deserialize(header, frames)
+    assert memoryview(y).nbytes == 0
+    assert memoryview(y).readonly
+
+
 def test_pickle_numpy():
     np = pytest.importorskip("numpy")
     x = np.ones(5)
@@ -117,11 +128,7 @@ def test_pickle_numpy():
         assert (deserialize(h, f) == x).all()
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 def test_pickle_functions():
     def make_closure():
         value = 1
