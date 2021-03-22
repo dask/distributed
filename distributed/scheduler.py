@@ -3279,7 +3279,11 @@ class Scheduler(SchedulerState, ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
-        self.events = defaultdict(lambda: deque(maxlen=100000))
+        self.events = defaultdict(
+            lambda: deque(
+                maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+            )
+        )
         self.event_counts = defaultdict(int)
         self.worker_plugins = []
 
