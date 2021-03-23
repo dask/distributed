@@ -5,6 +5,7 @@ from time import time
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 
 from bokeh.layouts import column
+from bokeh.palettes import Turbo256
 from bokeh.plotting import figure
 from bokeh.models import (
     ColumnDataSource,
@@ -60,15 +61,6 @@ class GPUMonitor(DashboardComponent):
             x_range=x_range,
             **kwargs,
         )
-        for ws in workers:
-            self.memory_figure.line(
-                source=self.source,
-                x="time",
-                y=f"{ws}_mem",
-                color="#76B900",
-            )
-        self.memory_figure.yaxis.axis_label = "Bytes"
-
         self.utilization_figure = figure(
             title="GPU Utilization",
             x_axis_type="datetime",
@@ -77,13 +69,22 @@ class GPUMonitor(DashboardComponent):
             x_range=x_range,
             **kwargs,
         )
-        for ws in workers:
+        for i, ws in enumerate(workers):
+            color = Turbo256[(i * 33) % 256]
+            self.memory_figure.line(
+                source=self.source,
+                x="time",
+                y=f"{ws}_mem",
+                color=color,
+            )
             self.utilization_figure.line(
                 source=self.source,
                 x="time",
                 y=f"{ws}_util",
-                color="#76B900",
+                color=color,
             )
+
+        self.memory_figure.yaxis.axis_label = "Bytes"
         self.utilization_figure.yaxis.axis_label = "Percentage"
 
         self.memory_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
@@ -99,7 +100,6 @@ class GPUMonitor(DashboardComponent):
         self.utilization_figure.y_range.start = 0
 
         self.root = column(*plots, **kw)
-
 
     @without_property_validation
     def update(self):
@@ -120,11 +120,11 @@ class GPUMonitor(DashboardComponent):
             d[f"{ws.address}_util"] = [metrics["utilization"]]
             memory_used += d[f"{ws.address}_mem"][0]
             memory_total += mem_total
-            
+
         self.memory_figure.title.text = "GPU Memory: %s / %s" % (
-                format_bytes(memory_used),
-                format_bytes(memory_total),
-            )
+            format_bytes(memory_used),
+            format_bytes(memory_total),
+        )
         self.source.stream(d, 1000)
 
 
@@ -295,7 +295,5 @@ def gpu_monitor_doc(scheduler, extra, doc):
     gpu_mon.update()
     doc.title = "Dask: GPU Monitor"
     add_periodic_callback(doc, gpu_mon, 500)
-
     doc.add_root(gpu_mon.root)
-    doc.template = env.get_template("simple.html")
     doc.theme = BOKEH_THEME
