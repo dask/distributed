@@ -934,56 +934,57 @@ class Worker(ServerNode):
             self.digests["latency"].add(latency)
 
     async def heartbeat(self):
-        if not self.heartbeat_active:
-            self.heartbeat_active = True
-            logger.debug("Heartbeat: %s" % self.address)
-            try:
-                start = time()
-                response = await retry_operation(
-                    self.scheduler.heartbeat_worker,
-                    address=self.contact_address,
-                    now=time(),
-                    metrics=await self.get_metrics(),
-                    executing={
-                        key: start - self.tasks[key].start_time
-                        for key in self.active_threads.values()
-                        if key in self.tasks
-                    },
-                )
-                end = time()
-                middle = (start + end) / 2
-
-                self._update_latency(end - start)
-
-                if response["status"] == "missing":
-                    for i in range(10):
-                        if self.status != Status.running:
-                            break
-                        else:
-                            await asyncio.sleep(0.05)
-                    else:
-                        await self._register_with_scheduler()
-                    return
-                self.scheduler_delay = response["time"] - middle
-                self.periodic_callbacks["heartbeat"].callback_time = (
-                    response["heartbeat-interval"] * 1000
-                )
-                self.bandwidth_workers.clear()
-                self.bandwidth_types.clear()
-            except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
-                if not self.reconnect:
-                    await self.close(report=False)
-            except IOError as e:
-                # Scheduler is gone. Respect distributed.comm.timeouts.connect
-                if "Timed out trying to connect" in str(e):
-                    await self.close(report=False)
-                else:
-                    raise e
-            finally:
-                self.heartbeat_active = False
-        else:
+        if self.heartbeat_active:
             logger.debug("Heartbeat skipped: channel busy")
+            return
+
+        self.heartbeat_active = True
+        logger.debug("Heartbeat: %s", self.address)
+        try:
+            start = time()
+            response = await retry_operation(
+                self.scheduler.heartbeat_worker,
+                address=self.contact_address,
+                now=start,
+                metrics=await self.get_metrics(),
+                executing={
+                    key: start - self.tasks[key].start_time
+                    for key in self.active_threads.values()
+                    if key in self.tasks
+                },
+            )
+            end = time()
+            middle = (start + end) / 2
+
+            self._update_latency(end - start)
+
+            if response["status"] == "missing":
+                for i in range(10):
+                    if self.status != Status.running:
+                        break
+                    else:
+                        await asyncio.sleep(0.05)
+                else:
+                    await self._register_with_scheduler()
+                return
+            self.scheduler_delay = response["time"] - middle
+            self.periodic_callbacks["heartbeat"].callback_time = (
+                response["heartbeat-interval"] * 1000
+            )
+            self.bandwidth_workers.clear()
+            self.bandwidth_types.clear()
+        except CommClosedError:
+            logger.warning("Heartbeat to scheduler failed")
+            if not self.reconnect:
+                await self.close(report=False)
+        except IOError as e:
+            # Scheduler is gone. Respect distributed.comm.timeouts.connect
+            if "Timed out trying to connect" in str(e):
+                await self.close(report=False)
+            else:
+                raise e
+        finally:
+            self.heartbeat_active = False
 
     async def handle_scheduler(self, comm):
         try:
