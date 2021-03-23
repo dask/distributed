@@ -3605,29 +3605,28 @@ class Scheduler(SchedulerState, ServerNode):
     def heartbeat_worker(
         self,
         comm=None,
-        address=None,
-        resolve_address=True,
-        now=None,
-        resources=None,
+        *,
+        address,
+        resolve_address: bool = True,
+        now: float = None,
+        resources: dict = None,
         host_info=None,
-        metrics=None,
+        metrics: dict,
         executing=None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        if address not in parent._workers:
+        try:
+            ws: WorkerState = parent._workers[address]
+        except KeyError:
             return {"status": "missing"}
 
         host = get_address_host(address)
         local_now = time()
-        now = now or time()
-        assert metrics
         host_info = host_info or {}
 
-        dh: dict = parent._host_info.get(host)
-        if dh is None:
-            parent._host_info[host] = dh = dict()
+        dh: dict = parent._host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
         frac = 1 / len(parent._workers)
@@ -3651,26 +3650,20 @@ class Scheduler(SchedulerState, ServerNode):
                     1 - alpha
                 )
 
-        ws: WorkerState = parent._workers[address]
-
-        ws._last_seen = time()
-
+        ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
                 parent._tasks[key]: duration for key, duration in executing.items()
             }
 
-        if metrics:
-            ws._metrics = metrics
+        ws._metrics = metrics
 
         if host_info:
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = dict()
+            dh: dict = parent._host_info.setdefault(host, {})
             dh.update(host_info)
 
-        delay = time() - now
-        ws._time_delay = delay
+        if now:
+            ws._time_delay = local_now - now
 
         if resources:
             self.add_resources(worker=address, resources=resources)
@@ -3757,7 +3750,7 @@ class Scheduler(SchedulerState, ServerNode):
             parent._total_nthreads += nthreads
             parent._aliases[name] = address
 
-            response = self.heartbeat_worker(
+            self.heartbeat_worker(
                 address=address,
                 resolve_address=resolve_address,
                 now=now,

@@ -25,7 +25,7 @@ from dask.compatibility import apply
 from dask.utils import format_bytes, funcname
 from dask.system import CPU_COUNT
 
-from tlz import pluck, merge, first, keymap
+from tlz import pluck, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
