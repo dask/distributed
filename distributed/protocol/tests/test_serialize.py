@@ -450,7 +450,7 @@ def test_compression_numpy_list():
                 np.random.random((3, 4)) if np is not None else b"skip np.random"
             ),
             True,
-            marks=pytest.mark.skipif(np is None, reason="Test needs numpy")
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
         ),
     ],
 )
@@ -481,7 +481,7 @@ def test_serialize_lists(serializers):
             memoryview(
                 np.random.random((3, 4)) if np is not None else b"skip np.random"
             ),
-            marks=pytest.mark.skipif(np is None, reason="Test needs numpy")
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
         ),
     ],
 )
