@@ -21,7 +21,7 @@ from tornado.tcpserver import TCPServer
 
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -201,7 +201,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not shutting_down():
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
             # Some OSError or a another "low-level" exception. We do not really know what
@@ -277,7 +277,7 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not shutting_down():
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
             # Some OSError or a another "low-level" exception. We do not really know

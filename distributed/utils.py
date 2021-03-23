@@ -1,6 +1,5 @@
 import asyncio
 from asyncio import TimeoutError
-import atexit
 import click
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
@@ -942,32 +941,6 @@ def divide_n_among_bins(n, bins):
 def mean(seq):
     seq = list(seq)
     return sum(seq) / len(seq)
-
-
-if hasattr(sys, "is_finalizing"):
-
-    def shutting_down(is_finalizing=sys.is_finalizing):
-        return is_finalizing()
-
-
-else:
-    _shutting_down = [False]
-
-    def _at_shutdown(l=_shutting_down):
-        l[0] = True
-
-    def shutting_down(l=_shutting_down):
-        return l[0]
-
-    atexit.register(_at_shutdown)
-
-
-shutting_down.__doc__ = """
-    Whether the interpreter is currently shutting down.
-    For use in finalizers, __del__ methods, and similar; it is advised
-    to early bind this function rather than look it up when calling it,
-    since at shutdown module globals may be cleared.
-    """
 
 
 def open_port(host=""):
