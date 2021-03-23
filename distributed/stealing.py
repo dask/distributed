@@ -95,7 +95,6 @@ class WorkStealing(SchedulerPlugin):
             return
 
         worker, level = result
-        self.log(("remove-stealable", ts.key, worker, level))
         try:
             self.stealable[worker][level].remove(ts)
         except KeyError:
