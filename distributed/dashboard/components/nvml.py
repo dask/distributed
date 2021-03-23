@@ -1,10 +1,14 @@
+import os
 import math
+from time import time
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 
+from bokeh.layouts import column
 from bokeh.plotting import figure
 from bokeh.models import (
     ColumnDataSource,
+    DataRange1d,
     BasicTicker,
     NumeralTickFormatter,
     TapTool,
@@ -24,6 +28,103 @@ try:
     pynvml.nvmlInit()
 except Exception:
     pass
+
+from jinja2 import Environment, FileSystemLoader
+
+env = Environment(
+    loader=FileSystemLoader(
+        os.path.join(os.path.dirname(__file__), "..", "..", "http", "templates")
+    )
+)
+
+
+class GPUMonitor(DashboardComponent):
+    """ Time series of GPU memory and utilization """
+
+    def __init__(self, scheduler, height=150, **kwargs):
+        self.scheduler = scheduler
+        workers = list(self.scheduler.workers.keys())
+        data = {f"{ws}_{metric}": [] for ws in workers for metric in ["mem", "util"]}
+        data.update({"time": []})
+        self.source = ColumnDataSource(data)
+        self.update()
+
+        x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
+
+        tools = "reset,xpan,xwheel_zoom"
+
+        self.memory_figure = figure(
+            title="GPU Memory",
+            x_axis_type="datetime",
+            height=height,
+            tools=tools,
+            x_range=x_range,
+            **kwargs,
+        )
+        for ws in workers:
+            self.memory_figure.line(
+                source=self.source,
+                x="time",
+                y=f"{ws}_mem",
+                color="#76B900",
+            )
+        self.memory_figure.yaxis.axis_label = "Bytes"
+
+        self.utilization_figure = figure(
+            title="GPU Utilization",
+            x_axis_type="datetime",
+            height=height,
+            tools=tools,
+            x_range=x_range,
+            **kwargs,
+        )
+        for ws in workers:
+            self.utilization_figure.line(
+                source=self.source,
+                x="time",
+                y=f"{ws}_util",
+                color="#76B900",
+            )
+        self.utilization_figure.yaxis.axis_label = "Percentage"
+
+        self.memory_figure.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+
+        plots = [self.memory_figure, self.utilization_figure]
+
+        if "sizing_mode" in kwargs:
+            kw = {"sizing_mode": kwargs["sizing_mode"]}
+        else:
+            kw = {}
+
+        self.memory_figure.y_range.start = 0
+        self.utilization_figure.y_range.start = 0
+
+        self.root = column(*plots, **kw)
+
+
+    @without_property_validation
+    def update(self):
+        now = time()
+        workers = list(self.scheduler.workers.values())
+        d = {"time": [now * 1000]}
+        memory_total = 0
+
+        for ws in workers:
+            try:
+                info = ws.extra["gpu"]
+            except KeyError:
+                continue
+            mem_total = info["memory-total"]
+            metrics = ws.metrics["gpu"]
+            d[f"{ws.address}_mem"] = [metrics["memory-used"]]
+            d[f"{ws.address}_util"] = [metrics["utilization"]]
+            memory_total += mem_total
+            
+        self.memory_figure.title.text = "GPU Memory: %s / %s" % (
+                format_bytes(sum(memory)),
+                format_bytes(memory_total),
+            )
+        self.source.stream(d, 1000)
 
 
 class GPUCurrentLoad(DashboardComponent):
@@ -53,7 +154,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-memory-worker-plot",
                 width=int(width / 2),
                 name="gpu_memory_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = memory.rect(
                 source=self.source,
@@ -71,7 +172,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-utilization-worker-plot",
                 width=int(width / 2),
                 name="gpu_utilization_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = utilization.rect(
                 source=self.source,
@@ -185,4 +286,15 @@ def gpu_utilization_doc(scheduler, extra, doc):
     gpu_load.update()
     add_periodic_callback(doc, gpu_load, 100)
     doc.add_root(gpu_load.utilization_figure)
+    doc.theme = BOKEH_THEME
+
+
+def gpu_monitor_doc(scheduler, extra, doc):
+    gpu_mon = GPUMonitor(scheduler, sizing_mode="stretch_both")
+    gpu_mon.update()
+    doc.title = "Dask: GPU Monitor"
+    add_periodic_callback(doc, gpu_mon, 500)
+
+    doc.add_root(gpu_mon.root)
+    doc.template = env.get_template("simple.html")
     doc.theme = BOKEH_THEME
