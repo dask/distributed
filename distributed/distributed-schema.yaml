@@ -80,6 +80,18 @@ properties:
               we will clear out old entries after a certain length.
               This is that length.
 
+          events-log-length:
+            type: integer
+            minimum: 0
+            description: |
+              How long should we keep the events log
+
+              All events (e.g. worker heartbeat) are stored in the events log.
+
+              To make sure that we don't run out of memory
+              we will clear out old entries after a certain length.
+              This is that length.
+
           work-stealing:
             type: boolean
             description: |
