@@ -67,7 +67,7 @@ from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import get_client, get_worker, secede
-from .diagnostics.plugin import UploadFile, WorkerPlugin
+from .diagnostics.plugin import PipInstall, UploadFile, WorkerPlugin
 from .utils import (
     All,
     sync,
@@ -3047,6 +3047,81 @@ class Client:
         return self.register_worker_plugin(
             UploadFile(filename),
             name=filename + str(uuid.uuid4()),
+        )
+
+    def pip_install(
+        self,
+        packages=None,
+        local_packages=None,
+        pip_options=None,
+        restart=False,
+        log_output=False,
+    ):
+        """Install packages from pip on all workers.
+
+        This accepts a set of packages to install on all workers.
+        As new workers join the cluster, they will automatically install
+        these packages at startup. You can also optionally ask for the
+        workers to restart themselves after performing this installation.
+
+        .. note::
+
+           This will increase the time it takes to start up
+           each worker. If possible, we recommend including the
+           libraries in the worker environment or image. This is
+           primarily intended for experimentation and debugging.
+
+           Additional issues may arise if multiple workers share the same
+           file system. Each worker might try to install the packages
+           simultaneously.
+
+        Parameters
+        ----------
+        packages : List[str]
+            A list of strings to place after "pip install" command
+        local_packages : str, List[str]
+            Paths to local pip-installable files (``.tar.gz``, ``.whl``, etc.).
+
+            When uploading a wheel, note that pip will not re-install it if that
+            module name and version number is already installed (even if the contents are
+            different). Therefore, when iterating on a module under local development,
+            or replacing a module already installed in the environment, uploading the
+            source distribution (``.tar.gz``) is generally preferred.
+        pip_options : List[str]
+            Additional options to pass to pip.
+        restart : bool, default False
+            Whether or not to restart the worker after pip installing
+            Only functions if the worker has an attached nanny process
+            and no ``local_packages`` were given.
+        log_output : bool, int, default False
+            Whether to log all pip output. Pass the
+            `log level <https://docs.python.org/3/library/logging.html#logging-levels>`_
+            to use, or for convenience, set ``log_output=True`` to log at ``INFO`` level.
+            If False (default), pip output won't be logged.
+
+        Examples
+        --------
+        >>> client.pip_install(packages=["scikit-learn"], pip_options=["--upgrade"])
+
+        >>> client.pip_install(local_packages="dist/mypackage-0.1.0.tar.gz")
+        >>> def check_install():
+        ...     import mypackage
+        ...     return "ok"
+        >>> client.run(check_install)
+        """
+        plugin = (
+            PipInstall(
+                packages=packages,
+                local_packages=local_packages,
+                pip_options=pip_options,
+                restart=restart,
+                log_output=log_output,
+            ),
+        )
+        return self.register_worker_plugin(
+            plugin,
+            name=f"pip-install-{tokenize(plugin.__dict__)}",
+            # tokenize the `__dict__` in case the contents of local files have changed
         )
 
     async def _rebalance(self, futures=None, workers=None):

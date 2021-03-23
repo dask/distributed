@@ -208,49 +208,107 @@ class PipInstall(WorkerPlugin):
     ----------
     packages : List[str]
         A list of strings to place after "pip install" command
+    local_packages : str, List[str]
+        Paths to local pip-installable files (``.tar.gz``, ``.whl``, etc.).
+
+        When uploading a wheel, note that pip will not re-install it if that
+        module name and version number is already installed (even if the contents are
+        different). Therefore, when iterating on a module under local development,
+        or replacing a module already installed in the environment, uploading the
+        source distribution (``.tar.gz``) is generally preferred.
     pip_options : List[str]
         Additional options to pass to pip.
     restart : bool, default False
         Whether or not to restart the worker after pip installing
         Only functions if the worker has an attached nanny process
+        and no ``local_packages`` were given.
+    log_output : bool, int, default False
+        Whether to log all pip output. Pass the
+        `log level <https://docs.python.org/3/library/logging.html#logging-levels>`_
+        to use, or for convenience, set ``log_output=True`` to log at ``INFO`` level.
+        If False (default), pip output won't be logged.
 
     Examples
     --------
     >>> from dask.distributed import PipInstall
     >>> plugin = PipInstall(packages=["scikit-learn"], pip_options=["--upgrade"])
-
     >>> client.register_worker_plugin(plugin)
+
+    >>> local_module_plugin = PipInstall(local_packages="dist/mypackage-0.1.0.tar.gz")
+    >>> client.register_worker_plugin(local_module_plugin)
     """
 
     name = "pip"
 
-    def __init__(self, packages, pip_options=None, restart=False):
-        self.packages = packages
+    def __init__(
+        self,
+        packages=None,
+        local_packages=None,
+        pip_options=None,
+        restart=False,
+        log_output=False,
+    ):
+        self.packages = packages if packages is not None else []
         self.restart = restart
+        self.log_output = logging.INFO if log_output is True else log_output
         if pip_options is None:
             pip_options = []
         self.pip_options = pip_options
+
+        self.local_packages = {}
+        if isinstance(local_packages, str):
+            local_packages = [local_packages]
+        for path in local_packages:
+            if os.path.isdir(path):
+                raise ValueError(
+                    f"{path} is a directory; you must instead give a single file that `pip install` works on. "
+                    "Consider building a distribution archive of your module: "
+                    "https://packaging.python.org/tutorials/packaging-projects/#generating-distribution-archives. "
+                    "Then pass the path to the `.tar.gz` or `.whl` file here."
+                )
+            with open(path, "rb") as f:
+                self.local_packages[os.path.basename(path)] = f.read()
 
     async def setup(self, worker):
         from ..lock import Lock
 
         async with Lock(socket.gethostname()):  # don't clobber one installation
-            logger.info("Pip installing the following packages: %s", self.packages)
+            local_packages = []
+            for filename, data in self.local_packages.items():
+                response = await worker.upload_file(
+                    comm=None, filename=filename, data=data, load=False
+                )
+                assert response == {"status": "OK", "nbytes": len(data)}
+
+                out_filename = os.path.join(worker.local_directory, filename)
+                local_packages.append(out_filename)
+
+            logger.info(
+                "Pip installing the following packages: %s",
+                self.packages + list(self.local_packages),
+            )
             proc = subprocess.Popen(
                 [sys.executable, "-m", "pip", "install"]
                 + self.pip_options
-                + self.packages,
+                + self.packages
+                + local_packages,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = proc.communicate()
             returncode = proc.wait()
 
+            if self.log_output:
+                # This may be ugly, but don't want to make assumtions
+                # about the log formatter and log line-by-line.
+                logger.log(self.log_output, "Pip stderr:\n" + stderr.decode().strip())
+                logger.log(self.log_output, "Pip stdout:\n" + stdout.decode().strip())
+
             if returncode:
                 logger.error("Pip install failed with '%s'", stderr.decode().strip())
                 return
 
-            if self.restart and worker.nanny:
+            if self.restart and worker.nanny and not local_packages:
                 lines = stdout.strip().split(b"\n")
                 if not all(
                     line.startswith(b"Requirement already satisfied") for line in lines
