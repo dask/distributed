@@ -37,7 +37,11 @@ from .components.scheduler import (
     individual_systemmonitor_doc,
 )
 from .worker import counters_doc
-from .components.nvml import gpu_memory_doc, gpu_utilization_doc  # noqa: 1708
+from .components.nvml import (
+    gpu_memory_doc,
+    gpu_utilization_doc,
+    gpu_monitor_doc,
+)
 
 
 template_variables = {
@@ -91,5 +95,6 @@ applications = {
     "/individual-aggregate-time-per-action": individual_aggregate_time_per_action_doc,
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
+    "/individual-gpu-monitor": gpu_monitor_doc,
     "/individual-scheduler-system": individual_systemmonitor_doc,
 }
