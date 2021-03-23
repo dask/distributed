@@ -806,8 +806,7 @@ class Worker(ServerNode):
         return self.local_directory
 
     async def get_metrics(self):
-        now = time()
-        core = dict(
+        out = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
@@ -818,17 +817,17 @@ class Worker(ServerNode):
                 "types": keymap(typename, self.bandwidth_types),
             },
         )
-        custom = {}
         for k, metric in self.metrics.items():
             try:
                 result = metric(self)
                 if isawaitable(result):
                     result = await result
-                custom[k] = result
+                out[k] = result
             except Exception:  # TODO: log error once
                 pass
 
-        return merge(custom, self.monitor.recent(), core)
+        out.update(self.monitor.recent())
+        return out
 
     async def get_startup_information(self):
         result = {}
