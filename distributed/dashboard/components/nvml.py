@@ -47,7 +47,6 @@ class GPUMonitor(DashboardComponent):
         data = {f"{ws}_{metric}": [] for ws in workers for metric in ["mem", "util"]}
         data.update({"time": []})
         self.source = ColumnDataSource(data)
-        self.update()
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
@@ -107,6 +106,7 @@ class GPUMonitor(DashboardComponent):
         now = time()
         workers = list(self.scheduler.workers.values())
         d = {"time": [now * 1000]}
+        memory_used = 0
         memory_total = 0
 
         for ws in workers:
@@ -118,10 +118,11 @@ class GPUMonitor(DashboardComponent):
             metrics = ws.metrics["gpu"]
             d[f"{ws.address}_mem"] = [metrics["memory-used"]]
             d[f"{ws.address}_util"] = [metrics["utilization"]]
+            memory_used += d[f"{ws.address}_mem"][0]
             memory_total += mem_total
             
         self.memory_figure.title.text = "GPU Memory: %s / %s" % (
-                format_bytes(sum(memory)),
+                format_bytes(memory_used),
                 format_bytes(memory_total),
             )
         self.source.stream(d, 1000)
