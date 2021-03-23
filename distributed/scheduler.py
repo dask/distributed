@@ -5758,11 +5758,11 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers:
                     await asyncio.gather(
-                        *(self.close_worker(worker=w, safe=True) for w in worker_keys)
+                        *[self.close_worker(worker=w, safe=True) for w in worker_keys]
                     )
                 if remove:
                     await asyncio.gather(
-                        *(self.remove_worker(address=w, safe=True) for w in worker_keys)
+                        *[self.remove_worker(address=w, safe=True) for w in worker_keys]
                     )
 
                 self.log_event(
