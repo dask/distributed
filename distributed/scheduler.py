@@ -64,7 +64,6 @@ from .utils import (
     no_default,
     parse_timedelta,
     parse_bytes,
-    shutting_down,
     key_split_group,
     empty_context,
     tmpfile,
@@ -4738,7 +4737,7 @@ class Scheduler(SchedulerState, ServerNode):
             if not comm.closed():
                 self.client_comms[client].send({"op": "stream-closed"})
             try:
-                if not shutting_down():
+                if not sys.is_finalizing():
                     await self.client_comms[client].close()
                     del self.client_comms[client]
                     if self.status == Status.running:

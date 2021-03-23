@@ -5,6 +5,7 @@ from enum import Enum
 from functools import partial
 import inspect
 import logging
+import sys
 import threading
 import traceback
 import uuid
@@ -32,7 +33,6 @@ from .utils import (
     is_coroutine_function,
     get_traceback,
     truncate_exception,
-    shutting_down,
     parse_timedelta,
     has_keyword,
     CancelledError,
@@ -406,7 +406,7 @@ class Server:
         )
         self.listeners.append(listener)
 
-    async def handle_comm(self, comm, shutting_down=shutting_down):
+    async def handle_comm(self, comm):
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -432,7 +432,7 @@ class Server:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
                 except EnvironmentError as e:
-                    if not shutting_down():
+                    if not sys.is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
                             " Last operation: %s",
@@ -536,7 +536,7 @@ class Server:
 
         finally:
             del self._comms[comm]
-            if not shutting_down() and not comm.closed():
+            if not sys.is_finalizing() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:

@@ -943,16 +943,6 @@ def mean(seq):
     return sum(seq) / len(seq)
 
 
-def shutting_down(is_finalizing=sys.is_finalizing):
-    """Whether the interpreter is currently shutting down.
-
-    For use in finalizers, __del__ methods, and similar; it is advised
-    to early bind this function rather than look it up when calling it,
-    since at shutdown module globals may be cleared.
-    """
-    return is_finalizing()
-
-
 def open_port(host=""):
     """Return a probably-open port
 
