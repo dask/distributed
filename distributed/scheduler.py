@@ -3672,7 +3672,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {
             "status": "OK",
-            "time": time(),
+            "time": local_now,
             "heartbeat-interval": heartbeat_interval(len(parent._workers)),
         }
 

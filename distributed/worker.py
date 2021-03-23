@@ -817,16 +817,18 @@ class Worker(ServerNode):
                 "types": keymap(typename, self.bandwidth_types),
             },
         )
+        out.update(self.monitor.recent())
+
         for k, metric in self.metrics.items():
             try:
                 result = metric(self)
                 if isawaitable(result):
                     result = await result
-                out[k] = result
+                # In case of collision, prefer core metrics
+                out.setdefault(k, result)
             except Exception:  # TODO: log error once
                 pass
 
-        out.update(self.monitor.recent())
         return out
 
     async def get_startup_information(self):
