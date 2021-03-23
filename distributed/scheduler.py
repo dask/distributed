@@ -3610,9 +3610,9 @@ class Scheduler(SchedulerState, ServerNode):
         resolve_address: bool = True,
         now: float = None,
         resources: dict = None,
-        host_info=None,
+        host_info: dict = None,
         metrics: dict,
-        executing=None,
+        executing: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
