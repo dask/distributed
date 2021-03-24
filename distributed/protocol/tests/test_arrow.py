@@ -1,7 +1,7 @@
-import pandas as pd
 import pytest
 
 pa = pytest.importorskip("pyarrow")
+pd = pytest.importorskip("pandas")
 
 import distributed
 from distributed.utils_test import gen_cluster

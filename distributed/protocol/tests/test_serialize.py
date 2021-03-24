@@ -3,9 +3,13 @@ import copy
 import pickle
 
 import msgpack
-import numpy as np
 import pytest
 from tlz import identity
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from dask.utils_test import inc
 
@@ -212,6 +216,7 @@ def test_empty_loads_deep():
     assert isinstance(e2[0][0][0], Empty)
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 @pytest.mark.parametrize("kwargs", [{}, {"serializers": ["pickle"]}])
 def test_serialize_bytes(kwargs):
     for x in [
@@ -228,6 +233,7 @@ def test_serialize_bytes(kwargs):
         assert str(x) == str(y)
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
     pytest.importorskip("lz4")
     x = np.ones(1000000)
@@ -439,7 +445,13 @@ def test_compression_numpy_list():
         (tuple([MyObj(None)]), True),
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
-        (memoryview(np.random.random((3, 4))), True),
+        pytest.param(
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
+            True,
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
+        ),
     ],
 )
 def test_check_dask_serializable(data, is_serializable):
@@ -462,7 +474,16 @@ def test_serialize_lists(serializers):
 
 
 @pytest.mark.parametrize(
-    "data_in", [memoryview(b"hello"), memoryview(np.random.random((3, 4)))]
+    "data_in",
+    [
+        memoryview(b"hello"),
+        pytest.param(
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
+        ),
+    ],
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
@@ -472,6 +493,7 @@ def test_deser_memoryview(data_in):
     assert data_in == data_out
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
