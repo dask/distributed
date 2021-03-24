@@ -25,11 +25,13 @@ jobs:
       - name: Setup Conda Environment
         # TODO replace with label as soon as it's available
         # https://github.com/conda-incubator/setup-miniconda/issues/106
-        uses: conda-incubator/setup-miniconda@77b16ed746da28724c61e1f1ad23395a4b695ef5
+        uses: conda-incubator/setup-miniconda@723ab12c1d66bb893c5ac701f8e387f00b24549e
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
           use-mamba: true
+          channels: conda-forge,defaults
+          channel-priority: true
           python-version: ${{ matrix.python-version }}
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
@@ -40,14 +42,6 @@ jobs:
         # stacktrace for Python 3.8 has not been released at the moment of writing
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
         run: mamba install -c conda-forge -c defaults -c numba libunwind stacktrace
-
-      - name: Hack around https://github.com/ipython/ipython/issues/12197
-        # This upstream issue causes an interpreter crash when running
-        # distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
-        # after running any test suite that imports IPython or ipywidgets
-        shell: bash -l {0}
-        if: ${{ matrix.os == 'windows-latest' && matrix.python-version >= '3.8' }}
-        run: mamba uninstall ipython
 
       - name: Cythonize
         shell: bash -l {0}
