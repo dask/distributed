@@ -5535,7 +5535,7 @@ async def test_client_active_bad_port():
 def test_turn_off_pickle(direct):
     @gen_cluster()
     async def test(s, a, b):
-        import numpy as np
+        np = pytest.importorskip("numpy")
 
         async with Client(
             s.address, asynchronous=True, serializers=["dask", "msgpack"]
@@ -5573,7 +5573,7 @@ def test_turn_off_pickle(direct):
 
 @gen_cluster()
 async def test_de_serialization(s, a, b):
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     c = await Client(
         s.address,
@@ -5594,7 +5594,7 @@ async def test_de_serialization(s, a, b):
 
 @gen_cluster()
 async def test_de_serialization_none(s, a, b):
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     c = await Client(s.address, asynchronous=True, deserializers=["msgpack"])
     try:
@@ -6432,8 +6432,8 @@ async def test_annotations_retries(c, s, a, b):
 @gen_cluster(client=True)
 async def test_annotations_blockwise_unpack(c, s, a, b):
     da = pytest.importorskip("dask.array")
+    np = pytest.importorskip("numpy")
     from dask.array.utils import assert_eq
-    import numpy as np
 
     # A flaky doubling function -- need extra args because it is called before
     # application to establish dtype/meta.

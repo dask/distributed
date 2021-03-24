@@ -425,8 +425,8 @@ async def test_load_balance_map(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 async def bench_param_server(c, s, *workers):
+    np = pytest.importorskip("numpy")
     import dask.array as da
-    import numpy as np
 
     x = da.random.random((500000, 1000), chunks=(1000, 1000))
     x = x.persist()

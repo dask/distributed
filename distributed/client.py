@@ -77,7 +77,6 @@ from .utils import (
     no_default,
     LoopRunner,
     parse_timedelta,
-    shutting_down,
     Any,
     has_keyword,
     format_dashboard_link,
@@ -383,7 +382,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Ocassionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not shutting_down():
+            if not sys.is_finalizing():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -1445,7 +1444,7 @@ class Client:
 
         assert self.status == "closed"
 
-        if not shutting_down():
+        if not sys.is_finalizing():
             self._loop_runner.stop()
 
     async def _shutdown(self):
@@ -4726,7 +4725,10 @@ def _close_global_client():
     if c is not None:
         c._should_close_loop = False
         with suppress(TimeoutError, RuntimeError):
-            c.close(timeout=3)
+            if c.asynchronous:
+                c.loop.add_callback(c.close, timeout=3)
+            else:
+                c.close(timeout=3)
 
 
 atexit.register(_close_global_client)

@@ -1,6 +1,7 @@
-import numpy as np
-import pandas as pd
 import pytest
+
+pd = pytest.importorskip("pandas")
+np = pytest.importorskip("numpy")
 
 from dask.dataframe.utils import assert_eq
 
