@@ -1,6 +1,5 @@
 import asyncio
 from asyncio import TimeoutError
-import atexit
 import click
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
@@ -25,7 +24,6 @@ import threading
 import warnings
 import weakref
 import pkgutil
-import base64
 import tblib.pickling_support
 import xml.etree.ElementTree
 
@@ -36,6 +34,10 @@ except ImportError:
 
 import dask
 from dask import istask
+
+# Import config serialization functions here for backward compatibility
+from dask.config import serialize as serialize_for_cli  # noqa
+from dask.config import deserialize as deserialize_for_cli  # noqa
 
 # provide format_bytes here for backwards compatibility
 from dask.utils import (  # noqa
@@ -941,32 +943,6 @@ def mean(seq):
     return sum(seq) / len(seq)
 
 
-if hasattr(sys, "is_finalizing"):
-
-    def shutting_down(is_finalizing=sys.is_finalizing):
-        return is_finalizing()
-
-
-else:
-    _shutting_down = [False]
-
-    def _at_shutdown(l=_shutting_down):
-        l[0] = True
-
-    def shutting_down(l=_shutting_down):
-        return l[0]
-
-    atexit.register(_at_shutdown)
-
-
-shutting_down.__doc__ = """
-    Whether the interpreter is currently shutting down.
-    For use in finalizers, __del__ methods, and similar; it is advised
-    to early bind this function rather than look it up when calling it,
-    since at shutdown module globals may be cleared.
-    """
-
-
 def open_port(host=""):
     """Return a probably-open port
 
@@ -1462,36 +1438,6 @@ def import_term(name: str):
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
-
-
-def serialize_for_cli(data):
-    """Serialize data into a string that can be passthrough cli
-
-    Parameters
-    ----------
-    data : json-serializable object
-        The data to serialize
-    Returns
-    -------
-    serialized_data : str
-        The serialized data as a string
-    """
-    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
-
-
-def deserialize_for_cli(data):
-    """De-serialize data into the original object
-
-    Parameters
-    ----------
-    data : str
-        String serialied by serialize_for_cli()
-    Returns
-    -------
-    deserialized_data : obj
-        The de-serialized data
-    """
-    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
 
 
 class EmptyContext:

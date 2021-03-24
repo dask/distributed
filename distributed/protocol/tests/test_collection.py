@@ -1,7 +1,8 @@
 import pytest
 from distributed.protocol import serialize, deserialize
-import pandas as pd
-import numpy as np
+
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
 
 @pytest.mark.parametrize("collection", [tuple, dict, list])

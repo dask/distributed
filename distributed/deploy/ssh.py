@@ -5,13 +5,13 @@ import warnings
 import weakref
 
 import dask
+import dask.config
 
 from .spec import SpecCluster, ProcessInterface
 from ..core import Status
 from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
 from ..worker import Worker as _Worker
-from ..utils import serialize_for_cli
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +95,13 @@ class Worker(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -176,13 +176,13 @@ class Scheduler(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(

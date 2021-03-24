@@ -7,8 +7,6 @@ import random
 import sys
 import multiprocessing as mp
 
-import numpy as np
-
 import pytest
 from tlz import valmap, first
 from tornado.ioloop import IOLoop
@@ -202,6 +200,7 @@ async def test_random_seed(c, s, a, b):
         assert x != y
 
     await check_func(lambda a, b: random.randint(a, b))
+    np = pytest.importorskip("numpy")
     await check_func(lambda a, b: np.random.randint(a, b))
 
 

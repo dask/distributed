@@ -19,19 +19,15 @@ Clone this repository with git::
 
 Install all dependencies:
 
-On Linux / MacOSX::
-
-    source continuous_integration/travis/install.sh
-
-On Windows:
+All OS::
 
 1. Install anaconda or miniconda
 2. ::
 
-    conda create -n dask-distributed -c conda-forge -c defaults python=3.8 tornado=6
+    conda env create --file continuous_integration/environment-3.8.yaml
     conda activate dask-distributed
-    conda env update --file continuous_integration/environment-windows.yml
-    python -m pip install .
+    python -m pip install -e .
+
 
 To keep a fork in sync with the upstream source::
 
