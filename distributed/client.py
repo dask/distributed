@@ -334,7 +334,7 @@ class Future(WrappedKey):
 
         Parameters
         ----------
-        fn: callable
+        fn : callable
             The method or function to be called
         """
         cls = Future
@@ -531,25 +531,48 @@ class FutureState:
         return event
 
     def cancel(self):
+        """ Cancels the operation """
         self.status = "cancelled"
         self.exception = CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
+        """ Sets the status to 'finished' and sets the event
+        
+        Parameters
+        ----------
+        type: any
+            The type
+        """
         self.status = "finished"
         self._get_event().set()
         if type is not None:
             self.type = type
 
     def lose(self):
+        """ Sets the status to 'lost' and clears the event
+        """
         self.status = "lost"
         self._get_event().clear()
 
     def retry(self):
+        """ Sets the status to 'pending' and clears the event
+        """
         self.status = "pending"
         self._get_event().clear()
 
     def set_error(self, exception, traceback):
+        """ Sets the error data 
+        
+        Sets the status to 'error'. Sets the exception, the traceback, and the event
+        
+        Parameters
+        ----------
+        exception: Exception
+            The exception
+        traceback: Exception
+            The traceback
+        """
         _, exception, traceback = clean_exception(exception, traceback)
 
         self.status = "error"
@@ -558,14 +581,27 @@ class FutureState:
         self._get_event().set()
 
     def done(self):
+        """ Returns 'True' if the event is not None and the event is set
+        """
         return self._event is not None and self._event.is_set()
 
     def reset(self):
+        """ Sets the status to 'pending' and clears the event
+        """
         self.status = "pending"
         if self._event is not None:
             self._event.clear()
 
     async def wait(self, timeout=None):
+        """ Sets the error data 
+        
+        Sets the status to 'error'. Sets the exception, the traceback, and the event
+        
+        Parameters
+        ----------
+        timeout: Exception
+            The exception
+        """
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
@@ -573,7 +609,15 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """Coroutine that waits on future, then calls callback"""
+    """ Coroutine that waits on the future, then calls the callback 
+        
+    Parameters
+    ----------
+    future: FutureState  
+        The future
+    callback: callable
+        The callback
+    """
     while future.status == "pending":
         await future._state.wait()
     callback(future)
@@ -581,6 +625,13 @@ async def done_callback(future, callback):
 
 @partial(normalize_token.register, Future)
 def normalize_future(f):
+    """ Coroutine that waits on the future, then calls the callback 
+        
+    Parameters
+    ----------
+    list  
+        The key and the type
+    """
     return [f.key, type(f)]
 
 
@@ -877,9 +928,18 @@ class Client(SyncMethodMixin):
         If allow_global is set to False, raise ValueError if running outside of the
         `as_client` context manager.
 
+        Parameters
+    	----------
+        allow_global : bool
+            If True returns the default client
         Returns
         -------
-
+        Client
+            The current client
+        Raises
+	    ------
+        ValueError
+            If there is no client set a ValueError is raised
         """
         out = _current_client.get()
         if out:
@@ -1453,6 +1513,7 @@ class Client(SyncMethodMixin):
         Returns 
         ------- 
         future: asyncio.Future
+            If running in asynchronous mode the future is returned
 
         See Also
         --------
@@ -1510,7 +1571,9 @@ class Client(SyncMethodMixin):
         scheduler and workers.
 
         Returns 
-        ------- 
+        -------
+        Future
+            If running in asynchronous mode returns the future
 
         See Also
         --------
@@ -1530,7 +1593,7 @@ class Client(SyncMethodMixin):
 
         Returns
         -------
-        _ : ClientExecutor
+        ClientExecutor
             An Executor object that's fully compatible with the concurrent.futures
             API.
         """
@@ -1601,6 +1664,15 @@ class Client(SyncMethodMixin):
         Returns
         -------
         Future
+            The future
+
+        Raises
+    	------
+        TypeError
+            If 'func' is not callable a TypeError is raised
+        ValueError
+            If 'allow_other_workers'is True and 'workers' is None a 
+            ValueError is raised
 
         See Also
         --------
@@ -2007,6 +2079,8 @@ class Client(SyncMethodMixin):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
+        asynchronous: bool
+            If True the client is in asynchronous mode            
 
         Returns
         -------
@@ -2193,7 +2267,9 @@ class Client(SyncMethodMixin):
         hash : bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
-
+        asynchronous: bool
+            If True the client is in asynchronous mode
+        
         Returns
         -------
         List, dict, iterator, or queue of futures matching the type of input.
@@ -2277,6 +2353,8 @@ class Client(SyncMethodMixin):
         futures : list of Futures
         force : boolean (False)
             Cancel this future even if other clients desire it
+        asynchronous: bool
+            If True the client is in asynchronous mode 
         """
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
@@ -2294,6 +2372,8 @@ class Client(SyncMethodMixin):
         Parameters
         ----------
         futures : list of Futures
+        asynchronous: bool
+            If True the client is in asynchronous mode
         """
         return self.sync(self._retry, futures, asynchronous=asynchronous)
 
@@ -2808,7 +2888,8 @@ class Client(SyncMethodMixin):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-
+        asynchronous: bool
+            If True the client is in asynchronous mode
         Examples
         --------
         >>> from operator import add  # doctest: +SKIP
