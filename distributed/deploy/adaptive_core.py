@@ -202,7 +202,8 @@ class AdaptiveCore:
             if status == "down":
                 await self.scale_down(**recommendations)
         except OSError as e:
-            logger.error("Adaptive stopping due to error %s", str(e))
-            self.stop()
+            if status != "down":
+                logger.error("Adaptive stopping due to error %s", str(e))
+                self.stop()
         finally:
             self._adapting = False
