@@ -59,6 +59,37 @@ from distributed.utils_test import (  # noqa: F401
 
 
 @pytest.mark.asyncio
+async def test_compression():
+    import numpy as np
+    import dask.array as da
+    from distributed.protocol import TypeCompressor
+
+    x = np.ones(100)  # a large but compressible piece of data
+
+    d = TypeCompressor()
+
+    d["x"] = x  # put Python object into d
+    out = d["x"]  # get the object back out
+
+    np.testing.assert_allclose(
+        np.fromstring(out, x.dtype), x
+    )  # the two objects should match
+
+    # assuming here that the underlying bytes are
+    # stored in something like a `.storage` attribute, but this isn't required
+    # we check that the amount of actual data stored is small
+    assert sum(map(len, d.storage.values())) < x.nbytes
+
+    async with Scheduler() as s:
+        async with Worker(s.address, data=d) as worker:
+            async with Client(s.address, asynchronous=True) as c:
+                x = da.ones((10, 10))
+                y = await x.persist()  # put data in memory
+                y = await (x + x.T).mean().persist()  # do some work
+                assert sum(map(len, worker.data.storage.values())) < x.nbytes
+
+
+@pytest.mark.asyncio
 async def test_worker_nthreads(cleanup):
     async with Scheduler() as s:
         async with Worker(s.address) as w:
@@ -1445,13 +1476,15 @@ async def test_register_worker_callbacks_err(c, s, a, b):
 
 @gen_cluster(nthreads=[])
 async def test_data_types(s):
+    from distributed.protocol import TypeCompressor
+
     w = await Worker(s.address, data=dict)
     assert isinstance(w.data, dict)
     await w.close()
 
     data = dict()
     w = await Worker(s.address, data=data)
-    assert w.data is data
+    assert w.data == TypeCompressor(data)
     await w.close()
 
     class Data(dict):
@@ -1600,6 +1633,18 @@ async def test_lifetime_stagger(c, s, a, b):
     assert a.lifetime != b.lifetime
     assert 8 <= a.lifetime <= 12
     assert 8 <= b.lifetime <= 12
+
+
+@gen_cluster()
+async def test_gpu_metrics(s, a, b):
+    pytest.importorskip("pynvml")
+    from distributed.diagnostics.nvml import count
+
+    assert "gpu" in a.metrics
+    assert len(s.workers[a.address].metrics["gpu"]["memory-used"]) == count
+
+    assert "gpu" in a.startup_information
+    assert len(s.workers[a.address].extra["gpu"]["name"]) == count
 
 
 @pytest.mark.asyncio

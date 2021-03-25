@@ -120,3 +120,49 @@ def _register_cudf():
 def _register_cuml():
     with suppress(ImportError):
         from cuml.comm import serialize
+
+
+import collections.abc
+
+import dask
+
+
+class TypeCompressor(collections.abc.MutableMapping):
+    def __init__(self, data=None):
+        self.storage = {}
+        if data is not None and isinstance(data, collections.abc.MutableMapping):
+            for key, value in data:
+                header, frames = serialize(value)
+                self.storage[key] = (header, maybe_compress(frames))
+
+    def __setitem__(self, key, value):
+        header, frames = serialize(value)
+        self.storage[key] = (header, maybe_compress(frames))
+
+    def __getitem__(self, key):
+        header, (compression, compressed) = self.storage[key]
+        if compression is None:
+            frames = compressed
+        else:
+            frames = decompress(compression, compressed)
+        return deserialize(header, frames)
+
+    def __delitem__(self, key):
+        del self.storage[key]
+
+    def __iter__(self):
+        return iter(self.storage)
+
+    def __len__(self):
+        return len(self.storage)
+
+    def __eq__(self, other):
+        if not isinstance(other, TypeCompressor):
+            return False
+        if len(self.storage) != len(other.storage):
+            return False
+        for key, value in self.storage:
+            if self.storage[key] != other.storage[key]:
+                return False
+
+        return True

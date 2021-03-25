@@ -41,7 +41,13 @@ from .metrics import time
 from .node import ServerNode
 from . import preloading
 from .proctitle import setproctitle
-from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
+from .protocol import (
+    pickle,
+    to_serialize,
+    deserialize_bytes,
+    serialize_bytelist,
+    TypeCompressor,
+)
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -591,7 +597,11 @@ class Worker(ServerNode):
                 "distributed.worker.memory.pause"
             )
 
-        if isinstance(data, MutableMapping):
+        if isinstance(data, MutableMapping) and not isinstance(data, TypeCompressor):
+            self.data = TypeCompressor()
+            for k, v in data.values():
+                self.data[k] = data[k]
+        elif isinstance(data, TypeCompressor):
             self.data = data
         elif callable(data):
             self.data = data()
