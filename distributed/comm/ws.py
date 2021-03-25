@@ -2,6 +2,7 @@ import asyncio
 import logging
 import struct
 import weakref
+import warnings
 
 from typing import Callable
 from ssl import SSLError
@@ -311,15 +312,20 @@ class WSListener(Listener):
         try:
             self.server = self.handler.__self__.http_server
             if self.server.port == self.port:
-                logger.debug(f"Sharing the same server on port {self.port}")
-                ssl_options = self.server_args.get(
-                    "ssl_options", self.server.ssl_options
-                )
-                # TODO: I think this should be the other way around
-                # and override `self.server_args` with the server's ssl_options
-                # if available
-                self.server.ssl_options = ssl_options
                 self.new_comm_server = False
+                logger.debug(f"Sharing the same server on port {self.port}")
+                ssl_options = self.server_args.get("ssl_options")
+                if self.server.ssl_options and ssl_options is None:
+                    raise RuntimeError("No ssl context found for the Scheduler")
+                if ssl_options:
+                    warnings.warn(
+                        "Dashboard and Scheduler are using "
+                        f"the same server on port {self.port}, "
+                        "defaulting to the Scheduler's ssl context. "
+                        "Your dashboard could become inaccessible",
+                        RuntimeWarning,
+                    )
+                    self.server.ssl_options = ssl_options
                 self.handler.__self__.http_application.add_handlers(r".*", routes)
         except AttributeError:
             logger.debug("No server available. Creating a new one")

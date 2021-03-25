@@ -1,7 +1,10 @@
+import os
 import warnings
 import pytest
+import tempfile
 
 import numpy as np
+import dask
 from distributed import Client, Scheduler, Worker
 from distributed.security import Security
 from distributed.comm.registry import backends, get_backend
@@ -15,6 +18,8 @@ from distributed.utils_test import (  # noqa: F401
 )
 
 from .test_comms import check_tls_extra
+
+security = Security.temporary()
 
 
 def test_registered():
@@ -69,6 +74,25 @@ async def test_expect_ssl_context():
 
 
 @pytest.mark.asyncio
+async def test_expect_scheduler_ssl_when_sharing_server():
+    with tempfile.TemporaryDirectory() as tempdir:
+        key_path = os.path.join(tempdir, "dask.pem")
+        cert_path = os.path.join(tempdir, "dask.crt")
+        with open(key_path, "w") as f:
+            f.write(security.tls_scheduler_key)
+        with open(cert_path, "w") as f:
+            f.write(security.tls_scheduler_cert)
+        c = {
+            "distributed.scheduler.dashboard.tls.key": key_path,
+            "distributed.scheduler.dashboard.tls.cert": cert_path,
+        }
+        with dask.config.set(c):
+            with pytest.raises(RuntimeError):
+                async with Scheduler(protocol="ws://", dashboard=True, port=8787) as s:
+                    pass
+
+
+@pytest.mark.asyncio
 async def test_roundtrip(cleanup):
     async with Scheduler(protocol="ws://") as s:
         async with Worker(s.address) as w:
@@ -102,50 +126,56 @@ async def test_large_transfer(cleanup):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dashboard", [True, False])
-async def test_same_http_server(cleanup, dashboard):
-    async with Scheduler(protocol="ws://", dashboard=dashboard, port=8787) as s:
-        assert s.http_server is s.listener.server
-        async with Worker(s.address, protocol="ws://") as w:
-            async with Client(s.address, asynchronous=True) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("dashboard", [True, False])
-async def test_different_http_server_by_default(cleanup, dashboard):
-    async with Scheduler(protocol="ws://", dashboard=dashboard) as s:
-        assert s.http_server is not s.listener.server
-        async with Worker(s.address, protocol="ws://") as w:
-            async with Client(s.address, asynchronous=True) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("dashboard", [True, False])
-async def test_same_http_server_wss(cleanup, dashboard):
-    security = Security.temporary()
+@pytest.mark.parametrize(
+    "dashboard,protocol,security,port",
+    [
+        (True, "ws://", None, 8787),
+        (True, "wss://", security, 8787),
+        (False, "ws://", None, 8787),
+        (False, "wss://", security, 8787),
+        (True, "ws://", None, 8786),
+        (True, "wss://", security, 8786),
+        (False, "ws://", None, 8786),
+        (False, "wss://", security, 8786),
+    ],
+)
+async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
     async with Scheduler(
-        protocol="wss://", dashboard=dashboard, port=8787, security=security
+        protocol=protocol, dashboard=dashboard, port=port, security=security
     ) as s:
-        assert s.http_server is s.listener.server
-        async with Worker(s.address, protocol="wss://", security=security) as w:
+        if port == 8787:
+            assert s.http_server is s.listener.server
+        else:
+            assert s.http_server is not s.listener.server
+        async with Worker(s.address, protocol=protocol, security=security) as w:
             async with Client(s.address, asynchronous=True, security=security) as c:
                 result = await c.submit(lambda x: x + 1, 10)
                 assert result == 11
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("dashboard", [True, False])
-async def test_different_http_server_by_default_wss(cleanup, dashboard):
-    security = Security.temporary()
+@pytest.mark.parametrize(
+    "dashboard,protocol,security,port",
+    [
+        (True, "ws://", None, 8787),
+        (True, "wss://", security, 8787),
+        (False, "ws://", None, 8787),
+        (False, "wss://", security, 8787),
+        (True, "ws://", None, 8786),
+        (True, "wss://", security, 8786),
+        (False, "ws://", None, 8786),
+        (False, "wss://", security, 8786),
+    ],
+)
+async def test_http__server(cleanup, dashboard, protocol, security, port):
     async with Scheduler(
-        protocol="wss://", dashboard=dashboard, security=security
+        protocol=protocol, dashboard=dashboard, port=port, security=security
     ) as s:
-        assert s.http_server is not s.listener.server
-        async with Worker(s.address, protocol="wss://", security=security) as w:
+        if port == 8787:
+            assert s.http_server is s.listener.server
+        else:
+            assert s.http_server is not s.listener.server
+        async with Worker(s.address, protocol=protocol, security=security) as w:
             async with Client(s.address, asynchronous=True, security=security) as c:
                 result = await c.submit(lambda x: x + 1, 10)
                 assert result == 11
@@ -167,7 +197,19 @@ async def test_quiet_close(cleanup):
     client=True,
     scheduler_kwargs={"protocol": "ws://"},
 )
-async def test_client_scheduler_worker_scheduler_client_roundtrip(c, s, a, b):
+async def test_ws_roundtrip(c, s, a, b):
+    x = np.arange(100)
+    future = await c.scatter(x)
+    y = await future
+    assert (x == y).all()
+
+
+@gen_cluster(
+    client=True,
+    security=security,
+    scheduler_kwargs={"protocol": "wss://"},
+)
+async def test_wss_roundtrip(c, s, a, b):
     x = np.arange(100)
     future = await c.scatter(x)
     y = await future
