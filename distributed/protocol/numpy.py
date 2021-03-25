@@ -20,7 +20,7 @@ def itemsize(dt):
 
 @dask_serialize.register(np.ndarray)
 def serialize_numpy_ndarray(x, context=None):
-    if x.dtype.hasobject:
+    if x.dtype.hasobject or (x.dtype.flags & np.core.multiarray.LIST_PICKLE):
         header = {"pickle": True}
         frames = [None]
         buffer_callback = lambda f: frames.append(memoryview(f))
