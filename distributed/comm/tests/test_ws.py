@@ -154,34 +154,6 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "dashboard,protocol,security,port",
-    [
-        (True, "ws://", None, 8787),
-        (True, "wss://", security, 8787),
-        (False, "ws://", None, 8787),
-        (False, "wss://", security, 8787),
-        (True, "ws://", None, 8786),
-        (True, "wss://", security, 8786),
-        (False, "ws://", None, 8786),
-        (False, "wss://", security, 8786),
-    ],
-)
-async def test_http__server(cleanup, dashboard, protocol, security, port):
-    async with Scheduler(
-        protocol=protocol, dashboard=dashboard, port=port, security=security
-    ) as s:
-        if port == 8787:
-            assert s.http_server is s.listener.server
-        else:
-            assert s.http_server is not s.listener.server
-        async with Worker(s.address, protocol=protocol, security=security) as w:
-            async with Client(s.address, asynchronous=True, security=security) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
-
-
-@pytest.mark.asyncio
 async def test_quiet_close(cleanup):
     with warnings.catch_warnings(record=True) as record:
         async with Client(protocol="ws", processes=False, asynchronous=True) as c:
