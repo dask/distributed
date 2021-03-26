@@ -1691,14 +1691,6 @@ async def test_result_type(c, s, a, b):
     assert "int" in s.tasks[x.key].type
 
 
-@gen_cluster(client=True)
-async def test_round_robin_dd(c, s, a, b):
-    await c.submit(inc, 1)
-    await c.submit(inc, 2)
-    await c.submit(inc, 3)
-    assert a.log and b.log
-
-
 @gen_cluster()
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)
@@ -2209,3 +2201,11 @@ async def test_configurable_events_log_length(c, s, a, b):
     assert s.events["test"][0][1] == "dummy message 2"
     assert s.events["test"][1][1] == "dummy message 3"
     assert s.events["test"][2][1] == "dummy message 4"
+
+
+@gen_cluster(client=True)
+async def test_quiet_cluster_round_robin(c, s, a, b):
+    await c.submit(inc, 1)
+    await c.submit(inc, 2)
+    await c.submit(inc, 3)
+    assert a.log and b.log
