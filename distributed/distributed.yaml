@@ -83,9 +83,14 @@ distributed:
       low-level: False      # Whether or not to include low-level functions
                             # Requires https://github.com/numba/stacktrace
 
-    # Fractions of worker memory at which we take action to avoid memory blowup
-    # Set any of the lower three values to False to turn off the behavior entirely
     memory:
+      # When there is an increase in process memory (as observed by the operating
+      # system) that is not accounted for by the dask keys stored on the worker, ignore
+      # it for this long before considering it in non-critical memory measures.
+      new_to_old_lag: 30s
+
+      # Fractions of worker process memory at which we take action to avoid memory
+      # blowup. Set any of the values to False to turn off the behavior entirely.
       target: 0.60  # target fraction to stay below
       spill: 0.70  # fraction at which we spill to disk
       pause: 0.80  # fraction at which we pause worker threads

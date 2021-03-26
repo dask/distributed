@@ -254,12 +254,17 @@ class Worker(ServerNode):
         memory_limit and at least one of memory_target_fraction or
         memory_spill_fraction values are defined, in that case, this attribute
         is a zict.Buffer, from which information on LRU cache can be queried.
-    * **data.memory:** ``{key: object}``:
+    * **data.fast:** ``{key: object}``:
         Dictionary mapping keys to actual values stored in memory. Only
         available if condition for **data** being a zict.Buffer is met.
-    * **data.disk:** ``{key: object}``:
+    * **data.slow:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
+    * **spilled_nbytes:** int:
+        Number of bytes currently spilled to disk. Only
+        available if condition for **data** being a zict.Buffer is met.
+        Note that this is the output of sizeof(), which may not accurately reflect the
+        serialized size of the data.
     * **data_needed**: deque(keys)
         The keys which still require data in order to execute, arranged in a deque
     * **ready**: [keys]
@@ -606,19 +611,21 @@ class Worker(ServerNode):
                 raise ImportError(
                     "Please `python -m pip install zict` for spill-to-disk workers"
                 )
-            path = os.path.join(self.local_directory, "storage")
             storage = Func(
                 partial(serialize_bytelist, on_error="raise"),
                 deserialize_bytes,
-                File(path),
+                File(os.path.join(self.local_directory, "storage")),
             )
-            target = (
-                int(float(self.memory_limit) * self.memory_target_fraction)
-                or sys.maxsize
+            target = int(self.memory_limit * self.memory_target_fraction) or sys.maxsize
+            self.spilled_nbytes = 0
+            self.data = Buffer(
+                {},
+                storage,
+                target,
+                weight=zict_weight,
+                fast_to_slow_callbacks=[partial(zict_on_evict, self)],
+                slow_to_fast_callbacks=[partial(zict_on_retrieve, self)],
             )
-            self.data = Buffer({}, storage, target, weight)
-            self.data.memory = self.data.fast
-            self.data.disk = self.data.slow
         else:
             self.data = dict()
 
@@ -817,6 +824,10 @@ class Worker(ServerNode):
                 "types": keymap(typename, self.bandwidth_types),
             },
         )
+        try:
+            out["spilled_nbytes"] = self.spilled_nbytes
+        except AttributeError:  # self.data is not a zict.Buffer
+            pass
         out.update(self.monitor.recent())
 
         for k, metric in self.metrics.items():
@@ -2854,8 +2865,8 @@ class Worker(ServerNode):
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
-                "Worker is at %d%% memory usage. Start spilling data to disk.",
-                int(frac * 100),
+                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
+                frac * 100,
             )
             start = time()
             target = self.memory_limit * self.memory_target_fraction
@@ -3701,8 +3712,19 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
-def weight(k, v):
+def zict_weight(k, v):
+    """Callback for zict.Buffer"""
     return sizeof(v)
+
+
+def zict_on_evict(w: Worker, k, v):
+    """Callback for zict.Buffer"""
+    w.spilled_nbytes += sizeof(v)
+
+
+def zict_on_retrieve(w: Worker, k, v):
+    """Callback for zict.Buffer"""
+    w.spilled_nbytes -= sizeof(v)
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
