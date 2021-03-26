@@ -2124,7 +2124,13 @@ class SchedulerState:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
             n_workers: Py_ssize_t = len(worker_pool_dv)
-            if n_workers < 20:  # smart but linear in small case
+            # if all occupancies in worker pool of size less than 20
+            # sum to under 0.1 of 1ms; go to the else branch (a round
+            # robin) because the cluster is considered quiet.
+            if (
+                n_workers < 20
+                and sum(w.occupancy for w in worker_pool.values()) > 1.0e-04
+            ):  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
                 ws = worker_pool.values()[self._n_tasks % n_workers]
