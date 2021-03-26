@@ -2124,9 +2124,9 @@ class SchedulerState:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
             n_workers: Py_ssize_t = len(worker_pool_dv)
-            if n_workers < 20:
+            if n_workers < 20:  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
-                if ws.occupancy == 0:
+                if ws.occupancy == 0:  # special case to use round-robin
                     ws = worker_pool.values()[self._n_tasks % n_workers]
             else:  # dumb but fast in large case
                 ws = worker_pool.values()[self._n_tasks % n_workers]
