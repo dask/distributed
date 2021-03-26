@@ -29,7 +29,7 @@ def test_registered():
 
 
 @pytest.mark.asyncio
-async def test_listen_connect():
+async def test_listen_connect(cleanup):
     async def handle_comm(comm):
         while True:
             msg = await comm.read()
@@ -45,7 +45,7 @@ async def test_listen_connect():
 
 
 @pytest.mark.asyncio
-async def test_listen_connect_wss():
+async def test_listen_connect_wss(cleanup):
     async def handle_comm(comm):
         while True:
             msg = await comm.read()
@@ -65,7 +65,7 @@ async def test_listen_connect_wss():
 
 
 @pytest.mark.asyncio
-async def test_expect_ssl_context():
+async def test_expect_ssl_context(cleanup):
     server_ctx = get_server_ssl_context()
 
     async with listen("wss://", lambda comm: comm, ssl_context=server_ctx) as listener:
@@ -74,7 +74,7 @@ async def test_expect_ssl_context():
 
 
 @pytest.mark.asyncio
-async def test_expect_scheduler_ssl_when_sharing_server():
+async def test_expect_scheduler_ssl_when_sharing_server(cleanup):
     with tempfile.TemporaryDirectory() as tempdir:
         key_path = os.path.join(tempdir, "dask.pem")
         cert_path = os.path.join(tempdir, "dask.crt")
