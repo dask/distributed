@@ -195,7 +195,7 @@ def check_dask_serializable(x):
     return False
 
 
-def serialize(x, serializers=None, on_error="message", context=None):
+def serialize(x, serializers=None, on_error="message", context=None, iterate_collection=None):
     r"""
     Convert object to a header and list of bytestrings
 
@@ -238,7 +238,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
         return x.header, x.frames
 
     if type(x) in (list, set, tuple, dict):
-        iterate_collection = False
+        iterate_collection = iterate_collection or False
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
             #       (see GitHub #3716), so we should iterate
