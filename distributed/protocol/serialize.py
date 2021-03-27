@@ -195,7 +195,9 @@ def check_dask_serializable(x):
     return False
 
 
-def serialize(x, serializers=None, on_error="message", context=None, iterate_collection=None):
+def serialize(
+    x, serializers=None, on_error="message", context=None, iterate_collection=None
+):
     r"""
     Convert object to a header and list of bytestrings
 
