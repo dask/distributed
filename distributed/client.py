@@ -3494,8 +3494,8 @@ class Client:
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
-            confiruable in config.yaml::log-length
+            Number of logs to retrive.  Maxes out at 100000 by default,
+            confiruable in distributed.yaml::transition-log-length
 
         Returns
         -------
@@ -3509,8 +3509,8 @@ class Client:
         Parameters
         ----------
         n : int
-            Number of logs to retrive.  Maxes out at 10000 by default,
-            confiruable in config.yaml::log-length
+            Number of logs to retrive.  Set to 0 by default,
+            confiruable in distributed.yaml::recent-messages-log-length
         workers : iterable
             List of worker addresses to retrieve.  Gets all workers by default.
         nanny : bool, default False
