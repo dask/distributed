@@ -6,6 +6,13 @@ properties:
       version:
         type: integer
 
+      logging:
+        type: object
+        description: |
+          The logging levels at which various administrative events get logged using the
+          Python standard logging module. Both the logging level and logging handlers
+          are customizable
+
       scheduler:
         type: object
         properties:
