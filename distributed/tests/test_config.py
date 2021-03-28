@@ -152,7 +152,11 @@ def test_logging_simple():
     """
     Test simple ("old-style") logging configuration.
     """
-    c = {"logging": {"distributed.foo": "info", "distributed.foo.bar": "error"}}
+    c = {
+        "distributed": {
+            "logging": {"distributed.foo": "info", "distributed.foo.bar": "error",}
+        }
+    }
     # Must test using a subprocess to avoid wrecking pre-existing configuration
     with new_config_file(c):
         code = """if 1:
@@ -188,29 +192,31 @@ def test_logging_extended():
     Test extended ("new-style") logging configuration.
     """
     c = {
-        "logging": {
-            "version": "1",
-            "formatters": {
-                "simple": {"format": "%(levelname)s: %(name)s: %(message)s"}
-            },
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                    "formatter": "simple",
-                }
-            },
-            "loggers": {
-                "distributed.foo": {
-                    "level": "INFO",
-                    #'handlers': ['console'],
+        "distributed": {
+            "logging": {
+                "version": "1",
+                "formatters": {
+                    "simple": {"format": "%(levelname)s: %(name)s: %(message)s"}
                 },
-                "distributed.foo.bar": {
-                    "level": "ERROR",
-                    #'handlers': ['console'],
+                "handlers": {
+                    "console": {
+                        "class": "logging.StreamHandler",
+                        "stream": "ext://sys.stderr",
+                        "formatter": "simple",
+                    }
                 },
-            },
-            "root": {"level": "WARNING", "handlers": ["console"]},
+                "loggers": {
+                    "distributed.foo": {
+                        "level": "INFO",
+                        #'handlers': ['console'],
+                    },
+                    "distributed.foo.bar": {
+                        "level": "ERROR",
+                        #'handlers': ['console'],
+                    },
+                },
+                "root": {"level": "WARNING", "handlers": ["console"]},
+            }
         }
     }
     # Must test using a subprocess to avoid wrecking pre-existing configuration
@@ -294,17 +300,25 @@ qualname=foo.bar
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as logging_config:
         logging_config.write(logging_config_contents)
     dask_config = {"logging-file-config": logging_config.name}
-    with new_config_file(dask_config):
-        code = """if 1:
-            import logging
-            from distributed import config
-            foo = logging.getLogger('foo')
-            bar = logging.getLogger('foo.bar')
-            assert logging.INFO == foo.getEffectiveLevel()
-            assert logging.ERROR == bar.getEffectiveLevel()
-            """
-        subprocess.check_call([sys.executable, "-c", code])
-    os.remove(logging_config.name)
+
+    try:
+        with new_config_file(dask_config):
+            code = """if 1:
+                import logging
+                from distributed import config
+
+                foo = logging.getLogger('foo')
+                bar = logging.getLogger('foo.bar')
+
+                expected = logging.INFO, logging.ERROR
+                actual = foo.getEffectiveLevel(), bar.getEffectiveLevel()
+
+                assert expected == actual, "{} != {}".format(expected, actual)
+                """
+            subprocess.check_call([sys.executable, "-c", code])
+
+    finally:
+        os.remove(logging_config.name)
 
 
 def test_schema():
@@ -331,7 +345,7 @@ def test_schema_is_complete():
     with open(schema_fn) as f:
         schema = yaml.safe_load(f)
 
-    skip = {"default-task-durations", "bokeh-application"}
+    skip = {"default-task-durations", "bokeh-application", "logging"}
 
     def test_matches(c, s):
         if set(c) != set(s["properties"]):
