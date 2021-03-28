@@ -1,12 +1,12 @@
 distributed:
   version: 2
-  # logging:
-  #   distributed: info
-  #   distributed.client: warning
-  #   bokeh: critical
-  #   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
-  #   tornado: critical
-  #   tornado.application: error
+  logging:
+    distributed: info
+    distributed.client: warning
+    bokeh: critical
+    # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
+    tornado: critical
+    tornado.application: error
 
   scheduler:
     allowed-failures: 3     # number of retries before a task is considered bad
