@@ -154,7 +154,10 @@ def test_logging_simple():
     """
     c = {
         "distributed": {
-            "logging": {"distributed.foo": "info", "distributed.foo.bar": "error",}
+            "logging": {
+                "distributed.foo": "info",
+                "distributed.foo.bar": "error",
+            }
         }
     }
     # Must test using a subprocess to avoid wrecking pre-existing configuration
