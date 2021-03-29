@@ -1819,8 +1819,8 @@ class WorkerTable(DashboardComponent):
             "memory_percent": NumberFormatter(format="0.0 %"),
             "memory": NumberFormatter(format="0.00 b"),
             "memory_limit": NumberFormatter(format="0.00 b"),
-            "read_bytes": NumberFormatter(format="0.00 b"),
-            "write_bytes": NumberFormatter(format="0.00 b"),
+            "read_bytes": NumberFormatter(format="0 b"),
+            "write_bytes": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
         }
