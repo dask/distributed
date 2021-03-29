@@ -112,8 +112,14 @@ For more information see the page on :doc:`Managing Computation <manage-computat
 Pure Functions by Default
 -------------------------
 
-By default we assume that all functions are pure_.  If this is not the case we
-should use the ``pure=False`` keyword argument.
+By default, ``distributed`` assumes that all functions are pure_.
+
+Pure functions:
+
+* always return the same output for a given set of inputs
+* do not have side effects, like modifying global state or creating files
+
+If this is not the case, you should use the ``pure=False`` keyword argument.
 
 The client associates a key to all computations.  This key is accessible on
 the Future object.
