@@ -1512,7 +1512,7 @@ class Client:
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See "Pure Functions by Default" in :doc:`client` for more details.
+            See :ref:`pure functions` for more details.
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
@@ -1632,7 +1632,7 @@ class Client:
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
-            See "Pure Functions by Default" in :doc:`client` for more details.
+            See :ref:`pure functions` for more details.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)

@@ -108,6 +108,7 @@ which are used for larger and smaller result sets respectively.
 
 For more information see the page on :doc:`Managing Computation <manage-computation>`.
 
+.. _pure functions:
 
 Pure Functions by Default
 -------------------------
@@ -119,7 +120,7 @@ Pure functions:
 * always return the same output for a given set of inputs
 * do not have side effects, like modifying global state or creating files
 
-If this is not the case, you should use the ``pure=False`` keyword argument.
+If this is not the case, you should use the ``pure=False`` keyword argument in methods like ``Client.map()`` and ``Client.submit()``.
 
 The client associates a key to all computations.  This key is accessible on
 the Future object.
