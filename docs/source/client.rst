@@ -112,9 +112,7 @@ For more information see the page on :doc:`Managing Computation <manage-computat
 Pure Functions by Default
 -------------------------
 
-By default, ``distributed`` assumes that all functions are pure_.
-
-Pure functions:
+By default, ``distributed`` assumes that all functions are pure_. Pure functions:
 
 * always return the same output for a given set of inputs
 * do not have side effects, like modifying global state or creating files
