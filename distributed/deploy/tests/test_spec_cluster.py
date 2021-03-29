@@ -361,8 +361,9 @@ async def test_widget(cleanup):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
-        assert "3" in cluster._widget_status()
-        assert "GB" in cluster._widget_status()
+        text = cluster._widget_status()
+        assert "3" in text
+        assert "GB" in text or "GiB" in text
 
         cluster.scale(5)
         assert "3 / 5" in cluster._widget_status()

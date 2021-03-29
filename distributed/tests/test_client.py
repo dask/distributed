@@ -1989,9 +1989,8 @@ def test_repr(loop):
             for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
-                assert "3" in text
-                assert "6" in text
-                assert "GB" in text
+                assert "threads=3" in text or "Cores: </b>3" in text
+                assert "6.00 GB" in text or "5.59 GiB" in text
                 if "<table" not in text:
                     assert len(text) < 80
 
@@ -5417,7 +5416,7 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
         future = c.submit(lambda x: x + 1, b"0" * 2000000)
 
     text = str(record[0].message)
-    assert "2.00 MB" in text
+    assert "2.00 MB" in text or "1.91 MiB" in text
     assert "large" in text
     assert "..." in text
     assert "'000" in text
