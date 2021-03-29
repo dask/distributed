@@ -205,7 +205,7 @@ class UCX(Comm):
                     *(
                         (is_cuda, each_frame)
                         for is_cuda, each_frame in zip(cuda_frames, frames)
-                        if len(each_frame) > 0
+                        if nbytes(each_frame) > 0
                     )
                 )
 
@@ -275,7 +275,7 @@ class UCX(Comm):
                     *(
                         (is_cuda, each_frame)
                         for is_cuda, each_frame in zip(cuda_frames, frames)
-                        if len(each_frame) > 0
+                        if nbytes(each_frame) > 0
                     )
                 )
 
