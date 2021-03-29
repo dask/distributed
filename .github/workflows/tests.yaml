@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Conda Environment
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v2.0.1
         with:
           miniconda-version: latest
           python-version: ${{ matrix.python-version }}
