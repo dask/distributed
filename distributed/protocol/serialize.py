@@ -211,6 +211,12 @@ def serialize(
     per-class serialization methods. ``None`` gives the default list
     ``['dask', 'pickle']``.
 
+    Notes on the ``iterate_collection`` argument (only relevant when
+    ``x`` is a collection):
+    - ``iterate_collection=True``: Serialize collection elements separately.
+    - ``iterate_collection=False``: Serialize collection elements together.
+    - ``iterate_collection=None`` (default): Infer the best setting.
+
     Examples
     --------
     >>> serialize(1)
@@ -239,8 +245,7 @@ def serialize(
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    if type(x) in (list, set, tuple, dict):
-        iterate_collection = iterate_collection or False
+    if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
             #       (see GitHub #3716), so we should iterate
