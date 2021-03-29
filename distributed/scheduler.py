@@ -3721,9 +3721,8 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        try:
-            ws: WorkerState = parent._workers[address]
-        except KeyError:
+        ws: WorkerState = parent._workers.get(address)
+        if ws is None:
             return {"status": "missing"}
 
         host = get_address_host(address)
