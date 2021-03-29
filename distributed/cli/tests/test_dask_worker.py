@@ -1,22 +1,29 @@
 import asyncio
+
 import pytest
 from click.testing import CliRunner
 
 pytest.importorskip("requests")
 
-import requests
-import sys
 import os
-from time import sleep
+import sys
 from multiprocessing import cpu_count
+from time import sleep
+
+import requests
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import sync, tmpfile, parse_ports
-from distributed.utils_test import popen, terminate_process, wait_for_port
-from distributed.utils_test import loop, cleanup  # noqa: F401
+from distributed.utils import parse_ports, sync, tmpfile
+from distributed.utils_test import (  # noqa: F401
+    cleanup,
+    loop,
+    popen,
+    terminate_process,
+    wait_for_port,
+)
 
 
 def test_nanny_worker_ports(loop):

@@ -4,10 +4,10 @@ A pytest plugin to trace resource leaks.
 """
 import collections
 import gc
-import time
 import os
 import sys
 import threading
+import time
 
 import pytest
 

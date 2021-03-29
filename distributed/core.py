@@ -1,16 +1,16 @@
 import asyncio
-from collections import defaultdict
-from contextlib import suppress
-from enum import Enum
-from functools import partial
 import inspect
 import logging
 import sys
 import threading
 import traceback
 import uuid
-import weakref
 import warnings
+import weakref
+from collections import defaultdict
+from contextlib import suppress
+from enum import Enum
+from functools import partial
 
 import dask
 import tblib
@@ -18,27 +18,26 @@ from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from . import profile, protocol
 from .comm import (
-    connect,
-    listen,
     CommClosedError,
+    connect,
+    get_address_host_port,
+    listen,
     normalize_address,
     unparse_host_port,
-    get_address_host_port,
 )
 from .metrics import time
-from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
-    is_coroutine_function,
-    get_traceback,
-    truncate_exception,
-    parse_timedelta,
-    has_keyword,
     CancelledError,
     TimeoutError,
+    get_traceback,
+    has_keyword,
+    is_coroutine_function,
+    parse_timedelta,
+    truncate_exception,
 )
-from . import protocol
 
 
 class Status(Enum):

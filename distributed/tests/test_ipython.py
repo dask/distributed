@@ -4,8 +4,7 @@ import pytest
 from tlz import first
 
 from distributed import Client
-from distributed.utils_test import cluster, mock_ipython
-from distributed.utils_test import loop, zmq_ctx  # noqa F401
+from distributed.utils_test import cluster, loop, mock_ipython, zmq_ctx  # noqa F401
 
 
 def need_functional_ipython(func):

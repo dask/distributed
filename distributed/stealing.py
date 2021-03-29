@@ -1,17 +1,16 @@
-from collections import defaultdict, deque
 import logging
+from collections import defaultdict, deque
 from math import log2
 from time import time
 
+import dask
+from tlz import topk
 from tornado.ioloop import PeriodicCallback
 
-import dask
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, parse_timedelta
-
-from tlz import topk
 
 LATENCY = 10e-3
 

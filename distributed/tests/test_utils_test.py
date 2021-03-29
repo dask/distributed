@@ -1,33 +1,30 @@
 import asyncio
-from contextlib import contextmanager
 import socket
 import threading
+from contextlib import contextmanager
 from time import sleep
 
 import pytest
 from tornado import gen
 
-from distributed import Scheduler, Worker, Nanny, Client, config, default_client
+from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.core import rpc
 from distributed.metrics import time
+from distributed.utils import get_ip
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     cluster,
     gen_cluster,
-    inc,
     gen_test,
-    wait_for_port,
-    new_config,
-)
-
-from distributed.utils_test import (  # noqa: F401
+    inc,
     loop,
-    tls_only_security,
+    new_config,
     security,
     tls_client,
     tls_cluster,
+    tls_only_security,
+    wait_for_port,
 )
-from distributed.utils import get_ip
 
 
 def test_bare_cluster(loop):

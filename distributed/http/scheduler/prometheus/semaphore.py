@@ -3,7 +3,7 @@ class SemaphoreMetricExtension:
         self.server = dask_server
 
     def collect(self):
-        from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         sem_ext = self.server.extensions["semaphores"]
 

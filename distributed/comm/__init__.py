@@ -1,21 +1,20 @@
 from .addressing import (
-    parse_address,
-    unparse_address,
-    normalize_address,
-    parse_host_port,
-    unparse_host_port,
-    resolve_address,
-    get_address_host_port,
     get_address_host,
+    get_address_host_port,
     get_local_address_for,
+    normalize_address,
+    parse_address,
+    parse_host_port,
+    resolve_address,
+    unparse_address,
+    unparse_host_port,
 )
-from .core import connect, listen, Comm, CommClosedError
+from .core import Comm, CommClosedError, connect, listen
 from .utils import get_tcp_server_address
 
 
 def _register_transports():
-    from . import inproc
-    from . import tcp
+    from . import inproc, tcp
 
     try:
         from . import ucx

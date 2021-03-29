@@ -5,7 +5,7 @@ from queue import Queue
 
 from .client import Future, default_client
 from .protocol import to_serialize
-from .utils import iscoroutinefunction, thread_state, sync
+from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
 from .worker import get_worker
 

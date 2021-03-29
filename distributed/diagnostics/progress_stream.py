@@ -1,14 +1,12 @@
 import logging
 
-from tlz import valmap, merge
+from tlz import merge, valmap
 
-from .progress import AllProgress
-
-from ..core import connect, coerce_to_address
+from ..core import coerce_to_address, connect
 from ..scheduler import Scheduler
-from ..utils import key_split, color_of
+from ..utils import color_of, key_split
 from ..worker import dumps_function
-
+from .progress import AllProgress
 
 logger = logging.getLogger(__name__)
 

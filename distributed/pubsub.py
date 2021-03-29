@@ -1,13 +1,13 @@
 import asyncio
-from collections import defaultdict, deque
 import logging
 import threading
 import weakref
+from collections import defaultdict, deque
 
 from .core import CommClosedError
 from .metrics import time
-from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
+from .utils import TimeoutError, parse_timedelta, sync
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ class Pub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed import get_worker, get_client
+            from distributed import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -363,7 +363,7 @@ class Sub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed.worker import get_worker, get_client
+            from distributed.worker import get_client, get_worker
 
             try:
                 worker = get_worker()

@@ -1,18 +1,17 @@
-from contextlib import suppress
 import logging
 import warnings
 import weakref
+from contextlib import suppress
 
-from tornado.httpserver import HTTPServer
-import tlz
 import dask
+import tlz
+from tornado.httpserver import HTTPServer
 
-from .comm import get_tcp_server_address
-from .comm import get_address_host
+from .comm import get_address_host, get_tcp_server_address
 from .core import Server
 from .http.routing import RoutingApplication
-from .versions import get_versions
 from .utils import DequeHandler, clean_dashboard_address
+from .versions import get_versions
 
 
 class ServerNode(Server):

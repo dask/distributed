@@ -1,17 +1,16 @@
+import filecmp
 import inspect
 import logging
 import os
 import shutil
 import sys
-from typing import List
-from types import ModuleType
-import filecmp
 from importlib import import_module
+from types import ModuleType
+from typing import List
 
 import click
-from tornado.httpclient import AsyncHTTPClient
-
 from dask.utils import tmpfile
+from tornado.httpclient import AsyncHTTPClient
 
 from .utils import import_file
 

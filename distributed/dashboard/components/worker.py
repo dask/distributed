@@ -2,22 +2,21 @@ import logging
 import math
 import os
 
-from bokeh.layouts import row, column
+from bokeh.layouts import column, row
 from bokeh.models import (
+    BoxZoomTool,
     ColumnDataSource,
     DataRange1d,
     HoverTool,
-    BoxZoomTool,
-    ResetTool,
-    PanTool,
-    WheelZoomTool,
     NumeralTickFormatter,
+    PanTool,
+    ResetTool,
     Select,
+    WheelZoomTool,
 )
-
 from bokeh.models.widgets import DataTable, TableColumn
-from bokeh.plotting import figure
 from bokeh.palettes import RdBu
+from bokeh.plotting import figure
 from bokeh.themes import Theme
 from dask.utils import format_bytes
 from tlz import merge, partition_all
@@ -25,15 +24,14 @@ from tlz import merge, partition_all
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
-    ProfileTimePlot,
     ProfileServer,
+    ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, without_property_validation, update
+from distributed.dashboard.utils import transpose, update, without_property_validation
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
-from distributed.utils import log_errors, key_split, format_time
-
+from distributed.utils import format_time, key_split, log_errors
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
-from distributed.protocol import serialize, deserialize
 import pytest
+
+from distributed.protocol import deserialize, serialize
 
 numpy = pytest.importorskip("numpy")
 cuda = pytest.importorskip("numba.cuda")

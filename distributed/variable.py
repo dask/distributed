@@ -1,14 +1,14 @@
 import asyncio
-from collections import defaultdict
-from contextlib import suppress
 import logging
 import uuid
-
-from tlz import merge
+from collections import defaultdict
+from contextlib import suppress
 
 from dask.utils import stringify
-from .client import Future, Client
-from .utils import log_errors, TimeoutError, parse_timedelta
+from tlz import merge
+
+from .client import Client, Future
+from .utils import TimeoutError, log_errors, parse_timedelta
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)

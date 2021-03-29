@@ -1,18 +1,19 @@
 import asyncio
 import re
-from time import sleep
 import warnings
+from time import sleep
 
 import dask
-from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
-from distributed.core import Status
-from distributed.compatibility import WINDOWS
-from distributed.deploy.spec import close_clusters, ProcessInterface, run_spec
-from distributed.metrics import time
-from distributed.utils_test import loop, cleanup  # noqa: F401
-from distributed.utils import is_valid_xml
-import tlz as toolz
 import pytest
+import tlz as toolz
+from dask.distributed import Client, Nanny, Scheduler, SpecCluster, Worker
+
+from distributed.compatibility import WINDOWS
+from distributed.core import Status
+from distributed.deploy.spec import ProcessInterface, close_clusters, run_spec
+from distributed.metrics import time
+from distributed.utils import is_valid_xml
+from distributed.utils_test import cleanup, loop  # noqa: F401
 
 
 class MyWorker(Worker):

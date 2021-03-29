@@ -8,39 +8,39 @@ from time import sleep
 import pytest
 
 pytest.importorskip("bokeh")
+import dask
 from bokeh.server.server import BokehTornado
+from dask.core import flatten
+from dask.utils import stringify
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
-import dask
-from dask.core import flatten
-from dask.utils import stringify
 from distributed.client import wait
 from distributed.compatibility import MACOS
-from distributed.metrics import time
-from distributed.utils import format_dashboard_link
-from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
-from distributed.dashboard.components.worker import Counters
-from distributed.dashboard.scheduler import applications
+from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
-    SystemMonitor,
-    Occupancy,
-    StealingTimeSeries,
-    StealingEvents,
-    Events,
-    TaskStream,
-    TaskProgress,
-    CurrentLoad,
-    ProcessingHistogram,
-    NBytesHistogram,
-    WorkerTable,
-    TaskGraph,
-    ProfileServer,
-    MemoryByKey,
     AggregateAction,
     ComputePerKey,
+    CurrentLoad,
+    Events,
+    MemoryByKey,
+    NBytesHistogram,
+    Occupancy,
+    ProcessingHistogram,
+    ProfileServer,
+    StealingEvents,
+    StealingTimeSeries,
+    SystemMonitor,
+    TaskGraph,
+    TaskProgress,
+    TaskStream,
+    WorkerTable,
 )
-from distributed.dashboard import scheduler
+from distributed.dashboard.components.worker import Counters
+from distributed.dashboard.scheduler import applications
+from distributed.metrics import time
+from distributed.utils import format_dashboard_link
+from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
 scheduler.PROFILING = False
 

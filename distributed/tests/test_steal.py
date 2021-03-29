@@ -9,6 +9,8 @@ from time import sleep
 
 import dask
 import pytest
+from tlz import concat, sliding_window
+
 from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
 from distributed.metrics import time
@@ -24,7 +26,6 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from tlz import concat, sliding_window
 
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module

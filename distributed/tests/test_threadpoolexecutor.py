@@ -1,8 +1,8 @@
-from time import sleep
 import threading
+from time import sleep
 
 from distributed.metrics import time
-from distributed.threadpoolexecutor import ThreadPoolExecutor, secede, rejoin
+from distributed.threadpoolexecutor import ThreadPoolExecutor, rejoin, secede
 
 
 def test_tpe():

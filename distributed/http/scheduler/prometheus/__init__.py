@@ -2,6 +2,7 @@ import toolz
 
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES
+
 from .semaphore import SemaphoreMetricExtension
 
 
@@ -10,7 +11,7 @@ class _PrometheusCollector:
         self.server = dask_server
 
     def collect(self):
-        from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         yield GaugeMetricFamily(
             "dask_scheduler_clients",

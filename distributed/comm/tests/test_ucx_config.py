@@ -1,12 +1,13 @@
-import pytest
 from time import sleep
 
 import dask
+import pytest
 from dask.utils import format_bytes
+
 from distributed import Client
-from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
-from distributed.utils import get_ip
 from distributed.comm.ucx import _scrub_ucx_config
+from distributed.utils import get_ip
+from distributed.utils_test import cleanup, gen_test, inc, loop, popen  # noqa: 401
 
 try:
     HOST = get_ip()

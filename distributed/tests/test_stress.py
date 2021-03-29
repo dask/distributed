@@ -1,34 +1,31 @@
 import asyncio
-from contextlib import suppress
 import random
 import sys
+from contextlib import suppress
 from operator import add
 from time import sleep
 
-from dask import delayed
 import pytest
+from dask import delayed
 from tlz import concat, sliding_window
 
-from distributed import Client, wait, Nanny
+from distributed import Client, Nanny, wait
+from distributed.client import wait
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All, CancelledError
-from distributed.utils_test import (
-    gen_cluster,
-    cluster,
-    inc,
-    slowinc,
-    slowadd,
-    slowsum,
-    bump_rlimit,
-)
 from distributed.utils_test import (  # noqa: F401
+    bump_rlimit,
+    cluster,
+    gen_cluster,
+    inc,
     loop,
     nodebug_setup_module,
     nodebug_teardown_module,
+    slowadd,
+    slowinc,
+    slowsum,
 )
-from distributed.client import wait
-
 
 # All tests here are slow in some way
 setup_module = nodebug_setup_module
@@ -254,10 +251,12 @@ async def test_no_delay_during_large_transfer(c, s, w):
     x_nbytes = x.nbytes
 
     # Reset digests
-    from distributed.counter import Digest
     from collections import defaultdict
     from functools import partial
+
     from dask.diagnostics import ResourceProfiler
+
+    from distributed.counter import Digest
 
     for server in [s, w]:
         server.digests = defaultdict(partial(Digest, loop=server.io_loop))

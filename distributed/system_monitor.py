@@ -1,4 +1,5 @@
 from collections import deque
+
 import psutil
 
 from .compatibility import WINDOWS

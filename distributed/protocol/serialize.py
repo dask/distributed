@@ -1,24 +1,17 @@
-from array import array
-from functools import partial
-import traceback
 import importlib
+import traceback
+from array import array
 from enum import Enum
+from functools import partial
 
 import dask
+import msgpack
 from dask.base import normalize_token
 
-import msgpack
-
+from ..utils import ensure_bytes, has_keyword, typename
 from . import pickle
-from ..utils import has_keyword, typename, ensure_bytes
-from .compression import maybe_compress, decompress
-from .utils import (
-    unpack_frames,
-    pack_frames_prelude,
-    frame_split_size,
-    msgpack_opts,
-)
-
+from .compression import decompress, maybe_compress
+from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
 
 lazy_registrations = {}
 

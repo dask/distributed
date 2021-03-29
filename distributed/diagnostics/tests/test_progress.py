@@ -4,15 +4,15 @@ import pytest
 
 from distributed import Nanny
 from distributed.client import wait
-from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, dec, div, nodebug
 from distributed.diagnostics.progress import (
-    Progress,
-    SchedulerPlugin,
     AllProgress,
     GroupProgress,
     MultiProgress,
+    Progress,
+    SchedulerPlugin,
 )
+from distributed.metrics import time
+from distributed.utils_test import dec, div, gen_cluster, inc, nodebug
 
 
 def f(*args):

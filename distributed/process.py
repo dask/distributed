@@ -1,18 +1,17 @@
+import asyncio
 import logging
 import os
-from queue import Queue as PyQueue
 import re
 import threading
 import weakref
-import asyncio
+from queue import Queue as PyQueue
+
 import dask
-
-from .utils import mp_context, TimeoutError
-
 from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
+from .utils import TimeoutError, mp_context
 
 logger = logging.getLogger(__name__)
 

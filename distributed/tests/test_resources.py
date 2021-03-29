@@ -2,15 +2,25 @@ import asyncio
 from time import time
 
 import dask
+import pytest
 from dask import delayed
 from dask.utils import stringify
-import pytest
 
 from distributed import Worker
 from distributed.client import wait
 from distributed.compatibility import WINDOWS
-from distributed.utils_test import inc, gen_cluster, slowinc, slowadd
-from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
+from distributed.utils_test import (  # noqa: F401
+    a,
+    b,
+    client,
+    cluster_fixture,
+    gen_cluster,
+    inc,
+    loop,
+    s,
+    slowadd,
+    slowinc,
+)
 
 
 @gen_cluster(client=True, nthreads=[])

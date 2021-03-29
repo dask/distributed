@@ -2,11 +2,10 @@ import concurrent.futures as cf
 import weakref
 
 from tlz import merge
-
 from tornado import gen
 
 from .metrics import time
-from .utils import sync, TimeoutError
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine

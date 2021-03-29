@@ -1,5 +1,5 @@
-from .plugin import SchedulerPlugin
 from ..utils import key_split
+from .plugin import SchedulerPlugin
 from .task_stream import colors
 
 

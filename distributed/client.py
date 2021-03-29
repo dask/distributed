@@ -1,37 +1,36 @@
 import asyncio
 import atexit
+import copy
+import errno
+import html
+import inspect
+import json
+import logging
+import os
+import socket
+import sys
+import threading
+import uuid
+import warnings
+import weakref
 from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-import copy
-import errno
 from functools import partial
-import html
-import inspect
-import json
-import logging
 from numbers import Number
-import os
-import sys
-import uuid
-import threading
-import socket
 from queue import Queue as pyQueue
-import warnings
-import weakref
 
 import dask
-from dask.base import tokenize, normalize_token, collections_to_dsk
-from dask.core import flatten
-from dask.optimization import SubgraphCallable
+from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
-
-from tlz import first, groupby, merge, valmap, keymap, partition_all
+from dask.optimization import SubgraphCallable
+from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 try:
     from dask.delayed import single_key
@@ -40,24 +39,18 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from . import versions as version_module
 from .batched import BatchedSend
-from .utils_comm import (
-    WrappedKey,
-    unpack_remotedata,
-    pack_data,
-    scatter_to_workers,
-    gather_from_workers,
-    retry_operation,
-)
 from .cfexecutor import ClientExecutor
 from .core import (
+    CommClosedError,
+    ConnectionPool,
+    PooledRPCCall,
+    clean_exception,
     connect,
     rpc,
-    clean_exception,
-    CommClosedError,
-    PooledRPCCall,
-    ConnectionPool,
 )
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -66,25 +59,30 @@ from .pubsub import PubSubClientExtension
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
-from .worker import get_client, get_worker, secede
-from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
-    sync,
-    log_errors,
-    key_split,
-    thread_state,
-    no_default,
-    LoopRunner,
-    parse_timedelta,
     Any,
-    has_keyword,
-    format_dashboard_link,
-    TimeoutError,
     CancelledError,
+    LoopRunner,
+    TimeoutError,
+    format_dashboard_link,
+    has_keyword,
+    key_split,
+    log_errors,
+    no_default,
+    parse_timedelta,
+    sync,
+    thread_state,
 )
-from . import versions as version_module
-
+from .utils_comm import (
+    WrappedKey,
+    gather_from_workers,
+    pack_data,
+    retry_operation,
+    scatter_to_workers,
+    unpack_remotedata,
+)
+from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
@@ -3940,7 +3938,7 @@ class Client:
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save, output_file
+                from bokeh.plotting import output_file, save
 
                 output_file(filename=filename, title="Dask Task Stream")
                 save(figure, filename=filename, resources=bokeh_resources)
