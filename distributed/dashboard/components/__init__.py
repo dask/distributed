@@ -4,7 +4,6 @@ from bisect import bisect
 from operator import add
 from time import time
 
-import dask
 from bokeh.layouts import column, row
 from bokeh.models import (
     BoxZoomTool,
@@ -26,6 +25,8 @@ from bokeh.models import (
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from tornado import gen
+
+import dask
 
 from distributed import profile
 from distributed.dashboard.utils import BOKEH_VERSION, without_property_validation

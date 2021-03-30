@@ -2,8 +2,9 @@ import asyncio
 import operator
 from time import sleep
 
-import dask
 import pytest
+
+import dask
 
 from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time

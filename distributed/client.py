@@ -23,6 +23,8 @@ from functools import partial
 from numbers import Number
 from queue import Queue as pyQueue
 
+from tlz import first, groupby, keymap, merge, partition_all, valmap
+
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.compatibility import apply
@@ -30,7 +32,6 @@ from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.utils import ensure_dict, format_bytes, funcname, stringify
-from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 try:
     from dask.delayed import single_key

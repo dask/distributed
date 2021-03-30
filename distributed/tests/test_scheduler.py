@@ -8,11 +8,12 @@ from collections import defaultdict
 from time import sleep
 
 import cloudpickle
-import dask
 import pytest
+from tlz import concat, first, frequencies, merge, valmap
+
+import dask
 from dask import delayed
 from dask.compatibility import apply
-from tlz import concat, first, frequencies, merge, valmap
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.client import wait

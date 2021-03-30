@@ -6,9 +6,10 @@ import uuid
 import warnings
 from contextlib import suppress
 
+from tornado.ioloop import PeriodicCallback
+
 import dask.config
 from dask.utils import format_bytes
-from tornado.ioloop import PeriodicCallback
 
 from ..core import Status
 from ..utils import (

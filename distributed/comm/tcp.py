@@ -14,11 +14,12 @@ try:
 except ImportError:
     ssl = None
 
-import dask
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
+
+import dask
 
 from ..protocol.utils import pack_frames_prelude, unpack_frames
 from ..system import MEMORY_LIMIT

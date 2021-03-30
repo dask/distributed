@@ -29,11 +29,12 @@ try:
 except ImportError:
     ssl = None
 
-import dask
 import pytest
 from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
+
+import dask
 
 from . import system
 from .client import Client, _global_clients, default_client

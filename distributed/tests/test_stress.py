@@ -6,8 +6,9 @@ from operator import add
 from time import sleep
 
 import pytest
-from dask import delayed
 from tlz import concat, sliding_window
+
+from dask import delayed
 
 from distributed import Client, Nanny, wait
 from distributed.client import wait

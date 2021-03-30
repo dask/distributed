@@ -3,8 +3,9 @@ import logging
 from collections import defaultdict
 from timeit import default_timer
 
-from dask.utils import stringify
 from tlz import groupby, valmap
+
+from dask.utils import stringify
 
 from ..utils import key_split, key_split_group, log_errors
 from .plugin import SchedulerPlugin

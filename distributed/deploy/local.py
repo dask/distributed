@@ -5,6 +5,7 @@ import warnings
 import weakref
 
 import toolz
+
 from dask.system import CPU_COUNT
 
 from ..nanny import Nanny

@@ -7,10 +7,11 @@ import random
 import sys
 from contextlib import suppress
 
-import dask
 import pytest
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
+
+import dask
 
 from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import MACOS

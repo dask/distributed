@@ -4,8 +4,9 @@ import threading
 import warnings
 from time import sleep
 
-import dask
 import pytest
+
+import dask
 from dask import delayed
 
 from distributed import (

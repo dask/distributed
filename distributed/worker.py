@@ -18,14 +18,15 @@ from functools import partial
 from inspect import isawaitable
 from pickle import PicklingError
 
+from tlz import first, keymap, merge, pluck  # noqa: F401
+from tornado import gen
+from tornado.ioloop import IOLoop, PeriodicCallback
+
 import dask
 from dask.compatibility import apply
 from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
-from tlz import first, keymap, merge, pluck  # noqa: F401
-from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import comm, preloading, profile, system
 from .batched import BatchedSend

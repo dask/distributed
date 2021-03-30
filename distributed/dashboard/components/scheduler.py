@@ -5,7 +5,6 @@ import os
 from collections import defaultdict
 from numbers import Number
 
-import dask
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -37,11 +36,13 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
-from dask import config
-from dask.utils import format_bytes, key_split
 from tlz import pipe
 from tlz.curried import concat, groupby, map
 from tornado import escape
+
+import dask
+from dask import config
+from dask.utils import format_bytes, key_split
 
 try:
     import numpy as np

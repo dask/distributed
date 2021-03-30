@@ -18,8 +18,9 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.palettes import RdBu
 from bokeh.plotting import figure
 from bokeh.themes import Theme
-from dask.utils import format_bytes
 from tlz import merge, partition_all
+
+from dask.utils import format_bytes
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (

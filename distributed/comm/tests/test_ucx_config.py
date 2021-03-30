@@ -1,7 +1,8 @@
 from time import sleep
 
-import dask
 import pytest
+
+import dask
 from dask.utils import format_bytes
 
 from distributed import Client

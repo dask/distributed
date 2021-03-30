@@ -10,11 +10,12 @@ import weakref
 from contextlib import suppress
 from multiprocessing.queues import Empty
 
-import dask
 import psutil
-from dask.system import CPU_COUNT
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
+
+import dask
+from dask.system import CPU_COUNT
 
 from . import preloading
 from .comm import get_address_host, unparse_host_port

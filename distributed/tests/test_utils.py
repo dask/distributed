@@ -10,9 +10,10 @@ import traceback
 from functools import partial
 from time import sleep
 
-import dask
 import pytest
 from tornado.ioloop import IOLoop
+
+import dask
 
 from distributed.metrics import time
 from distributed.utils import (

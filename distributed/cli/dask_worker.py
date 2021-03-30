@@ -9,10 +9,11 @@ import warnings
 from contextlib import suppress
 
 import click
-import dask
-from dask.system import CPU_COUNT
 from tlz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
+
+import dask
+from dask.system import CPU_COUNT
 
 from distributed import Nanny
 from distributed.cli.utils import check_python_3, install_signal_handlers

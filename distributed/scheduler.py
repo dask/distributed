@@ -17,10 +17,8 @@ from datetime import timedelta
 from functools import partial
 from numbers import Number
 
-import dask
 import psutil
 import sortedcontainers
-from dask.highlevelgraph import HighLevelGraph
 from tlz import (
     compose,
     concat,
@@ -34,6 +32,9 @@ from tlz import (
     valmap,
 )
 from tornado.ioloop import IOLoop, PeriodicCallback
+
+import dask
+from dask.highlevelgraph import HighLevelGraph
 
 from . import preloading, profile
 from . import versions as version_module

@@ -9,8 +9,9 @@ from bokeh.models import (
     TapTool,
 )
 from bokeh.plotting import figure
-from dask.utils import format_bytes
 from tornado import escape
+
+from dask.utils import format_bytes
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env

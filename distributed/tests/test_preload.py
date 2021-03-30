@@ -3,9 +3,10 @@ import shutil
 import sys
 import tempfile
 
-import dask
 import pytest
 from tornado import web
+
+import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
 from distributed.utils_test import captured_logger, cleanup, cluster, loop  # noqa F401

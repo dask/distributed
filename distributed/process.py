@@ -6,10 +6,11 @@ import threading
 import weakref
 from queue import Queue as PyQueue
 
-import dask
 from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
+
+import dask
 
 from .utils import TimeoutError, mp_context
 

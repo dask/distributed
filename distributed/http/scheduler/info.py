@@ -4,10 +4,11 @@ import os
 import os.path
 from datetime import datetime
 
-from dask.utils import format_bytes
 from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
+
+from dask.utils import format_bytes
 
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time

@@ -1,8 +1,9 @@
 import asyncio
 from time import time
 
-import dask
 import pytest
+
+import dask
 from dask import delayed
 from dask.utils import stringify
 

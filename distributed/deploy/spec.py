@@ -7,8 +7,9 @@ import warnings
 import weakref
 from contextlib import suppress
 
-import dask
 from tornado import gen
+
+import dask
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler

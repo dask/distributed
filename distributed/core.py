@@ -12,11 +12,12 @@ from contextlib import suppress
 from enum import Enum
 from functools import partial
 
-import dask
 import tblib
 from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
+
+import dask
 
 from . import profile, protocol
 from .comm import (

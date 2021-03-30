@@ -6,11 +6,12 @@ import types
 import warnings
 from functools import partial
 
-import dask
 import pkg_resources
 import pytest
 from tornado import ioloop
 from tornado.concurrent import Future
+
+import dask
 
 import distributed
 from distributed.comm import (

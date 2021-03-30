@@ -4,8 +4,9 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
-from dask.utils import stringify
 from tlz import merge
+
+from dask.utils import stringify
 
 from .client import Client, Future
 from .utils import TimeoutError, log_errors, parse_timedelta

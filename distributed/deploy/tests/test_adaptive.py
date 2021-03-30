@@ -3,8 +3,9 @@ import gc
 import math
 from time import sleep
 
-import dask
 import pytest
+
+import dask
 
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time

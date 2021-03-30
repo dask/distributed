@@ -3,9 +3,10 @@ from collections import defaultdict, deque
 from math import log2
 from time import time
 
-import dask
 from tlz import topk
 from tornado.ioloop import PeriodicCallback
+
+import dask
 
 from .comm.addressing import get_address_host
 from .core import CommClosedError

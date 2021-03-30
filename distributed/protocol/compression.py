@@ -8,8 +8,9 @@ import random
 from contextlib import suppress
 from functools import partial
 
-import dask
 from tlz import identity
+
+import dask
 
 try:
     import blosc

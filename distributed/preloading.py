@@ -9,8 +9,9 @@ from types import ModuleType
 from typing import List
 
 import click
-from dask.utils import tmpfile
 from tornado.httpclient import AsyncHTTPClient
+
+from dask.utils import tmpfile
 
 from .utils import import_file
 

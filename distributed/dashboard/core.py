@@ -10,10 +10,11 @@ try:
 except ImportError:
     from bokeh.server.util import create_hosts_whitelist as create_hosts_allowlist
 
-import dask
 import toolz
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
+
+import dask
 
 if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
     warnings.warn(

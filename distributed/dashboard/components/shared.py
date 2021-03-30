@@ -1,7 +1,6 @@
 import asyncio
 import weakref
 
-import dask
 import tlz as toolz
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -16,6 +15,8 @@ from bokeh.models import (
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from tornado import gen
+
+import dask
 
 from distributed import profile
 from distributed.compatibility import WINDOWS

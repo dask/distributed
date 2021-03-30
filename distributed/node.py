@@ -3,9 +3,10 @@ import warnings
 import weakref
 from contextlib import suppress
 
-import dask
 import tlz
 from tornado.httpserver import HTTPServer
+
+import dask
 
 from .comm import get_address_host, get_tcp_server_address
 from .core import Server

@@ -5,8 +5,9 @@ try:
 except ImportError:
     ssl = None
 
-import dask
 import pytest
+
+import dask
 
 from distributed.comm import connect, listen
 from distributed.security import Security

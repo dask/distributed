@@ -4,8 +4,9 @@ from array import array
 from enum import Enum
 from functools import partial
 
-import dask
 import msgpack
+
+import dask
 from dask.base import normalize_token
 
 from ..utils import ensure_bytes, has_keyword, typename

@@ -5,8 +5,9 @@ from contextlib import suppress
 from time import sleep
 
 import pytest
-from dask import delayed
 from tlz import first, partition_all
+
+from dask import delayed
 
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError

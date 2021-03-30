@@ -5,10 +5,11 @@ from collections import defaultdict
 from functools import partial
 from itertools import cycle
 
+from tlz import concat, drop, groupby, merge
+
 import dask.config
 from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
-from tlz import concat, drop, groupby, merge
 
 from .core import rpc
 from .utils import All

@@ -8,12 +8,13 @@ from time import sleep
 import pytest
 
 pytest.importorskip("bokeh")
-import dask
 from bokeh.server.server import BokehTornado
-from dask.core import flatten
-from dask.utils import stringify
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
+
+import dask
+from dask.core import flatten
+from dask.utils import stringify
 
 from distributed.client import wait
 from distributed.compatibility import MACOS

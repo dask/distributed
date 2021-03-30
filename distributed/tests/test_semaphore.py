@@ -4,8 +4,9 @@ import pickle
 from datetime import timedelta
 from time import sleep, time
 
-import dask
 import pytest
+
+import dask
 from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget

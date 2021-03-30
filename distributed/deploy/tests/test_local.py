@@ -11,9 +11,10 @@ from time import sleep
 
 import pytest
 import tornado
-from dask.system import CPU_COUNT
 from tornado.httpclient import AsyncHTTPClient
 from tornado.ioloop import IOLoop
+
+from dask.system import CPU_COUNT
 
 from distributed import Client, Nanny, Worker, get_client
 from distributed.core import Status

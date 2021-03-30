@@ -1,7 +1,8 @@
 import asyncio
 
-import dask
 import pytest
+
+import dask
 from dask import delayed, persist
 from dask.core import flatten
 from dask.utils import stringify

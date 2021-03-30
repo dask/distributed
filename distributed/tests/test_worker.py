@@ -11,13 +11,14 @@ from operator import add
 from time import sleep
 from unittest import mock
 
-import dask
 import psutil
 import pytest
+from tlz import first, pluck, sliding_window
+
+import dask
 from dask import delayed
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes
-from tlz import first, pluck, sliding_window
 
 from distributed import (
     Client,

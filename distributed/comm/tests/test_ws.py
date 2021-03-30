@@ -2,9 +2,10 @@ import os
 import tempfile
 import warnings
 
-import dask
 import numpy as np
 import pytest
+
+import dask
 
 from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws

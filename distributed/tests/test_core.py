@@ -5,8 +5,9 @@ import threading
 import warnings
 import weakref
 
-import dask
 import pytest
+
+import dask
 
 from distributed.core import (
     ConnectionPool,

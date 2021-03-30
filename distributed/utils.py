@@ -33,8 +33,11 @@ try:
 except ImportError:
     resource = None
 
-import dask
 import tlz as toolz
+from tornado import gen
+from tornado.ioloop import IOLoop
+
+import dask
 from dask import istask
 
 # Import config serialization functions here for backward compatibility
@@ -49,8 +52,6 @@ from dask.utils import (  # noqa: F401
     parse_bytes,
     parse_timedelta,
 )
-from tornado import gen
-from tornado.ioloop import IOLoop
 
 try:
     from tornado.ioloop import PollIOLoop

@@ -5,9 +5,10 @@ import pytest
 
 pytest.importorskip("bokeh")
 
-from dask.sizeof import sizeof
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
+
+from dask.sizeof import sizeof
 
 from distributed.utils import is_valid_xml
 from distributed.utils_test import gen_cluster, inc, slowinc

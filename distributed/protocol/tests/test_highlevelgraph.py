@@ -1,9 +1,10 @@
 import ast
 
+import pytest
+
 import dask
 import dask.array as da
 import dask.dataframe as dd
-import pytest
 
 from distributed.diagnostics import SchedulerPlugin
 from distributed.utils_test import gen_cluster

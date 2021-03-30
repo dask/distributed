@@ -18,14 +18,15 @@ from operator import add
 from threading import Semaphore
 from time import sleep
 
-import dask
-import dask.bag as db
 import psutil
 import pytest
+from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
+
+import dask
+import dask.bag as db
 from dask import delayed
 from dask.optimization import SubgraphCallable
 from dask.utils import stringify
-from tlz import concat, first, identity, isdistinct, merge, pluck, valmap
 
 from distributed import (
     CancelledError,

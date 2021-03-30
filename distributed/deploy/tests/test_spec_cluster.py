@@ -3,9 +3,10 @@ import re
 import warnings
 from time import sleep
 
-import dask
 import pytest
 import tlz as toolz
+
+import dask
 from dask.distributed import Client, Nanny, Scheduler, SpecCluster, Worker
 
 from distributed.compatibility import WINDOWS
