@@ -275,16 +275,23 @@ class MemoryInfo:
     dask_in_memory
         Sum of the output of sizeof() for the dask keys held in RAM
     dask_spilled
-        Sum of the output of sizeof() for the dask keys held in RAM
+        Sum of the output of sizeof() for the dask keys spilled to the hard drive.
+        Note that this is the size in memory; serialized size may be different.
     rss
         Total RSS memory measured on the process
     other
-        rss - dask_in_memory. This is the sum of the Python interpreter, the modules,
-        global variables, memory fragmentation, memory leaks, memory not yet garbage
-        collected, and memory not yet free()'d to the OS by the Python memory manager
-        for whatever reason.
+        rss - dask_in_memory. This is the sum of
+
+        - Python interpreter and modules
+        - global variables
+        - memory temporarily allocated by the dask tasks that are currently running
+        - memory fragmentation
+        - memory leaks
+        - memory not yet garbage collected
+        - memory not yet free()'d by the Python memory manager to the OS
+
     other_old
-        Minimum of the "other" memory measures over the latest
+        Minimum of the "other" memory measures over the last
         ``distributed.memory.new_to_old_lag`` seconds
     other_new
         other - other_old; in other words RSS memory that has been recently allocated
@@ -310,7 +317,7 @@ class MemoryInfo:
     @property
     def dask_in_memory(self) -> int:
         # dask_spilled is updated by heartbeat_worker, whereas dask_total is updated
-        # together with TaskInfo.who_has. So This may briefly turn negative.
+        # together with TaskInfo.who_has. So this may briefly turn negative.
         return max(0, self.dask_total - self.dask_spilled)
 
     @property
@@ -330,15 +337,14 @@ class MemoryInfo:
         return self.dask_in_memory + self.other_old
 
     def __repr__(self) -> str:
-        GIB = 2 ** 30
         return (
-            f"dask keys      : {self.dask_total / GIB:.2f} GiB\n"
-            f"  - in memory  : {self.dask_in_memory / GIB:.2f} GiB\n"
-            f"  - on disk    : {self.dask_spilled / GIB:.2f} GiB\n"
-            f"RSS            : {self.rss / GIB:.2f} GiB\n"
-            f"  - dask keys  : {self.dask_in_memory / GIB:.2f} GiB\n"
-            f"  - other (old): {self.other_old / GIB:.2f} GiB\n"
-            f"  - other (new): {self.other_new / GIB:.2f} GiB\n"
+            f"dask keys      : {format_bytes(self.dask_total)}\n"
+            f"  - in memory  : {format_bytes(self.dask_in_memory)}\n"
+            f"  - spilled    : {format_bytes(self.dask_spilled)}\n"
+            f"RSS            : {format_bytes(self.rss)}\n"
+            f"  - dask keys  : {format_bytes(self.dask_in_memory)}\n"
+            f"  - other (old): {format_bytes(self.other_old)}\n"
+            f"  - other (new): {format_bytes(self.other_new)}\n"
         )
 
 
@@ -592,7 +598,7 @@ class WorkerState:
     def memory(self) -> MemoryInfo:
         return MemoryInfo(
             dask_total=self._nbytes,
-            dask_spilled=self._metrics.get("spilled_nbytes", 0),
+            dask_spilled=self._metrics["spilled_nbytes"],
             other_old=self._memory_other_old,
             rss=self._metrics["memory"],
         )
@@ -3773,15 +3779,13 @@ class Scheduler(SchedulerState, ServerNode):
             if size == memory_other_old:
                 memory_other_old = 0  # recalculate min()
 
-        size = max(
-            0, metrics["memory"] - ws._nbytes + ws._metrics.get("spilled_nbytes", 0)
-        )
+        size = max(0, metrics["memory"] - ws._nbytes + ws._metrics["spilled_nbytes"])
         ws._memory_other_history.append((local_now, size))
         if not memory_other_old:
             # The worker has just been started or the previous minimum has been expunged
-            # because too old Note: this is capped to 200 * MEMORY_NEW_TO_OLD_LAG
-            # elements cluster-wide by heartbeat_interval(), regardless of the number of
-            # workers
+            # because too old.
+            # Note: this algorithm is capped to 200 * MEMORY_NEW_TO_OLD_LAG elements
+            # cluster-wide by heartbeat_interval(), regardless of the number of workers
             ws._memory_other_old = min(map(second, ws._memory_other_history))
         elif size < memory_other_old:
             ws._memory_other_old = size

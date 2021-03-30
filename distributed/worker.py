@@ -261,10 +261,8 @@ class Worker(ServerNode):
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
     * **spilled_nbytes:** int:
-        Number of bytes currently spilled to disk. Only
-        available if condition for **data** being a zict.Buffer is met.
-        Note that this is the output of sizeof(), which may not accurately reflect the
-        serialized size of the data.
+        Number of bytes currently spilled to disk. Note that this is the output of
+        sizeof(), which may not accurately reflect the serialized size of the data.
     * **data_needed**: deque(keys)
         The keys which still require data in order to execute, arranged in a deque
     * **ready**: [keys]
@@ -823,11 +821,8 @@ class Worker(ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
+            spilled_nbytes=getattr(self, "spilled_nbytes", 0),
         )
-        try:
-            out["spilled_nbytes"] = self.spilled_nbytes
-        except AttributeError:  # self.data is not a zict.Buffer
-            pass
         out.update(self.monitor.recent())
 
         for k, metric in self.metrics.items():
