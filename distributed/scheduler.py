@@ -3597,29 +3597,27 @@ class Scheduler(SchedulerState, ServerNode):
     def heartbeat_worker(
         self,
         comm=None,
-        address=None,
-        resolve_address=True,
-        now=None,
-        resources=None,
-        host_info=None,
-        metrics=None,
-        executing=None,
+        *,
+        address,
+        resolve_address: bool = True,
+        now: float = None,
+        resources: dict = None,
+        host_info: dict = None,
+        metrics: dict,
+        executing: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        if address not in parent._workers:
+        ws: WorkerState = parent._workers.get(address)
+        if ws is None:
             return {"status": "missing"}
 
         host = get_address_host(address)
         local_now = time()
-        now = now or time()
-        assert metrics
         host_info = host_info or {}
 
-        dh: dict = parent._host_info.get(host)
-        if dh is None:
-            parent._host_info[host] = dh = dict()
+        dh: dict = parent._host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
         frac = 1 / len(parent._workers)
@@ -3643,26 +3641,20 @@ class Scheduler(SchedulerState, ServerNode):
                     1 - alpha
                 )
 
-        ws: WorkerState = parent._workers[address]
-
-        ws._last_seen = time()
-
+        ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
                 parent._tasks[key]: duration for key, duration in executing.items()
             }
 
-        if metrics:
-            ws._metrics = metrics
+        ws._metrics = metrics
 
         if host_info:
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = dict()
+            dh: dict = parent._host_info.setdefault(host, {})
             dh.update(host_info)
 
-        delay = time() - now
-        ws._time_delay = delay
+        if now:
+            ws._time_delay = local_now - now
 
         if resources:
             self.add_resources(worker=address, resources=resources)
@@ -3671,7 +3663,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {
             "status": "OK",
-            "time": time(),
+            "time": local_now,
             "heartbeat-interval": heartbeat_interval(len(parent._workers)),
         }
 
@@ -3749,7 +3741,7 @@ class Scheduler(SchedulerState, ServerNode):
             parent._total_nthreads += nthreads
             parent._aliases[name] = address
 
-            response = self.heartbeat_worker(
+            self.heartbeat_worker(
                 address=address,
                 resolve_address=resolve_address,
                 now=now,
@@ -5324,7 +5316,7 @@ class Scheduler(SchedulerState, ServerNode):
                     map(first, sorted(worker_bytes.items(), key=second, reverse=True))
                 )
 
-                recipients = iter(reversed(sorted_workers))
+                recipients = reversed(sorted_workers)
                 recipient = next(recipients)
                 msgs = []  # (sender, recipient, key)
                 for sender in sorted_workers[: len(workers) // 2]:
@@ -5336,11 +5328,8 @@ class Scheduler(SchedulerState, ServerNode):
                     )
 
                     try:
-                        while worker_bytes[sender] > avg:
-                            while (
-                                worker_bytes[recipient] < avg
-                                and worker_bytes[sender] > avg
-                            ):
+                        while avg < worker_bytes[sender]:
+                            while worker_bytes[recipient] < avg < worker_bytes[sender]:
                                 ts, nb = next(sender_keys)
                                 if ts not in tasks_by_worker[recipient]:
                                     tasks_by_worker[recipient].add(ts)
@@ -5348,7 +5337,7 @@ class Scheduler(SchedulerState, ServerNode):
                                     msgs.append((sender, recipient, ts))
                                     worker_bytes[sender] -= nb
                                     worker_bytes[recipient] += nb
-                            if worker_bytes[sender] > avg:
+                            if avg < worker_bytes[sender]:
                                 recipient = next(recipients)
                     except StopIteration:
                         break
@@ -5379,7 +5368,7 @@ class Scheduler(SchedulerState, ServerNode):
                     },
                 )
 
-                if not all(r["status"] == "OK" for r in result):
+                if any(r["status"] != "OK" for r in result):
                     return {
                         "status": "missing-data",
                         "keys": tuple(
@@ -5680,7 +5669,7 @@ class Scheduler(SchedulerState, ServerNode):
         workers: list (optional)
             List of worker addresses to retire.
             If not provided we call ``workers_to_close`` which finds a good set
-        workers_names: list (optional)
+        names: list (optional)
             List of worker names to retire.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
@@ -5708,30 +5697,31 @@ class Scheduler(SchedulerState, ServerNode):
         with log_errors():
             async with self._lock if lock else empty_context:
                 if names is not None:
+                    if workers is not None:
+                        raise TypeError("names and workers are mutually exclusive")
                     if names:
                         logger.info("Retire worker names %s", names)
                     names = set(map(str, names))
-                    workers = [
+                    workers = {
                         ws._address
                         for ws in parent._workers_dv.values()
                         if str(ws._name) in names
-                    ]
-                if workers is None:
+                    }
+                elif workers is None:
                     while True:
                         try:
                             workers = self.workers_to_close(**kwargs)
-                            if workers:
-                                workers = await self.retire_workers(
-                                    workers=workers,
-                                    remove=remove,
-                                    close_workers=close_workers,
-                                    lock=False,
-                                )
-                                return workers
-                            else:
+                            if not workers:
                                 return {}
+                            return await self.retire_workers(
+                                workers=workers,
+                                remove=remove,
+                                close_workers=close_workers,
+                                lock=False,
+                            )
                         except KeyError:  # keys left during replicate
                             pass
+
                 workers = {
                     parent._workers_dv[w] for w in workers if w in parent._workers_dv
                 }
@@ -5743,22 +5733,21 @@ class Scheduler(SchedulerState, ServerNode):
                 keys = set.union(*[w.has_what for w in workers])
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
-                other_workers = set(parent._workers_dv.values()) - workers
                 if keys:
-                    if other_workers:
-                        logger.info("Moving %d keys to other workers", len(keys))
-                        await self.replicate(
-                            keys=keys,
-                            workers=[ws._address for ws in other_workers],
-                            n=1,
-                            delete=False,
-                            lock=False,
-                        )
-                    else:
+                    other_workers = set(parent._workers_dv.values()) - workers
+                    if not other_workers:
                         return {}
+                    logger.info("Moving %d keys to other workers", len(keys))
+                    await self.replicate(
+                        keys=keys,
+                        workers=[ws._address for ws in other_workers],
+                        n=1,
+                        delete=False,
+                        lock=False,
+                    )
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
-                if close_workers and worker_keys:
+                if close_workers:
                     await asyncio.gather(
                         *[self.close_worker(worker=w, safe=True) for w in worker_keys]
                     )

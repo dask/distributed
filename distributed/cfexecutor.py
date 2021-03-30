@@ -5,7 +5,7 @@ from tlz import merge
 from tornado import gen
 
 from .metrics import time
-from .utils import TimeoutError, sync
+from .utils import sync, TimeoutError, parse_timedelta
 
 
 @gen.coroutine
@@ -117,6 +117,7 @@ class ClientExecutor(cf.Executor):
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:
+            timeout = parse_timedelta(timeout)
             end_time = timeout + time()
         if "chunksize" in kwargs:
             del kwargs["chunksize"]

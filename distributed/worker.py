@@ -809,8 +809,7 @@ class Worker(ServerNode):
         return self.local_directory
 
     async def get_metrics(self):
-        now = time()
-        core = dict(
+        out = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
@@ -821,17 +820,19 @@ class Worker(ServerNode):
                 "types": keymap(typename, self.bandwidth_types),
             },
         )
-        custom = {}
+        out.update(self.monitor.recent())
+
         for k, metric in self.metrics.items():
             try:
                 result = metric(self)
                 if isawaitable(result):
                     result = await result
-                custom[k] = result
+                # In case of collision, prefer core metrics
+                out.setdefault(k, result)
             except Exception:  # TODO: log error once
                 pass
 
-        return merge(custom, self.monitor.recent(), core)
+        return out
 
     async def get_startup_information(self):
         result = {}
@@ -937,56 +938,57 @@ class Worker(ServerNode):
             self.digests["latency"].add(latency)
 
     async def heartbeat(self):
-        if not self.heartbeat_active:
-            self.heartbeat_active = True
-            logger.debug("Heartbeat: %s" % self.address)
-            try:
-                start = time()
-                response = await retry_operation(
-                    self.scheduler.heartbeat_worker,
-                    address=self.contact_address,
-                    now=time(),
-                    metrics=await self.get_metrics(),
-                    executing={
-                        key: start - self.tasks[key].start_time
-                        for key in self.active_threads.values()
-                        if key in self.tasks
-                    },
-                )
-                end = time()
-                middle = (start + end) / 2
-
-                self._update_latency(end - start)
-
-                if response["status"] == "missing":
-                    for i in range(10):
-                        if self.status != Status.running:
-                            break
-                        else:
-                            await asyncio.sleep(0.05)
-                    else:
-                        await self._register_with_scheduler()
-                    return
-                self.scheduler_delay = response["time"] - middle
-                self.periodic_callbacks["heartbeat"].callback_time = (
-                    response["heartbeat-interval"] * 1000
-                )
-                self.bandwidth_workers.clear()
-                self.bandwidth_types.clear()
-            except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
-                if not self.reconnect:
-                    await self.close(report=False)
-            except IOError as e:
-                # Scheduler is gone. Respect distributed.comm.timeouts.connect
-                if "Timed out trying to connect" in str(e):
-                    await self.close(report=False)
-                else:
-                    raise e
-            finally:
-                self.heartbeat_active = False
-        else:
+        if self.heartbeat_active:
             logger.debug("Heartbeat skipped: channel busy")
+            return
+
+        self.heartbeat_active = True
+        logger.debug("Heartbeat: %s", self.address)
+        try:
+            start = time()
+            response = await retry_operation(
+                self.scheduler.heartbeat_worker,
+                address=self.contact_address,
+                now=start,
+                metrics=await self.get_metrics(),
+                executing={
+                    key: start - self.tasks[key].start_time
+                    for key in self.active_threads.values()
+                    if key in self.tasks
+                },
+            )
+            end = time()
+            middle = (start + end) / 2
+
+            self._update_latency(end - start)
+
+            if response["status"] == "missing":
+                for i in range(10):
+                    if self.status != Status.running:
+                        break
+                    else:
+                        await asyncio.sleep(0.05)
+                else:
+                    await self._register_with_scheduler()
+                return
+            self.scheduler_delay = response["time"] - middle
+            self.periodic_callbacks["heartbeat"].callback_time = (
+                response["heartbeat-interval"] * 1000
+            )
+            self.bandwidth_workers.clear()
+            self.bandwidth_types.clear()
+        except CommClosedError:
+            logger.warning("Heartbeat to scheduler failed")
+            if not self.reconnect:
+                await self.close(report=False)
+        except IOError as e:
+            # Scheduler is gone. Respect distributed.comm.timeouts.connect
+            if "Timed out trying to connect" in str(e):
+                await self.close(report=False)
+            else:
+                raise e
+        finally:
+            self.heartbeat_active = False
 
     async def handle_scheduler(self, comm):
         try:
@@ -2762,26 +2764,25 @@ class Worker(ServerNode):
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
+            elif isinstance(result.pop("actual-exception"), Reschedule):
+                self.batched_stream.send({"op": "reschedule", "key": ts.key})
+                self.transition(ts, "rescheduled", report=False)
+                self.release_key(ts.key, report=False)
             else:
-                if isinstance(result.pop("actual-exception"), Reschedule):
-                    self.batched_stream.send({"op": "reschedule", "key": ts.key})
-                    self.transition(ts, "rescheduled", report=False)
-                    self.release_key(ts.key, report=False)
-                else:
-                    ts.exception = result["exception"]
-                    ts.traceback = result["traceback"]
-                    logger.warning(
-                        " Compute Failed\n"
-                        "Function:  %s\n"
-                        "args:      %s\n"
-                        "kwargs:    %s\n"
-                        "Exception: %s\n",
-                        str(funcname(function))[:1000],
-                        convert_args_to_str(args2, max_len=1000),
-                        convert_kwargs_to_str(kwargs2, max_len=1000),
-                        repr(result["exception"].data),
-                    )
-                    self.transition(ts, "error")
+                ts.exception = result["exception"]
+                ts.traceback = result["traceback"]
+                logger.warning(
+                    "Compute Failed\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n",
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception"].data,
+                )
+                self.transition(ts, "error")
 
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
@@ -3367,8 +3368,6 @@ class Reschedule(Exception):
     load across the cluster has significantly changed since first scheduling
     the task.
     """
-
-    pass
 
 
 def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):

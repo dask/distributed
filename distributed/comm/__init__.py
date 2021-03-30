@@ -14,7 +14,7 @@ from .utils import get_tcp_server_address
 
 
 def _register_transports():
-    from . import inproc, tcp
+    from . import inproc, tcp, ws
 
     try:
         from . import ucx
