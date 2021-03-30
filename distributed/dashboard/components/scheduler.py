@@ -1883,10 +1883,13 @@ class WorkerTable(DashboardComponent):
             name: TableColumn(
                 field=name,
                 title=name.replace("_percent", " %"),
-                formatter=formatters.get(name.split("_", 1)[-1]),
             )
             for name in stat_names
         }
+        for name in stat_names:
+            formatter = formatters.get(name.split("_", 1)[-1])
+            if formatter is not None:
+                stat_columns[name].formatter = formatter
 
         stat_table = DataTable(
             source=self.source,
