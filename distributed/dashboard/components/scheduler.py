@@ -10,9 +10,11 @@ from bokeh.layouts import column, row
 from bokeh.models import (
     ColumnDataSource,
     ColorBar,
+    CustomJS,
     DataRange1d,
     HoverTool,
     ResetTool,
+    CheckboxButtonGroup,
     PanTool,
     WheelZoomTool,
     TapTool,
@@ -1797,22 +1799,16 @@ class WorkerTable(DashboardComponent):
         )
         self.stat_names = [
             "max_cpu",
-            "min_cpu",
             "mean_cpu",
             "max_memory",
-            "min_memory",
             "mean_memory",
             "max_memory_percent",
-            "min_memory_percent",
             "mean_memory_percent",
             "max_num_fds",
-            "min_num_fds",
             "mean_num_fds",
             "max_read_bytes",
-            "min_read_bytes",
             "mean_read_bytes",
             "max_write_bytes",
-            "min_write_bytes",
             "mean_write_bytes",
         ]
 
@@ -1884,28 +1880,57 @@ class WorkerTable(DashboardComponent):
 
         stat_names = ["name", "address"] + self.stat_names
         stat_columns = {
-            name: TableColumn(field=name, title=name.replace("_percent", " %"))
+            name: TableColumn(
+                field=name,
+                title=name.replace("_percent", " %"),
+                formatter=formatters.get(name.split("_", 1)[-1]),
+            )
             for name in stat_names
         }
 
         stat_table = DataTable(
             source=self.source,
-            columns=[stat_columns[n] for n in stat_names],
+            columns=[
+                stat_columns[n]
+                for n in [
+                    "name",
+                    "address",
+                    "max_cpu",
+                    "mean_cpu",
+                    "max_memory",
+                    "mean_memory",
+                ]
+            ],
             reorderable=True,
             sortable=True,
             width=width,
             **dt_kwargs,
         )
 
-        for name in stat_names:
-            if name[4:] in formatters:
-                stat_table.columns[stat_names.index(name)].formatter = formatters[
-                    name[4:]
-                ]
-            elif name[5:] in formatters:
-                stat_table.columns[stat_names.index(name)].formatter = formatters[
-                    name[5:]
-                ]
+        column_choice = CheckboxButtonGroup(
+            labels=[
+                "cpu",
+                "memory",
+                "memory_percent",
+                "num_fds",
+                "read_bytes",
+                "write_bytes",
+            ],
+            active=[0, 1],
+        )
+        column_choice.js_on_click(
+            CustomJS(
+                args=dict(table=stat_table, columns=stat_columns),
+                code="""
+                    var visible_columns = [columns["name"], columns["address"]]
+                    for (var i = 0; i < this.active.length; i++) {
+                        visible_columns.push(columns["max_" + this.labels[this.active[i]]]);
+                        visible_columns.push(columns["mean_" + this.labels[this.active[i]]]);
+                    }
+                    table.columns = visible_columns;
+                """,
+            )
+        )
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -1971,9 +1996,9 @@ class WorkerTable(DashboardComponent):
         else:
             sizing_mode = {}
 
-        components = [cpu_plot, mem_plot, table, stat_table]
+        components = [cpu_plot, mem_plot, table, column_choice, stat_table]
         if report:
-            components = [stat_table]
+            components = [column_choice, stat_table]
         if self.extra_names:
             components.append(extra_table)
 
