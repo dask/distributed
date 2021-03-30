@@ -1998,7 +1998,9 @@ class SchedulerState:
             for key in keys:
                 self.validate_key(key)
 
-    def transition_released_waiting(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_released_waiting(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2053,7 +2055,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_waiting(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_no_worker_waiting(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2163,7 +2167,9 @@ class SchedulerState:
         ws._processing[ts] = total_duration
         return total_duration
 
-    def transition_waiting_processing(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_waiting_processing(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2210,9 +2216,11 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    @exceptval(check=False)
     def transition_waiting_memory(
         self, key, nbytes=None, type=None, typename: str = None, worker=None, **kwargs
-    ):
+    ) -> tuple:
         try:
             ws: WorkerState = self._workers_dv[worker]
             ts: TaskState = self._tasks[key]
@@ -2250,6 +2258,8 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    @exceptval(check=False)
     def transition_processing_memory(
         self,
         key,
@@ -2259,7 +2269,7 @@ class SchedulerState:
         worker=None,
         startstops=None,
         **kwargs,
-    ):
+    ) -> tuple:
         ws: WorkerState
         wws: WorkerState
         recommendations: dict = {}
@@ -2367,7 +2377,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_memory_released(self, key, safe: bint = False):
+    @ccall
+    @exceptval(check=False)
+    def transition_memory_released(self, key, safe: bint = False) -> tuple:
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -2442,7 +2454,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_erred(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_released_erred(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2487,7 +2501,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_erred_released(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_erred_released(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2527,7 +2543,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_waiting_released(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_waiting_released(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
@@ -2565,7 +2583,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_processing_released(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_processing_released(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2611,9 +2631,11 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
+    @exceptval(check=False)
     def transition_processing_erred(
         self, key, cause=None, exception=None, traceback=None, **kwargs
-    ):
+    ) -> tuple:
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -2690,7 +2712,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_no_worker_released(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_no_worker_released(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -2733,7 +2757,9 @@ class SchedulerState:
         ts._exception_blame = ts._exception = ts._traceback = None
         self._task_metadata.pop(key, None)
 
-    def transition_memory_forgotten(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_memory_forgotten(self, key) -> tuple:
         ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
@@ -2775,7 +2801,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
-    def transition_released_forgotten(self, key):
+    @ccall
+    @exceptval(check=False)
+    def transition_released_forgotten(self, key) -> tuple:
         try:
             ts: TaskState = self._tasks[key]
             recommendations: dict = {}
