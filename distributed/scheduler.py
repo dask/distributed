@@ -2649,6 +2649,7 @@ class SchedulerState:
         traceback=None,
         worker=None,
         startstops=None,
+        text=None,
     ) -> tuple:
         ws: WorkerState
         try:
