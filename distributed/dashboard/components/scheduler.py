@@ -222,7 +222,9 @@ class ProcessingHistogram(DashboardComponent):
 
 
 class NBytesHistogram(DashboardComponent):
-    """ How many tasks are on each worker """
+    """Histogram of memory usage, showing how many workers there are in each bucket of
+    usage. Replaces the per-worker graph when there are >= 50 workers.
+    """
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
