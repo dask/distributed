@@ -2642,7 +2642,13 @@ class SchedulerState:
     @ccall
     @exceptval(check=False)
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None
+        self,
+        key,
+        cause=None,
+        exception=None,
+        traceback=None,
+        worker=None,
+        startstops=None,
     ) -> tuple:
         ws: WorkerState
         try:
