@@ -2219,7 +2219,7 @@ class SchedulerState:
     @ccall
     @exceptval(check=False)
     def transition_waiting_memory(
-        self, key, nbytes=None, type=None, typename: str = None, worker=None, **kwargs
+        self, key, nbytes=None, type=None, typename: str = None, worker=None
     ) -> tuple:
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2268,7 +2268,6 @@ class SchedulerState:
         typename: str = None,
         worker=None,
         startstops=None,
-        **kwargs,
     ) -> tuple:
         ws: WorkerState
         wws: WorkerState
@@ -2634,7 +2633,7 @@ class SchedulerState:
     @ccall
     @exceptval(check=False)
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, **kwargs
+        self, key, cause=None, exception=None, traceback=None
     ) -> tuple:
         ws: WorkerState
         try:
