@@ -1,4 +1,4 @@
-from . import config  # isort:skip
+from . import config  # isort:skip; load distributed configuration first
 import dask
 from dask.config import config
 
