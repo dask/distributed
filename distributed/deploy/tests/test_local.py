@@ -979,7 +979,7 @@ async def test_repr(cleanup):
         assert "workers=2" in text
         assert cluster.scheduler_address in text
         assert "cores=4" in text or "threads=4" in text
-        assert "GB" in text and "4" in text
+        assert "4.00 GB" in text or "3.73 GiB" in text
 
     async with LocalCluster(
         n_workers=2, processes=False, memory_limit=None, asynchronous=True
