@@ -5,7 +5,7 @@ from tlz import merge
 from tornado import gen
 
 from .metrics import time
-from .utils import sync, TimeoutError, parse_timedelta
+from .utils import TimeoutError, parse_timedelta, sync
 
 
 @gen.coroutine
