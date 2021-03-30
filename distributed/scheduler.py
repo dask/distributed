@@ -1814,7 +1814,7 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    def _transition(self, key, finish: str, *args, **kwargs):
+    def _transition(self, key, finish: str, *args, status: str = None, **kwargs):
         """Transition a key from its current state to the finish state
 
         Examples
