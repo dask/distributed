@@ -37,12 +37,20 @@ from .components.scheduler import (
     individual_systemmonitor_doc,
 )
 from .worker import counters_doc
-from .components.nvml import gpu_memory_doc, gpu_utilization_doc  # noqa: 1708
+from .components.nvml import (
+    NVML_ENABLED,
+    gpu_memory_doc,
+    gpu_utilization_doc,
+    gpu_doc,
+)  # noqa: 1708
 
 
 template_variables = {
     "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
 }
+
+if NVML_ENABLED:
+    template_variables["pages"].insert(4, "gpu")
 
 
 def connect(application, http_server, scheduler, prefix=""):
@@ -75,6 +83,7 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/gpu": gpu_doc,
     "/individual-task-stream": individual_task_stream_doc,
     "/individual-progress": individual_progress_doc,
     "/individual-graph": individual_graph_doc,
