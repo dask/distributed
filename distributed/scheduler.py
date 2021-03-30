@@ -1821,6 +1821,7 @@ class SchedulerState:
         *args,
         status: str = None,
         thread: Py_ssize_t = -1,
+        metadata: dict = None,
         **kwargs,
     ):
         """Transition a key from its current state to the finish state
