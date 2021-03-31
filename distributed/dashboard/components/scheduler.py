@@ -932,11 +932,15 @@ class CurrentLoad(DashboardComponent):
         with log_errors():
             workers = list(self.scheduler.workers.values())
 
+            nprocessing = [len(ws.processing) for ws in workers]
+            now = time()
+            if not any(nprocessing) and now < self.last + 1:
+                return
+
             y = list(range(len(workers)))
 
             cpu = [int(ws.metrics["cpu"]) for ws in workers]
 
-            nprocessing = [len(ws.processing) for ws in workers]
             processing_color = []
             for ws in workers:
                 if ws in self.scheduler.idle:
@@ -966,37 +970,33 @@ class CurrentLoad(DashboardComponent):
                 else:
                     nbytes_color.append("blue")
 
-            now = time()
-            if any(nprocessing) or self.last + 1 < now:
-                self.last = now
-                result = {
-                    "cpu": cpu,
-                    "cpu-half": [c / 2 for c in cpu],
-                    "nprocessing": nprocessing,
-                    "nprocessing-half": [np / 2 for np in nprocessing],
-                    "nprocessing-color": processing_color,
-                    "nbytes": nbytes,
-                    "nbytes-half": [nb / 2 for nb in nbytes],
-                    "nbytes-color": nbytes_color,
-                    "nbytes_text": nbytes_text,
-                    "worker": [ws.address for ws in workers],
-                    "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
-                    "y": y,
-                }
+            self.last = now
+            result = {
+                "cpu": cpu,
+                "cpu-half": [c / 2 for c in cpu],
+                "nprocessing": nprocessing,
+                "nprocessing-half": [np / 2 for np in nprocessing],
+                "nprocessing-color": processing_color,
+                "nbytes": nbytes,
+                "nbytes-half": [nb / 2 for nb in nbytes],
+                "nbytes-color": nbytes_color,
+                "nbytes_text": nbytes_text,
+                "worker": [ws.address for ws in workers],
+                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "y": y,
+            }
 
-                self.nbytes_figure.title.text = "Bytes stored: " + format_bytes(
-                    sum(nbytes)
+            self.nbytes_figure.title.text = "Bytes stored: " + format_bytes(sum(nbytes))
+            self.nbytes_figure.x_range.end = max_limit
+            if self.scheduler.workers:
+                self.cpu_figure.x_range.end = (
+                    max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
+                    * 100
                 )
-                self.nbytes_figure.x_range.end = max_limit
-                if self.scheduler.workers:
-                    self.cpu_figure.x_range.end = (
-                        max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
-                        * 100
-                    )
-                else:
-                    self.cpu_figure.x_range.end = 100
+            else:
+                self.cpu_figure.x_range.end = 100
 
-                update(self.source, result)
+            update(self.source, result)
 
 
 class StealingTimeSeries(DashboardComponent):
