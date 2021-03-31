@@ -936,6 +936,7 @@ class CurrentLoad(DashboardComponent):
             now = time()
             if not any(nprocessing) and now < self.last + 1:
                 return
+            self.last = now
 
             y = list(range(len(workers)))
 
@@ -970,7 +971,6 @@ class CurrentLoad(DashboardComponent):
                 else:
                     nbytes_color.append("blue")
 
-            self.last = now
             result = {
                 "cpu": cpu,
                 "cpu-half": [c / 2 for c in cpu],
