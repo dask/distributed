@@ -3,26 +3,26 @@ import pytest
 pytest.importorskip("requests")
 
 import os
-import requests
-import socket
 import shutil
+import socket
 import sys
 import tempfile
 from time import sleep
 
+import requests
 from click.testing import CliRunner
 
 import distributed
-from distributed import Scheduler, Client
+import distributed.cli.dask_scheduler
+from distributed import Client, Scheduler
+from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface, tmpfile
+from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
-    popen,
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
+    popen,
 )
-from distributed.utils_test import loop  # noqa: F401
-from distributed.metrics import time
-import distributed.cli.dask_scheduler
 
 
 def test_defaults(loop):

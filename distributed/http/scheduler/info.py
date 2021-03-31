@@ -1,19 +1,19 @@
-from datetime import datetime
 import json
 import logging
 import os
 import os.path
+from datetime import datetime
+
+from tlz import first, merge
+from tornado import escape
+from tornado.websocket import WebSocketHandler
 
 from dask.utils import format_bytes
 
-from tornado import escape
-from tornado.websocket import WebSocketHandler
-from tlz import first, merge
-
-from ..utils import RequestHandler, redirect
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time
-from ...utils import log_errors, format_time
+from ...utils import format_time, log_errors
+from ..utils import RequestHandler, redirect
 
 ns = {
     func.__name__: func

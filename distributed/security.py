@@ -1,6 +1,6 @@
 import datetime
-import tempfile
 import os
+import tempfile
 
 try:
     import ssl
@@ -8,7 +8,6 @@ except ImportError:
     ssl = None
 
 import dask
-
 
 __all__ = ("Security",)
 
@@ -95,8 +94,7 @@ class Security:
         try:
             from cryptography import x509
             from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives import hashes
-            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
             from cryptography.x509.oid import NameOID
         except ImportError:

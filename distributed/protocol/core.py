@@ -1,17 +1,17 @@
 import logging
+
 import msgpack
 
-from .compression import compressions, maybe_compress, decompress
+from .compression import compressions, decompress, maybe_compress
 from .serialize import (
     Serialize,
     Serialized,
+    merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
-    merge_and_deserialize,
     serialize_and_split,
 )
 from .utils import msgpack_opts
-
 
 logger = logging.getLogger(__name__)
 

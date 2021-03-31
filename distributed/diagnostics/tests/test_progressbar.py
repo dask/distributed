@@ -5,8 +5,14 @@ import pytest
 from distributed import Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
-from distributed.utils_test import inc, div, gen_cluster
-from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster_fixture,
+    div,
+    gen_cluster,
+    inc,
+    loop,
+)
 
 
 def test_text_progressbar(capsys, client):

@@ -1,8 +1,7 @@
 import collections
-from functools import wraps
 import sys
 import time as timemod
-
+from functools import wraps
 
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
 

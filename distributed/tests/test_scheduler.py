@@ -8,39 +8,40 @@ from collections import defaultdict
 from time import sleep
 
 import cloudpickle
+import pytest
+from tlz import concat, first, frequencies, merge, valmap
+
 import dask
 from dask import delayed
-from tlz import merge, concat, valmap, first, frequencies
+from dask.compatibility import apply
 
-import pytest
-
-from distributed import Nanny, Worker, Client, wait, fire_and_forget
+from distributed import Client, Nanny, Worker, fire_and_forget, wait
+from distributed.client import wait
 from distributed.comm import Comm
 from distributed.compatibility import MACOS
-from distributed.core import connect, rpc, ConnectionPool, Status
-from distributed.scheduler import Scheduler
-from distributed.client import wait
+from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.worker import dumps_function, dumps_task
-from distributed.utils import tmpfile, typename, TimeoutError
+from distributed.scheduler import Scheduler
+from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
     cleanup,
-    inc,
+    cluster,
     dec,
+    div,
     gen_cluster,
     gen_test,
-    slowinc,
+    inc,
+    loop,
+    nodebug,
     slowadd,
     slowdec,
-    cluster,
-    div,
-    varying,
+    slowinc,
     tls_only_security,
+    varying,
 )
-from distributed.utils_test import loop, nodebug  # noqa: F401
-from dask.compatibility import apply
+from distributed.worker import dumps_function, dumps_task
 
 if sys.version_info < (3, 8):
     try:

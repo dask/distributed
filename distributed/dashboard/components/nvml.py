@@ -1,22 +1,22 @@
 import math
 
-from distributed.dashboard.components import DashboardComponent, add_periodic_callback
-
-from bokeh.plotting import figure
 from bokeh.models import (
-    ColumnDataSource,
     BasicTicker,
-    NumeralTickFormatter,
-    TapTool,
-    OpenURL,
+    ColumnDataSource,
     HoverTool,
+    NumeralTickFormatter,
+    OpenURL,
+    TapTool,
 )
+from bokeh.plotting import figure
 from tornado import escape
-from dask.utils import format_bytes
-from distributed.utils import log_errors
-from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import without_property_validation, update
 
+from dask.utils import format_bytes
+
+from distributed.dashboard.components import DashboardComponent, add_periodic_callback
+from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
+from distributed.dashboard.utils import update, without_property_validation
+from distributed.utils import log_errors
 
 try:
     import pynvml

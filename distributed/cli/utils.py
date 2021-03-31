@@ -1,6 +1,5 @@
 from tornado.ioloop import IOLoop
 
-
 py3_err_msg = """
 Warning: Your terminal does not set locales.
 

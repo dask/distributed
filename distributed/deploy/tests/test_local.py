@@ -1,42 +1,42 @@
 import asyncio
-from functools import partial
 import gc
 import subprocess
 import sys
-from time import sleep
-from threading import Lock
 import unittest
 import weakref
 from distutils.version import LooseVersion
+from functools import partial
+from threading import Lock
+from time import sleep
 
-from tornado.ioloop import IOLoop
+import pytest
 import tornado
 from tornado.httpclient import AsyncHTTPClient
-import pytest
+from tornado.ioloop import IOLoop
 
 from dask.system import CPU_COUNT
-from distributed import Client, Worker, Nanny, get_client
+
+from distributed import Client, Nanny, Worker, get_client
 from distributed.core import Status
 from distributed.deploy.local import LocalCluster
+from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
+from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (  # noqa: F401
-    clean,
-    cleanup,
-    inc,
-    gen_test,
-    slowinc,
-    assert_cannot_connect,
-    assert_can_connect_locally_4,
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
+    assert_can_connect_locally_4,
+    assert_cannot_connect,
     captured_logger,
+    clean,
+    cleanup,
+    gen_test,
+    inc,
+    loop,
+    slowinc,
     tls_only_security,
 )
-from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync, TimeoutError
-
-from distributed.deploy.utils_test import ClusterTest
 
 
 def test_simple(loop):

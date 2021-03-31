@@ -1,14 +1,15 @@
 import asyncio
+import logging
+import random
 from collections import defaultdict
 from functools import partial
 from itertools import cycle
-import logging
-import random
 
-from dask.optimization import SubgraphCallable
+from tlz import concat, drop, groupby, merge
+
 import dask.config
+from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
-from tlz import merge, concat, groupby, drop
 
 from .core import rpc
 from .utils import All

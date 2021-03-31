@@ -1,6 +1,6 @@
+import pytest
 from tornado import web
 from tornado.httpclient import AsyncHTTPClient, HTTPClientError
-import pytest
 
 from distributed.http.routing import RoutingApplication
 

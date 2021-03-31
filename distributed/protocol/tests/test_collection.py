@@ -1,5 +1,6 @@
 import pytest
-from distributed.protocol import serialize, deserialize
+
+from distributed.protocol import deserialize, serialize
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")

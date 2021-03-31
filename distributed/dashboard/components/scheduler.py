@@ -1,47 +1,48 @@
-from collections import defaultdict
 import logging
 import math
-from numbers import Number
 import operator
 import os
+from collections import defaultdict
+from numbers import Number
 
+from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
-    ColumnDataSource,
-    ColorBar,
-    DataRange1d,
-    HoverTool,
-    ResetTool,
-    PanTool,
-    WheelZoomTool,
-    TapTool,
-    OpenURL,
-    Range1d,
-    value,
-    NumeralTickFormatter,
-    BoxZoomTool,
     AdaptiveTicker,
     BasicTicker,
-    NumberFormatter,
     BoxSelectTool,
-    GroupFilter,
+    BoxZoomTool,
     CDSView,
-    Tabs,
+    ColorBar,
+    ColumnDataSource,
+    DataRange1d,
+    GroupFilter,
+    HoverTool,
+    NumberFormatter,
+    NumeralTickFormatter,
+    OpenURL,
     Panel,
+    PanTool,
+    Range1d,
+    ResetTool,
+    Tabs,
+    TapTool,
     Title,
+    WheelZoomTool,
+    value,
 )
 from bokeh.models.widgets import DataTable, TableColumn
-from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
+from bokeh.plotting import figure
 from bokeh.themes import Theme
-from bokeh.transform import factor_cmap, linear_cmap, cumsum
-from bokeh.io import curdoc
+from bokeh.transform import cumsum, factor_cmap, linear_cmap
+from tlz import pipe
+from tlz.curried import concat, groupby, map
+from tornado import escape
+
 import dask
 from dask import config
 from dask.utils import format_bytes, key_split
-from tlz import pipe
-from tlz.curried import map, concat, groupby
-from tornado import escape
 
 try:
     import numpy as np
@@ -51,24 +52,24 @@ except ImportError:
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
     DashboardComponent,
-    ProfileTimePlot,
     ProfileServer,
+    ProfileTimePlot,
     SystemMonitor,
 )
 from distributed.dashboard.utils import (
-    transpose,
     BOKEH_VERSION,
     PROFILING,
-    without_property_validation,
+    transpose,
     update,
+    without_property_validation,
 )
-from distributed.metrics import time
-from distributed.utils import log_errors, format_time, parse_timedelta
-from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.graph_layout import GraphLayout
+from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
+from distributed.metrics import time
+from distributed.utils import format_time, log_errors, parse_timedelta
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool

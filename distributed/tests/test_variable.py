@@ -1,17 +1,25 @@
 import asyncio
+import logging
 import random
 from datetime import timedelta
-from time import sleep, monotonic
-import logging
+from time import monotonic, sleep
 
 import pytest
 from tornado.ioloop import IOLoop
 
-from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
-from distributed.metrics import time
+from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
-from distributed.utils_test import gen_cluster, inc, div, captured_logger, popen
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    captured_logger,
+    client,
+    cluster_fixture,
+    div,
+    gen_cluster,
+    inc,
+    loop,
+    popen,
+)
 
 
 @gen_cluster(client=True)

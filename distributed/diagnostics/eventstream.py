@@ -1,10 +1,8 @@
 import logging
 
-from .plugin import SchedulerPlugin
-
-from ..core import connect, coerce_to_address
+from ..core import coerce_to_address, connect
 from ..worker import dumps_function
-
+from .plugin import SchedulerPlugin
 
 logger = logging.getLogger(__name__)
 

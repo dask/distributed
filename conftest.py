@@ -1,7 +1,6 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 import pytest
 
-
 # Uncomment to enable more logging and checks
 # (https://docs.python.org/3/library/asyncio-dev.html)
 # Note this makes things slower and might consume much memory.
