@@ -3,9 +3,9 @@
 
 # flake8: noqa
 
-import time
 import errno
 import threading
+import time
 import weakref
 
 __all__ = ["lock_file"]

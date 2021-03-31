@@ -1,10 +1,8 @@
 import asyncio
 import collections
-import gc
-from contextlib import contextmanager, suppress
 import copy
 import functools
-from glob import glob
+import gc
 import io
 import itertools
 import logging
@@ -19,10 +17,12 @@ import subprocess
 import sys
 import tempfile
 import threading
-from time import sleep
 import uuid
 import warnings
 import weakref
+from contextlib import contextmanager, suppress
+from glob import glob
+from time import sleep
 
 try:
     import ssl
@@ -30,38 +30,38 @@ except ImportError:
     ssl = None
 
 import pytest
-
-import dask
-from tlz import merge, memoize, assoc
+from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 
+import dask
+
 from . import system
-from .client import default_client, _global_clients, Client
-from .compatibility import WINDOWS
+from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .compatibility import WINDOWS
 from .config import initialize_logging
-from .core import connect, rpc, CommClosedError, Status
+from .core import CommClosedError, Status, connect, rpc
 from .deploy import SpecCluster
+from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
+from .nanny import Nanny
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
-    log_errors,
-    mp_context,
+    DequeHandler,
+    TimeoutError,
+    _offload_executor,
     get_ip,
     get_ipv6,
-    DequeHandler,
+    iscoroutinefunction,
+    log_errors,
+    mp_context,
     reset_logger_locks,
     sync,
-    iscoroutinefunction,
     thread_state,
-    _offload_executor,
-    TimeoutError,
 )
 from .worker import Worker
-from .nanny import Nanny
-from .diagnostics.plugin import WorkerPlugin
 
 try:
     import dask.array  # register config
@@ -190,6 +190,7 @@ def pristine_loop():
 @contextmanager
 def mock_ipython():
     from unittest import mock
+
     from distributed._ipython_utils import remote_magic
 
     ip = mock.Mock()

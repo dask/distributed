@@ -1,52 +1,61 @@
-import asyncio
 import array
+import asyncio
 import datetime
-from functools import partial
 import io
 import os
 import queue
 import socket
 import sys
-from time import sleep
 import traceback
+from functools import partial
+from time import sleep
 
 import pytest
 from tornado.ioloop import IOLoop
 
 import dask
+
 from distributed.metrics import time
 from distributed.utils import (
+    LRU,
     All,
     Log,
     Logs,
-    sync,
+    LoopRunner,
+    TimeoutError,
+    _maybe_complex,
+    ensure_bytes,
+    ensure_ip,
+    format_dashboard_link,
+    funcname,
+    get_ip_interface,
+    get_traceback,
     is_kernel,
     is_valid_xml,
-    ensure_ip,
-    truncate_exception,
-    get_traceback,
-    _maybe_complex,
+    nbytes,
+    offload,
+    open_port,
+    parse_bytes,
+    parse_ports,
+    parse_timedelta,
     read_block,
     seek_delimiter,
-    funcname,
-    ensure_bytes,
-    open_port,
-    get_ip_interface,
-    nbytes,
     set_thread_state,
+    sync,
     thread_state,
-    LoopRunner,
-    parse_bytes,
-    parse_timedelta,
-    parse_ports,
+    truncate_exception,
     warn_on_duration,
-    format_dashboard_link,
-    LRU,
-    offload,
-    TimeoutError,
 )
-from distributed.utils_test import loop, loop_in_thread  # noqa: F401
-from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
+from distributed.utils_test import (  # noqa: F401
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    loop,
+    loop_in_thread,
+    throws,
+)
 
 
 def test_All(loop):

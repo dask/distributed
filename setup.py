@@ -2,8 +2,10 @@
 
 import os
 import sys
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 from setuptools.extension import Extension
+
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")

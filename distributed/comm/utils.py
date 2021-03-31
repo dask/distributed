@@ -9,7 +9,6 @@ from dask.utils import parse_bytes
 from .. import protocol
 from ..utils import get_ip, get_ipv6, nbytes, offload
 
-
 logger = logging.getLogger(__name__)
 
 

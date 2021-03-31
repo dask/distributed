@@ -1,31 +1,32 @@
 import asyncio
 import weakref
 
-from bokeh.layouts import row, column
+import tlz as toolz
+from bokeh.layouts import column, row
 from bokeh.models import (
+    Button,
     ColumnDataSource,
     DataRange1d,
     HoverTool,
-    Range1d,
-    Button,
-    Select,
     NumeralTickFormatter,
+    Range1d,
+    Select,
 )
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
-import dask
 from tornado import gen
-import tlz as toolz
 
+import dask
+
+from distributed import profile
+from distributed.compatibility import WINDOWS
 from distributed.dashboard.components import DashboardComponent
 from distributed.dashboard.utils import (
-    without_property_validation,
     BOKEH_VERSION,
     update,
+    without_property_validation,
 )
-from distributed import profile
 from distributed.utils import log_errors, parse_timedelta
-from distributed.compatibility import WINDOWS
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool

@@ -1,10 +1,10 @@
 from contextlib import suppress
 
+from .adaptive import Adaptive
 from .cluster import Cluster
 from .local import LocalCluster
+from .spec import ProcessInterface, SpecCluster
 from .ssh import SSHCluster
-from .spec import SpecCluster, ProcessInterface
-from .adaptive import Adaptive
 
 with suppress(ImportError):
     from .ssh import SSHCluster
