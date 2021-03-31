@@ -681,8 +681,10 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
-            "get_monitor": self.get_monitor,
+            "get_monitor_range": self.get_monitor_range,
+            "get_monitor_recent": self.get_monitor_recent,
             "get_monitor_count": self.get_monitor_count,
+            "get_monitor_last_time": self.get_monitor_last_time,
         }
 
         stream_handlers = {
@@ -1071,11 +1073,17 @@ class Worker(ServerNode):
             self.update_data(data=result, report=False)
             return {"status": "OK"}
 
-    def get_monitor(self, comm=None, start=0):
+    def get_monitor_range(self, comm=None, start=0):
         return self.monitor.range_query(start=start)
+
+    def get_monitor_recent(self, comm=None):
+        return self.monitor.recent()
 
     def get_monitor_count(self, comm=None):
         return self.monitor.count
+
+    def get_monitor_last_time(self, comm=None):
+        return self.monitor.last_time
 
     #############
     # Lifecycle #
