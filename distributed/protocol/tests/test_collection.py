@@ -20,6 +20,7 @@ def test_serialize_collection(collection, y, y_serializer):
         header, frames = serialize({"x": x, "y": y}, serializers=("dask", "pickle"))
     else:
         header, frames = serialize(collection((x, y)), serializers=("dask", "pickle"))
+    frames = tuple(frames)  # verify that no mutation occurs
     t = deserialize(header, frames, deserializers=("dask", "pickle", "error"))
     assert isinstance(t, collection)
 
