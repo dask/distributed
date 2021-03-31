@@ -6500,30 +6500,40 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return valmap(tuple, self.events)
 
-    async def worker_monitors(self, starts=dict()):
+    async def get_worker_monitor_info(self, starts=dict(), recent=False):
         parent: SchedulerState = cast(SchedulerState, self)
-        return dict(
-            zip(
-                parent._workers_dv,
-                await asyncio.gather(
-                    *(
-                        self.rpc(w).get_monitor(start=starts.get(w, 0))
-                        for w in parent._workers_dv
-                    )
-                ),
+        query = asyncio.gather(
+            *(
+                self.rpc(w).get_monitor_range(start=starts.get(w, 0))
+                for w in parent._workers_dv
             )
         )
-
-    async def worker_counts(self):
-        parent: SchedulerState = cast(SchedulerState, self)
-        return dict(
-            zip(
-                parent._workers_dv,
-                await asyncio.gather(
-                    *(self.rpc(w).get_monitor_count() for w in parent._workers_dv)
-                ),
+        if recent:
+            query = asyncio.gather(
+                *(self.rpc(w).get_monitor_recent() for w in parent._workers_dv)
             )
-        )
+        return {
+            "range_query": dict(zip(parent._workers_dv, await query)),
+            "count": dict(
+                zip(
+                    parent._workers_dv,
+                    await asyncio.gather(
+                        *(self.rpc(w).get_monitor_count() for w in parent._workers_dv)
+                    ),
+                )
+            ),
+            "last_time": dict(
+                zip(
+                    parent._workers_dv,
+                    await asyncio.gather(
+                        *(
+                            self.rpc(w).get_monitor_last_time()
+                            for w in parent._workers_dv
+                        )
+                    ),
+                )
+            ),
+        }
 
     ###########
     # Cleanup #
