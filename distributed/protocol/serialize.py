@@ -64,10 +64,14 @@ def pickle_dumps(x, context=None):
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
 
+    writeable = header.get("writeable")
+    if not writeable:
+        writeable = len(buffers) * (None,)
+
     new = []
     memoryviews = map(memoryview, buffers)
-    for writeable, mv in zip(header["writeable"], memoryviews):
-        if writeable == mv.readonly:
+    for w, mv in zip(writeable, memoryviews):
+        if w == mv.readonly:
             if mv.readonly:
                 mv = memoryview(bytearray(mv))
             else:
@@ -77,6 +81,7 @@ def pickle_loads(header, frames):
             else:
                 mv = mv.cast(mv.format)
         new.append(mv)
+
     return pickle.loads(x, buffers=new)
 
 
