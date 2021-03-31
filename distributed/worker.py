@@ -1401,6 +1401,7 @@ class Worker(ServerNode):
             ts = self.tasks.get(key)
             if ts is None:
                 self.tasks[key] = ts = TaskState(key)
+                ts.state = "flight"
             recommendations.update({ts: ("memory", {"value": value})})
 
             self.log.append((key, "receive-from-scatter"))
