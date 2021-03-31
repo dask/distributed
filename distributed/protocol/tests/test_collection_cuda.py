@@ -1,7 +1,8 @@
 import pytest
 
-from distributed.protocol import serialize, deserialize
 from dask.dataframe.utils import assert_eq
+
+from distributed.protocol import deserialize, serialize
 
 
 @pytest.mark.parametrize("collection", [tuple, dict])

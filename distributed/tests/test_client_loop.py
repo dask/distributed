@@ -1,5 +1,6 @@
 import pytest
-from distributed import LocalCluster, Client
+
+from distributed import Client, LocalCluster
 from distributed.utils import LoopRunner
 
 

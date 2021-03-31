@@ -1,28 +1,29 @@
 import asyncio
-from contextlib import suppress
 import os
 import random
+from contextlib import suppress
 from time import sleep
 
 import pytest
-from tlz import partition_all, first
+from tlz import first, partition_all
 
 from dask import delayed
+
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS
 from distributed.metrics import time
-from distributed.utils import sync, CancelledError
-from distributed.utils_test import (
-    gen_cluster,
-    cluster,
-    inc,
-    div,
-    slowinc,
-    slowadd,
-    captured_logger,
-)
+from distributed.utils import CancelledError, sync
 from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import (
+    captured_logger,
+    cluster,
+    div,
+    gen_cluster,
+    inc,
+    slowadd,
+    slowinc,
+)
 
 
 def test_submit_after_failed_worker_sync(loop):

@@ -6,11 +6,16 @@ np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
 
 import dask
-import dask.dataframe as dd
 import dask.bag as db
+import dask.dataframe as dd
+
 from distributed.client import wait
-from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
+from distributed.utils_test import (  # noqa F401
+    client,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 PANDAS_VERSION = LooseVersion(pd.__version__)
 PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")

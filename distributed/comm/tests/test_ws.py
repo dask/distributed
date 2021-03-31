@@ -1,20 +1,22 @@
 import os
-import warnings
-import pytest
 import tempfile
+import warnings
 
 import numpy as np
+import pytest
+
 import dask
+
 from distributed import Client, Scheduler, Worker
-from distributed.security import Security
+from distributed.comm import connect, listen, ws
 from distributed.comm.registry import backends, get_backend
-from distributed.comm import ws, listen, connect
+from distributed.security import Security
 from distributed.utils_test import (  # noqa: F401
+    cleanup,
+    gen_cluster,
     get_client_ssl_context,
     get_server_ssl_context,
-    cleanup,
     inc,
-    gen_cluster,
 )
 
 from .test_comms import check_tls_extra

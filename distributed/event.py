@@ -1,13 +1,12 @@
 import asyncio
-from collections import defaultdict
-from contextlib import suppress
 import logging
 import uuid
+from collections import defaultdict
+from contextlib import suppress
 
 from .client import Client
-from .utils import log_errors, TimeoutError
+from .utils import TimeoutError, log_errors, parse_timedelta
 from .worker import get_worker
-from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 

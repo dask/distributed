@@ -3,7 +3,7 @@ import pytest
 keras = pytest.importorskip("keras")
 np = pytest.importorskip("numpy")
 
-from distributed.protocol import serialize, deserialize, dumps, loads, to_serialize
+from distributed.protocol import deserialize, dumps, loads, serialize, to_serialize
 
 
 def test_serialize_deserialize_model():
