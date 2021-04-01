@@ -57,8 +57,8 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                     sub_header, sub_frames = serialize_and_split(
                         obj, serializers=serializers, on_error=on_error, context=context
                     )
-                    sub_header["num-sub-frames"] = len(sub_frames)
                     _inplace_compress_frames(sub_header, sub_frames)
+                sub_header["num-sub-frames"] = len(sub_frames)
                 frames.append(
                     msgpack.dumps(
                         sub_header, default=msgpack_encode_default, use_bin_type=True
