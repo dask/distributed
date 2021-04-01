@@ -27,7 +27,7 @@ def test_compression_2():
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
     msg = dumps(to_serialize(x.tobytes()))
-    compression = msgpack.loads(msg[1]).get("compression")
+    compression = msgpack.loads(msg[1]).get("compression")["values"]
     assert all(c is None for c in compression)
 
 

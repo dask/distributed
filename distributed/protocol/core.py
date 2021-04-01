@@ -58,7 +58,10 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                 _inplace_compress_frames(sub_header, sub_frames)
                 frames.append(
                     msgpack.dumps(
-                        sub_header, default=msgpack_encode_default, use_bin_type=True
+                        sub_header,
+                        default=msgpack_encode_default,
+                        strict_types=True,
+                        use_bin_type=True,
                     )
                 )
                 frames.extend(sub_frames)
@@ -66,7 +69,9 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
             else:
                 return msgpack_encode_default(obj)
 
-        frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+        frames[0] = msgpack.dumps(
+            msg, default=_encode_default, strict_types=True, use_bin_type=True
+        )
         return frames
 
     except Exception:
@@ -85,7 +90,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_header = msgpack.loads(
                     frames[offset],
                     object_hook=msgpack_decode_default,
-                    use_list=False,
+                    use_list=True,
                     **msgpack_opts
                 )
                 offset += 1
@@ -102,7 +107,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 return msgpack_decode_default(obj)
 
         return msgpack.loads(
-            frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
+            frames[0], object_hook=_decode_default, use_list=True, **msgpack_opts
         )
 
     except Exception:
@@ -119,14 +124,16 @@ def dumps_msgpack(msg, compression=None):
         loads_msgpack
     """
     header = {}
-    payload = msgpack.dumps(msg, default=msgpack_encode_default, use_bin_type=True)
+    payload = msgpack.dumps(
+        msg, default=msgpack_encode_default, strict_types=True, use_bin_type=True
+    )
 
     fmt, payload = maybe_compress(payload, compression=compression)
     if fmt:
         header["compression"] = fmt
 
     if header:
-        header_bytes = msgpack.dumps(header, use_bin_type=True)
+        header_bytes = msgpack.dumps(header, strict_types=True, use_bin_type=True)
     else:
         header_bytes = b""
 
@@ -142,7 +149,7 @@ def loads_msgpack(header, payload):
     header = bytes(header)
     if header:
         header = msgpack.loads(
-            header, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+            header, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
         )
     else:
         header = {}
@@ -158,5 +165,5 @@ def loads_msgpack(header, payload):
             )
 
     return msgpack.loads(
-        payload, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
+        payload, object_hook=msgpack_decode_default, use_list=True, **msgpack_opts
     )

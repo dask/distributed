@@ -226,7 +226,7 @@ def test_compress_numpy():
     except ImportError:
         pass
     else:
-        assert all(c == "blosc" for c in header["compression"])
+        assert all(c == "blosc" for c in header["compression"]["values"])
 
 
 def test_compress_memoryview():
@@ -246,7 +246,7 @@ def test_dont_compress_uncompressable_data():
 
     x = np.ones(1000000)
     header, [data] = serialize(x)
-    assert header["compression"] == ["blosc"]
+    assert header["compression"]["values"] == ("blosc",)
     assert data != x.data
 
     x = np.ones(100)

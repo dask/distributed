@@ -42,7 +42,7 @@ def test_serialize_collection(collection, y, y_serializer):
 
 def test_large_collections_serialize_simply():
     header, frames = serialize(tuple(range(1000)))
-    assert len(frames) == 1
+    assert len(frames) == 1000
 
 
 def test_nested_types():
