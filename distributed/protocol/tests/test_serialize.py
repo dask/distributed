@@ -13,7 +13,7 @@ except ImportError:
 
 from dask.utils_test import inc
 
-from distributed import wait
+from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
     Serialize,
@@ -499,3 +499,15 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_large_pickled_object(c, s, a, b):
+    np = pytest.importorskip("numpy")
+
+    class Data:
+        def __init__(self, n):
+            self.data = np.empty(n, dtype="u1")
+
+    x = Data(200_000_000)
+    future = await c.scatter(x, direct=True)
