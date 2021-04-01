@@ -234,8 +234,8 @@ class Future(WrappedKey):
         
         Parameters
         ----------
-        timeout: int
-            The amount of time in seconds to wait before timing out
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
 
         Raises
         ------
@@ -245,7 +245,7 @@ class Future(WrappedKey):
 
         Returns
         -------
-        result: Future
+        result : asyncio.Future
             The Future that contains the result of the computation
         """
         if self.client.asynchronous:
@@ -292,8 +292,10 @@ class Future(WrappedKey):
         
         Parameters
         ----------
-        timeout: int
-            The amount of time in seconds to wait before timing out
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+        **kwargs : dict
+            Optional keyword arguments for the function
 
         Returns
         -------
@@ -345,11 +347,6 @@ class Future(WrappedKey):
     def cancel(self, **kwargs):
         """Cancel the request to run this future
 
-        Returns
-        -------
-        Future
-            The Future object that was canceled
-
         See Also
         --------
         Client.cancel
@@ -358,11 +355,6 @@ class Future(WrappedKey):
 
     def retry(self, **kwargs):
         """Retry this future if it has failed
-
-        Returns
-        -------
-        Future
-            The Future object that was retried
 
         See Also
         --------
@@ -539,7 +531,7 @@ class FutureState:
         
         Parameters
         ----------
-        type: any
+        type : any
             The type
         """
         self.status = "finished"
@@ -591,14 +583,12 @@ class FutureState:
             self._event.clear()
 
     async def wait(self, timeout=None):
-        """ Sets the error data 
-        
-        Sets the status to 'error'. Sets the exception, the traceback, and the event
+        """ Wait for the awaitable to complete with a timeout.
         
         Parameters
         ----------
-        timeout: Exception
-            The exception
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
         """
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
@@ -611,9 +601,9 @@ async def done_callback(future, callback):
         
     Parameters
     ----------
-    future: FutureState  
+    future : asyncio.Future  
         The future
-    callback: callable
+    callback : callable
         The callback
     """
     while future.status == "pending":
@@ -623,7 +613,7 @@ async def done_callback(future, callback):
 
 @partial(normalize_token.register, Future)
 def normalize_future(f):
-    """ Coroutine that waits on the future, then calls the callback 
+    """ Returns the key and the type as a list
         
     Parameters
     ----------
@@ -657,6 +647,8 @@ class Client:
     address: string, or Cluster
         This can be the address of a ``Scheduler`` server like a string
         ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
+    loop : 
+        The event loop
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
@@ -674,11 +666,20 @@ class Client:
     name: string (optional)
         Gives the client a name that will be included in logs generated on
         the scheduler for matters relating to this client
+    heartbeat_interval: int (optional)
+        Time in milliseconds between heartbeats to scheduler
+    serializers
+        The serializers to turn an object into a string
+    deserializers
+        The deserializers to turn the string into the original object
+    extensions : list
+        The extensions
     direct_to_workers: bool (optional)
         Whether or not to connect directly to the workers, or to ask
         the scheduler to serve as intermediary.
-    heartbeat_interval: int
-        Time in milliseconds between heartbeats to scheduler
+    connection_limit : int
+        The number of open comms to maintain at once in the connection pool
+    
     **kwargs:
         If you do not pass a scheduler address, Client will create a
         ``LocalCluster`` object, passing any extra keyword arguments.
@@ -920,14 +921,16 @@ class Client:
     	----------
         allow_global : bool
             If True returns the default client
+
         Returns
         -------
         Client
             The current client
+
         Raises
 	    ------
         ValueError
-            If there is no client set a ValueError is raised
+            If there is no client set, a ValueError is raised
         """
         out = _current_client.get()
         if out:
@@ -954,8 +957,8 @@ class Client:
         Returns
         -------
         bool
-            True if self._asynchronous and self.loop is IOLoop.current(),
-            otherwise False 
+            True if we are in asynchronous mode and we are running in the event loop.
+            Otherwise False 
         """
         try:
             return self._asynchronous and self.loop is IOLoop.current()
@@ -964,7 +967,8 @@ class Client:
 
     @property
     def dashboard_link(self):
-        """
+        """The formatted dashboard link dictionary
+
         Returns
         -------
         dict
@@ -992,12 +996,14 @@ class Client:
             The function to call
         asynchronous: bool
             If True the client is in asynchronous mode
-        callback_timeout: int
-            The amount of time in seconds to wait before timing out
+        callback_timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+
         Returns
         -------
-        Future
-            The future
+        asyncio.Future
+            If running in asynchronous mode, returns the future. Otherwise returns the 
+            concrete value
         """
         callback_timeout = parse_timedelta(callback_timeout)
         if (
@@ -1346,7 +1352,15 @@ class Client:
             info = await self.scheduler.identity()
 
     def wait_for_workers(self, n_workers=0, timeout=None):
-        """Blocking call to wait for n workers before continuing"""
+        """Blocking call to wait for n workers before continuing
+	    
+        Parameters
+    	----------
+        n_workers : int
+            The number of workers
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+         """
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
@@ -1574,10 +1588,11 @@ class Client:
         If you started a client without arguments like ``Client()`` then this
         will also close the local cluster that was started at the same time.
 
-        Returns 
-        ------- 
-        future: asyncio.Future
-            If running in asynchronous mode the future is returned
+
+    	Parameters
+    	----------
+        timeout : number
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
 
         See Also
         --------
@@ -1636,11 +1651,6 @@ class Client:
         Note, this may disrupt other clients that may be using the same
         scheduler and workers.
 
-        Returns 
-        -------
-        Future
-            If running in asynchronous mode returns the future
-
         See Also
         --------
         Client.close : close only this client
@@ -1687,19 +1697,18 @@ class Client:
         Parameters
         ----------
         func : callable
-        *args
-        **kwargs
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
+        *args : tuple
+            Optional positional arguments
+        key : str
+            Unique identifier for the task.  Defaults to function-name and hash
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
-        key : str
-            Unique identifier for the task.  Defaults to function-name and hash
-        allow_other_workers : bool (defaults to False)
-            Used with ``workers``. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
+        resources : dict (defaults to {})
+            Defines the ``resources`` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
         retries : int (default to 0)
             Number of allowed automatic retries if the task fails
         priority : Number
@@ -1707,16 +1716,18 @@ class Client:
             Higher priorities take precedence
         fifo_timeout : str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
-        resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
-            See :doc:`worker resources <resources>` for details on defining
-            resources.
+        allow_other_workers : bool (defaults to False)
+            Used with ``workers``. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         actor : bool (default False)
             Whether this task should exist on the worker as a stateful actor.
             See :doc:`actors` for additional details.
         actors : bool (default False)
             Alias for `actor`
+        pure : bool (defaults to True)
+            Whether or not the function is pure.  Set ``pure=False`` for
+            impure functions like ``np.random.random``.
+        **kwargs
 
         Examples
         --------
@@ -1725,14 +1736,15 @@ class Client:
         Returns
         -------
         Future
-            The future
+            If running in asynchronous mode, returns the future. Otherwise returns the 
+            concrete value
 
         Raises
     	------
         TypeError
-            If 'func' is not callable a TypeError is raised
+            If 'func' is not callable, a TypeError is raised
         ValueError
-            If 'allow_other_workers'is True and 'workers' is None a 
+            If 'allow_other_workers'is True and 'workers' is None, a 
             ValueError is raised
 
         See Also
@@ -1813,43 +1825,44 @@ class Client:
         Parameters
         ----------
         func : callable
+            The function
         iterables : Iterables
             List-like objects to map over.  They should have the same length.
         key : str, list
             Prefix for task names if string.  Explicit names if list.
-        pure : bool (defaults to True)
-            Whether or not the function is pure.  Set ``pure=False`` for
-            impure functions like ``np.random.random``.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
-        allow_other_workers : bool (defaults to False)
-            Used with `workers`. Indicates whether or not the computations
-            may be performed on workers that are not in the `workers` set(s).
         retries : int (default to 0)
             Number of allowed automatic retries if a task fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
-        fifo_timeout : str timedelta (default '100ms')
-            Allowed amount of time between calls to consider the same priority
         resources : dict (defaults to {})
             Defines the `resources` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
+        priority : Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
+        allow_other_workers : bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
+        fifo_timeout : str timedelta (default '100ms')
+            Allowed amount of time between calls to consider the same priority
         actor : bool (default False)
             Whether these tasks should exist on the worker as stateful actors.
             See :doc:`actors` for additional details.
         actors : bool (default False)
             Alias for `actor`
+        pure : bool (defaults to True)
+            Whether or not the function is pure.  Set ``pure=False`` for
+            impure functions like ``np.random.random``.
         batch_size : int, optional
             Submit tasks to the scheduler in batches of (at most) ``batch_size``.
             Larger batch sizes can be useful for very large ``iterables``,
             as the cluster can start processing tasks while later ones are
             submitted asynchronously.
         **kwargs : dict
-            Extra keywords to send to the function.
+            Extra keyword arguments to send to the function.
             Large values will be included explicitly in the task graph.
 
         Examples
@@ -2310,6 +2323,8 @@ class Client:
         hash : bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
+        timeout : number, optional
+            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
         asynchronous: bool
             If True the client is in asynchronous mode
         
@@ -2393,12 +2408,13 @@ class Client:
 
         Parameters
         ----------
-        futures : list of Futures
-        force : boolean (False)
-            Cancel this future even if other clients desire it
+        futures : List[Future]
+            The list of Futures
         asynchronous: bool
             If True the client is in asynchronous mode 
-        """
+        force : boolean (False)
+            Cancel this future even if other clients desire it
+         """
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
     async def _retry(self, futures):
@@ -2415,6 +2431,7 @@ class Client:
         Parameters
         ----------
         futures : list of Futures
+            The list of Futures
         asynchronous: bool
             If True the client is in asynchronous mode
         """
@@ -2466,9 +2483,6 @@ class Client:
         Parameters
         ----------
         args : list of objects to publish as name
-        name : optional name of the dataset to publish
-        override : bool (optional, default False)
-            if true, override any already present dataset with the same name
         kwargs : dict
             named collections to publish on the scheduler
 
@@ -2505,6 +2519,11 @@ class Client:
     def unpublish_dataset(self, name, **kwargs):
         """
         Remove named datasets from scheduler
+        
+        Parameters
+        ----------
+        name : str
+            The name of the dataset to unpublish
 
         Examples
         --------
@@ -2549,11 +2568,17 @@ class Client:
 
         Parameters
         ----------
-        name : name of the dataset to retrieve
-        default : optional, not set by default
+        name : str
+            name of the dataset to retrieve
+        default : str
+            optional, not set by default
             If set, do not raise a KeyError if the name is not present but return this default
         kwargs : dict
-            additional arguments to _get_dataset
+            additional keyword arguments to _get_dataset
+
+        Returns
+        -------
+        The dataset from the scheduler, if present
 
         See Also
         --------
@@ -2581,6 +2606,15 @@ class Client:
         This is typically used for live debugging.  The function should take a
         keyword argument ``dask_scheduler=``, which will be given the scheduler
         object itself.
+
+    	Parameters
+    	----------
+        function : callable
+            The function to run on the scheduler process
+        *args : tuple
+            Optional arguments for the function
+        **kwargs : dict
+            Optional keyword arguments for the function
 
         Examples
         --------
@@ -2646,8 +2680,11 @@ class Client:
         Parameters
         ----------
         function : callable
-        *args : arguments for remote function
-        **kwargs : keyword arguments for remote function
+            The function to run
+        *args : tuple
+            Optional arguments for the remote function
+        **kwargs : dict
+            Optional keyword arguments for the remote function
         workers : list
             Workers on which to run the function. Defaults to all known workers.
         wait : boolean (optional)
@@ -2704,13 +2741,10 @@ class Client:
         function : a coroutine function
             (typically a function wrapped in gen.coroutine or
              a Python 3.5+ async function)
-        *args : arguments for remote function
-        **kwargs : keyword arguments for remote function
-        wait : boolean (default True)
-            Whether to wait for coroutines to end.
-        workers : list
-            Workers on which to run the function. Defaults to all known workers.
-
+        *args : tuple
+            Optional arguments for the remote function
+        **kwargs : dict
+            Optional keyword arguments for the remote function
         """
         warnings.warn(
             "This method has been deprecated. "
@@ -2807,11 +2841,6 @@ class Client:
         allow_other_workers : bool (defaults to False)
             Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
-        retries : int (default to 0)
-            Number of allowed automatic retries if computing a result fails
-        priority : Number
-            Optional prioritization of task.  Zero is default.
-            Higher priorities take precedence
         resources : dict (defaults to {})
             Defines the ``resources`` each instance of this mapped task requires
             on the worker; e.g. ``{'GPU': 2}``.
@@ -2819,12 +2848,32 @@ class Client:
             resources.
         sync : bool (optional)
             Returns Futures if False or concrete values if True (default).
+        asynchronous: bool
+            If True the client is in asynchronous mode
         direct : bool
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        asynchronous: bool
-            If True the client is in asynchronous mode
+        retries : int (default to 0)
+            Number of allowed automatic retries if computing a result fails
+        priority : Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
+        fifo_timeout : timedelta str (defaults to '60s')
+            Allowed amount of time between calls to consider the same priority
+        actors : bool or dict (default None)
+            Whether these tasks should exist on the worker as stateful actors.
+            Specified on a global (True/False) or per-task (``{'x': True,
+            'y': False}``) basis. See :doc:`actors` for additional details.
+
+
+        Returns
+        -------
+        results
+            If 'sync' is True, returns the results. Otherwise, returns the known data
+        packed
+            If 'sync' is False, returns the known data. Otherwise, returns the results
+
         Examples
         --------
         >>> from operator import add  # doctest: +SKIP
@@ -2896,6 +2945,13 @@ class Client:
         This normalizes the tasks within a collections task graph against the
         known futures within the scheduler.  It returns a copy of the
         collection with a task graph that includes the overlapping futures.
+
+	    Parameters
+    	----------
+        collection
+
+        Returns
+        -------
 
         Examples
         --------
@@ -3230,6 +3286,8 @@ class Client:
         ----------
         filename : string
             Filename of .py, .egg or .zip file to send to workers
+        **kwargs : dict
+            Optional keyword arguments for the function
 
         Examples
         --------
@@ -3269,6 +3327,8 @@ class Client:
             A list of futures to balance, defaults all data
         workers : list, optional
             A list of workers on which to balance, defaults to all workers
+        **kwargs : dict
+            Optional keyword arguments for the function
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
 
@@ -3302,6 +3362,8 @@ class Client:
             Defaults to all.
         branching_factor : int, optional
             The number of workers that can copy data in each generation
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3333,6 +3395,8 @@ class Client:
         workers : list (optional)
             A list of workers that we care about specifically.
             Leave empty to receive information about all workers.
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3364,6 +3428,8 @@ class Client:
         ----------
         futures : list (optional)
             A list of futures, defaults to all data
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3400,6 +3466,8 @@ class Client:
         ----------
         workers : list (optional)
             A list of worker addresses, defaults to all
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3466,6 +3534,8 @@ class Client:
             A list of keys, defaults to all keys
         summary : boolean, (optional)
             Summarize keys into key types
+        **kwargs : dict
+            Optional keyword arguments for the remote function
 
         Examples
         --------
@@ -3616,6 +3686,11 @@ class Client:
     def scheduler_info(self, **kwargs):
         """Basic information about the workers in the cluster
 
+    	Parameters
+    	----------
+        **kwargs : dict
+            Optional keyword arguments for the remote function
+    
         Examples
         --------
         >>> c.scheduler_info()  # doctest: +SKIP
@@ -3753,6 +3828,13 @@ class Client:
 
         See dask.distributed.Scheduler.retire_workers for the full docstring.
 
+    	Parameters
+    	----------
+        workers
+        close_workers
+        **kwargs : dict
+            Optional keyword arguments for the remote function
+
         Examples
         --------
         You can get information about active workers using the following:
@@ -3864,9 +3946,25 @@ class Client:
         return result
 
     def futures_of(self, futures):
+        """Wrapper method of futures_of
+
+    	Parameters
+    	----------
+        futures : tuple
+            The futures
+        """
         return futures_of(futures, client=self)
 
     def start_ipython(self, *args, **kwargs):
+        """Raises an Exception
+
+    	Parameters
+    	----------
+        *args : tuple
+            Optional arguments for the function
+        **kwargs : dict
+            Optional keyword arguments for the function
+        """
         raise Exception("Method moved to start_ipython_workers")
 
     async def _start_ipython_workers(self, workers):
@@ -4201,7 +4299,7 @@ class Client:
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
-        **kwargs : optional
+        **kwargs : dict, optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
 
@@ -4312,7 +4410,7 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
     Parameters
     ----------
-    fs : list of futures
+    fs : List[Future]
     timeout : number, optional
         Time in seconds after which to raise a ``dask.distributed.TimeoutError``
     return_when : str, optional
@@ -4604,7 +4702,18 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started """
+    """ Return a client if one has started 
+
+    Parameters
+	----------
+    c : Client
+        The client
+
+    Returns
+    -------
+    c : Client
+        The client, if one has started 
+    """
     c = c or _get_global_client()
     if c:
         return c
@@ -4618,11 +4727,36 @@ def default_client(c=None):
 
 
 def ensure_default_get(client):
+    """ Sets the scheduler and the default client
+
+    Parameters
+	----------
+    client : Client
+        The client
+    """
     dask.config.set(scheduler="dask.distributed")
     _set_global_client(client)
 
 
 def redict_collection(c, dsk):
+    """ Change the dictionary in the collection
+
+    Parameters
+	----------
+    c : collection
+        The collection
+    dsk : dict
+        The dictionary
+
+    Returns
+    -------
+    c : Delayed
+        If the collection is a 'Delayed' object the collection is returned
+    cc : collection
+        If the collection is not a 'Delayed' object a copy of the collection with
+        the new dictionary is returned
+
+    """
     from dask.delayed import Delayed
 
     if isinstance(c, Delayed):
@@ -4640,12 +4774,19 @@ def futures_of(o, client=None):
     ----------
     o : collection
         A possibly nested collection of Dask objects
+    client : Client, optional
+        The client
 
     Examples
     --------
     >>> futures_of(my_dask_dataframe)
     [<Future: finished key: ...>,
      <Future: pending  key: ...>]
+
+	Raises
+	------
+    CancelledError
+        If one of the futures is cancelled a CancelledError is raised
 
     Returns
     -------
