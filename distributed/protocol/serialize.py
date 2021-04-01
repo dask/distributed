@@ -63,19 +63,26 @@ def pickle_dumps(x, context=None):
 
 def pickle_loads(header, frames):
     x, buffers = frames[0], frames[1:]
-    writeable = header["writeable"]
-    for i in range(len(buffers)):
-        mv = memoryview(buffers[i])
-        if writeable[i] == mv.readonly:
+
+    writeable = header.get("writeable")
+    if not writeable:
+        writeable = len(buffers) * (None,)
+
+    new = []
+    memoryviews = map(memoryview, buffers)
+    for w, mv in zip(writeable, memoryviews):
+        if w == mv.readonly:
             if mv.readonly:
-                buf = memoryview(bytearray(mv))
+                mv = memoryview(bytearray(mv))
             else:
-                buf = memoryview(bytes(mv))
-            if buf.nbytes > 0:
-                buffers[i] = buf.cast(mv.format, mv.shape)
+                mv = memoryview(bytes(mv))
+            if mv.nbytes > 0:
+                mv = mv.cast(mv.format, mv.shape)
             else:
-                buffers[i] = buf.cast(mv.format)
-    return pickle.loads(x, buffers=buffers)
+                mv = mv.cast(mv.format)
+        new.append(mv)
+
+    return pickle.loads(x, buffers=new)
 
 
 def import_allowed_module(name):
