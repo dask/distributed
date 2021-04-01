@@ -54,3 +54,14 @@ async def test_gpu_metrics(s, a, b):
         s.workers[a.address].extra["gpu"]["name"]
         == pynvml.nvmlDeviceGetName(h).decode()
     )
+
+
+@gen_cluster()
+async def test_gpu_monitoring(s, a, b):
+    h = nvml._pynvml_handles()
+    res = a.monitor.recent()
+
+    assert res["gpu_utilization"] == pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+    assert res["gpu_memory_used"] == pynvml.nvmlDeviceGetMemoryInfo(h).used
+    assert a.monitor.gpu_name == pynvml.nvmlDeviceGetName(h).decode()
+    assert a.monitor.gpu_memory_total == pynvml.nvmlDeviceGetMemoryInfo(h).total
