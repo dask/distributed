@@ -78,7 +78,7 @@ class LocalCluster(SpecCluster):
 
     Examples
     --------
-    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster  # doctest: +SKIP
     >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, threads=8)
 
