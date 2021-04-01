@@ -226,8 +226,8 @@ class Pub:
     Pubs and Subs use the central scheduler to find each other, but not to
     mediate the communication.  This means that there is very little additional
     latency or overhead, and they are appropriate for very frequent data
-    transfers.  For context, most data transfer first checks with the scheduler to find which
-    workers should participate, and then does direct worker-to-worker
+    transfers.  For context, most data transfer first checks with the scheduler to 
+    find which workers should participate, and then does direct worker-to-worker
     transfers.  This checking in with the scheduler provides some stability
     guarantees, but also adds in a few extra network hops.  PubSub doesn't do
     this, and so is faster, but also can easily drop messages if Pubs or Subs
