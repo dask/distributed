@@ -1,6 +1,7 @@
 from . import config  # isort:skip; load distributed configuration first
 import dask
 from dask.config import config
+from dask.utils import import_required
 
 from ._version import get_versions
 from .actor import Actor, ActorFuture
@@ -45,6 +46,15 @@ del get_versions, versions
 if dask.config.get("distributed.admin.event-loop") in ("asyncio", "tornado"):
     pass
 elif dask.config.get("distributed.admin.event-loop") == "uvloop":
+    import_required(
+        "uvloop",
+        "The distributed.admin.event-loop configuration value "
+        "is set to 'uvloop' but the uvloop module is not installed"
+        "\n\n"
+        "Please either change the config value or install one of the following\n"
+        "    conda install uvloop\n"
+        "    pip install uvloop",
+    )
     import uvloop
 
     uvloop.install()
