@@ -88,9 +88,7 @@ env = Environment(
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
 TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]}
-
-nan = float("nan")
-inf = float("inf")
+XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
 class Occupancy(DashboardComponent):
@@ -246,7 +244,7 @@ class NBytesHistogram(DashboardComponent):
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            self.root.xaxis.major_label_orientation = -math.pi / 12
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
 
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
@@ -376,7 +374,7 @@ class BandwidthWorkers(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
-            fig.xaxis.major_label_orientation = -math.pi / 12
+            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
             rect = fig.rect(
                 source=self.source,
                 x="source",
@@ -496,7 +494,7 @@ class ComputePerKey(DashboardComponent):
             fig.yaxis.axis_label = "Time (s)"
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = -math.pi / 12
+            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
             rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
@@ -671,7 +669,7 @@ class AggregateAction(DashboardComponent):
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.axis_label = "Time (s)"
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = -math.pi / 12
+            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
             fig.xaxis.major_label_text_font_size = "16px"
             rect.nonselection_glyph = None
 
@@ -758,7 +756,7 @@ class MemoryByKey(DashboardComponent):
             )
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = -math.pi / 12
+            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
             rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
@@ -888,7 +886,7 @@ class CurrentLoad(DashboardComponent):
 
             nbytes.axis[0].ticker = BasicTicker(**TICKS_1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            nbytes.xaxis.major_label_orientation = -math.pi / 12
+            nbytes.xaxis.major_label_orientation = XLABEL_ORIENTATION
             nbytes.x_range.start = 0
 
             for fig in [processing, nbytes, cpu]:
@@ -957,11 +955,11 @@ class CurrentLoad(DashboardComponent):
             max_limit = 0
             for ws, nb in zip(workers, nbytes):
                 limit = (
-                    getattr(self.scheduler.workers[ws.address], "memory_limit", inf)
-                    or inf
+                    getattr(self.scheduler.workers[ws.address], "memory_limit", None)
+                    or math.inf
                 )
 
-                if limit > max_limit and limit != inf:
+                if limit > max_limit and not math.isinf(limit):
                     max_limit = limit
 
                 if nb > limit:
