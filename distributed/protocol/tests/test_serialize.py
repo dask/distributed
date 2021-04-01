@@ -509,5 +509,7 @@ async def test_large_pickled_object(c, s, a, b):
         def __init__(self, n):
             self.data = np.empty(n, dtype="u1")
 
-    x = Data(200_000_000)
-    future = await c.scatter(x, direct=True)
+    x = Data(100_000_000)
+    y = await c.scatter(x, workers=[a.worker_address])
+    z = c.submit(lambda x: x, y, workers=[b.worker_address])
+    await z

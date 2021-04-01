@@ -51,11 +51,14 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                 if typ is Serialize:
                     obj = obj.data
                 offset = len(frames)
-                sub_header, sub_frames = serialize_and_split(
-                    obj, serializers=serializers, on_error=on_error, context=context
-                )
-                sub_header["num-sub-frames"] = len(sub_frames)
-                _inplace_compress_frames(sub_header, sub_frames)
+                if typ is Serialized:
+                    sub_header, sub_frames = obj.header, obj.frames
+                else:
+                    sub_header, sub_frames = serialize_and_split(
+                        obj, serializers=serializers, on_error=on_error, context=context
+                    )
+                    sub_header["num-sub-frames"] = len(sub_frames)
+                    _inplace_compress_frames(sub_header, sub_frames)
                 frames.append(
                     msgpack.dumps(
                         sub_header, default=msgpack_encode_default, use_bin_type=True
