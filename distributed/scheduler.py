@@ -3647,7 +3647,8 @@ class Scheduler(SchedulerState, ServerNode):
             ws._executing = {
                 parent._tasks.get(key): duration for key, duration in executing.items()
             }
-            del ws._executing[None]
+            if None in ws._executing:
+                del ws._executing[None]
 
         ws._metrics = metrics
 
