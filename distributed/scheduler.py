@@ -2127,7 +2127,17 @@ class SchedulerState:
             if n_workers < 20:  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
                 if ws.occupancy == 0:  # special case to use round-robin
-                    ws = worker_pool.values()[self._n_tasks % n_workers]
+                    wp_vals = worker_pool.values()
+                    start = self._n_tasks % n_workers
+                    for i in range(start, n_workers):
+                        if wp_vals[i].occupancy == 0:
+                            ws = wp_vals[i]
+                            break
+                    else:
+                        for i in range(start):
+                            if wp_vals[i].occupancy == 0:
+                                ws = wp_vals[i]
+                                break
             else:  # dumb but fast in large case
                 ws = worker_pool.values()[self._n_tasks % n_workers]
 
