@@ -2126,7 +2126,7 @@ class SchedulerState:
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
-                if ws.occupancy == 0:  # special case to use round-robin
+                if ws._occupancy == 0:  # special case to use round-robin
                     wp_vals = worker_pool.values()
                     start = self._n_tasks % n_workers
                     for i in range(start, n_workers):
