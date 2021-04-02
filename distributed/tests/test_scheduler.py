@@ -1832,10 +1832,12 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
 @gen_cluster(client=True)
 async def test_task_groups(c, s, a, b):
+    start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
     y = (x + 1).persist(optimize_graph=False)
     y = await y
+    stop = time()
 
     tg = s.task_groups[x.name]
     tp = s.task_prefixes["arange"]
@@ -1870,6 +1872,9 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["forgotten"] == 5
     # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
+    assert tg._start > start
+    assert tg._stop < stop
+    assert "compute" in tg._all_durations
     assert sys.getrefcount(tg) == 2
 
 
