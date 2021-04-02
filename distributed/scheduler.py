@@ -2128,6 +2128,7 @@ class SchedulerState:
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
                 if ws._occupancy == 0:  # special case to use round-robin
                     wp_vals = worker_pool.values()
+                    wp_i: WorkerState
                     start: Py_ssize_t = self._n_tasks % n_workers
                     i: Py_ssize_t
                     for i in range(start, n_workers):
