@@ -2211,6 +2211,6 @@ async def test_get_worker_monitor_info(s, a, b):
         ms = ("cpu", "time", "read_bytes", "write_bytes")
     for w in (a, b):
         for m in ms:
-            assert res["range_query"][w.address][m] is not None
-        assert res["count"][w.address] is not None
-        assert res["last_time"][w.address] is not None
+            assert res[w.address]["range_query"][m] is not None
+        assert res[w.address]["count"] is not None
+        assert res[w.address]["last_time"] is not None
