@@ -2138,8 +2138,9 @@ class SchedulerState:
                             break
                     else:
                         for i in range(start):
-                            if wp_vals[i].occupancy == 0:
-                                ws = wp_vals[i]
+                            wp_i = wp_vals[i]
+                            if wp_i._occupancy == 0:
+                                ws = wp_i
                                 break
             else:  # dumb but fast in large case
                 ws = worker_pool.values()[self._n_tasks % n_workers]
