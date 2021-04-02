@@ -79,7 +79,7 @@ jobs:
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed/tests/test_client.py::test_log_event -m "not avoid_ci" --runslow --cov=distributed --cov-report=xml
+          pytest distributed -m "not avoid_ci" --runslow --cov=distributed --cov-report=xml
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
