@@ -11,6 +11,7 @@ continuous_integration/hdfs-initialized
 .DS_Store
 .cache
 .coverage
+coverage.xml
 *.lock
 .#*
 .eggs/
