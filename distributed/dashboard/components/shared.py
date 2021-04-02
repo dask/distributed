@@ -1,6 +1,6 @@
-from statistics import mean
 import asyncio
 import weakref
+from statistics import mean
 
 import tlz as toolz
 from bokeh.layouts import column, row
@@ -9,10 +9,10 @@ from bokeh.models import (
     ColumnDataSource,
     DataRange1d,
     HoverTool,
+    LabelSet,
     NumeralTickFormatter,
     Range1d,
     Select,
-    LabelSet,
 )
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure

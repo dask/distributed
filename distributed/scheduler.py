@@ -6397,7 +6397,8 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
         sysmon.update()
 
-        from bokeh.models import Panel, Tabs, Div
+        from bokeh.models import Div, Panel, Tabs
+
         import distributed
 
         # HTML
