@@ -862,6 +862,7 @@ class CurrentLoad(DashboardComponent):
                 width="nbytes",
                 height=1,
                 color="nbytes-color",
+                alpha="nbytes-alpha",
             )
             rect.nonselection_glyph = None
 
@@ -949,25 +950,42 @@ class CurrentLoad(DashboardComponent):
                 else:
                     processing_color.append("blue")
 
-            nbytes = [ws.metrics["memory"] for ws in workers]
-            nbytes_text = [format_bytes(nb) for nb in nbytes]
+            nbytes = []
+            nbytes_half = []
+            nbytes_text = []
             nbytes_color = []
+            nbytes_alpha = []
             max_limit = 0
-            for ws, nb in zip(workers, nbytes):
-                limit = (
-                    getattr(self.scheduler.workers[ws.address], "memory_limit", None)
-                    or math.inf
+
+            for ws in workers:
+                meminfo = ws.memory
+                limit = getattr(ws, "memory_limit", 0)
+                max_limit = max(
+                    max_limit, limit, meminfo.process + meminfo.managed_spilled
                 )
-
-                if limit > max_limit and not math.isinf(limit):
-                    max_limit = limit
-
-                if nb > limit:
-                    nbytes_color.append("red")
-                elif nb > limit / 2:
-                    nbytes_color.append("orange")
+                if limit and meminfo.process > limit:
+                    color = "red"
+                elif limit and meminfo.process > limit / 2:
+                    color = "orange"
                 else:
-                    nbytes_color.append("blue")
+                    color = "blue"
+
+                nbytes += [
+                    meminfo.managed_in_memory,
+                    meminfo.unmanaged_old,
+                    meminfo.unmanaged_recent,
+                    meminfo.managed_spilled,
+                ]
+                nbytes_half += [sum(nbytes[-4:i]) + nbytes[i] / 2 for i in range(-4, 0)]
+                nbytes_color += [color, color, color, "grey"]
+                nbytes_alpha += [1, 0.7, 0.4, 1]
+                nbytes_text += [
+                    f"{label}: {format_bytes(n)}"
+                    for label, n in zip(
+                        ["managed", "unmanaged (old)", "unmanaged (recent)", "spilled"],
+                        nbytes[-4:],
+                    )
+                ]
 
             result = {
                 "cpu": cpu,
@@ -976,15 +994,22 @@ class CurrentLoad(DashboardComponent):
                 "nprocessing-half": [np / 2 for np in nprocessing],
                 "nprocessing-color": processing_color,
                 "nbytes": nbytes,
-                "nbytes-half": [nb / 2 for nb in nbytes],
+                "nbytes-half": nbytes_half,
                 "nbytes-color": nbytes_color,
+                "nbytes-alpha": nbytes_alpha,
                 "nbytes_text": nbytes_text,
                 "worker": [ws.address for ws in workers],
                 "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
                 "y": y,
             }
 
-            self.nbytes_figure.title.text = "Bytes stored: " + format_bytes(sum(nbytes))
+            meminfo = self.scheduler.memory
+            self.nbytes_figure.title.text = (
+                f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
+                f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
+                f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
+                f"spilled {format_bytes(meminfo.managed_spilled)}"
+            )
             self.nbytes_figure.x_range.end = max_limit
             if self.scheduler.workers:
                 self.cpu_figure.x_range.end = (
