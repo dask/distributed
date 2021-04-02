@@ -263,18 +263,19 @@ class ClientState:
 class MemoryInfo:
     """Memory readings on a worker.
 
-    dask_total
+    managed
         Sum of the output of sizeof() for all dask keys held by the worker, both in
         memory and spilled to disk
-    dask_in_memory
+    managed_in_memory
         Sum of the output of sizeof() for the dask keys held in RAM
-    dask_spilled
+    managed_spilled
         Sum of the output of sizeof() for the dask keys spilled to the hard drive.
         Note that this is the size in memory; serialized size may be different.
-    rss
-        Total RSS memory measured on the process
-    other
-        rss - dask_in_memory. This is the sum of
+    process
+        Total RSS memory measured by the OS on the worker process.
+        This is always exactly equal to managed_in_memory + unmanaged.
+    unmanaged
+        process - managed_in_memory. This is the sum of
 
         - Python interpreter and modules
         - global variables
@@ -284,61 +285,73 @@ class MemoryInfo:
         - memory not yet garbage collected
         - memory not yet free()'d by the Python memory manager to the OS
 
-    other_old
+    unmanaged_old
         Minimum of the "other" memory measures over the last
         ``distributed.memory.new_to_old_lag`` seconds
-    other_new
-        other - other_old; in other words RSS memory that has been recently allocated
-        but is not accounted for by dask keys; hopefully it's mostly a temporary spike.
+    unmanaged_recent
+        other - unmanaged_old; in other words process memory that has been recently
+        allocated but is not accounted for by dask; hopefully it's mostly a temporary
+        spike.
     optimistic
-        dask_in_memory + other_old; in other words the memory held long-term by the
-        process under the hopeful assumption that all other_new memory is temporary
+        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        the process under the hopeful assumption that all unmanaged_recent memory is
+        temporary
     """
 
-    __slots__ = ("dask_total", "dask_spilled", "other_old", "rss")
+    __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
 
-    dask_total: int
-    dask_spilled: int
-    other_old: int
-    rss: int
+    process: int
+    managed_in_memory: int
+    managed_spilled: int
+    unmanaged_old: int
 
-    def __init__(self, *, dask_total: int, dask_spilled: int, other_old: int, rss: int):
-        self.dask_total = dask_total
-        self.dask_spilled = dask_spilled
-        self.other_old = other_old
-        self.rss = rss
+    def __init__(
+        self,
+        *,
+        process: int,
+        unmanaged_old: int,
+        managed: int,
+        managed_spilled: int,
+    ):
+        self.process = process
+        self.managed_spilled = min(managed_spilled, managed)
+        self.managed_in_memory = min(managed - self.managed_spilled, process)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+
+    @classmethod
+    def sum(cls, *infos: "MemoryInfo") -> "MemoryInfo":
+        out = object.__new__(cls)
+        for k in cls.__slots__:
+            setattr(out, k, sum(getattr(i, k) for i in infos))
+        return out
 
     @property
-    def dask_in_memory(self) -> int:
-        # dask_spilled is updated by heartbeat_worker, whereas dask_total is updated
-        # together with TaskInfo.who_has. So this may briefly turn negative.
-        return max(0, self.dask_total - self.dask_spilled)
+    def managed(self) -> int:
+        return self.managed_in_memory + self.managed_spilled
 
     @property
-    def other(self) -> int:
-        # This can become negative:
-        # 1. if sizeof() returns overestimated measures
-        # 2. transitorily, like with dask_in_memory, because the two measures arrive at
-        #    different times
-        return max(0, self.rss - self.dask_in_memory)
+    def unmanaged(self) -> int:
+        # This is never negative thanks to __init__
+        return self.process - self.managed_in_memory
 
     @property
-    def other_new(self) -> int:
-        return max(0, self.other - self.other_old)
+    def unmanaged_recent(self) -> int:
+        # This is never negative thanks to __init__
+        return self.process - self.managed_in_memory - self.unmanaged_old
 
     @property
     def optimistic(self) -> int:
-        return self.dask_in_memory + self.other_old
+        return self.managed_in_memory + self.unmanaged_old
 
     def __repr__(self) -> str:
         return (
-            f"dask keys      : {format_bytes(self.dask_total)}\n"
-            f"  - in memory  : {format_bytes(self.dask_in_memory)}\n"
-            f"  - spilled    : {format_bytes(self.dask_spilled)}\n"
-            f"RSS            : {format_bytes(self.rss)}\n"
-            f"  - dask keys  : {format_bytes(self.dask_in_memory)}\n"
-            f"  - other (old): {format_bytes(self.other_old)}\n"
-            f"  - other (new): {format_bytes(self.other_new)}\n"
+            f"Managed by Dask       : {format_bytes(self.managed)}\n"
+            f"  - in process memory : {format_bytes(self.managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self.managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self.process)}\n"
+            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
+            f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
         )
 
 
@@ -442,7 +455,7 @@ class WorkerState:
     _local_directory: str
     _memory_limit: Py_ssize_t
     _memory_other_history: "deque[tuple[float, Py_ssize_t]]"
-    _memory_other_old: Py_ssize_t
+    _memory_unmanaged_old: Py_ssize_t
     _metrics: dict
     _name: object
     _nanny: str
@@ -470,7 +483,7 @@ class WorkerState:
         "_local_directory",
         "_memory_limit",
         "_memory_other_history",
-        "_memory_other_old",
+        "_memory_unmanaged_old",
         "_metrics",
         "_name",
         "_nanny",
@@ -514,7 +527,7 @@ class WorkerState:
         self._status = Status.running
         self._nbytes = 0
         self._occupancy = 0
-        self._memory_other_old = 0
+        self._memory_unmanaged_old = 0
         self._memory_other_history = deque()
         self._metrics = {}
         self._last_seen = 0
@@ -591,10 +604,10 @@ class WorkerState:
     @property
     def memory(self) -> MemoryInfo:
         return MemoryInfo(
-            dask_total=self._nbytes,
-            dask_spilled=self._metrics["spilled_nbytes"],
-            other_old=self._memory_other_old,
-            rss=self._metrics["memory"],
+            process=self._metrics["memory"],
+            managed=self._nbytes,
+            managed_spilled=self._metrics["spilled_nbytes"],
+            unmanaged_old=self._memory_unmanaged_old,
         )
 
     @property
@@ -1857,14 +1870,8 @@ class SchedulerState:
         return self._workers
 
     @property
-    def memory(self) -> "MemoryInfo":
-        infos = [w.memory for w in self.workers.values()]
-        return MemoryInfo(
-            dask_total=sum(m.dask_total for m in infos),
-            dask_spilled=sum(m.dask_spilled for m in infos),
-            other_old=sum(m.other_old for m in infos),
-            rss=sum(m.rss for m in infos),
-        )
+    def memory(self) -> MemoryInfo:
+        return MemoryInfo.sum(*(w.memory for w in self.workers.values()))
 
     @property
     def __pdict__(self):
@@ -3763,26 +3770,26 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Calculate RSS - dask keys, separating "old" and "new" usage
         # See MemoryInfo for details
-        max_memory_other_old_hist_age = local_now - MEMORY_NEW_TO_OLD_LAG
-        memory_other_old = ws._memory_other_old
+        max_memory_unmanaged_old_hist_age = local_now - MEMORY_NEW_TO_OLD_LAG
+        memory_unmanaged_old = ws._memory_unmanaged_old
         while ws._memory_other_history:
             ts, size = ws._memory_other_history[0]
-            if ts >= max_memory_other_old_hist_age:
+            if ts >= max_memory_unmanaged_old_hist_age:
                 break
             ws._memory_other_history.popleft()
-            if size == memory_other_old:
-                memory_other_old = 0  # recalculate min()
+            if size == memory_unmanaged_old:
+                memory_unmanaged_old = 0  # recalculate min()
 
         size = max(0, metrics["memory"] - ws._nbytes + ws._metrics["spilled_nbytes"])
         ws._memory_other_history.append((local_now, size))
-        if not memory_other_old:
+        if not memory_unmanaged_old:
             # The worker has just been started or the previous minimum has been expunged
             # because too old.
             # Note: this algorithm is capped to 200 * MEMORY_NEW_TO_OLD_LAG elements
             # cluster-wide by heartbeat_interval(), regardless of the number of workers
-            ws._memory_other_old = min(map(second, ws._memory_other_history))
-        elif size < memory_other_old:
-            ws._memory_other_old = size
+            ws._memory_unmanaged_old = min(map(second, ws._memory_other_history))
+        elif size < memory_unmanaged_old:
+            ws._memory_unmanaged_old = size
 
         if host_info:
             dh: dict = parent._host_info.setdefault(host, {})
