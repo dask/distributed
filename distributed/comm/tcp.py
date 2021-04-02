@@ -367,8 +367,24 @@ class RequireEncryptionMixin:
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
     _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    client = TCPClient(resolver=_resolver)
+
+    @property
+    def _resolver(self):
+        try:
+            return self._cached_resolver
+        except AttributeError:
+            self._cached_resolver = netutil.ExecutorResolver(
+                close_executor=False, executor=self._executor
+            )
+            return self._cached_resolver
+
+    @property
+    def client(self):
+        try:
+            return self._cached_client
+        except AttributeError:
+            self._cached_client = TCPClient(resolver=self._resolver)
+            return self._cached_client
 
     async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
