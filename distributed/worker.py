@@ -1073,7 +1073,9 @@ class Worker(ServerNode):
     def get_monitor_info(self, comm=None, recent=False, start=0):
         return dict(
             range_query=(
-                self.monitor.recent() if recent else self.monitor.range_query(start=0)
+                self.monitor.recent()
+                if recent
+                else self.monitor.range_query(start=start)
             ),
             count=self.monitor.count,
             last_time=self.monitor.last_time,

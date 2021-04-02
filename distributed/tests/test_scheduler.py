@@ -2206,11 +2206,10 @@ async def test_configurable_events_log_length(c, s, a, b):
 @gen_cluster()
 async def test_get_worker_monitor_info(s, a, b):
     res = await s.get_worker_monitor_info()
-    ms = ("cpu", "time", "read_bytes", "write_bytes", "num_fds")
-    if WINDOWS:
-        ms = ("cpu", "time", "read_bytes", "write_bytes")
+    ms = ["cpu", "time", "read_bytes", "write_bytes"]
+    if not WINDOWS:
+        ms += ["num_fds"]
     for w in (a, b):
-        for m in ms:
-            assert res[w.address]["range_query"][m] is not None
+        assert all(res[w.address]["range_query"][m] is not None for m in ms)
         assert res[w.address]["count"] is not None
         assert res[w.address]["last_time"] is not None
