@@ -12,19 +12,17 @@ try:
 except ImportError:
     # Python 2
     import Queue as queue
-from subprocess import Popen
-import sys
-from threading import Thread
-from uuid import uuid4
 
-from tornado.gen import TimeoutError
-from tornado.ioloop import IOLoop
-from threading import Event
+import sys
+from subprocess import Popen
+from threading import Event, Thread
+from uuid import uuid4
 
 from IPython import get_ipython
 from jupyter_client import BlockingKernelClient, write_connection_file
 from jupyter_core.paths import jupyter_runtime_dir
-
+from tornado.gen import TimeoutError
+from tornado.ioloop import IOLoop
 
 OUTPUT_TIMEOUT = 10
 

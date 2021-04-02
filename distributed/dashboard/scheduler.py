@@ -1,48 +1,51 @@
 from urllib.parse import urljoin
 
-from tornado.ioloop import IOLoop
 from tornado import web
+from tornado.ioloop import IOLoop
 
 try:
     import numpy as np
 except ImportError:
     np = False
 
-from .core import BokehApplication
-from .components.worker import counters_doc
+from .components.nvml import gpu_doc  # noqa: 1708
+from .components.nvml import NVML_ENABLED, gpu_memory_doc, gpu_utilization_doc
 from .components.scheduler import (
-    systemmonitor_doc,
-    stealing_doc,
-    workers_doc,
     events_doc,
-    tasks_doc,
-    status_doc,
-    profile_doc,
-    profile_server_doc,
     graph_doc,
-    individual_task_stream_doc,
-    individual_progress_doc,
-    individual_graph_doc,
-    individual_profile_doc,
-    individual_profile_server_doc,
-    individual_nbytes_doc,
-    individual_cpu_doc,
-    individual_nprocessing_doc,
-    individual_workers_doc,
+    individual_aggregate_time_per_action_doc,
     individual_bandwidth_types_doc,
     individual_bandwidth_workers_doc,
-    individual_memory_by_key_doc,
     individual_compute_time_per_key_doc,
-    individual_aggregate_time_per_action_doc,
+    individual_cpu_doc,
+    individual_graph_doc,
+    individual_memory_by_key_doc,
+    individual_nbytes_doc,
+    individual_nprocessing_doc,
+    individual_profile_doc,
+    individual_profile_server_doc,
+    individual_progress_doc,
     individual_systemmonitor_doc,
+    individual_task_stream_doc,
+    individual_workers_doc,
+    profile_doc,
+    profile_server_doc,
+    status_doc,
+    stealing_doc,
+    systemmonitor_doc,
+    tasks_doc,
+    workers_doc,
 )
+from .components.worker import counters_doc
+from .core import BokehApplication
 from .worker import counters_doc
-from .components.nvml import gpu_memory_doc, gpu_utilization_doc  # noqa: 1708
-
 
 template_variables = {
     "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
 }
+
+if NVML_ENABLED:
+    template_variables["pages"].insert(4, "gpu")
 
 
 def connect(application, http_server, scheduler, prefix=""):
@@ -75,6 +78,7 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/gpu": gpu_doc,
     "/individual-task-stream": individual_task_stream_doc,
     "/individual-progress": individual_progress_doc,
     "/individual-graph": individual_graph_doc,

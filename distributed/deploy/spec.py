@@ -1,29 +1,29 @@
 import asyncio
 import atexit
-from contextlib import suppress
 import copy
 import logging
 import math
-import weakref
 import warnings
+import weakref
+from contextlib import suppress
 
-import dask
 from tornado import gen
 
-from .adaptive import Adaptive
-from .cluster import Cluster
-from ..core import rpc, CommClosedError, Status
-from ..utils import (
-    LoopRunner,
-    silence_logging,
-    parse_bytes,
-    parse_timedelta,
-    import_term,
-    TimeoutError,
-)
+import dask
+
+from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-
+from ..utils import (
+    LoopRunner,
+    TimeoutError,
+    import_term,
+    parse_bytes,
+    parse_timedelta,
+    silence_logging,
+)
+from .adaptive import Adaptive
+from .cluster import Cluster
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +252,7 @@ class SpecCluster(Cluster):
         self.scheduler_spec = copy.copy(scheduler)
         self.worker_spec = copy.copy(workers) or {}
         self.new_spec = copy.copy(worker)
+        self.scheduler = None
         self.workers = {}
         self._i = 0
         self.security = security or Security()
@@ -290,6 +291,7 @@ class SpecCluster(Cluster):
             raise ValueError("Cluster is closed")
 
         self._lock = asyncio.Lock()
+        self.status = Status.starting
 
         if self.scheduler_spec is None:
             try:
@@ -300,13 +302,13 @@ class SpecCluster(Cluster):
                 options = {"dashboard": True}
             self.scheduler_spec = {"cls": Scheduler, "options": options}
 
-        cls = self.scheduler_spec["cls"]
-        if isinstance(cls, str):
-            cls = import_term(cls)
-        self.scheduler = cls(**self.scheduler_spec.get("options", {}))
-
-        self.status = Status.starting
-        self.scheduler = await self.scheduler
+        # Check if scheduler has already been created by a subclass
+        if self.scheduler is None:
+            cls = self.scheduler_spec["cls"]
+            if isinstance(cls, str):
+                cls = import_term(cls)
+            self.scheduler = cls(**self.scheduler_spec.get("options", {}))
+            self.scheduler = await self.scheduler
         self.scheduler_comm = rpc(
             getattr(self.scheduler, "external_address", None) or self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
@@ -412,7 +414,7 @@ class SpecCluster(Cluster):
             for future in self._futures:
                 await future
             async with self._lock:
-                with suppress(CommClosedError):
+                with suppress(CommClosedError, OSError):
                     if self.scheduler_comm:
                         await self.scheduler_comm.close(close_workers=True)
                     else:

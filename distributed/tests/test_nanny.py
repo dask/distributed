@@ -1,33 +1,27 @@
 import asyncio
-from contextlib import suppress
 import gc
 import logging
+import multiprocessing as mp
 import os
 import random
 import sys
-import multiprocessing as mp
-
-import numpy as np
+from contextlib import suppress
 
 import pytest
-from tlz import valmap, first
+from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
-from distributed.diagnostics import SchedulerPlugin
-from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
+
+from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
+from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import tmpfile, TimeoutError, parse_ports
-from distributed.utils_test import (  # noqa: F401
-    gen_cluster,
-    gen_test,
-    inc,
-    captured_logger,
-    cleanup,
-)
+from distributed.utils import TimeoutError, parse_ports, tmpfile
+from distributed.utils_test import cleanup  # noqa: F401
+from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
 # FIXME why does this leave behind unclosed Comm objects?
@@ -202,6 +196,7 @@ async def test_random_seed(c, s, a, b):
         assert x != y
 
     await check_func(lambda a, b: random.randint(a, b))
+    np = pytest.importorskip("numpy")
     await check_func(lambda a, b: np.random.randint(a, b))
 
 

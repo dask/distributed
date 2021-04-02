@@ -1,9 +1,8 @@
 import pytest
-
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.utils_test import gen_cluster
 from distributed import Semaphore
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, clean_kwargs={"threads": False})

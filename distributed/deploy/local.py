@@ -4,15 +4,16 @@ import math
 import warnings
 import weakref
 
-from dask.system import CPU_COUNT
 import toolz
 
-from .spec import SpecCluster
-from .utils import nprocesses_nthreads
+from dask.system import CPU_COUNT
+
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
+from .spec import SpecCluster
+from .utils import nprocesses_nthreads
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class LocalCluster(SpecCluster):
 
     Examples
     --------
-    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster  # doctest: +SKIP
     >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, threads=8)
 

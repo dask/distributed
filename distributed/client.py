@@ -1,37 +1,37 @@
 import asyncio
 import atexit
+import copy
+import errno
+import html
+import inspect
+import json
+import logging
+import os
+import socket
+import sys
+import threading
+import uuid
+import warnings
+import weakref
 from collections import defaultdict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-import copy
-import errno
 from functools import partial
-import html
-import inspect
-import json
-import logging
 from numbers import Number
-import os
-import sys
-import uuid
-import threading
-import socket
 from queue import Queue as pyQueue
-import warnings
-import weakref
+
+from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
-from dask.base import tokenize, normalize_token, collections_to_dsk
-from dask.core import flatten
-from dask.optimization import SubgraphCallable
+from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
-
-from tlz import first, groupby, merge, valmap, keymap, partition_all
+from dask.optimization import SubgraphCallable
+from dask.utils import ensure_dict, format_bytes, funcname, stringify
 
 try:
     from dask.delayed import single_key
@@ -40,24 +40,18 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from . import versions as version_module
 from .batched import BatchedSend
-from .utils_comm import (
-    WrappedKey,
-    unpack_remotedata,
-    pack_data,
-    scatter_to_workers,
-    gather_from_workers,
-    retry_operation,
-)
 from .cfexecutor import ClientExecutor
 from .core import (
+    CommClosedError,
+    ConnectionPool,
+    PooledRPCCall,
+    clean_exception,
     connect,
     rpc,
-    clean_exception,
-    CommClosedError,
-    PooledRPCCall,
-    ConnectionPool,
 )
+from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -66,26 +60,30 @@ from .pubsub import PubSubClientExtension
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
-from .worker import get_client, get_worker, secede
-from .diagnostics.plugin import UploadFile, WorkerPlugin
 from .utils import (
     All,
-    sync,
-    log_errors,
-    key_split,
-    thread_state,
-    no_default,
-    LoopRunner,
-    parse_timedelta,
-    shutting_down,
     Any,
-    has_keyword,
-    format_dashboard_link,
-    TimeoutError,
     CancelledError,
+    LoopRunner,
+    TimeoutError,
+    format_dashboard_link,
+    has_keyword,
+    key_split,
+    log_errors,
+    no_default,
+    parse_timedelta,
+    sync,
+    thread_state,
 )
-from . import versions as version_module
-
+from .utils_comm import (
+    WrappedKey,
+    gather_from_workers,
+    pack_data,
+    retry_operation,
+    scatter_to_workers,
+    unpack_remotedata,
+)
+from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
 
@@ -383,7 +381,7 @@ class Future(WrappedKey):
         except AttributeError:
             # Ocassionally we see this error when shutting down the client
             # https://github.com/dask/distributed/issues/4305
-            if not shutting_down():
+            if not sys.is_finalizing():
                 raise
         except RuntimeError:  # closed event loop
             pass
@@ -1445,7 +1443,7 @@ class Client:
 
         assert self.status == "closed"
 
-        if not shutting_down():
+        if not sys.is_finalizing():
             self._loop_runner.stop()
 
     async def _shutdown(self):
@@ -1513,6 +1511,7 @@ class Client:
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
+            See :ref:`pure functions` for more details.
         workers : string or iterable of strings
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
@@ -1632,6 +1631,7 @@ class Client:
         pure : bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
+            See :ref:`pure functions` for more details.
         workers : string or iterable of strings
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
@@ -3496,7 +3496,8 @@ class Client:
         ----------
         n : int
             Number of logs to retrive.  Maxes out at 10000 by default,
-            confiruable in config.yaml::log-length
+            configurable via the ``distributed.admin.log-length``
+            configuration value.
 
         Returns
         -------
@@ -3511,7 +3512,8 @@ class Client:
         ----------
         n : int
             Number of logs to retrive.  Maxes out at 10000 by default,
-            confiruable in config.yaml::log-length
+            configurable via the ``distributed.admin.log-length``
+            configuration value.
         workers : iterable
             List of worker addresses to retrieve.  Gets all workers by default.
         nanny : bool, default False
@@ -3941,7 +3943,7 @@ class Client:
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
             if plot == "save":
-                from bokeh.plotting import save, output_file
+                from bokeh.plotting import output_file, save
 
                 output_file(filename=filename, title="Dask Task Stream")
                 save(figure, filename=filename, resources=bokeh_resources)
@@ -4729,7 +4731,10 @@ def _close_global_client():
     if c is not None:
         c._should_close_loop = False
         with suppress(TimeoutError, RuntimeError):
-            c.close(timeout=3)
+            if c.asynchronous:
+                c.loop.add_callback(c.close, timeout=3)
+            else:
+                c.close(timeout=3)
 
 
 atexit.register(_close_global_client)

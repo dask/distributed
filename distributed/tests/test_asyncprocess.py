@@ -16,7 +16,7 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import mp_context
-from distributed.utils_test import gen_test, pristine_loop, nodebug
+from distributed.utils_test import gen_test, nodebug, pristine_loop
 
 
 def feed(in_q, out_q):

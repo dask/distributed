@@ -1,35 +1,39 @@
-from array import array
 import copy
 import pickle
+from array import array
 
 import msgpack
-import numpy as np
 import pytest
 from tlz import identity
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from dask.utils_test import inc
 
-from distributed import wait
+from distributed import Nanny, wait
+from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
-    register_serialization,
-    serialize,
-    deserialize,
-    nested_deserialize,
     Serialize,
     Serialized,
-    to_serialize,
-    serialize_bytes,
-    deserialize_bytes,
-    serialize_bytelist,
-    register_serialization_family,
     dask_serialize,
+    deserialize,
+    deserialize_bytes,
     dumps,
     loads,
+    nested_deserialize,
+    register_serialization,
+    register_serialization_family,
+    serialize,
+    serialize_bytelist,
+    serialize_bytes,
+    to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
-from distributed.utils_test import inc, gen_test
-from distributed.comm.utils import to_frames, from_frames
+from distributed.utils_test import gen_test, inc
 
 
 class MyObj:
@@ -141,8 +145,9 @@ def test_nested_deserialize():
     assert x == x_orig  # x wasn't mutated
 
 
-from distributed.utils_test import gen_cluster
 from dask import delayed
+
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)
@@ -212,6 +217,7 @@ def test_empty_loads_deep():
     assert isinstance(e2[0][0][0], Empty)
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 @pytest.mark.parametrize("kwargs", [{}, {"serializers": ["pickle"]}])
 def test_serialize_bytes(kwargs):
     for x in [
@@ -228,6 +234,7 @@ def test_serialize_bytes(kwargs):
         assert str(x) == str(y)
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_serialize_list_compress():
     pytest.importorskip("lz4")
     x = np.ones(1000000)
@@ -439,7 +446,13 @@ def test_compression_numpy_list():
         (tuple([MyObj(None)]), True),
         ({("x", i): MyObj(5) for i in range(100)}, True),
         (memoryview(b"hello"), True),
-        (memoryview(np.random.random((3, 4))), True),
+        pytest.param(
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
+            True,
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
+        ),
     ],
 )
 def test_check_dask_serializable(data, is_serializable):
@@ -462,7 +475,16 @@ def test_serialize_lists(serializers):
 
 
 @pytest.mark.parametrize(
-    "data_in", [memoryview(b"hello"), memoryview(np.random.random((3, 4)))]
+    "data_in",
+    [
+        memoryview(b"hello"),
+        pytest.param(
+            memoryview(
+                np.random.random((3, 4)) if np is not None else b"skip np.random"
+            ),
+            marks=pytest.mark.skipif(np is None, reason="Test needs numpy"),
+        ),
+    ],
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
@@ -472,7 +494,22 @@ def test_deser_memoryview(data_in):
     assert data_in == data_out
 
 
+@pytest.mark.skipif(np is None, reason="Test needs numpy")
 def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_large_pickled_object(c, s, a, b):
+    np = pytest.importorskip("numpy")
+
+    class Data:
+        def __init__(self, n):
+            self.data = np.empty(n, dtype="u1")
+
+    x = Data(100_000_000)
+    y = await c.scatter(x, workers=[a.worker_address])
+    z = c.submit(lambda x: x, y, workers=[b.worker_address])
+    await z

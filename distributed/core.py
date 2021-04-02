@@ -1,44 +1,44 @@
 import asyncio
+import inspect
+import logging
+import sys
+import threading
+import traceback
+import uuid
+import warnings
+import weakref
 from collections import defaultdict
 from contextlib import suppress
 from enum import Enum
 from functools import partial
-import inspect
-import logging
-import threading
-import traceback
-import uuid
-import weakref
-import warnings
 
-import dask
 import tblib
 from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+import dask
+
+from . import profile, protocol
 from .comm import (
-    connect,
-    listen,
     CommClosedError,
+    connect,
+    get_address_host_port,
+    listen,
     normalize_address,
     unparse_host_port,
-    get_address_host_port,
 )
 from .metrics import time
-from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
-    is_coroutine_function,
-    get_traceback,
-    truncate_exception,
-    shutting_down,
-    parse_timedelta,
-    has_keyword,
     CancelledError,
     TimeoutError,
+    get_traceback,
+    has_keyword,
+    is_coroutine_function,
+    parse_timedelta,
+    truncate_exception,
 )
-from . import protocol
 
 
 class Status(Enum):
@@ -406,7 +406,7 @@ class Server:
         )
         self.listeners.append(listener)
 
-    async def handle_comm(self, comm, shutting_down=shutting_down):
+    async def handle_comm(self, comm):
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -432,7 +432,7 @@ class Server:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
                 except EnvironmentError as e:
-                    if not shutting_down():
+                    if not sys.is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
                             " Last operation: %s",
@@ -536,7 +536,7 @@ class Server:
 
         finally:
             del self._comms[comm]
-            if not shutting_down() and not comm.closed():
+            if not sys.is_finalizing() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:

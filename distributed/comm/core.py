@@ -1,21 +1,20 @@
-from abc import ABC, abstractmethod, abstractproperty
 import asyncio
-from contextlib import suppress
 import inspect
 import logging
 import random
 import sys
 import weakref
+from abc import ABC, abstractmethod, abstractproperty
+from contextlib import suppress
 
 import dask
 
 from ..metrics import time
-from ..utils import parse_timedelta, TimeoutError
+from ..protocol import pickle
+from ..protocol.compression import get_default_compression
+from ..utils import TimeoutError, parse_timedelta
 from . import registry
 from .addressing import parse_address
-from ..protocol.compression import get_default_compression
-from ..protocol import pickle
-
 
 logger = logging.getLogger(__name__)
 

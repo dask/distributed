@@ -5,8 +5,9 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-import dask
 from tornado.ioloop import IOLoop, PeriodicCallback
+
+import dask
 
 from distributed.utils_comm import retry_operation
 

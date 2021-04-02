@@ -1,21 +1,19 @@
 import asyncio
-from collections import deque, namedtuple
 import itertools
 import logging
 import os
 import threading
-import weakref
 import warnings
+import weakref
+from collections import deque, namedtuple
 
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
 from ..protocol import nested_deserialize
 from ..utils import get_ip
-
+from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
-from .core import Comm, Connector, Listener, CommClosedError
-
 
 logger = logging.getLogger(__name__)
 
