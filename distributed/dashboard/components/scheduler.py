@@ -2216,6 +2216,27 @@ def graph_doc(scheduler, extra, doc):
 
 def status_doc(scheduler, extra, doc):
     with log_errors():
+        nbytes_cluster = NBytesCluster(scheduler, sizing_mode="stretch_both")
+        nbytes_cluster.update()
+        add_periodic_callback(doc, nbytes_cluster, 100)
+        doc.add_root(nbytes_cluster.root)
+
+        if len(scheduler.workers) < 50:
+            nbytes_workers = NBytes(scheduler, sizing_mode="stretch_both")
+            processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
+            processing.root.y_range = nbytes_workers.root.y_range
+        else:
+            nbytes_workers = NBytesHistogram(scheduler, sizing_mode="stretch_both")
+            processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
+            row(nbytes_workers.root, processing.root, sizing_mode="stretch_both")
+
+        nbytes_workers.update()
+        processing.update()
+        add_periodic_callback(doc, nbytes_workers, 100)
+        add_periodic_callback(doc, processing, 100)
+        doc.add_root(nbytes_workers.root)
+        doc.add_root(processing.root)
+
         task_stream = TaskStream(
             scheduler,
             n_rectangles=dask.config.get(
@@ -2226,47 +2247,17 @@ def status_doc(scheduler, extra, doc):
         )
         task_stream.update()
         add_periodic_callback(doc, task_stream, 100)
+        doc.add_root(task_stream.root)
 
         task_progress = TaskProgress(scheduler, sizing_mode="stretch_both")
         task_progress.update()
         add_periodic_callback(doc, task_progress, 100)
-
-        nbytes_cluster = NBytesCluster(scheduler, sizing_mode="stretch_both")
-        nbytes_cluster.update()
-        add_periodic_callback(doc, nbytes_cluster, 100)
-        doc.add_root(nbytes_cluster.root)
-
-        if len(scheduler.workers) < 50:
-            nbytes = NBytes(scheduler, sizing_mode="stretch_both")
-            nbytes.update()
-            current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-            current_load.update()
-            add_periodic_callback(doc, nbytes, 100)
-            add_periodic_callback(doc, current_load, 100)
-            current_load.processing_figure.y_range = nbytes.root.y_range
-
-            doc.add_root(nbytes.root)
-            doc.add_root(current_load.processing_figure)
-
-        else:
-            nbytes_hist = NBytesHistogram(scheduler, sizing_mode="stretch_both")
-            nbytes_hist.update()
-            processing_hist = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
-            processing_hist.update()
-            add_periodic_callback(doc, nbytes_hist, 100)
-            add_periodic_callback(doc, processing_hist, 100)
-            row(nbytes_hist.root, processing_hist.root, sizing_mode="stretch_both")
-
-            doc.add_root(nbytes_hist.root)
-            doc.add_root(processing_hist.root)
+        doc.add_root(task_progress.root)
 
         doc.title = "Dask: Status"
-        doc.add_root(task_progress.root)
-        doc.add_root(task_stream.root)
         doc.theme = BOKEH_THEME
         doc.template = env.get_template("status.html")
         doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
 
 
 @curry
