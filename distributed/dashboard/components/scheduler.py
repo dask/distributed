@@ -328,7 +328,7 @@ class NBytes(DashboardComponent):
                 tools="",
                 id="bk-nbytes-worker-plot",
                 width=int(width / 2),
-                name="nbytes_hist",
+                name="nbytes_workers",
                 **kwargs,
             )
             rect = self.root.rect(
@@ -437,7 +437,7 @@ class NBytesHistogram(DashboardComponent):
 
             self.root = figure(
                 title="Bytes stored per worker (histogram)",
-                name="nbytes_hist",
+                name="nbytes_workers",
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
                 tools="",
