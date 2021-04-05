@@ -354,6 +354,30 @@ class MemoryInfo:
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
         )
 
+    def _repr_html_(self) -> str:
+        """This is used both by Jupyter Notebook as well as the Bokeh dashboard"""
+
+        def l1(label: str, nbytes: int) -> str:
+            return (
+                f"<tr><td><b>{label}</b></td>"
+                f"<td><b>{format_bytes(nbytes)}</b></td></tr>\n"
+            )
+
+        def l2(label: str, nbytes: int) -> str:
+            return f"<tr><td>{label}</td><td>{format_bytes(nbytes)}</td></tr>\n"
+
+        return (
+            "<table>"
+            + l1("Managed by Dask", self.managed)
+            + l2("in process memory", self.managed_in_memory)
+            + l2("spilled to disk", self.managed_spilled)
+            + l1("Process memory (RSS)", self.process)
+            + l2("managed by Dask", self.managed_in_memory)
+            + l2("unmanaged (old)", self.unmanaged_old)
+            + l2("umanaged (recent)", self.unmanaged_recent)
+            + "</table>\n"
+        )
+
 
 @final
 @cclass

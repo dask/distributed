@@ -918,7 +918,7 @@ class CurrentLoad(DashboardComponent):
             processing.add_tools(hover)
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @text"
+            hover.tooltips = "<b>@worker</b><br>\n@text{safe}"
             hover.point_policy = "follow_mouse"
             nbytes.add_tools(hover)
 
@@ -1011,13 +1011,13 @@ class CurrentLoad(DashboardComponent):
             ]
             x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
             color += [color_i, color_i, color_i, "grey"]
-            text.append(repr(meminfo))
+            text.append(meminfo._repr_html_())
 
         result = {
             "width": width,
             "x": x,
             "color": color,
-            "alpha": [0.9, 0.65, 0.4, 0.9] * len(workers),
+            "alpha": [1, 0.7, 0.4, 1] * len(workers),
             "text": quadlist(text),
             "worker": quadlist(ws.address for ws in workers),
             "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
