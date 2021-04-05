@@ -36,7 +36,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
-from tlz import pipe
+from tlz import curry, pipe
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -191,7 +191,7 @@ class ProcessingHistogram(DashboardComponent):
             self.root = figure(
                 title="Tasks Processing (Histogram)",
                 id="bk-nprocessing-histogram-plot",
-                name="processing_hist",
+                name="processing",
                 y_axis_label="frequency",
                 tools="",
                 **kwargs,
@@ -220,6 +220,90 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
+class NBytesCluster(DashboardComponent):
+    """Total memory usage on the cluster"""
+
+    def __init__(self, scheduler, width=600, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "width": [0] * 4,
+                    "x": [0] * 4,
+                    "y": [0] * 4,
+                    "text": [""] * 4,
+                    "color": ["blue", "blue", "blue", "grey"],
+                    "alpha": [1, 0.7, 0.4, 1],
+                }
+            )
+
+            self.root = figure(
+                title="Bytes stored on cluster",
+                tools="",
+                id="bk-nbytes-cluster-worker-plot",
+                width=int(width / 2),
+                name="nbytes_cluster",
+                **kwargs,
+            )
+            rect = self.root.rect(
+                source=self.source,
+                x="x",
+                y="y",
+                width="width",
+                height=1,
+                color="color",
+                alpha="alpha",
+            )
+            rect.nonselection_glyph = None
+
+            self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.x_range.start = 0
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.yaxis.visible = False
+            self.root.ygrid.visible = False
+
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
+            self.root.yaxis.visible = False
+
+            hover = HoverTool()
+            hover.tooltips = "@text{safe}"
+            hover.point_policy = "follow_mouse"
+            self.root.add_tools(hover)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            workers = list(self.scheduler.workers.values())
+            limit = sum(getattr(ws, "memory_limit", 0) for ws in workers)
+            meminfo = self.scheduler.memory
+            if limit and meminfo.process > limit:
+                color = "red"
+            elif limit and meminfo.process > limit / 2:
+                color = "orange"
+            else:
+                color = "blue"
+
+            width = [
+                meminfo.managed_in_memory,
+                meminfo.unmanaged_old,
+                meminfo.unmanaged_recent,
+                meminfo.managed_spilled,
+            ]
+            text = meminfo._repr_html_()
+
+            result = {
+                "width": width,
+                "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
+                "color": [color, color, color, "grey"],
+                "text": [text] * 4,
+            }
+            self.root.x_range.end = limit
+            update(self.source, result)
+
+
 class NBytes(DashboardComponent):
     """Memory usage for single workers"""
 
@@ -240,11 +324,11 @@ class NBytes(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes stored",
+                title="Bytes stored per worker",
                 tools="",
                 id="bk-nbytes-worker-plot",
                 width=int(width / 2),
-                name="nbytes_hist",  # This must match NBytesHistogram
+                name="nbytes_hist",
                 **kwargs,
             )
             rect = self.root.rect(
@@ -334,14 +418,6 @@ class NBytes(DashboardComponent):
             result = {
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
-
-            meminfo = self.scheduler.memory
-            self.root.title.text = (
-                f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
-                f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
-                f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
-                f"spilled {format_bytes(meminfo.managed_spilled)}"
-            )
             self.root.x_range.end = max_limit
             update(self.source, result)
 
@@ -360,8 +436,8 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes Stored (Histogram)",
-                name="nbytes_hist",  # This must match CurrentLoad
+                title="Bytes stored per worker (histogram)",
+                name="nbytes_hist",
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
                 tools="",
@@ -395,7 +471,6 @@ class NBytesHistogram(DashboardComponent):
         )
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
-        self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
         update(self.source, d)
 
 
@@ -415,7 +490,7 @@ class BandwidthTypes(DashboardComponent):
                 }
             )
 
-            fig = figure(
+            self.root = figure(
                 title="Bandwidth by Type",
                 tools="",
                 id="bk-bandwidth-type-plot",
@@ -423,8 +498,8 @@ class BandwidthTypes(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
-            fig.xaxis.major_label_orientation = -0.5
-            rect = fig.rect(
+            self.root.xaxis.major_label_orientation = -0.5
+            rect = self.root.rect(
                 source=self.source,
                 x="bandwidth-half",
                 y="type",
@@ -432,37 +507,36 @@ class BandwidthTypes(DashboardComponent):
                 height=1,
                 color="blue",
             )
-            fig.x_range.start = 0
-            fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            fig.xaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            self.root.x_range.start = 0
+            self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.ticker = AdaptiveTicker(**TICKS_1024)
             rect.nonselection_glyph = None
 
-            fig.xaxis.minor_tick_line_alpha = 0
-            fig.ygrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = False
 
-            fig.toolbar.logo = None
-            fig.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
             hover = HoverTool()
             hover.tooltips = "@type: @bandwidth_text / s"
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
-
-            self.fig = fig
+            self.root.add_tools(hover)
 
     @without_property_validation
     def update(self):
         with log_errors():
             bw = self.scheduler.bandwidth_types
-            self.fig.y_range.factors = list(sorted(bw))
+            self.root.y_range.factors = list(sorted(bw))
             result = {
                 "bandwidth": list(bw.values()),
                 "bandwidth-half": [b / 2 for b in bw.values()],
                 "type": list(bw.keys()),
                 "bandwidth_text": list(map(format_bytes, bw.values())),
             }
-            self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
-
+            self.root.title.text = "Bandwidth: " + format_bytes(
+                self.scheduler.bandwidth
+            )
             update(self.source, result)
 
 
@@ -649,14 +723,6 @@ class ComputePerKey(DashboardComponent):
             self.fig = fig
             tab1 = Panel(child=fig, title="Bar Chart")
 
-            compute_wedge_data = {
-                "times": [0.2, 0.1],
-                "formatted_time": ["0.2 ms", "2.8 us"],
-                "angles": [1.4, 0.8],
-                "color": [ts_color_lookup["transfer"], ts_color_lookup["compute"]],
-                "names": ["sum", "sum_partial"],
-            }
-
             fig2 = figure(
                 title="Compute Time Per Task",
                 tools="",
@@ -666,7 +732,7 @@ class ComputePerKey(DashboardComponent):
                 **kwargs,
             )
 
-            wedge = fig2.wedge(
+            fig2.wedge(
                 x=0,
                 y=1,
                 radius=0.4,
@@ -701,7 +767,7 @@ class ComputePerKey(DashboardComponent):
             self.wedge_fig = fig2
             tab2 = Panel(child=fig2, title="Pie Chart")
 
-            self.tabs = Tabs(tabs=[tab1, tab2])
+            self.root = Tabs(tabs=[tab1, tab2])
 
     @without_property_validation
     def update(self):
@@ -952,7 +1018,7 @@ class CurrentLoad(DashboardComponent):
                 title="Tasks Processing",
                 tools="",
                 id="bk-nprocessing-plot",
-                name="processing_hist",
+                name="processing",
                 width=int(width / 2),
                 **kwargs,
             )
@@ -1012,6 +1078,10 @@ class CurrentLoad(DashboardComponent):
 
             self.processing_figure = processing
             self.cpu_figure = cpu
+
+    @property
+    def root(self):
+        return self.processing_figure
 
     @without_property_validation
     def update(self):
@@ -2194,65 +2264,13 @@ def status_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-def individual_task_stream_doc(scheduler, extra, doc):
-    task_stream = TaskStream(
-        scheduler, n_rectangles=1000, clear_interval="10s", sizing_mode="stretch_both"
-    )
-    task_stream.update()
-    add_periodic_callback(doc, task_stream, 100)
-    doc.add_root(task_stream.root)
-    doc.theme = BOKEH_THEME
-
-
-def individual_nbytes_doc(scheduler, extra, doc):
-    fig = NBytes(scheduler, sizing_mode="stretch_both")
-    fig.update()
-    add_periodic_callback(doc, fig, 100)
-    doc.add_root(fig.root)
-    doc.theme = BOKEH_THEME
-
-
-def individual_cpu_doc(scheduler, extra, doc):
-    current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-    current_load.update()
-    add_periodic_callback(doc, current_load, 100)
-    doc.add_root(current_load.cpu_figure)
-    doc.theme = BOKEH_THEME
-
-
-def individual_nprocessing_doc(scheduler, extra, doc):
-    current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-    current_load.update()
-    add_periodic_callback(doc, current_load, 100)
-    doc.add_root(current_load.processing_figure)
-    doc.theme = BOKEH_THEME
-
-
-def individual_progress_doc(scheduler, extra, doc):
-    task_progress = TaskProgress(scheduler, height=160, sizing_mode="stretch_both")
-    task_progress.update()
-    add_periodic_callback(doc, task_progress, 100)
-    doc.add_root(task_progress.root)
-    doc.theme = BOKEH_THEME
-
-
-def individual_graph_doc(scheduler, extra, doc):
+@curry
+def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwargs):
     with log_errors():
-        graph = TaskGraph(scheduler, sizing_mode="stretch_both")
-        graph.update()
-
-        add_periodic_callback(doc, graph, 200)
-        doc.add_root(graph.root)
-        doc.theme = BOKEH_THEME
-
-
-def individual_systemmonitor_doc(scheduler, extra, doc):
-    with log_errors():
-        sysmon = SystemMonitor(scheduler, sizing_mode="stretch_both")
-        doc.title = "Dask: Scheduler System Monitor"
-        add_periodic_callback(doc, sysmon, 500)
-
-        doc.add_root(sysmon.root)
+        fig = cls(scheduler, sizing_mode="stretch_both", **kwargs)
+        fig.update()
+        add_periodic_callback(doc, fig, interval)
+        doc.add_root(getattr(fig, fig_attr))
         doc.theme = BOKEH_THEME
 
 
@@ -2269,60 +2287,6 @@ def individual_profile_server_doc(scheduler, extra, doc):
         prof = ProfileServer(scheduler, sizing_mode="scale_width", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
-        doc.theme = BOKEH_THEME
-
-
-def individual_workers_doc(scheduler, extra, doc):
-    with log_errors():
-        table = WorkerTable(scheduler)
-        table.update()
-        add_periodic_callback(doc, table, 500)
-        doc.add_root(table.root)
-        doc.theme = BOKEH_THEME
-
-
-def individual_bandwidth_types_doc(scheduler, extra, doc):
-    with log_errors():
-        bw = BandwidthTypes(scheduler, sizing_mode="stretch_both")
-        bw.update()
-        add_periodic_callback(doc, bw, 500)
-        doc.add_root(bw.fig)
-        doc.theme = BOKEH_THEME
-
-
-def individual_bandwidth_workers_doc(scheduler, extra, doc):
-    with log_errors():
-        bw = BandwidthWorkers(scheduler, sizing_mode="stretch_both")
-        bw.update()
-        add_periodic_callback(doc, bw, 500)
-        doc.add_root(bw.fig)
-        doc.theme = BOKEH_THEME
-
-
-def individual_memory_by_key_doc(scheduler, extra, doc):
-    with log_errors():
-        component = MemoryByKey(scheduler, sizing_mode="stretch_both")
-        component.update()
-        add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
-        doc.theme = BOKEH_THEME
-
-
-def individual_compute_time_per_key_doc(scheduler, extra, doc):
-    with log_errors():
-        component = ComputePerKey(scheduler, sizing_mode="stretch_both")
-        component.update()
-        add_periodic_callback(doc, component, 500)
-        doc.add_root(component.tabs)
-        doc.theme = BOKEH_THEME
-
-
-def individual_aggregate_time_per_action_doc(scheduler, extra, doc):
-    with log_errors():
-        component = AggregateAction(scheduler, sizing_mode="stretch_both")
-        component.update()
-        add_periodic_callback(doc, component, 500)
-        doc.add_root(component.fig)
         doc.theme = BOKEH_THEME
 
 

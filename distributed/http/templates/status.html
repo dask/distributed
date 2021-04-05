@@ -8,12 +8,12 @@
 {% from macros import embed %}
 <div id="status-fluid">
 
-  <div id="status-history">
+  <div id="status-nbytes-hist">
     {{ embed(roots.nbytes_hist) }}
   </div>
 
   <div id="status-processing">
-    {{ embed(roots.processing_hist) }}
+    {{ embed(roots.processing) }}
   </div>
 
   <div id="status-tasks">
