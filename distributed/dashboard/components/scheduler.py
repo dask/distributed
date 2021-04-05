@@ -235,7 +235,7 @@ class NBytesHistogram(DashboardComponent):
 
             self.root = figure(
                 title="Bytes Stored (Histogram)",
-                name="nbytes_hist",
+                name="nbytes_hist",  # This must match CurrentLoad
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
                 tools="",
@@ -816,15 +816,23 @@ class CurrentLoad(DashboardComponent):
                     "nprocessing": [1, 2],
                     "nprocessing-half": [0.5, 1],
                     "nprocessing-color": ["red", "blue"],
-                    "nbytes": [1, 2],
-                    "nbytes-half": [0.5, 1],
-                    "nbytes_text": ["1B", "2B"],
                     "cpu": [1, 2],
                     "cpu-half": [0.5, 1],
-                    "worker": ["a", "b"],
                     "y": [1, 2],
-                    "nbytes-color": ["blue", "blue"],
+                    "worker": ["a", "b"],
                     "escaped_worker": ["a", "b"],
+                }
+            )
+            self.source_nbytes = ColumnDataSource(
+                {
+                    "width": [],
+                    "x": [],
+                    "y": [],
+                    "text": [],
+                    "color": [],
+                    "alpha": [],
+                    "worker": [],
+                    "escaped_worker": [],
                 }
             )
 
@@ -852,17 +860,17 @@ class CurrentLoad(DashboardComponent):
                 tools="",
                 id="bk-nbytes-worker-plot",
                 width=int(width / 2),
-                name="nbytes_hist",
+                name="nbytes_hist",  # This must match NBytesHistogram
                 **kwargs,
             )
             rect = nbytes.rect(
-                source=self.source,
-                x="nbytes-half",
+                source=self.source_nbytes,
+                x="x",
                 y="y",
-                width="nbytes",
+                width="width",
                 height=1,
-                color="nbytes-color",
-                alpha="nbytes-alpha",
+                color="color",
+                alpha="alpha",
             )
             rect.nonselection_glyph = None
 
@@ -910,7 +918,7 @@ class CurrentLoad(DashboardComponent):
             processing.add_tools(hover)
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @nbytes_text"
+            hover.tooltips = "@worker : @text"
             hover.point_policy = "follow_mouse"
             nbytes.add_tools(hover)
 
@@ -930,96 +938,103 @@ class CurrentLoad(DashboardComponent):
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
-
-            nprocessing = [len(ws.processing) for ws in workers]
             now = time()
-            if not any(nprocessing) and now < self.last + 1:
-                return
-            self.last = now
+            if any(ws.processing for ws in workers) or now > self.last + 1:
+                self.last = now
+                self._update_other(workers)
+                self._update_nbytes(workers)
 
-            y = list(range(len(workers)))
+    def _update_other(self, workers: list) -> None:
+        """Update self.processing_figure and self.cpu_figure"""
+        cpu = [int(ws.metrics["cpu"]) for ws in workers]
+        nprocessing = [len(ws.processing) for ws in workers]
 
-            cpu = [int(ws.metrics["cpu"]) for ws in workers]
-
-            processing_color = []
-            for ws in workers:
-                if ws in self.scheduler.idle:
-                    processing_color.append("red")
-                elif ws in self.scheduler.saturated:
-                    processing_color.append("green")
-                else:
-                    processing_color.append("blue")
-
-            nbytes = []
-            nbytes_half = []
-            nbytes_text = []
-            nbytes_color = []
-            nbytes_alpha = []
-            max_limit = 0
-
-            for ws in workers:
-                meminfo = ws.memory
-                limit = getattr(ws, "memory_limit", 0)
-                max_limit = max(
-                    max_limit, limit, meminfo.process + meminfo.managed_spilled
-                )
-                if limit and meminfo.process > limit:
-                    color = "red"
-                elif limit and meminfo.process > limit / 2:
-                    color = "orange"
-                else:
-                    color = "blue"
-
-                nbytes += [
-                    meminfo.managed_in_memory,
-                    meminfo.unmanaged_old,
-                    meminfo.unmanaged_recent,
-                    meminfo.managed_spilled,
-                ]
-                nbytes_half += [sum(nbytes[-4:i]) + nbytes[i] / 2 for i in range(-4, 0)]
-                nbytes_color += [color, color, color, "grey"]
-                nbytes_alpha += [1, 0.7, 0.4, 1]
-                nbytes_text += [
-                    f"{label}: {format_bytes(n)}"
-                    for label, n in zip(
-                        ["managed", "unmanaged (old)", "unmanaged (recent)", "spilled"],
-                        nbytes[-4:],
-                    )
-                ]
-
-            result = {
-                "cpu": cpu,
-                "cpu-half": [c / 2 for c in cpu],
-                "nprocessing": nprocessing,
-                "nprocessing-half": [np / 2 for np in nprocessing],
-                "nprocessing-color": processing_color,
-                "nbytes": nbytes,
-                "nbytes-half": nbytes_half,
-                "nbytes-color": nbytes_color,
-                "nbytes-alpha": nbytes_alpha,
-                "nbytes_text": nbytes_text,
-                "worker": [ws.address for ws in workers],
-                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
-                "y": y,
-            }
-
-            meminfo = self.scheduler.memory
-            self.nbytes_figure.title.text = (
-                f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
-                f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
-                f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
-                f"spilled {format_bytes(meminfo.managed_spilled)}"
-            )
-            self.nbytes_figure.x_range.end = max_limit
-            if self.scheduler.workers:
-                self.cpu_figure.x_range.end = (
-                    max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
-                    * 100
-                )
+        nprocessing_color = []
+        for ws in workers:
+            if ws in self.scheduler.idle:
+                nprocessing_color.append("red")
+            elif ws in self.scheduler.saturated:
+                nprocessing_color.append("green")
             else:
-                self.cpu_figure.x_range.end = 100
+                nprocessing_color.append("blue")
 
-            update(self.source, result)
+        result = {
+            "cpu": cpu,
+            "cpu-half": [c / 2 for c in cpu],
+            "nprocessing": nprocessing,
+            "nprocessing-half": [np / 2 for np in nprocessing],
+            "nprocessing-color": nprocessing_color,
+            "worker": [ws.address for ws in workers],
+            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+            "y": list(range(len(workers))),
+        }
+
+        if self.scheduler.workers:
+            xrange = max(ws.nthreads or 1 for ws in workers)
+        else:
+            xrange = 1
+        self.cpu_figure.x_range.end = xrange * 100
+
+        update(self.source, result)
+
+    def _update_nbytes(self, workers: list) -> None:
+        """Update self.nbytes_figure"""
+
+        def quadlist(i) -> list:
+            out = []
+            for ii in i:
+                out += [ii, ii, ii, ii]
+            return out
+
+        width = []
+        x = []
+        color = []
+        text = []
+        max_limit = 0
+
+        for ws in workers:
+            meminfo = ws.memory
+            limit = getattr(ws, "memory_limit", 0)
+            max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
+            if limit and meminfo.process > limit:
+                color_i = "red"
+            elif limit and meminfo.process > limit / 2:
+                color_i = "orange"
+            else:
+                color_i = "blue"
+
+            width += [
+                meminfo.managed_in_memory,
+                meminfo.unmanaged_old,
+                meminfo.unmanaged_recent,
+                meminfo.managed_spilled,
+            ]
+            x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
+            color += [color_i, color_i, color_i, "grey"]
+            text.append(repr(meminfo))
+
+        result = {
+            "width": width,
+            "x": x,
+            "color": color,
+            "alpha": [0.9, 0.65, 0.4, 0.9] * len(workers),
+            "text": quadlist(text),
+            "worker": quadlist(ws.address for ws in workers),
+            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
+            "y": quadlist(range(len(workers))),
+        }
+        # Remove rectangles with width=0
+        result = {k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()}
+
+        meminfo = self.scheduler.memory
+        self.nbytes_figure.title.text = (
+            f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
+            f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
+            f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
+            f"spilled {format_bytes(meminfo.managed_spilled)}"
+        )
+        self.nbytes_figure.x_range.end = max_limit
+        update(self.source_nbytes, result)
 
 
 class StealingTimeSeries(DashboardComponent):
