@@ -686,6 +686,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "get_monitor_info": self.get_monitor_info,
         }
 
         stream_handlers = {
@@ -1074,6 +1075,17 @@ class Worker(ServerNode):
         else:
             self.update_data(data=result, report=False)
             return {"status": "OK"}
+
+    def get_monitor_info(self, comm=None, recent=False, start=0):
+        return dict(
+            range_query=(
+                self.monitor.recent()
+                if recent
+                else self.monitor.range_query(start=start)
+            ),
+            count=self.monitor.count,
+            last_time=self.monitor.last_time,
+        )
 
     #############
     # Lifecycle #
