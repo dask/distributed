@@ -2231,6 +2231,11 @@ def status_doc(scheduler, extra, doc):
         task_progress.update()
         add_periodic_callback(doc, task_progress, 100)
 
+        nbytes_cluster = NBytesCluster(scheduler, sizing_mode="stretch_both")
+        nbytes_cluster.update()
+        add_periodic_callback(doc, nbytes_cluster, 100)
+        doc.add_root(nbytes_cluster.root)
+
         if len(scheduler.workers) < 50:
             nbytes = NBytes(scheduler, sizing_mode="stretch_both")
             nbytes.update()

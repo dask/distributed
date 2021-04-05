@@ -8,6 +8,10 @@
 {% from macros import embed %}
 <div id="status-fluid">
 
+  <div id="status-nbytes-cluster">
+    {{ embed(roots.nbytes_cluster) }}
+  </div>
+
   <div id="status-nbytes-workers">
     {{ embed(roots.nbytes_workers) }}
   </div>
