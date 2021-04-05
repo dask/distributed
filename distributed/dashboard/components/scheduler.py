@@ -338,7 +338,8 @@ class NBytes(DashboardComponent):
                 width="width",
                 height=1,
                 color="color",
-                alpha="alpha",
+                fill_alpha="alpha",
+                line_width=0,
             )
             rect.nonselection_glyph = None
 
@@ -436,7 +437,7 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes stored per worker (histogram)",
+                title="Bytes stored per worker (Histogram)",
                 name="nbytes_workers",
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
