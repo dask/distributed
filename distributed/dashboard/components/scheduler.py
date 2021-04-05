@@ -220,6 +220,132 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
+class NBytes(DashboardComponent):
+    """Memory usage for single workers"""
+
+    def __init__(self, scheduler, width=600, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "width": [],
+                    "x": [],
+                    "y": [],
+                    "text": [],
+                    "color": [],
+                    "alpha": [],
+                    "worker": [],
+                    "escaped_worker": [],
+                }
+            )
+
+            self.root = figure(
+                title="Bytes stored",
+                tools="",
+                id="bk-nbytes-worker-plot",
+                width=int(width / 2),
+                name="nbytes_hist",  # This must match NBytesHistogram
+                **kwargs,
+            )
+            rect = self.root.rect(
+                source=self.source,
+                x="x",
+                y="y",
+                width="width",
+                height=1,
+                color="color",
+                alpha="alpha",
+            )
+            rect.nonselection_glyph = None
+
+            self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.x_range.start = 0
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.yaxis.visible = False
+            self.root.ygrid.visible = False
+
+            tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
+            self.root.add_tools(tap)
+
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
+            self.root.yaxis.visible = False
+
+            hover = HoverTool()
+            hover.tooltips = "<b>@worker</b><br>\n@text{safe}"
+            hover.point_policy = "follow_mouse"
+            self.root.add_tools(hover)
+
+    @without_property_validation
+    def update(self):
+        def quadlist(i) -> list:
+            out = []
+            for ii in i:
+                out += [ii, ii, ii, ii]
+            return out
+
+        with log_errors():
+            workers = list(self.scheduler.workers.values())
+
+            width = []
+            x = []
+            color = []
+            text = []
+            max_limit = 0
+
+            for ws in workers:
+                meminfo = ws.memory
+                limit = getattr(ws, "memory_limit", 0)
+                max_limit = max(
+                    max_limit, limit, meminfo.process + meminfo.managed_spilled
+                )
+                if limit and meminfo.process > limit:
+                    color_i = "red"
+                elif limit and meminfo.process > limit / 2:
+                    color_i = "orange"
+                else:
+                    color_i = "blue"
+
+                width += [
+                    meminfo.managed_in_memory,
+                    meminfo.unmanaged_old,
+                    meminfo.unmanaged_recent,
+                    meminfo.managed_spilled,
+                ]
+                x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
+                color += [color_i, color_i, color_i, "grey"]
+                text.append(meminfo._repr_html_())
+
+            result = {
+                "width": width,
+                "x": x,
+                "color": color,
+                "alpha": [1, 0.7, 0.4, 1] * len(workers),
+                "text": quadlist(text),
+                "worker": quadlist(ws.address for ws in workers),
+                "escaped_worker": quadlist(
+                    escape.url_escape(ws.address) for ws in workers
+                ),
+                "y": quadlist(range(len(workers))),
+            }
+            # Remove rectangles with width=0
+            result = {
+                k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
+            }
+
+            meminfo = self.scheduler.memory
+            self.root.title.text = (
+                f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
+                f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
+                f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
+                f"spilled {format_bytes(meminfo.managed_spilled)}"
+            )
+            self.root.x_range.end = max_limit
+            update(self.source, result)
+
+
 class NBytesHistogram(DashboardComponent):
     """Histogram of memory usage, showing how many workers there are in each bucket of
     usage. Replaces the per-worker graph when there are >= 50 workers.
@@ -269,9 +395,8 @@ class NBytesHistogram(DashboardComponent):
         )
         counts, x = np.histogram(nbytes, bins=40)
         d = {"left": x[:-1], "right": x[1:], "top": counts}
-        self.source.data.update(d)
-
         self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
+        update(self.source, d)
 
 
 class BandwidthTypes(DashboardComponent):
@@ -805,7 +930,7 @@ class MemoryByKey(DashboardComponent):
 
 
 class CurrentLoad(DashboardComponent):
-    """ How many tasks are on each worker """
+    """Tasks and CPU usage on each worker"""
 
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
@@ -823,19 +948,6 @@ class CurrentLoad(DashboardComponent):
                     "escaped_worker": ["a", "b"],
                 }
             )
-            self.source_nbytes = ColumnDataSource(
-                {
-                    "width": [],
-                    "x": [],
-                    "y": [],
-                    "text": [],
-                    "color": [],
-                    "alpha": [],
-                    "worker": [],
-                    "escaped_worker": [],
-                }
-            )
-
             processing = figure(
                 title="Tasks Processing",
                 tools="",
@@ -853,25 +965,6 @@ class CurrentLoad(DashboardComponent):
                 color="nprocessing-color",
             )
             processing.x_range.start = 0
-            rect.nonselection_glyph = None
-
-            nbytes = figure(
-                title="Bytes stored",
-                tools="",
-                id="bk-nbytes-worker-plot",
-                width=int(width / 2),
-                name="nbytes_hist",  # This must match NBytesHistogram
-                **kwargs,
-            )
-            rect = nbytes.rect(
-                source=self.source_nbytes,
-                x="x",
-                y="y",
-                width="width",
-                height=1,
-                color="color",
-                alpha="alpha",
-            )
             rect.nonselection_glyph = None
 
             cpu = figure(
@@ -893,12 +986,7 @@ class CurrentLoad(DashboardComponent):
             )
             rect.nonselection_glyph = None
 
-            nbytes.axis[0].ticker = BasicTicker(**TICKS_1024)
-            nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            nbytes.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            nbytes.x_range.start = 0
-
-            for fig in [processing, nbytes, cpu]:
+            for fig in (processing, cpu):
                 fig.xaxis.minor_tick_line_alpha = 0
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
@@ -918,123 +1006,52 @@ class CurrentLoad(DashboardComponent):
             processing.add_tools(hover)
 
             hover = HoverTool()
-            hover.tooltips = "<b>@worker</b><br>\n@text{safe}"
-            hover.point_policy = "follow_mouse"
-            nbytes.add_tools(hover)
-
-            hover = HoverTool()
             hover.tooltips = "@worker : @cpu %"
             hover.point_policy = "follow_mouse"
             cpu.add_tools(hover)
 
             self.processing_figure = processing
-            self.nbytes_figure = nbytes
             self.cpu_figure = cpu
-
-            processing.y_range = nbytes.y_range
-            cpu.y_range = nbytes.y_range
 
     @without_property_validation
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
             now = time()
-            if any(ws.processing for ws in workers) or now > self.last + 1:
-                self.last = now
-                self._update_other(workers)
-                self._update_nbytes(workers)
+            if not any(ws.processing for ws in workers) and now < self.last + 1:
+                return
+            self.last = now
 
-    def _update_other(self, workers: list) -> None:
-        """Update self.processing_figure and self.cpu_figure"""
-        cpu = [int(ws.metrics["cpu"]) for ws in workers]
-        nprocessing = [len(ws.processing) for ws in workers]
+            cpu = [int(ws.metrics["cpu"]) for ws in workers]
+            nprocessing = [len(ws.processing) for ws in workers]
 
-        nprocessing_color = []
-        for ws in workers:
-            if ws in self.scheduler.idle:
-                nprocessing_color.append("red")
-            elif ws in self.scheduler.saturated:
-                nprocessing_color.append("green")
+            nprocessing_color = []
+            for ws in workers:
+                if ws in self.scheduler.idle:
+                    nprocessing_color.append("red")
+                elif ws in self.scheduler.saturated:
+                    nprocessing_color.append("green")
+                else:
+                    nprocessing_color.append("blue")
+
+            result = {
+                "cpu": cpu,
+                "cpu-half": [c / 2 for c in cpu],
+                "nprocessing": nprocessing,
+                "nprocessing-half": [np / 2 for np in nprocessing],
+                "nprocessing-color": nprocessing_color,
+                "worker": [ws.address for ws in workers],
+                "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
+                "y": list(range(len(workers))),
+            }
+
+            if self.scheduler.workers:
+                xrange = max(ws.nthreads or 1 for ws in workers)
             else:
-                nprocessing_color.append("blue")
+                xrange = 1
+            self.cpu_figure.x_range.end = xrange * 100
 
-        result = {
-            "cpu": cpu,
-            "cpu-half": [c / 2 for c in cpu],
-            "nprocessing": nprocessing,
-            "nprocessing-half": [np / 2 for np in nprocessing],
-            "nprocessing-color": nprocessing_color,
-            "worker": [ws.address for ws in workers],
-            "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
-            "y": list(range(len(workers))),
-        }
-
-        if self.scheduler.workers:
-            xrange = max(ws.nthreads or 1 for ws in workers)
-        else:
-            xrange = 1
-        self.cpu_figure.x_range.end = xrange * 100
-
-        update(self.source, result)
-
-    def _update_nbytes(self, workers: list) -> None:
-        """Update self.nbytes_figure"""
-
-        def quadlist(i) -> list:
-            out = []
-            for ii in i:
-                out += [ii, ii, ii, ii]
-            return out
-
-        width = []
-        x = []
-        color = []
-        text = []
-        max_limit = 0
-
-        for ws in workers:
-            meminfo = ws.memory
-            limit = getattr(ws, "memory_limit", 0)
-            max_limit = max(max_limit, limit, meminfo.process + meminfo.managed_spilled)
-            if limit and meminfo.process > limit:
-                color_i = "red"
-            elif limit and meminfo.process > limit / 2:
-                color_i = "orange"
-            else:
-                color_i = "blue"
-
-            width += [
-                meminfo.managed_in_memory,
-                meminfo.unmanaged_old,
-                meminfo.unmanaged_recent,
-                meminfo.managed_spilled,
-            ]
-            x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
-            color += [color_i, color_i, color_i, "grey"]
-            text.append(meminfo._repr_html_())
-
-        result = {
-            "width": width,
-            "x": x,
-            "color": color,
-            "alpha": [1, 0.7, 0.4, 1] * len(workers),
-            "text": quadlist(text),
-            "worker": quadlist(ws.address for ws in workers),
-            "escaped_worker": quadlist(escape.url_escape(ws.address) for ws in workers),
-            "y": quadlist(range(len(workers))),
-        }
-        # Remove rectangles with width=0
-        result = {k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()}
-
-        meminfo = self.scheduler.memory
-        self.nbytes_figure.title.text = (
-            f"Memory: managed {format_bytes(meminfo.managed_in_memory)}, "
-            f"unmanaged (old) {format_bytes(meminfo.unmanaged_old)}, "
-            f"unmanaged (recent) {format_bytes(meminfo.unmanaged_recent)}), "
-            f"spilled {format_bytes(meminfo.managed_spilled)}"
-        )
-        self.nbytes_figure.x_range.end = max_limit
-        update(self.source_nbytes, result)
+            update(self.source, result)
 
 
 class StealingTimeSeries(DashboardComponent):
@@ -2145,11 +2162,17 @@ def status_doc(scheduler, extra, doc):
         add_periodic_callback(doc, task_progress, 100)
 
         if len(scheduler.workers) < 50:
+            nbytes = NBytes(scheduler, sizing_mode="stretch_both")
+            nbytes.update()
             current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
             current_load.update()
+            add_periodic_callback(doc, nbytes, 100)
             add_periodic_callback(doc, current_load, 100)
-            doc.add_root(current_load.nbytes_figure)
+            current_load.processing_figure.y_range = nbytes.root.y_range
+
+            doc.add_root(nbytes.root)
             doc.add_root(current_load.processing_figure)
+
         else:
             nbytes_hist = NBytesHistogram(scheduler, sizing_mode="stretch_both")
             nbytes_hist.update()
@@ -2157,9 +2180,7 @@ def status_doc(scheduler, extra, doc):
             processing_hist.update()
             add_periodic_callback(doc, nbytes_hist, 100)
             add_periodic_callback(doc, processing_hist, 100)
-            current_load_fig = row(
-                nbytes_hist.root, processing_hist.root, sizing_mode="stretch_both"
-            )
+            row(nbytes_hist.root, processing_hist.root, sizing_mode="stretch_both")
 
             doc.add_root(nbytes_hist.root)
             doc.add_root(processing_hist.root)
@@ -2184,10 +2205,10 @@ def individual_task_stream_doc(scheduler, extra, doc):
 
 
 def individual_nbytes_doc(scheduler, extra, doc):
-    current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-    current_load.update()
-    add_periodic_callback(doc, current_load, 100)
-    doc.add_root(current_load.nbytes_figure)
+    fig = NBytes(scheduler, sizing_mode="stretch_both")
+    fig.update()
+    add_periodic_callback(doc, fig, 100)
+    doc.add_root(fig.root)
     doc.theme = BOKEH_THEME
 
 
