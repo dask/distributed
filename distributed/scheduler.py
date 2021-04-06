@@ -2134,7 +2134,7 @@ class SchedulerState:
                     wp_i: WorkerState
                     start: Py_ssize_t = self._n_tasks % n_workers
                     i: Py_ssize_t
-                    for i in range(0, n_workers):
+                    for i in range(n_workers):
                         wp_i = wp_vals[i + start % n_workers]
                         if wp_i._occupancy == 0:
                             ws = wp_i
