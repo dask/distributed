@@ -18,7 +18,7 @@ from dask.compatibility import apply
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.client import wait
 from distributed.comm import Comm
-from distributed.compatibility import MACOS
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -2203,9 +2203,13 @@ async def test_configurable_events_log_length(c, s, a, b):
     assert s.events["test"][2][1] == "dummy message 4"
 
 
-@gen_cluster(client=True)
-async def test_quiet_cluster_round_robin(c, s, a, b):
-    await c.submit(inc, 1)
-    await c.submit(inc, 2)
-    await c.submit(inc, 3)
-    assert a.log and b.log
+@gen_cluster()
+async def test_get_worker_monitor_info(s, a, b):
+    res = await s.get_worker_monitor_info()
+    ms = ["cpu", "time", "read_bytes", "write_bytes"]
+    if not WINDOWS:
+        ms += ["num_fds"]
+    for w in (a, b):
+        assert all(res[w.address]["range_query"][m] is not None for m in ms)
+        assert res[w.address]["count"] is not None
+        assert res[w.address]["last_time"] is not None
