@@ -46,7 +46,14 @@ from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize, serialize, Serialized
+from .protocol import (
+    Serialized,
+    deserialize_bytes,
+    pickle,
+    serialize,
+    serialize_bytelist,
+    to_serialize,
+)
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -3545,7 +3552,9 @@ def _serialized_task_arg(args):
 def dumps_task(task):
     """Serialize a dask task
 
-    Returns a dict of bytestrings that can each be loaded with ``loads``
+    Returns a dict of bytestrings that can each be loaded with ``loads``.
+    If any elements of the task are ``Serialized`` objects, the returned
+    dict elements will contain ``Serialized`` objects instead.
 
     Examples
     --------
@@ -3579,6 +3588,7 @@ def dumps_task(task):
 
 _warn_dumps_warned = [False]
 
+
 def _large_object_msg(nbytes, obj):
     s = str(obj)
     if len(s) > 70:
@@ -3595,6 +3605,7 @@ def _large_object_msg(nbytes, obj):
         % (format_bytes(nbytes), s)
     )
 
+
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """ Dump an object to bytes, warn if those bytes are large """
     b = dumps(obj, protocol=4)
@@ -3603,7 +3614,9 @@ def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
         warnings.warn(_large_object_msg(len(b), obj))
     return b
 
+
 _warn_serialize_warned = [False]
+
 
 def warn_serialize(obj, limit=1e6):
     """ Serialize an object, warn if the result is too large """
