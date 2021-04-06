@@ -46,7 +46,7 @@ from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize
+from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize, serialize, Serialized
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -3476,9 +3476,9 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
         function = loads_function(function)
-    if args:
+    if args and isinstance(args, bytes):
         args = pickle.loads(args)
-    if kwargs:
+    if kwargs and isinstance(kwargs, bytes):
         kwargs = pickle.loads(kwargs)
 
     if task is not no_value:
@@ -3512,19 +3512,34 @@ cache_dumps = LRU(maxsize=100)
 _cache_lock = threading.Lock()
 
 
+def _pickle_non_bytes(func):
+    # Used by `dumps_function`.
+    # Assume that we only want to pickle an
+    # object that is not already `bytes`.
+    return func if isinstance(func, bytes) else pickle.dumps(func, protocol=4)
+
+
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func, protocol=4)
+        result = _pickle_non_bytes(func)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
+        result = _pickle_non_bytes(func)
     return result
+
+
+def _serialized_task_arg(args):
+    # Simple utility to check if there are any Serialized
+    # element (or dict values) in `args`
+    if isinstance(args, dict):
+        return any(isinstance(arg, Serialized) for arg in args.values())
+    return any(isinstance(arg, Serialized) for arg in args)
 
 
 def dumps_task(task):
@@ -3549,37 +3564,54 @@ def dumps_task(task):
     """
     if istask(task):
         if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
+            # Use `warn_serialize` if any elements of `task` are `Serialized`.
+            # Otherwise, we can just use warn_dumps (pickle)
+            _dumps = warn_serialize if _serialized_task_arg(task[2:]) else warn_dumps
+            d = {"function": dumps_function(task[1]), "args": _dumps(task[2])}
             if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
+                d["kwargs"] = _dumps(task[3])
             return d
         elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
+            _dumps = warn_serialize if _serialized_task_arg(task[2:]) else warn_dumps
+            return {"function": dumps_function(task[0]), "args": _dumps(task[1:])}
+    return to_serialize(task, iterate_collection=True)
 
 
 _warn_dumps_warned = [False]
 
+def _large_object_msg(nbytes, obj):
+    s = str(obj)
+    if len(s) > 70:
+        s = s[:50] + " ... " + s[-15:]
+    return (
+        "Large object of size %s detected in task graph: \n"
+        "  %s\n"
+        "Consider scattering large objects ahead of time\n"
+        "with client.scatter to reduce scheduler burden and \n"
+        "keep data on workers\n\n"
+        "    future = client.submit(func, big_data)    # bad\n\n"
+        "    big_future = client.scatter(big_data)     # good\n"
+        "    future = client.submit(func, big_future)  # good"
+        % (format_bytes(nbytes), s)
+    )
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """ Dump an object to bytes, warn if those bytes are large """
     b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
-        s = str(obj)
-        if len(s) > 70:
-            s = s[:50] + " ... " + s[-15:]
-        warnings.warn(
-            "Large object of size %s detected in task graph: \n"
-            "  %s\n"
-            "Consider scattering large objects ahead of time\n"
-            "with client.scatter to reduce scheduler burden and \n"
-            "keep data on workers\n\n"
-            "    future = client.submit(func, big_data)    # bad\n\n"
-            "    big_future = client.scatter(big_data)     # good\n"
-            "    future = client.submit(func, big_future)  # good"
-            % (format_bytes(len(b)), s)
-        )
+        warnings.warn(_large_object_msg(len(b), obj))
+    return b
+
+_warn_serialize_warned = [False]
+
+def warn_serialize(obj, limit=1e6):
+    """ Serialize an object, warn if the result is too large """
+    b = Serialized(*serialize(obj, iterate_collection=True))
+    nbytes = sum(len(f) for f in b.frames)
+    if not _warn_serialize_warned[0] and nbytes > limit:
+        _warn_serialize_warned[0] = True
+        warnings.warn(_large_object_msg(nbytes, obj))
     return b
 
 

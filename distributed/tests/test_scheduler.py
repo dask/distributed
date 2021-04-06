@@ -22,6 +22,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
+from distributed.protocol import Serialized, serialize, dumps, loads
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
@@ -41,7 +42,7 @@ from distributed.utils_test import (  # noqa: F401
     tls_only_security,
     varying,
 )
-from distributed.worker import dumps_function, dumps_task
+from distributed.worker import dumps_function, dumps_task, warn_serialize
 
 if sys.version_info < (3, 8):
     try:
@@ -470,6 +471,11 @@ def test_dumps_function():
     c = dumps_function(dec)
     assert a != c
 
+    a = dumps_function(inc)
+    a2 = dumps_function(a)
+    assert a is a2
+    assert cloudpickle.loads(a2)(10) == 11
+
 
 def test_dumps_task():
     d = dumps_task((inc, 1))
@@ -485,6 +491,31 @@ def test_dumps_task():
     assert cloudpickle.loads(d["function"])(1, 2) == 3
     assert cloudpickle.loads(d["args"]) == (1,)
     assert set(d) == {"function", "args"}
+    arr = "special-data"
+    sarr = Serialized(*serialize(arr))
+
+    # Check that dumps_task properly uses warn_serialize
+    arr = "special-data"
+    sarr = Serialized(*serialize(arr))
+    task = (0, sarr, "('fake-key', 3)", None)
+    expect = (0, arr, "('fake-key', 3)", None)
+    d = dumps(dumps_task(task))
+    assert loads(d) == expect
+
+
+def test_warn_serialize():
+
+    arr = "special-data"
+    sarr = Serialized(*serialize(arr))
+
+    task = (0, sarr, "('fake-key', 3)", None)
+    expect = (0, arr, "('fake-key', 3)", None)
+
+    with pytest.warns(UserWarning):
+        warn_serialize(task, limit=1)
+
+    d = dumps(warn_serialize(task))
+    assert loads(d) == expect
 
 
 @gen_cluster()
