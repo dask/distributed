@@ -21,8 +21,8 @@ from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
+from distributed.protocol import Serialized, dumps, loads, serialize
 from distributed.protocol.pickle import dumps
-from distributed.protocol import Serialized, serialize, dumps, loads
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
