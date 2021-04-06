@@ -2213,3 +2213,11 @@ async def test_get_worker_monitor_info(s, a, b):
         assert all(res[w.address]["range_query"][m] is not None for m in ms)
         assert res[w.address]["count"] is not None
         assert res[w.address]["last_time"] is not None
+
+
+@gen_cluster(client=True)
+async def test_quiet_cluster_round_robin(c, s, a, b):
+    await c.submit(inc, 1)
+    await c.submit(inc, 2)
+    await c.submit(inc, 3)
+    assert a.log and b.log
