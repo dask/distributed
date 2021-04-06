@@ -1830,7 +1830,23 @@ async def test_no_danglng_asyncio_tasks(cleanup):
     assert tasks == start
 
 
-@gen_cluster(client=True)
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass
+
+
+@gen_cluster(client=True, Worker=NoSchedulerDelayWorker)
 async def test_task_groups(c, s, a, b):
     start = time()
     da = pytest.importorskip("dask.array")
