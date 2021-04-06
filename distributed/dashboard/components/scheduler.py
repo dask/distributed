@@ -231,9 +231,15 @@ class NBytesCluster(DashboardComponent):
                     "width": [0] * 4,
                     "x": [0] * 4,
                     "y": [0] * 4,
-                    "text": [""] * 4,
+                    "proc_memory": [0] * 4,
                     "color": ["blue", "blue", "blue", "grey"],
                     "alpha": [1, 0.7, 0.4, 1],
+                    "memtype": [
+                        "managed (in memory)",
+                        "unmanaged",
+                        "unmanaged, recently increased",
+                        "managed (spilled)",
+                    ],
                 }
             )
 
@@ -269,7 +275,7 @@ class NBytesCluster(DashboardComponent):
             self.root.yaxis.visible = False
 
             hover = HoverTool()
-            hover.tooltips = "@text{safe}"
+            hover.tooltips = "@proc_memory{0.00 b} (@width{0.00 b} @memtype)"
             hover.point_policy = "follow_mouse"
             self.root.add_tools(hover)
 
@@ -292,13 +298,11 @@ class NBytesCluster(DashboardComponent):
                 meminfo.unmanaged_recent,
                 meminfo.managed_spilled,
             ]
-            text = meminfo._repr_html_()
-
             result = {
                 "width": width,
                 "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
                 "color": [color, color, color, "grey"],
-                "text": [text] * 4,
+                "proc_memory": [meminfo.process] * 4,
             }
             self.root.x_range.end = limit
             update(self.source, result)
@@ -315,9 +319,10 @@ class NBytes(DashboardComponent):
                     "width": [],
                     "x": [],
                     "y": [],
-                    "text": [],
+                    "memtype": [],
                     "color": [],
                     "alpha": [],
+                    "proc_memory": [],
                     "worker": [],
                     "escaped_worker": [],
                 }
@@ -359,7 +364,7 @@ class NBytes(DashboardComponent):
             self.root.yaxis.visible = False
 
             hover = HoverTool()
-            hover.tooltips = "<b>@worker</b><br>\n@text{safe}"
+            hover.tooltips = "@worker: @proc_memory{0.00 b} (@width{0.00 b} @memtype)"
             hover.point_policy = "follow_mouse"
             self.root.add_tools(hover)
 
@@ -377,7 +382,7 @@ class NBytes(DashboardComponent):
             width = []
             x = []
             color = []
-            text = []
+            procmemory = []
             max_limit = 0
 
             for ws in workers:
@@ -401,14 +406,21 @@ class NBytes(DashboardComponent):
                 ]
                 x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
                 color += [color_i, color_i, color_i, "grey"]
-                text.append(meminfo._repr_html_())
+                procmemory.append(meminfo.process)
 
             result = {
                 "width": width,
                 "x": x,
                 "color": color,
                 "alpha": [1, 0.7, 0.4, 1] * len(workers),
-                "text": quadlist(text),
+                "memtype": [
+                    "managed (in memory)",
+                    "unmanaged",
+                    "unmanaged, recently increased",
+                    "managed (spilled)",
+                ]
+                * len(workers),
+                "proc_memory": quadlist(procmemory),
                 "worker": quadlist(ws.address for ws in workers),
                 "escaped_worker": quadlist(
                     escape.url_escape(ws.address) for ws in workers
