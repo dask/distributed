@@ -2126,22 +2126,19 @@ class SchedulerState:
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
                 ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
-                if ws._occupancy == 0:  # special case to use round-robin
+                if ws._occupancy == 0:
+                    # special case to use round-robin; linear search
+                    # for next worker with zero occupancy (or just
+                    # land back where we started).
                     wp_vals = worker_pool.values()
                     wp_i: WorkerState
                     start: Py_ssize_t = self._n_tasks % n_workers
                     i: Py_ssize_t
-                    for i in range(start, n_workers):
-                        wp_i = wp_vals[i]
+                    for i in range(0, n_workers):
+                        wp_i = wp_vals[i + start % n_workers]
                         if wp_i._occupancy == 0:
                             ws = wp_i
                             break
-                    else:
-                        for i in range(start):
-                            wp_i = wp_vals[i]
-                            if wp_i._occupancy == 0:
-                                ws = wp_i
-                                break
             else:  # dumb but fast in large case
                 ws = worker_pool.values()[self._n_tasks % n_workers]
 
