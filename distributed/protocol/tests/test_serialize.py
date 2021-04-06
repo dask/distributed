@@ -1,6 +1,6 @@
-from array import array
 import copy
 import pickle
+from array import array
 
 import msgpack
 import pytest
@@ -13,27 +13,27 @@ except ImportError:
 
 from dask.utils_test import inc
 
-from distributed import wait
+from distributed import Nanny, wait
+from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
-    register_serialization,
-    serialize,
-    deserialize,
-    nested_deserialize,
     Serialize,
     Serialized,
-    to_serialize,
-    serialize_bytes,
-    deserialize_bytes,
-    serialize_bytelist,
-    register_serialization_family,
     dask_serialize,
+    deserialize,
+    deserialize_bytes,
     dumps,
     loads,
+    nested_deserialize,
+    register_serialization,
+    register_serialization_family,
+    serialize,
+    serialize_bytelist,
+    serialize_bytes,
+    to_serialize,
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
-from distributed.utils_test import inc, gen_test
-from distributed.comm.utils import to_frames, from_frames
+from distributed.utils_test import gen_test, inc
 
 
 class MyObj:
@@ -163,8 +163,9 @@ def test_serialize_iterate_collection():
     assert loads(d) == expect
 
 
-from distributed.utils_test import gen_cluster
 from dask import delayed
+
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)
@@ -516,3 +517,17 @@ def test_ser_memoryview_object():
     data_in = memoryview(np.array(["hello"], dtype=object))
     with pytest.raises(TypeError):
         serialize(data_in, on_error="raise")
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_large_pickled_object(c, s, a, b):
+    np = pytest.importorskip("numpy")
+
+    class Data:
+        def __init__(self, n):
+            self.data = np.empty(n, dtype="u1")
+
+    x = Data(100_000_000)
+    y = await c.scatter(x, workers=[a.worker_address])
+    z = c.submit(lambda x: x, y, workers=[b.worker_address])
+    await z

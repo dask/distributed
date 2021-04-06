@@ -1,14 +1,13 @@
 import asyncio
-from collections import defaultdict
 import logging
 import uuid
+from collections import defaultdict
 
 from dask.utils import stringify
 
-from .client import Future, Client
-from .utils import sync, thread_state
+from .client import Client, Future
+from .utils import parse_timedelta, sync, thread_state
 from .worker import get_client, get_worker
-from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 

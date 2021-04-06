@@ -1,17 +1,17 @@
 import logging
+
 import msgpack
 
-from .compression import compressions, maybe_compress, decompress
+from .compression import compressions, decompress, maybe_compress
 from .serialize import (
     Serialize,
     Serialized,
+    merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
-    merge_and_deserialize,
     serialize_and_split,
 )
 from .utils import msgpack_opts
-
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +53,18 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                     iterate_collection = obj.iterate_collection
                     obj = obj.data
                 offset = len(frames)
-                sub_header, sub_frames = serialize_and_split(
-                    obj,
-                    serializers=serializers,
-                    on_error=on_error,
-                    context=context,
-                    iterate_collection=iterate_collection,
-                )
+                if typ is Serialized:
+                    sub_header, sub_frames = obj.header, obj.frames
+                else:
+                    sub_header, sub_frames = serialize_and_split(
+                        obj,
+                        serializers=serializers,
+                        on_error=on_error,
+                        context=context,
+                        iterate_collection=iterate_collection,
+                    )
+                    _inplace_compress_frames(sub_header, sub_frames)
                 sub_header["num-sub-frames"] = len(sub_frames)
-                _inplace_compress_frames(sub_header, sub_frames)
                 frames.append(
                     msgpack.dumps(
                         sub_header, default=msgpack_encode_default, use_bin_type=True

@@ -1,6 +1,64 @@
 Changelog
 =========
 
+2021.04.0
+---------
+
+Released on April 2, 2021
+
+- Fix un-merged frames (:pr:`4666`) `Matthew Rocklin`_
+- Add informative error message to install uvloop (:pr:`4664`) `Matthew Rocklin`_
+- Remove incorrect comment regarding default ``LocalCluster`` creation (:pr:`4660`) `cameron16`_
+- Treat empty/missing ``writeable`` as a no-op (:pr:`4659`) `jakirkham`_
+- Avoid list mutation in ``pickle_loads`` (:pr:`4653`) `Matthew Rocklin`_
+- Ignore ``OSError`` exception when scaling down (:pr:`4633`) `Gerald`_
+- Add ``isort`` to pre-commit hooks, package resorting (:pr:`4647`) `Charles Blackmon-Luca`_
+- Use powers-of-two when displaying RAM (:pr:`4649`) `crusaderky`_
+- Support Websocket communication protocols (:pr:`4396`) `Marcos Moyano`_
+- ``scheduler.py`` / ``worker.py`` code cleanup (:pr:`4626`) `crusaderky`_
+- Update out-of-date references to ``config.yaml`` (:pr:`4643`) `Hristo Georgiev`_
+- Suppress ``OSError`` on ``SpecCluster`` shutdown (:pr:`4567`) `Jacob Tomlinson`_
+- Replace conda with mamba (:pr:`4585`) `crusaderky`_
+- Expand documentation on pure functions (:pr:`4644`) `James Lamb`_
+
+
+2021.03.1
+---------
+
+Released on March 26, 2021
+
+- Add standalone dashboard page for GPU usage (:pr:`4556`) `Jacob Tomlinson`_
+- Handle ``stream is None`` case in TCP comm finalizer (:pr:`4631`) `James Bourbeau`_
+- Include ``LIST_PICKLE`` in NumPy array serialization (:pr:`4632`) `James Bourbeau`_
+- Rename annotation plugin in ``test_highlevelgraph.py`` (:pr:`4618`) `James Bourbeau`_
+- UCX use ``nbytes`` instead of ``len`` (:pr:`4621`) `Mads R. B. Kristensen`_
+- Skip NumPy and pandas tests if not importable (:pr:`4563`) `Ben Greiner`_
+- Remove ``utils.shutting_down`` in favor of ``sys.is_finalizing`` (:pr:`4624`) `James Bourbeau`_
+- Handle ``async`` clients when closing (:pr:`4623`) `Matthew Rocklin`_
+- Drop ``log`` from ``remove_key_from_stealable`` (:pr:`4609`) `jakirkham`_
+- Introduce events log length config option (:pr:`4615`) `Fabian Gebhart`_
+- Upstream config serialization and inheritance (:pr:`4372`) `Jacob Tomlinson`_
+- Add check to scheduler creation in ``SpecCluster`` (:pr:`4605`) `Jacob Tomlinson`_
+- Make length of events ``deque`` configurable (:pr:`4604`) `Fabian Gebhart`_
+- Add explicit ``fetch`` state to worker ``TaskState`` (:pr:`4470`) `Gil Forsyth`_
+- Update ``develop.rst`` (:pr:`4603`) `Florian Jetter`_
+- ``pickle_loads()``: Handle empty ``memoryview`` (:pr:`4595`) `Mads R. B. Kristensen`_
+- Switch documentation builds for PRs to readthedocs (:pr:`4599`) `James Bourbeau`_
+- Track frame sizes along with frames (:pr:`4593`) `jakirkham`_
+- Add support for a list of keys when using ``batch_size`` in ``client.map`` (:pr:`4592`) `Sultan Orazbayev`_
+- If ``SpecCluster`` fails to start attempt to gracefully close out again (:pr:`4590`) `Jacob Tomlinson`_
+- Multi-lock extension (:pr:`4503`) `Mads R. B. Kristensen`_
+- Update ``PipInstall`` plugin command (:pr:`4584`) `James Bourbeau`_
+- IPython magics: remove deprecated ``ioloop`` workarounds (:pr:`4530`) `Min RK`_
+- Add GitHub actions workflow to cancel duplicate builds (:pr:`4581`) `James Bourbeau`_
+- Remove outdated macOS build badge from ``README`` (:pr:`4576`) `James Bourbeau`_
+- Dask master -> main (:pr:`4569`) `Julia Signell`_
+- Drop support for Python 3.6 (:pr:`4390`) `James Bourbeau`_
+- Add docstring for ``dashboard_link`` property (:pr:`4572`) `Doug Davis`_
+- Change default branch from master to main (:pr:`4495`) `Julia Signell`_
+- Msgpack handles extract serialize (:pr:`4531`) `Mads R. B. Kristensen`_
+
+
 2021.03.0
 ---------
 
@@ -2229,3 +2287,13 @@ significantly without many new features.
 .. _`selshowk`: https://github.com/selshowk
 .. _`Ray Bell`: https://github.com/raybellwaves
 .. _`Casey Clements`: https://github.com/caseyclements
+.. _`Ben Greiner`: https://github.com/bnavigator
+.. _`Fabian Gebhart`: https://github.com/fgebhart
+.. _`Sultan Orazbayev`: https://github.com/SultanOrazbayev
+.. _`Doug Davis`: https://github.com/douglasdavis
+.. _`cameron16`: https://github.com/cameron16
+.. _`Gerald`: https://github.com/gerald732
+.. _`Charles Blackmon-Luca`: https://github.com/charlesbluca
+.. _`Marcos Moyano`: https://github.com/marcosmoyano
+.. _`James Lamb`: https://github.com/jameslamb
+.. _`Hristo Georgiev`: https://github.com/hristog

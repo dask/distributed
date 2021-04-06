@@ -1,89 +1,85 @@
 import asyncio
-from collections import defaultdict, deque
-
-from collections.abc import Mapping, Set
-from contextlib import suppress
-from datetime import timedelta
-from functools import partial
 import inspect
 import itertools
 import json
 import logging
 import math
-from numbers import Number
 import operator
 import os
-import sys
 import random
+import sys
 import warnings
 import weakref
+from collections import defaultdict, deque
+from collections.abc import Mapping, Set
+from contextlib import suppress
+from datetime import timedelta
+from functools import partial
+from numbers import Number
+
 import psutil
 import sortedcontainers
-
 from tlz import (
-    merge,
-    pluck,
-    merge_sorted,
-    first,
-    merge_with,
-    valmap,
-    second,
     compose,
-    groupby,
     concat,
+    first,
+    groupby,
+    merge,
+    merge_sorted,
+    merge_with,
+    pluck,
+    second,
+    valmap,
 )
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
 
-from . import profile
+from . import preloading, profile
+from . import versions as version_module
 from .batched import BatchedSend
 from .comm import (
+    get_address_host,
     normalize_address,
     resolve_address,
-    get_address_host,
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import rpc, send_recv, clean_exception, CommClosedError, Status
+from .core import CommClosedError, Status, clean_exception, rpc, send_recv
 from .diagnostics.plugin import SchedulerPlugin
-
+from .event import EventExtension
 from .http import get_handlers
+from .lock import LockExtension
 from .metrics import time
+from .multi_lock import MultiLockExtension
 from .node import ServerNode
-from . import preloading
 from .proctitle import setproctitle
+from .publish import PublishExtension
+from .pubsub import PubSubSchedulerExtension
+from .queues import QueueExtension
+from .recreate_exceptions import ReplayExceptionScheduler
 from .security import Security
+from .semaphore import SemaphoreExtension
+from .stealing import WorkStealing
 from .utils import (
     All,
-    get_fileno_limit,
-    log_errors,
-    key_split,
-    validate_key,
-    no_default,
-    parse_timedelta,
-    parse_bytes,
-    key_split_group,
+    TimeoutError,
     empty_context,
-    tmpfile,
     format_bytes,
     format_time,
-    TimeoutError,
+    get_fileno_limit,
+    key_split,
+    key_split_group,
+    log_errors,
+    no_default,
+    parse_bytes,
+    parse_timedelta,
+    tmpfile,
+    validate_key,
 )
-from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
-from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
-from . import versions as version_module
-
-from .publish import PublishExtension
-from .queues import QueueExtension
-from .semaphore import SemaphoreExtension
-from .recreate_exceptions import ReplayExceptionScheduler
-from .lock import LockExtension
-from .multi_lock import MultiLockExtension
-from .event import EventExtension
-from .pubsub import PubSubSchedulerExtension
-from .stealing import WorkStealing
+from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
+from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from .variable import VariableExtension
 
 try:
@@ -93,6 +89,8 @@ except ImportError:
 
 if compiled:
     from cython import (
+        Py_hash_t,
+        Py_ssize_t,
         bint,
         cast,
         ccall,
@@ -104,15 +102,11 @@ if compiled:
         final,
         inline,
         nogil,
-        Py_hash_t,
-        Py_ssize_t,
     )
 else:
-    from ctypes import (
-        c_double as double,
-        c_ssize_t as Py_hash_t,
-        c_ssize_t as Py_ssize_t,
-    )
+    from ctypes import c_double as double
+    from ctypes import c_ssize_t as Py_hash_t
+    from ctypes import c_ssize_t as Py_ssize_t
 
     bint = bool
 
@@ -3604,29 +3598,27 @@ class Scheduler(SchedulerState, ServerNode):
     def heartbeat_worker(
         self,
         comm=None,
-        address=None,
-        resolve_address=True,
-        now=None,
-        resources=None,
-        host_info=None,
-        metrics=None,
-        executing=None,
+        *,
+        address,
+        resolve_address: bool = True,
+        now: float = None,
+        resources: dict = None,
+        host_info: dict = None,
+        metrics: dict,
+        executing: dict = None,
     ):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        if address not in parent._workers:
+        ws: WorkerState = parent._workers.get(address)
+        if ws is None:
             return {"status": "missing"}
 
         host = get_address_host(address)
         local_now = time()
-        now = now or time()
-        assert metrics
         host_info = host_info or {}
 
-        dh: dict = parent._host_info.get(host)
-        if dh is None:
-            parent._host_info[host] = dh = dict()
+        dh: dict = parent._host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
         frac = 1 / len(parent._workers)
@@ -3650,26 +3642,20 @@ class Scheduler(SchedulerState, ServerNode):
                     1 - alpha
                 )
 
-        ws: WorkerState = parent._workers[address]
-
-        ws._last_seen = time()
-
+        ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
                 parent._tasks[key]: duration for key, duration in executing.items()
             }
 
-        if metrics:
-            ws._metrics = metrics
+        ws._metrics = metrics
 
         if host_info:
-            dh: dict = parent._host_info.get(host)
-            if dh is None:
-                parent._host_info[host] = dh = dict()
+            dh: dict = parent._host_info.setdefault(host, {})
             dh.update(host_info)
 
-        delay = time() - now
-        ws._time_delay = delay
+        if now:
+            ws._time_delay = local_now - now
 
         if resources:
             self.add_resources(worker=address, resources=resources)
@@ -3678,7 +3664,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {
             "status": "OK",
-            "time": time(),
+            "time": local_now,
             "heartbeat-interval": heartbeat_interval(len(parent._workers)),
         }
 
@@ -3756,7 +3742,7 @@ class Scheduler(SchedulerState, ServerNode):
             parent._total_nthreads += nthreads
             parent._aliases[name] = address
 
-            response = self.heartbeat_worker(
+            self.heartbeat_worker(
                 address=address,
                 resolve_address=resolve_address,
                 now=now,
@@ -5331,7 +5317,7 @@ class Scheduler(SchedulerState, ServerNode):
                     map(first, sorted(worker_bytes.items(), key=second, reverse=True))
                 )
 
-                recipients = iter(reversed(sorted_workers))
+                recipients = reversed(sorted_workers)
                 recipient = next(recipients)
                 msgs = []  # (sender, recipient, key)
                 for sender in sorted_workers[: len(workers) // 2]:
@@ -5343,11 +5329,8 @@ class Scheduler(SchedulerState, ServerNode):
                     )
 
                     try:
-                        while worker_bytes[sender] > avg:
-                            while (
-                                worker_bytes[recipient] < avg
-                                and worker_bytes[sender] > avg
-                            ):
+                        while avg < worker_bytes[sender]:
+                            while worker_bytes[recipient] < avg < worker_bytes[sender]:
                                 ts, nb = next(sender_keys)
                                 if ts not in tasks_by_worker[recipient]:
                                     tasks_by_worker[recipient].add(ts)
@@ -5355,7 +5338,7 @@ class Scheduler(SchedulerState, ServerNode):
                                     msgs.append((sender, recipient, ts))
                                     worker_bytes[sender] -= nb
                                     worker_bytes[recipient] += nb
-                            if worker_bytes[sender] > avg:
+                            if avg < worker_bytes[sender]:
                                 recipient = next(recipients)
                     except StopIteration:
                         break
@@ -5386,7 +5369,7 @@ class Scheduler(SchedulerState, ServerNode):
                     },
                 )
 
-                if not all(r["status"] == "OK" for r in result):
+                if any(r["status"] != "OK" for r in result):
                     return {
                         "status": "missing-data",
                         "keys": tuple(
@@ -5687,7 +5670,7 @@ class Scheduler(SchedulerState, ServerNode):
         workers: list (optional)
             List of worker addresses to retire.
             If not provided we call ``workers_to_close`` which finds a good set
-        workers_names: list (optional)
+        names: list (optional)
             List of worker names to retire.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
@@ -5715,30 +5698,31 @@ class Scheduler(SchedulerState, ServerNode):
         with log_errors():
             async with self._lock if lock else empty_context:
                 if names is not None:
+                    if workers is not None:
+                        raise TypeError("names and workers are mutually exclusive")
                     if names:
                         logger.info("Retire worker names %s", names)
                     names = set(map(str, names))
-                    workers = [
+                    workers = {
                         ws._address
                         for ws in parent._workers_dv.values()
                         if str(ws._name) in names
-                    ]
-                if workers is None:
+                    }
+                elif workers is None:
                     while True:
                         try:
                             workers = self.workers_to_close(**kwargs)
-                            if workers:
-                                workers = await self.retire_workers(
-                                    workers=workers,
-                                    remove=remove,
-                                    close_workers=close_workers,
-                                    lock=False,
-                                )
-                                return workers
-                            else:
+                            if not workers:
                                 return {}
+                            return await self.retire_workers(
+                                workers=workers,
+                                remove=remove,
+                                close_workers=close_workers,
+                                lock=False,
+                            )
                         except KeyError:  # keys left during replicate
                             pass
+
                 workers = {
                     parent._workers_dv[w] for w in workers if w in parent._workers_dv
                 }
@@ -5750,22 +5734,21 @@ class Scheduler(SchedulerState, ServerNode):
                 keys = set.union(*[w.has_what for w in workers])
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
-                other_workers = set(parent._workers_dv.values()) - workers
                 if keys:
-                    if other_workers:
-                        logger.info("Moving %d keys to other workers", len(keys))
-                        await self.replicate(
-                            keys=keys,
-                            workers=[ws._address for ws in other_workers],
-                            n=1,
-                            delete=False,
-                            lock=False,
-                        )
-                    else:
+                    other_workers = set(parent._workers_dv.values()) - workers
+                    if not other_workers:
                         return {}
+                    logger.info("Moving %d keys to other workers", len(keys))
+                    await self.replicate(
+                        keys=keys,
+                        workers=[ws._address for ws in other_workers],
+                        n=1,
+                        delete=False,
+                        lock=False,
+                    )
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
-                if close_workers and worker_keys:
+                if close_workers:
                     await asyncio.gather(
                         *[self.close_worker(worker=w, safe=True) for w in worker_keys]
                     )
@@ -6390,16 +6373,16 @@ class Scheduler(SchedulerState, ServerNode):
         for k in sorted(timespent.keys()):
             tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
 
-        from .diagnostics.task_stream import rectangles
         from .dashboard.components.scheduler import task_stream_figure
+        from .diagnostics.task_stream import rectangles
 
         rects = rectangles(task_stream)
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
         source.data.update(rects)
 
         from distributed.dashboard.components.scheduler import (
-            BandwidthWorkers,
             BandwidthTypes,
+            BandwidthWorkers,
         )
 
         bandwidth_workers = BandwidthWorkers(self, sizing_mode="stretch_both")
@@ -6407,7 +6390,8 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
 
-        from bokeh.models import Panel, Tabs, Div
+        from bokeh.models import Div, Panel, Tabs
+
         import distributed
 
         # HTML
@@ -6476,8 +6460,8 @@ class Scheduler(SchedulerState, ServerNode):
             ]
         )
 
-        from bokeh.plotting import save, output_file
         from bokeh.core.templates import get_env
+        from bokeh.plotting import output_file, save
 
         with tmpfile(extension=".html") as fn:
             output_file(filename=fn, title="Dask Performance Report")
@@ -6515,6 +6499,18 @@ class Scheduler(SchedulerState, ServerNode):
             return tuple(self.events[topic])
         else:
             return valmap(tuple, self.events)
+
+    async def get_worker_monitor_info(self, recent=False, starts=None):
+        parent: SchedulerState = cast(SchedulerState, self)
+        if starts is None:
+            starts = {}
+        results = await asyncio.gather(
+            *(
+                self.rpc(w).get_monitor_info(recent=recent, start=starts.get(w, 0))
+                for w in parent._workers_dv
+            )
+        )
+        return dict(zip(parent._workers_dv, results))
 
     ###########
     # Cleanup #

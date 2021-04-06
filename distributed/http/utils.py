@@ -2,11 +2,10 @@ import importlib
 import os
 from typing import List
 
-from tornado import web
 import toolz
+from tornado import web
 
 from ..utils import has_keyword
-
 
 dirname = os.path.dirname(__file__)
 

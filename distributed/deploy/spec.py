@@ -1,29 +1,29 @@
 import asyncio
 import atexit
-from contextlib import suppress
 import copy
 import logging
 import math
-import weakref
 import warnings
+import weakref
+from contextlib import suppress
 
-import dask
 from tornado import gen
 
-from .adaptive import Adaptive
-from .cluster import Cluster
-from ..core import rpc, CommClosedError, Status
-from ..utils import (
-    LoopRunner,
-    silence_logging,
-    parse_bytes,
-    parse_timedelta,
-    import_term,
-    TimeoutError,
-)
+import dask
+
+from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-
+from ..utils import (
+    LoopRunner,
+    TimeoutError,
+    import_term,
+    parse_bytes,
+    parse_timedelta,
+    silence_logging,
+)
+from .adaptive import Adaptive
+from .cluster import Cluster
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +414,7 @@ class SpecCluster(Cluster):
             for future in self._futures:
                 await future
             async with self._lock:
-                with suppress(CommClosedError):
+                with suppress(CommClosedError, OSError):
                     if self.scheduler_comm:
                         await self.scheduler_comm.close(close_workers=True)
                     else:

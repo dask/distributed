@@ -3,13 +3,20 @@ import gc
 import math
 from time import sleep
 
-import dask
 import pytest
 
-from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
-from distributed.utils_test import gen_test, slowinc, clean
-from distributed.utils_test import loop, nodebug, cleanup  # noqa: F401
+import dask
+
+from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    clean,
+    cleanup,
+    gen_test,
+    loop,
+    nodebug,
+    slowinc,
+)
 
 
 @pytest.mark.asyncio

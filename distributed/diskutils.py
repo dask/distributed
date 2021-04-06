@@ -11,7 +11,6 @@ import dask
 
 from . import locket
 
-
 logger = logging.getLogger(__name__)
 
 DIR_LOCK_EXT = ".dirlock"

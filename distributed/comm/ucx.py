@@ -11,19 +11,19 @@ import weakref
 
 import dask
 
-from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener, CommClosedError
-from .registry import Backend, backends
-from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import (
+    CancelledError,
     ensure_ip,
     get_ip,
     get_ipv6,
-    nbytes,
     log_errors,
-    CancelledError,
+    nbytes,
     parse_bytes,
 )
+from .addressing import parse_host_port, unparse_host_port
+from .core import Comm, CommClosedError, Connector, Listener
+from .registry import Backend, backends
+from .utils import ensure_concrete_host, from_frames, to_frames
 
 logger = logging.getLogger(__name__)
 
