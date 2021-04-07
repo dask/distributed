@@ -3549,7 +3549,7 @@ def _serialized_task_arg(args):
     return any(isinstance(arg, Serialized) for arg in args)
 
 
-def dumps_task(task):
+def dumps_task(task, check_task=True):
     """Serialize a dask task
 
     Returns a dict of bytestrings that can each be loaded with ``loads``.
@@ -3571,7 +3571,7 @@ def dumps_task(task):
     >>> dumps_task(1)  # doctest: +SKIP
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
-    if istask(task):
+    if not check_task or istask(task):
         if task[0] is apply and not any(map(_maybe_complex, task[2:])):
             # Use `warn_serialize` if any elements of `task` are `Serialized`.
             # Otherwise, we can just use warn_dumps (pickle)
