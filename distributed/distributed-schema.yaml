@@ -817,8 +817,8 @@ properties:
       cuda_copy:
         type: boolean
         description: |
-          Set environment variables to enable CUDA transfers over UCX, even if InfiniBand and
-          NVLink are not supported or disabled.
+          Set environment variables to enable CUDA support over UCX. This may be used even if
+          InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
       tcp:
         type: boolean
         description: |
