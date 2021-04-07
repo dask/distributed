@@ -176,6 +176,7 @@ async def test_connection_made_with_extra_conn_args(cleanup, protocol, security)
         connection_args = security.get_connection_args("worker")
         comm = await connect(s.address, **connection_args)
         assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+        await comm.close()
 
 
 @pytest.mark.asyncio
