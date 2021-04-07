@@ -156,6 +156,29 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "protocol,security",
+    [
+        (
+            "ws://",
+            Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
+        ),
+        (
+            "wss://",
+            Security.temporary(
+                extra_conn_args={"headers": {"Authorization": "Token abcd"}}
+            ),
+        ),
+    ],
+)
+async def test_connection_made_with_extra_conn_args(cleanup, protocol, security):
+    async with Scheduler(protocol=protocol, security=security) as s:
+        connection_args = security.get_connection_args("worker")
+        comm = await connect(s.address, **connection_args)
+        assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+
+
+@pytest.mark.asyncio
 async def test_quiet_close(cleanup):
     with warnings.catch_warnings(record=True) as record:
         async with Client(protocol="ws", processes=False, asynchronous=True) as c:
