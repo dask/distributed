@@ -3544,7 +3544,7 @@ def dumps_function(func):
 def dumps_task(task):
     """Serialize a dask task
 
-    Returns a dict of bytestrings that can each be loaded with ``loads``.
+    Returns a dict of bytestrings that can each be loaded with ``loads``
 
     Examples
     --------
