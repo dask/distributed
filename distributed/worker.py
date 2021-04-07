@@ -3541,20 +3541,10 @@ def dumps_function(func):
     return result
 
 
-def _serialized_task_arg(args):
-    # Simple utility to check if there are any Serialized
-    # element (or dict values) in `args`
-    if isinstance(args, dict):
-        return any(isinstance(arg, Serialized) for arg in args.values())
-    return any(isinstance(arg, Serialized) for arg in args)
-
-
-def dumps_task(task, check_task=True):
+def dumps_task(task):
     """Serialize a dask task
 
     Returns a dict of bytestrings that can each be loaded with ``loads``.
-    If any elements of the task are ``Serialized`` objects, the returned
-    dict elements will contain ``Serialized`` objects instead.
 
     Examples
     --------
@@ -3571,18 +3561,38 @@ def dumps_task(task, check_task=True):
     >>> dumps_task(1)  # doctest: +SKIP
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
-    if not check_task or istask(task):
+    if istask(task):
         if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            # Use `warn_serialize` if any elements of `task` are `Serialized`.
-            # Otherwise, we can just use warn_dumps (pickle)
-            _dumps = warn_serialize if _serialized_task_arg(task[2:]) else warn_dumps
-            d = {"function": dumps_function(task[1]), "args": _dumps(task[2])}
+            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
             if len(task) == 4:
-                d["kwargs"] = _dumps(task[3])
+                d["kwargs"] = warn_dumps(task[3])
             return d
         elif not any(map(_maybe_complex, task[1:])):
-            _dumps = warn_serialize if _serialized_task_arg(task[2:]) else warn_dumps
-            return {"function": dumps_function(task[0]), "args": _dumps(task[1:])}
+            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
+    return to_serialize(task)
+
+
+def serialize_task(task, dump_args=False, dump_kwargs=False):
+    """Serialize an object that is gueranteed to be a task
+
+    This function is similar to ``dumps_task``, but is designed to
+    handle a task that already has one or more elements serialized.
+    If it is known that the args and/or kwargs contain no `Serialized`
+    objects, the ``dump_args`` and/or ``dumps_kwargs`` options can
+    be used to avoid serializing the seperate elements of args/kwargs.
+    """
+    if task[0] is apply and not any(map(_maybe_complex, task[2:])):
+        # Use `warn_serialize` if any elements of `task` are `Serialized`.
+        # Otherwise, we can just use warn_dumps (pickle)
+        _dumps = warn_dumps if dump_args else warn_serialize
+        d = {"function": dumps_function(task[1]), "args": _dumps(task[2])}
+        if len(task) == 4:
+            _dumps = warn_dumps if dump_kwargs else warn_serialize
+            d["kwargs"] = _dumps(task[3])
+        return d
+    elif not any(map(_maybe_complex, task[1:])):
+        _dumps = warn_dumps if dump_args else warn_serialize
+        return {"function": dumps_function(task[0]), "args": _dumps(task[1:])}
     return to_serialize(task, iterate_collection=True)
 
 
