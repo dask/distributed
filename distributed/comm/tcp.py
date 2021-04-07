@@ -133,7 +133,7 @@ def _close_comm(ref):
 
     Parameters
     ----------
-        ref: weak reference to a Dask comm
+    ref : weak reference to a Dask comm
     """
     comm = ref()
     if comm:

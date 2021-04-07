@@ -403,7 +403,7 @@ def progress(*futures, notebook=None, multi=True, complete=True, **kwargs):
 
     Parameters
     ----------
-    futures : Futures
+    *futures : Futures
         A list of futures or keys to track
     notebook : bool (optional)
         Running in the notebook or not (defaults to guess)

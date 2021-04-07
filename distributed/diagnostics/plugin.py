@@ -150,7 +150,7 @@ class WorkerPlugin:
             One of waiting, ready, executing, long-running, memory, error.
         finish : string
             Final state of the transition.
-        kwargs : More options passed when transitioning
+        **kwargs : More options passed when transitioning
         """
 
     def release_key(self, key, state, cause, reason, report):

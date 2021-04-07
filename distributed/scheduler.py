@@ -6117,7 +6117,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         See Also
         --------
-        Scheduler.transitions: transitive version of this function
+        Scheduler.transitions : transitive version of this function
         """
         parent: SchedulerState = cast(SchedulerState, self)
         recommendations: dict

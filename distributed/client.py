@@ -1624,7 +1624,7 @@ class Client:
         Parameters
         ----------
         func : callable
-        iterables : Iterables
+        *iterables : Iterables
             List-like objects to map over.  They should have the same length.
         key : str, list
             Prefix for task names if string.  Explicit names if list.
@@ -2273,11 +2273,11 @@ class Client:
 
         Parameters
         ----------
-        args : list of objects to publish as name
+        *args : list of objects to publish as name
         name : optional name of the dataset to publish
         override : bool (optional, default False)
             if true, override any already present dataset with the same name
-        kwargs : dict
+        **kwargs : dict
             named collections to publish on the scheduler
 
         Examples
@@ -2360,7 +2360,7 @@ class Client:
         name : name of the dataset to retrieve
         default : optional, not set by default
             If set, do not raise a KeyError if the name is not present but return this default
-        kwargs : dict
+        **kwargs : dict
             additional arguments to _get_dataset
 
         See Also

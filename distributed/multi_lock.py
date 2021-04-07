@@ -49,15 +49,15 @@ class MultiLockExtension:
 
         Parameters
         ----------
-        locks: List[str]
+        locks : List[str]
             Names of the locks to request.
-        id: Hashable
+        id : Hashable
             Identifier of the `MultiLock` instance requesting the locks.
-        num_locks: int
+        num_locks : int
             Number of locks in `locks` requesting
 
-        Return
-        ------
+        Returns
+        -------
         result: bool
             Whether `num_locks` requested locks are free immediately or not.
         """
@@ -82,9 +82,9 @@ class MultiLockExtension:
 
         Parameters
         ----------
-        locks: List[str]
+        locks : List[str]
             Names of the locks to refain.
-        id: Hashable
+        id : Hashable
             Identifier of the `MultiLock` instance refraining the locks.
         """
         waiters_ready = set()
