@@ -1,6 +1,27 @@
 Changelog
 =========
 
+2021.04.0
+---------
+
+Released on April 2, 2021
+
+- Fix un-merged frames (:pr:`4666`) `Matthew Rocklin`_
+- Add informative error message to install uvloop (:pr:`4664`) `Matthew Rocklin`_
+- Remove incorrect comment regarding default ``LocalCluster`` creation (:pr:`4660`) `cameron16`_
+- Treat empty/missing ``writeable`` as a no-op (:pr:`4659`) `jakirkham`_
+- Avoid list mutation in ``pickle_loads`` (:pr:`4653`) `Matthew Rocklin`_
+- Ignore ``OSError`` exception when scaling down (:pr:`4633`) `Gerald`_
+- Add ``isort`` to pre-commit hooks, package resorting (:pr:`4647`) `Charles Blackmon-Luca`_
+- Use powers-of-two when displaying RAM (:pr:`4649`) `crusaderky`_
+- Support Websocket communication protocols (:pr:`4396`) `Marcos Moyano`_
+- ``scheduler.py`` / ``worker.py`` code cleanup (:pr:`4626`) `crusaderky`_
+- Update out-of-date references to ``config.yaml`` (:pr:`4643`) `Hristo Georgiev`_
+- Suppress ``OSError`` on ``SpecCluster`` shutdown (:pr:`4567`) `Jacob Tomlinson`_
+- Replace conda with mamba (:pr:`4585`) `crusaderky`_
+- Expand documentation on pure functions (:pr:`4644`) `James Lamb`_
+
+
 2021.03.1
 ---------
 
@@ -2270,3 +2291,9 @@ significantly without many new features.
 .. _`Fabian Gebhart`: https://github.com/fgebhart
 .. _`Sultan Orazbayev`: https://github.com/SultanOrazbayev
 .. _`Doug Davis`: https://github.com/douglasdavis
+.. _`cameron16`: https://github.com/cameron16
+.. _`Gerald`: https://github.com/gerald732
+.. _`Charles Blackmon-Luca`: https://github.com/charlesbluca
+.. _`Marcos Moyano`: https://github.com/marcosmoyano
+.. _`James Lamb`: https://github.com/jameslamb
+.. _`Hristo Georgiev`: https://github.com/hristog
