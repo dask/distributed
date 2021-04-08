@@ -840,7 +840,13 @@ properties:
       net-devices:
         type: [string, 'null']
         description: |
-          Name of interface used by workers for UCX communication.
+          Interface(s) used by workers for UCX communication. Can be a string (like
+          ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
+          (requires ``ucx.infiniband=True``) to pick the optimal interface per-worker based on
+          the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
+          all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
+          and compiled with hwloc support. Unexpected errors can occur when using
+          ``"auto"`` if any interfaces are disconnected or improperly configured.
       reuse-endpoints:
         type: boolean
         description: | 
