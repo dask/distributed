@@ -3513,7 +3513,7 @@ async def test_restart_timeout_is_logged(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.client")) as logger:
         await c.restart(timeout=0.5)
     text = logger.getvalue()
-    assert "Restart timed out after 0.500000 seconds" in text
+    assert "Restart timed out after 0.50 seconds" in text
 
 
 def test_get_stops_work_after_error(c):

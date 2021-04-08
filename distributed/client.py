@@ -2985,7 +2985,7 @@ class Client:
         try:
             await asyncio.wait_for(self._restart_event.wait(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out after %f seconds", timeout)
+            logger.error("Restart timed out after %.2f seconds", timeout)
             pass
         self.generation += 1
         with self._refcount_lock:
