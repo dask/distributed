@@ -435,7 +435,8 @@ async def readone(comm):
         return msg
 
 
-def run_scheduler(q, nputs, port=0, **kwargs):
+def run_scheduler(q, nputs, port=0, log_queue=None, **kwargs):
+    register_queue_handler(log_queue=log_queue)
     from distributed import Scheduler
 
     # On Python 2.7 and Unix, fork() is used to spawn child processes,
@@ -456,7 +457,8 @@ def run_scheduler(q, nputs, port=0, **kwargs):
             loop.close(all_fds=True)
 
 
-def run_worker(q, scheduler_q, **kwargs):
+def run_worker(q, scheduler_q, log_queue, **kwargs):
+    register_queue_handler(log_queue=log_queue)
     from distributed import Worker
 
     reset_logger_locks()
@@ -475,7 +477,19 @@ def run_worker(q, scheduler_q, **kwargs):
                 loop.close(all_fds=True)
 
 
-def run_nanny(q, scheduler_q, **kwargs):
+def register_queue_handler(log_queue):
+    if not log_queue:
+        return
+    import logging
+
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    for name in logging.root.manager.loggerDict:
+        logger = logging.getLogger(name)
+        logger.addHandler(queue_handler)
+
+
+def run_nanny(q, scheduler_q, log_queue, **kwargs):
+    register_queue_handler(log_queue)
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
@@ -595,6 +609,7 @@ def cluster(
     active_rpc_timeout=10,
     disconnect_timeout=20,
     scheduler_kwargs={},
+    log_queue=None,
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -607,7 +622,8 @@ def cluster(
 
         # The scheduler queue will receive the scheduler's address
         scheduler_q = mp_context.Queue()
-
+        # log_queue = mp_context.Queue()
+        scheduler_kwargs["log_queue"] = log_queue
         # Launch scheduler
         scheduler = mp_context.Process(
             name="Dask cluster test: Scheduler",
@@ -635,7 +651,7 @@ def cluster(
             proc = mp_context.Process(
                 name="Dask cluster test: Worker",
                 target=_run_worker,
-                args=(q, scheduler_q),
+                args=(q, scheduler_q, log_queue),
                 kwargs=kwargs,
             )
             ws.add(proc)

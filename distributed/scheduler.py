@@ -3645,7 +3645,12 @@ class Scheduler(SchedulerState, ServerNode):
         ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
-                parent._tasks[key]: duration for key, duration in executing.items()
+                parent._tasks[key]: duration
+                for key, duration in executing.items()
+                # key might've been already released and forgotten but the
+                # worker issued the hearbeat before it was made aware of
+                # this
+                if key in parent._tasks
             }
 
         ws._metrics = metrics

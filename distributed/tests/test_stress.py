@@ -1,4 +1,5 @@
 import asyncio
+import queue
 import random
 import sys
 from contextlib import suppress
@@ -86,6 +87,69 @@ def test_cancel_stress_sync(loop):
                 f = c.compute(y)
                 sleep(random.random())
                 c.cancel(f)
+
+
+from distributed.utils import mp_context
+
+
+# TODO parameterize over task runtime. That catches different edge cases, e.g. 0.1 vs 1s
+def test_cancel_stress_plain_future_sync(loop):
+    """
+    This is a large quantity compute/cancel workflow in a sync context which can
+    reveal various race conditions in the task state on scheduler and worker
+    side.
+    """
+    timeout = 5
+    log_que = mp_context.Queue()
+
+    # What happens
+    # * Task is scheduled and properly transitioned to executed on the worker
+    # * Task is moved to the threadpool, marked ready, put into active threads
+    # * Task is canceled but thread is still running, i..e active_threads is
+    #   still populated
+    # * State is cleaned up on the worker with the exception of the currently
+    #   running task
+    # * Task is rescheduled but no longer exists in Worker.tasks and is
+    #   therefore recreated and initialized to state ready From here, two things
+    #   can happen
+    # 1. The original thread finishes and tries the transition ready->memory
+    #    which raises an exception since this does not exist
+    # 2. The hearbeat tries to communicate the currently executing tasks via
+    #    active_threads although the task is not in executing state
+    # 2.a. Task does not exist at all in which case it is skipped via `key in
+    #    tasks` guard
+    # 2.b. Task is in tasks but in ready state with not existing start_time ->
+    #    Exception
+    # 2.b.1 In a scenario with workers with more than one thread this could lead
+    #    to simultaneous scheduling and improper executing times being submitted
+    #    to the scheduler (big deal??)
+
+    def workload(x):
+        import time
+
+        time.sleep(1)
+        pass
+
+    with cluster(log_queue=log_que) as (s, [a, b]):
+        with Client(s["address"], loop=loop) as client:
+            import time
+
+            start = time.time()
+            while time.time() - start < timeout:
+                while True:
+                    try:
+                        futs = client.map(workload, range(100))
+                        client.cancel(futs)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+
+    while not log_que.empty():
+        try:
+            rec = log_que.get_nowait()
+            assert "Error" not in rec.msg
+        except queue.Empty:
+            break
 
 
 @gen_cluster(nthreads=[], client=True, timeout=None)
