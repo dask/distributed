@@ -2978,6 +2978,8 @@ class Client:
     async def _restart(self, timeout=no_default):
         if timeout == no_default:
             timeout = self._timeout * 2
+        if timeout is not None:
+            timeout = parse_timedelta(timeout, "s")
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = asyncio.Event()
         try:
