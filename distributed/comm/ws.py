@@ -380,7 +380,7 @@ class WSConnector(Connector):
         return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):
-        return {}
+        return {**connection_args.get("extra_conn_args", {})}
 
 
 class WSSConnector(WSConnector):
@@ -389,7 +389,7 @@ class WSSConnector(WSConnector):
 
     def _get_connect_args(self, **connection_args):
         ctx = _expect_tls_context(connection_args)
-        return {"ssl_options": ctx}
+        return {"ssl_options": ctx, **connection_args.get("extra_conn_args", {})}
 
 
 class WSBackend(BaseTCPBackend):
