@@ -3512,25 +3512,18 @@ cache_dumps = LRU(maxsize=100)
 _cache_lock = threading.Lock()
 
 
-def _pickle_non_bytes(func):
-    # Used by `dumps_function`.
-    # Assume that we only want to pickle an
-    # object that is not already `bytes`.
-    return func if isinstance(func, bytes) else pickle.dumps(func, protocol=4)
-
-
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = _pickle_non_bytes(func)
+        result = pickle.dumps(func, protocol=4)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = _pickle_non_bytes(func)
+        result = pickle.dumps(func, protocol=4)
     return result
 
 

@@ -470,11 +470,6 @@ def test_dumps_function():
     c = dumps_function(dec)
     assert a != c
 
-    a = dumps_function(inc)
-    a2 = dumps_function(a)
-    assert a is a2
-    assert cloudpickle.loads(a2)(10) == 11
-
 
 def test_dumps_task():
     d = dumps_task((inc, 1))
