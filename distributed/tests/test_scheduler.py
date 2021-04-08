@@ -21,7 +21,6 @@ from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
-from distributed.protocol import Serialized, deserialize, serialize
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
@@ -42,12 +41,7 @@ from distributed.utils_test import (  # noqa: F401
     tls_only_security,
     varying,
 )
-from distributed.worker import (
-    dumps_function,
-    dumps_task,
-    serialize_task,
-    warn_serialize,
-)
+from distributed.worker import dumps_function, dumps_task
 
 if sys.version_info < (3, 8):
     try:
@@ -496,48 +490,6 @@ def test_dumps_task():
     assert cloudpickle.loads(d["function"])(1, 2) == 3
     assert cloudpickle.loads(d["args"]) == (1,)
     assert set(d) == {"function", "args"}
-
-
-def test_serialize_task():
-    d = dumps_task((inc, 1))
-    assert set(d) == {"function", "args"}
-
-    f = lambda x, y=2: x + y
-    d = serialize_task((apply, f, (1,), {"y": 10}), dump_args=True, dump_kwargs=True)
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
-
-    d = serialize_task((apply, f, (1,)), dump_args=True)
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert set(d) == {"function", "args"}
-
-    # Check that dumps_task properly uses warn_serialize
-    arr = "special-data"
-    sarr = Serialized(*serialize(arr))
-    task = (dumps_function(f), sarr, "('fake-key', 3)", None)
-    expect = (arr, "('fake-key', 3)", None)
-    s = serialize_task(task)
-    assert cloudpickle.loads(s["function"])(1, 2) == 3
-    d = s["args"]
-    assert deserialize(d.header, d.frames) == expect
-    assert set(s) == {"function", "args"}
-
-
-def test_warn_serialize():
-
-    arr = "special-data"
-    sarr = Serialized(*serialize(arr))
-
-    task = (0, sarr, "('fake-key', 3)", None)
-    expect = (0, arr, "('fake-key', 3)", None)
-
-    with pytest.warns(UserWarning):
-        warn_serialize(task, limit=1)
-
-    d = warn_serialize(task)
-    assert deserialize(d.header, d.frames) == expect
 
 
 @gen_cluster()

@@ -151,15 +151,20 @@ def test_serialize_iterate_collection():
 
     arr = "special-data"
     sarr = Serialized(*serialize(arr))
+    sdarr = to_serialize(arr)
 
-    task = (0, sarr, "('fake-key', 3)", None)
+    task1 = (0, sarr, "('fake-key', 3)", None)
+    task2 = (0, sdarr, "('fake-key', 3)", None)
     expect = (0, arr, "('fake-key', 3)", None)
 
     # Check serialize/deserialize directly
-    assert deserialize(*serialize(task, iterate_collection=True)) == expect
+    assert deserialize(*serialize(task1, iterate_collection=True)) == expect
+    assert deserialize(*serialize(task2, iterate_collection=True)) == expect
 
     # Check to_serialize -> dumps -> loads
-    d = dumps(to_serialize(task, iterate_collection=True))
+    d = dumps(to_serialize(task1, iterate_collection=True))
+    assert loads(d) == expect
+    d = dumps(to_serialize(task2, iterate_collection=True))
     assert loads(d) == expect
 
 
