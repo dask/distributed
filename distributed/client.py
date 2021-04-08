@@ -2981,9 +2981,7 @@ class Client:
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = asyncio.Event()
         try:
-            await asyncio.wait_for(
-                self._restart_event.wait(), self.loop.time() + timeout
-            )
+            await asyncio.wait_for(self._restart_event.wait(), timeout)
         except TimeoutError:
             logger.error("Restart timed out after %f seconds", timeout)
             pass
