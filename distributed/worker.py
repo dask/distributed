@@ -3581,19 +3581,15 @@ def serialize_task(task, dump_args=False, dump_kwargs=False):
     objects, the ``dump_args`` and/or ``dumps_kwargs`` options can
     be used to avoid serializing the seperate elements of args/kwargs.
     """
+    _to_serialize = partial(to_serialize, iterate_collection=True)
     if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-        # Use `warn_serialize` if any elements of `task` are `Serialized`.
-        # Otherwise, we can just use warn_dumps (pickle)
-        _dumps = warn_dumps if dump_args else warn_serialize
-        d = {"function": dumps_function(task[1]), "args": _dumps(task[2])}
+        d = {"function": dumps_function(task[1]), "args": _to_serialize(task[2])}
         if len(task) == 4:
-            _dumps = warn_dumps if dump_kwargs else warn_serialize
-            d["kwargs"] = _dumps(task[3])
+            d["kwargs"] = _to_serialize(task[3])
         return d
     elif not any(map(_maybe_complex, task[1:])):
-        _dumps = warn_dumps if dump_args else warn_serialize
-        return {"function": dumps_function(task[0]), "args": _dumps(task[1:])}
-    return to_serialize(task, iterate_collection=True)
+        return {"function": dumps_function(task[0]), "args": _to_serialize(task[1:])}
+    return _to_serialize(task)
 
 
 _warn_dumps_warned = [False]

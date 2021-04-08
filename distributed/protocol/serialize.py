@@ -243,8 +243,18 @@ def serialize(
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
+    # Handle obects that are marked as `Serialize`, or that are
+    # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
+    if isinstance(x, Serialize):
+        return serialize(
+            x.data,
+            serializers=serializers,
+            on_error=on_error,
+            context=context,
+            iterate_collection=iterate_collection,
+        )
 
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
