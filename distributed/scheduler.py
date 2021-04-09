@@ -4087,6 +4087,9 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 ts._host_restrictions = set()
                 ts._worker_restrictions = set()
+                # Make sure `v` is a collection and not a single worker name / address
+                if not isinstance(v, (list, tuple, set)):
+                    v = [v]
                 for w in v:
                     try:
                         w = self.coerce_address(w)
