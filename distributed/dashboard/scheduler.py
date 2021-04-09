@@ -87,7 +87,9 @@ applications = {
     "/individual-nbytes": individual_doc(NBytes, 100),
     "/individual-nbytes-cluster": individual_doc(NBytesCluster, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
-    "/individual-nprocessing": individual_doc(CurrentLoad, 100),
+    "/individual-nprocessing": individual_doc(
+        CurrentLoad, 100, fig_attr="processing_figure"
+    ),
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),

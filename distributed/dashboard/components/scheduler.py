@@ -282,7 +282,7 @@ class NBytesCluster(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
             limit = sum(getattr(ws, "memory_limit", 0) for ws in workers)
             meminfo = self.scheduler.memory
             if limit and meminfo.process > limit:
@@ -304,16 +304,18 @@ class NBytesCluster(DashboardComponent):
                 "color": [color, color, color, "grey"],
                 "proc_memory": [meminfo.process] * 4,
             }
+            # FIXME https://github.com/dask/distributed/issues/4675
+            #       This causes flickering after adding workers and when enough memory
+            #       is spilled out
             self.root.x_range.end = max(
                 limit, meminfo.process + meminfo.managed_spilled
             )
+
+            title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
-                self.root.title.text = (
-                    f"Bytes stored: {format_bytes(meminfo.process)} "
-                    f"+ {format_bytes(meminfo.managed_spilled)} spilled"
-                )
-            else:
-                self.root.title.text = f"Bytes stored: {format_bytes(meminfo.process)}"
+                title += f" + {format_bytes(meminfo.managed_spilled)} spilled"
+            self.root.title.text = title
+
             update(self.source, result)
 
 
@@ -386,7 +388,7 @@ class NBytes(DashboardComponent):
             return out
 
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
 
             width = []
             x = []
@@ -440,6 +442,9 @@ class NBytes(DashboardComponent):
             result = {
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
+            # FIXME https://github.com/dask/distributed/issues/4675
+            #       This causes flickering after adding workers and when enough memory
+            #       is spilled out
             self.root.x_range.end = max_limit
             update(self.source, result)
 
@@ -1026,14 +1031,14 @@ class CurrentLoad(DashboardComponent):
             self.scheduler = scheduler
             self.source = ColumnDataSource(
                 {
-                    "nprocessing": [1, 2],
-                    "nprocessing-half": [0.5, 1],
-                    "nprocessing-color": ["red", "blue"],
-                    "cpu": [1, 2],
-                    "cpu-half": [0.5, 1],
-                    "y": [1, 2],
-                    "worker": ["a", "b"],
-                    "escaped_worker": ["a", "b"],
+                    "nprocessing": [],
+                    "nprocessing-half": [],
+                    "nprocessing-color": [],
+                    "cpu": [],
+                    "cpu-half": [],
+                    "y": [],
+                    "worker": [],
+                    "escaped_worker": [],
                 }
             )
             processing = figure(
@@ -1100,10 +1105,6 @@ class CurrentLoad(DashboardComponent):
 
             self.processing_figure = processing
             self.cpu_figure = cpu
-
-    @property
-    def root(self):
-        return self.processing_figure
 
     @without_property_validation
     def update(self):
@@ -2278,10 +2279,12 @@ def status_doc(scheduler, extra, doc):
         if len(scheduler.workers) < 50:
             nbytes_workers = NBytes(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
-            processing.root.y_range = nbytes_workers.root.y_range
+            processing_root = processing.processing_figure
+            processing_root.y_range = nbytes_workers.root.y_range
         else:
             nbytes_workers = NBytesHistogram(scheduler, sizing_mode="stretch_both")
             processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
+            processing_root = processing.root
             row(nbytes_workers.root, processing.root, sizing_mode="stretch_both")
 
         nbytes_workers.update()
@@ -2289,7 +2292,7 @@ def status_doc(scheduler, extra, doc):
         add_periodic_callback(doc, nbytes_workers, 100)
         add_periodic_callback(doc, processing, 100)
         doc.add_root(nbytes_workers.root)
-        doc.add_root(processing.root)
+        doc.add_root(processing_root)
 
         task_stream = TaskStream(
             scheduler,

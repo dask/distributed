@@ -87,6 +87,7 @@ distributed:
       # When there is an increase in process memory (as observed by the operating
       # system) that is not accounted for by the dask keys stored on the worker, ignore
       # it for this long before considering it in non-critical memory measures.
+      # This should be set to be longer than the duration of most dask tasks.
       new_to_old_lag: 30s
 
       # Fractions of worker process memory at which we take action to avoid memory

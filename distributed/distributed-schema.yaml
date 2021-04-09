@@ -401,7 +401,8 @@ properties:
                   When there is an increase in process memory (as observed by the
                   operating system) that is not accounted for by the dask keys stored on
                   the worker, ignore it for this long before considering it in
-                  non-time-sensitive heuristics.
+                  non-time-sensitive heuristics. This should be set to be longer than
+                  the duration of most dask tasks.
 
               target:
                 oneOf:

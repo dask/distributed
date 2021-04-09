@@ -313,6 +313,10 @@ class MemoryInfo:
         managed: int,
         managed_spilled: int,
     ):
+        # Some data arrives with the heartbeat, some other arrives in realtime as the
+        # tasks progress. Also, sizeof() is not guaranteed to return correct results.
+        # This can cause temporary glitches where a partial measure is larger than the
+        # whole, so we need to force all numbers to add up exactly by definition.
         self.process = process
         self.managed_spilled = min(managed_spilled, managed)
         self.managed_in_memory = min(managed - self.managed_spilled, process)
