@@ -2545,13 +2545,9 @@ class Client:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
 
-            keyset = set(keys)
-
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
-
-            dsk = dsk.__dask_distributed_pack__(self, keyset)
 
             annotations = {}
             if user_priority:
@@ -2569,7 +2565,18 @@ class Client:
             if resources:
                 annotations["resources"] = resources
 
+            # Merge global annotations into each layer
             annotations = merge(dask.config.get("annotations", {}), annotations)
+            if annotations:
+                for layer in dsk.layers.values():
+                    if layer.annotations:
+                        layer.annotations = merge(layer.annotations, annotations)
+                    else:
+                        layer.annotations = annotations
+
+            # Pack the high level graph before sending it to the scheduler
+            keyset = set(keys)
+            dsk = dsk.__dask_distributed_pack__(self, keyset)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
@@ -2581,7 +2588,6 @@ class Client:
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
-                    "annotations": annotations,
                     "actors": actors,
                 }
             )
