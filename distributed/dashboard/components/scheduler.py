@@ -1916,7 +1916,14 @@ class WorkerTable(DashboardComponent):
     plot laying out hosts by their current memory use.
     """
 
-    excluded_names = {"executing", "in_flight", "in_memory", "ready", "time"}
+    excluded_names = {
+        "executing",
+        "in_flight",
+        "in_memory",
+        "ready",
+        "time",
+        "spilled_nbytes",
+    }
 
     def __init__(self, scheduler, width=800, **kwargs):
         self.scheduler = scheduler
@@ -1928,6 +1935,10 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
+            "memory_managed",
+            "memory_unmanaged_old",
+            "memory_unmanaged_recent",
+            "memory_spilled",
             "num_fds",
             "read_bytes",
             "write_bytes",
@@ -1952,33 +1963,47 @@ class WorkerTable(DashboardComponent):
             "memory",
             "memory_limit",
             "memory_percent",
+            "memory_managed",
+            "memory_unmanaged_old",
+            "memory_unmanaged_recent",
+            "memory_spilled",
             "num_fds",
             "read_bytes",
             "write_bytes",
         ]
+        column_title_renames = {
+            "memory_limit": "limit",
+            "memory_percent": "memory %",
+            "memory_managed": "managed",
+            "memory_unmanaged_old": "unmanaged",
+            "memory_unmanaged_recent": "unmanaged recent",
+            "memory_spilled": "spilled",
+            "num_fds": "# fds",
+            "read_bytes": "read",
+            "write_bytes": "write",
+        }
 
         self.source = ColumnDataSource({k: [] for k in self.names})
 
         columns = {
-            name: TableColumn(field=name, title=name.replace("_percent", " %"))
+            name: TableColumn(field=name, title=column_title_renames.get(name, name))
             for name in table_names
         }
 
         formatters = {
-            "cpu": NumberFormatter(format="0.0 %"),
+            "cpu": NumberFormatter(format="0 %"),
             "memory_percent": NumberFormatter(format="0.0 %"),
-            "memory": NumberFormatter(format="0.00 b"),
-            "memory_limit": NumberFormatter(format="0.00 b"),
+            "memory": NumberFormatter(format="0.0 b"),
+            "memory_limit": NumberFormatter(format="0.0 b"),
+            "memory_managed": NumberFormatter(format="0.0 b"),
+            "memory_unmanaged_old": NumberFormatter(format="0.0 b"),
+            "memory_unmanaged_recent": NumberFormatter(format="0.0 b"),
+            "memory_spilled": NumberFormatter(format="0.0 b"),
             "read_bytes": NumberFormatter(format="0 b"),
             "write_bytes": NumberFormatter(format="0 b"),
             "num_fds": NumberFormatter(format="0"),
             "nthreads": NumberFormatter(format="0"),
         }
-
-        if BOKEH_VERSION < "0.12.15":
-            dt_kwargs = {"row_headers": False}
-        else:
-            dt_kwargs = {"index_position": None}
 
         table = DataTable(
             source=self.source,
@@ -1986,7 +2011,7 @@ class WorkerTable(DashboardComponent):
             reorderable=True,
             sortable=True,
             width=width,
-            **dt_kwargs,
+            index_position=None,
         )
 
         for name in table_names:
@@ -1995,7 +2020,7 @@ class WorkerTable(DashboardComponent):
 
         extra_names = ["name", "address"] + self.extra_names
         extra_columns = {
-            name: TableColumn(field=name, title=name.replace("_percent", "%"))
+            name: TableColumn(field=name, title=column_title_renames.get(name, name))
             for name in extra_names
         }
 
@@ -2005,7 +2030,7 @@ class WorkerTable(DashboardComponent):
             reorderable=True,
             sortable=True,
             width=width,
-            **dt_kwargs,
+            index_position=None,
         )
 
         hover = HoverTool(
@@ -2013,7 +2038,7 @@ class WorkerTable(DashboardComponent):
             tooltips="""
                 <div>
                   <span style="font-size: 10px; font-family: Monaco, monospace;">Worker (@name): </span>
-                  <span style="font-size: 10px; font-family: Monaco, monospace;">@memory_percent</span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@memory_percent{0.0 %}</span>
                 </div>
                 """,
         )
@@ -2042,7 +2067,7 @@ class WorkerTable(DashboardComponent):
             tooltips="""
                 <div>
                   <span style="font-size: 10px; font-family: Monaco, monospace;">Worker (@name): </span>
-                  <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu_fraction</span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu_fraction{0 %}</span>
                 </div>
                 """,
         )
@@ -2084,6 +2109,8 @@ class WorkerTable(DashboardComponent):
         for i, (addr, ws) in enumerate(
             sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
         ):
+            minfo = ws.memory
+
             for name in self.names + self.extra_names:
                 data[name].append(ws.metrics.get(name, None))
             data["name"][-1] = ws.name if ws.name is not None else i
@@ -2093,6 +2120,11 @@ class WorkerTable(DashboardComponent):
             else:
                 data["memory_percent"][-1] = ""
             data["memory_limit"][-1] = ws.memory_limit
+            data["memory_managed"][-1] = minfo.managed_in_memory
+            data["memory_unmanaged_old"][-1] = minfo.unmanaged_old
+            data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent
+            data["memory_unmanaged_recent"][-1] = minfo.unmanaged_recent
+            data["memory_spilled"][-1] = minfo.managed_spilled
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
