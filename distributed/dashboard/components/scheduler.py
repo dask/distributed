@@ -304,7 +304,16 @@ class NBytesCluster(DashboardComponent):
                 "color": [color, color, color, "grey"],
                 "proc_memory": [meminfo.process] * 4,
             }
-            self.root.x_range.end = limit
+            self.root.x_range.end = max(
+                limit, meminfo.process + meminfo.managed_spilled
+            )
+            if meminfo.managed_spilled:
+                self.root.title.text = (
+                    f"Bytes stored: {format_bytes(meminfo.process)} "
+                    f"+ {format_bytes(meminfo.managed_spilled)} spilled"
+                )
+            else:
+                self.root.title.text = f"Bytes stored: {format_bytes(meminfo.process)}"
             update(self.source, result)
 
 
