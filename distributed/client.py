@@ -2980,13 +2980,14 @@ class Client:
             timeout = self._timeout * 2
         if timeout is not None:
             timeout = parse_timedelta(timeout, "s")
+
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = asyncio.Event()
         try:
             await asyncio.wait_for(self._restart_event.wait(), timeout)
         except TimeoutError:
             logger.error("Restart timed out after %.2f seconds", timeout)
-            pass
+
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
