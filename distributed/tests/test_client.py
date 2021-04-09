@@ -4132,6 +4132,21 @@ async def test_persist_workers_annotate(e, s, a, b, c):
 
 @nodebug  # test timing is fragile
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+async def test_persist_workers_annotate2(e, s, a, b, c):
+    def key_to_worker(key):
+        return a.address
+
+    L1 = [delayed(inc)(i) for i in range(4)]
+    with dask.annotate(workers=key_to_worker):
+        out = e.persist(L1, optimize_graph=False)
+        await wait(out)
+
+    for v in L1:
+        assert s.worker_restrictions[v.key] == {a.address}
+
+
+@nodebug  # test timing is fragile
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers(e, s, a, b, c):
     L1 = [delayed(inc)(i) for i in range(4)]
     total = delayed(sum)(L1)
