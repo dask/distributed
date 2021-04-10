@@ -1822,6 +1822,9 @@ class SchedulerState:
         status: str = None,
         thread: Py_ssize_t = -1,
         metadata: dict = None,
+        worker=None,
+        startstops=None,
+        text=None,
         **kwargs,
     ):
         """Transition a key from its current state to the finish state
@@ -2647,9 +2650,6 @@ class SchedulerState:
         cause=None,
         exception=None,
         traceback=None,
-        worker=None,
-        startstops=None,
-        text=None,
     ) -> tuple:
         ws: WorkerState
         try:
