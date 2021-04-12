@@ -4130,7 +4130,6 @@ async def test_persist_workers_annotate(e, s, a, b, c):
     assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
 
 
-@nodebug  # test timing is fragile
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers_annotate2(e, s, a, b, c):
     def key_to_worker(key):
