@@ -76,6 +76,11 @@ from .utils_comm import gather_from_workers, pack_data, retry_operation
 from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
 
+try:
+    from .diagnostics import nvml
+except Exception:
+    nvml = None
+
 logger = logging.getLogger(__name__)
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -681,6 +686,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "get_monitor_info": self.get_monitor_info,
         }
 
         stream_handlers = {
@@ -1068,6 +1074,21 @@ class Worker(ServerNode):
         else:
             self.update_data(data=result, report=False)
             return {"status": "OK"}
+
+    def get_monitor_info(self, comm=None, recent=False, start=0):
+        result = dict(
+            range_query=(
+                self.monitor.recent()
+                if recent
+                else self.monitor.range_query(start=start)
+            ),
+            count=self.monitor.count,
+            last_time=self.monitor.last_time,
+        )
+        if nvml is not None:
+            result["gpu_name"] = self.monitor.gpu_name
+            result["gpu_memory_total"] = self.monitor.gpu_memory_total
+        return result
 
     #############
     # Lifecycle #

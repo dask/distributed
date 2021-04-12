@@ -6510,6 +6510,18 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return valmap(tuple, self.events)
 
+    async def get_worker_monitor_info(self, recent=False, starts=None):
+        parent: SchedulerState = cast(SchedulerState, self)
+        if starts is None:
+            starts = {}
+        results = await asyncio.gather(
+            *(
+                self.rpc(w).get_monitor_info(recent=recent, start=starts.get(w, 0))
+                for w in parent._workers_dv
+            )
+        )
+        return dict(zip(parent._workers_dv, results))
+
     ###########
     # Cleanup #
     ###########
