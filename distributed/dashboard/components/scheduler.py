@@ -109,32 +109,30 @@ class Occupancy(DashboardComponent):
                 }
             )
 
-            fig = figure(
+            self.root = figure(
                 title="Occupancy",
                 tools="",
                 id="bk-occupancy-plot",
                 x_axis_type="datetime",
                 **kwargs,
             )
-            rect = fig.rect(
+            rect = self.root.rect(
                 source=self.source, x="x", width="ms", y="y", height=1, color="color"
             )
             rect.nonselection_glyph = None
 
-            fig.xaxis.minor_tick_line_alpha = 0
-            fig.yaxis.visible = False
-            fig.ygrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.yaxis.visible = False
+            self.root.ygrid.visible = False
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
-            fig.x_range.start = 0
+            self.root.x_range.start = 0
 
             tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover, tap)
-
-            self.root = fig
+            self.root.add_tools(hover, tap)
 
     @without_property_validation
     def update(self):
@@ -591,7 +589,7 @@ class BandwidthWorkers(DashboardComponent):
                 high=1,
             )
 
-            fig = figure(
+            self.root = figure(
                 title="Bandwidth by Worker",
                 tools="",
                 id="bk-bandwidth-worker-plot",
@@ -600,8 +598,8 @@ class BandwidthWorkers(DashboardComponent):
                 y_range=["a", "b"],
                 **kwargs,
             )
-            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            rect = fig.rect(
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.rect(
                 source=self.source,
                 x="source",
                 y="destination",
@@ -619,10 +617,10 @@ class BandwidthWorkers(DashboardComponent):
             )
             color_bar.formatter = NumeralTickFormatter(format="0.0 b")
             color_bar.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.add_layout(color_bar, "right")
+            self.root.add_layout(color_bar, "right")
 
-            fig.toolbar.logo = None
-            fig.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
             hover = HoverTool()
             hover.tooltips = """
@@ -633,9 +631,7 @@ class BandwidthWorkers(DashboardComponent):
             </div>
             """
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
-
-            self.fig = fig
+            self.root.add_tools(hover)
 
     @without_property_validation
     def update(self):
@@ -659,8 +655,8 @@ class BandwidthWorkers(DashboardComponent):
             self.color_map.high = max(value)
 
             factors = list(sorted(set(x + y)))
-            self.fig.x_range.factors = factors
-            self.fig.y_range.factors = factors[::-1]
+            self.root.x_range.factors = factors
+            self.root.y_range.factors = factors[::-1]
 
             result = {
                 "source": x,
@@ -668,8 +664,9 @@ class BandwidthWorkers(DashboardComponent):
                 "bandwidth": value,
                 "bandwidth_text": list(map(format_bytes, value)),
             }
-            self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
-
+            self.root.title.text = "Bandwidth: " + format_bytes(
+                self.scheduler.bandwidth
+            )
             update(self.source, result)
 
 
@@ -864,7 +861,7 @@ class AggregateAction(DashboardComponent):
 
             self.action_source = ColumnDataSource(data=action_data)
 
-            fig = figure(
+            self.root = figure(
                 title="Aggregate Per Action",
                 tools="",
                 id="bk-aggregate-per-action-plot",
@@ -873,7 +870,7 @@ class AggregateAction(DashboardComponent):
                 **kwargs,
             )
 
-            rect = fig.vbar(
+            rect = self.root.vbar(
                 source=self.action_source,
                 x="names",
                 top="times",
@@ -881,21 +878,21 @@ class AggregateAction(DashboardComponent):
                 color="color",
             )
 
-            fig.y_range.start = 0
-            fig.min_border_right = 20
-            fig.min_border_bottom = 60
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
-            fig.yaxis.axis_label = "Time (s)"
-            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            fig.xaxis.major_label_text_font_size = "16px"
+            self.root.y_range.start = 0
+            self.root.min_border_right = 20
+            self.root.min_border_bottom = 60
+            self.root.yaxis[0].formatter = NumeralTickFormatter(format="0")
+            self.root.yaxis.axis_label = "Time (s)"
+            self.root.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.xaxis.major_label_text_font_size = "16px"
             rect.nonselection_glyph = None
 
-            fig.xaxis.minor_tick_line_alpha = 0
-            fig.xgrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.xgrid.visible = False
 
-            fig.toolbar.logo = None
-            fig.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
             hover = HoverTool()
             hover.tooltips = """
@@ -905,9 +902,7 @@ class AggregateAction(DashboardComponent):
             </div>
             """
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
-
-            self.fig = fig
+            self.root.add_tools(hover)
 
     @without_property_validation
     def update(self):
@@ -932,8 +927,8 @@ class AggregateAction(DashboardComponent):
                     agg_colors.append(ts_color_lookup[action])
                 agg_time.append(t)
 
-            self.fig.x_range.factors = agg_names
-            self.fig.title.text = "Aggregate Time Per Action"
+            self.root.x_range.factors = agg_names
+            self.root.title.text = "Aggregate Time Per Action"
 
             action_result = dict(
                 times=agg_time,
@@ -961,7 +956,7 @@ class MemoryByKey(DashboardComponent):
                 }
             )
 
-            fig = figure(
+            self.root = figure(
                 title="Memory Use",
                 tools="",
                 id="bk-memory-by-key-plot",
@@ -969,19 +964,19 @@ class MemoryByKey(DashboardComponent):
                 x_range=["a", "b"],
                 **kwargs,
             )
-            rect = fig.vbar(
+            rect = self.root.vbar(
                 source=self.source, x="name", top="nbytes", width=0.9, color="color"
             )
-            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
-            fig.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             rect.nonselection_glyph = None
 
-            fig.xaxis.minor_tick_line_alpha = 0
-            fig.ygrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = False
 
-            fig.toolbar.logo = None
-            fig.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
             hover = HoverTool()
             hover.tooltips = "@name: @nbytes_text"
@@ -993,9 +988,7 @@ class MemoryByKey(DashboardComponent):
             </div>
             """
             hover.point_policy = "follow_mouse"
-            fig.add_tools(hover)
-
-            self.fig = fig
+            self.root.add_tools(hover)
 
     @without_property_validation
     def update(self):
@@ -1009,7 +1002,7 @@ class MemoryByKey(DashboardComponent):
                     nbytes[ks] += ts.nbytes
 
             names = list(sorted(counts))
-            self.fig.x_range.factors = names
+            self.root.x_range.factors = names
             result = {
                 "name": names,
                 "count": [counts[name] for name in names],
@@ -1017,7 +1010,7 @@ class MemoryByKey(DashboardComponent):
                 "nbytes_text": [format_bytes(nbytes[name]) for name in names],
                 "color": [color_of(name) for name in names],
             }
-            self.fig.title.text = "Total Use: " + format_bytes(sum(nbytes.values()))
+            self.root.title.text = "Total Use: " + format_bytes(sum(nbytes.values()))
 
             update(self.source, result)
 
@@ -1156,7 +1149,7 @@ class StealingTimeSeries(DashboardComponent):
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
-        fig = figure(
+        self.root = figure(
             title="Idle and Saturated Workers Over Time",
             x_axis_type="datetime",
             y_range=[-0.1, len(scheduler.workers) + 0.1],
@@ -1165,15 +1158,13 @@ class StealingTimeSeries(DashboardComponent):
             x_range=x_range,
             **kwargs,
         )
-        fig.line(source=self.source, x="time", y="idle", color="red")
-        fig.line(source=self.source, x="time", y="saturated", color="green")
-        fig.yaxis.minor_tick_line_color = None
+        self.root.line(source=self.source, x="time", y="idle", color="red")
+        self.root.line(source=self.source, x="time", y="saturated", color="green")
+        self.root.yaxis.minor_tick_line_color = None
 
-        fig.add_tools(
+        self.root.add_tools(
             ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
         )
-
-        self.root = fig
 
     @without_property_validation
     def update(self):
@@ -1210,7 +1201,7 @@ class StealingEvents(DashboardComponent):
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
-        fig = figure(
+        self.root = figure(
             title="Stealing Events",
             x_axis_type="datetime",
             y_axis_type="log",
@@ -1220,7 +1211,7 @@ class StealingEvents(DashboardComponent):
             **kwargs,
         )
 
-        fig.circle(
+        self.root.circle(
             source=self.source,
             x="time",
             y="cost_factor",
@@ -1228,20 +1219,18 @@ class StealingEvents(DashboardComponent):
             size="radius",
             alpha=0.5,
         )
-        fig.yaxis.axis_label = "Cost Multiplier"
+        self.root.yaxis.axis_label = "Cost Multiplier"
 
         hover = HoverTool()
         hover.tooltips = "Level: @level, Duration: @duration, Count: @count, Cost factor: @cost_factor"
         hover.point_policy = "follow_mouse"
 
-        fig.add_tools(
+        self.root.add_tools(
             hover,
             ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
-
-        self.root = fig
 
     def convert(self, msgs):
         """ Convert a log message to a glyph """
@@ -1307,7 +1296,7 @@ class Events(DashboardComponent):
 
         x_range = DataRange1d(follow="end", follow_interval=200000)
 
-        fig = figure(
+        self.root = figure(
             title=name,
             x_axis_type="datetime",
             height=height,
@@ -1316,7 +1305,7 @@ class Events(DashboardComponent):
             **kwargs,
         )
 
-        fig.circle(
+        self.root.circle(
             source=self.source,
             x="time",
             y="y",
@@ -1325,21 +1314,19 @@ class Events(DashboardComponent):
             alpha=0.5,
             **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "action"},
         )
-        fig.yaxis.axis_label = "Action"
-        fig.legend.location = "top_left"
+        self.root.yaxis.axis_label = "Action"
+        self.root.legend.location = "top_left"
 
         hover = HoverTool()
         hover.tooltips = "@action<br>@hover"
         hover.point_policy = "follow_mouse"
 
-        fig.add_tools(
+        self.root.add_tools(
             hover,
             ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
         )
-
-        self.root = fig
 
     @without_property_validation
     def update(self):

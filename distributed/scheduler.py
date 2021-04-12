@@ -6589,9 +6589,9 @@ class Scheduler(SchedulerState, ServerNode):
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
         task_stream = Panel(child=task_stream, title="Task Stream")
         bandwidth_workers = Panel(
-            child=bandwidth_workers.fig, title="Bandwidth (Workers)"
+            child=bandwidth_workers.root, title="Bandwidth (Workers)"
         )
-        bandwidth_types = Panel(child=bandwidth_types.fig, title="Bandwidth (Types)")
+        bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
 
         tabs = Tabs(
             tabs=[
