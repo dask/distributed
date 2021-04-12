@@ -9,8 +9,8 @@ import dask
 
 from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
-from distributed.comm.registry import backends, get_backend
 from distributed.comm.core import FatalCommClosedError
+from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
 from distributed.utils_test import (  # noqa: F401
     cleanup,
