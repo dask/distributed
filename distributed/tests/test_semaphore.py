@@ -2,7 +2,7 @@ import asyncio
 import logging
 import pickle
 from datetime import timedelta
-from time import sleep, time
+from time import sleep
 
 import pytest
 
@@ -509,25 +509,38 @@ async def test_metrics(c, s, a, b):
 def test_threadpoolworkers_pick_correct_ioloop(cleanup):
     # gh4057
 
+    # About picking appropriate values for the various timings
+    # * Sleep time in `access_limited` impacts test runtime but is arbitrary
+    # * `lease-timeout` should be smaller than the sleep time. This is what the
+    #   test builds on. assuming the leases cannot be refreshed, e.g. wrong
+    #   event loop picked / PeriodicCallback never scheduled, the semaphore
+    #   would become oversubscribed and the len(protected_resources) becomes
+    #   non zero. This should also trigger a log message about "unknown leases"
+    #   and fails the test.
+    # * `lease-validation-interval` interval should be the smallest quantity.
+    #   How often leases are checked for staleness is hard coded atm and a fifth
+    #   of the `lease-timeout`. Accounting for this and some jitter, this should
+    #   be sufficiently small to ensure smooth operation.
+
     with dask.config.set(
         {
             "distributed.scheduler.locks.lease-validation-interval": 0.01,
-            "distributed.scheduler.locks.lease-timeout": 0.05,
+            "distributed.scheduler.locks.lease-timeout": 0.1,
         }
     ):
         with Client(processes=False, threads_per_worker=4) as client:
             sem = Semaphore(max_leases=1, name="database")
-            protected_ressource = []
+            protected_resource = []
 
             def access_limited(val, sem):
                 import time
 
                 with sem:
-                    assert len(protected_ressource) == 0
-                    protected_ressource.append(val)
+                    assert len(protected_resource) == 0
+                    protected_resource.append(val)
                     # Interact with the DB
-                    time.sleep(0.1)
-                    protected_ressource.remove(val)
+                    time.sleep(0.2)
+                    protected_resource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
 
