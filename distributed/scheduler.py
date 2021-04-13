@@ -846,6 +846,18 @@ class TaskGroup:
     def types(self):
         return self._types
 
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
+
     @ccall
     def add(self, o):
         ts: TaskState = o

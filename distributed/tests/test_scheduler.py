@@ -1888,9 +1888,9 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["forgotten"] == 5
     # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
-    assert tg._start > start
-    assert tg._stop < stop
-    assert "compute" in tg._all_durations
+    assert tg.start > start
+    assert tg.stop < stop
+    assert "compute" in tg.all_durations
     assert sys.getrefcount(tg) == 2
 
 
