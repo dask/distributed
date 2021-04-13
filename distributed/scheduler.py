@@ -2660,6 +2660,7 @@ class SchedulerState:
         cause=None,
         exception=None,
         traceback=None,
+        worker=None,
     ) -> tuple:
         ws: WorkerState
         try:
