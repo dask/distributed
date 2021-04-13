@@ -1938,12 +1938,18 @@ class SchedulerState:
                     ts._dependents = dependents
                     ts._dependencies = dependencies
                     parent._tasks[ts._key] = ts
-                kwargs["status"] = status
-                kwargs["thread"] = thread
-                kwargs["metadata"] = metadata
                 for plugin in list(self.plugins):
                     try:
-                        plugin.transition(key, start, finish2, *args, **kwargs)
+                        plugin.transition(
+                            key,
+                            start,
+                            finish2,
+                            *args,
+                            status=status,
+                            thread=thread,
+                            metadata=metadata,
+                            **kwargs,
+                        )
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts._state == "forgotten":
