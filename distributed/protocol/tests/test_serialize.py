@@ -161,12 +161,6 @@ def test_serialize_iterate_collection():
     assert deserialize(*serialize(task1, iterate_collection=True)) == expect
     assert deserialize(*serialize(task2, iterate_collection=True)) == expect
 
-    # Check to_serialize -> dumps -> loads
-    d = dumps(to_serialize(task1, iterate_collection=True))
-    assert loads(d) == expect
-    d = dumps(to_serialize(task2, iterate_collection=True))
-    assert loads(d) == expect
-
 
 from dask import delayed
 

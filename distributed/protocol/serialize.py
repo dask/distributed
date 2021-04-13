@@ -406,9 +406,7 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-def serialize_and_split(
-    x, serializers=None, on_error="message", context=None, iterate_collection=None
-):
+def serialize_and_split(x, serializers=None, on_error="message", context=None):
     """Serialize and split compressable frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
@@ -421,9 +419,7 @@ def serialize_and_split(
     serialize
     merge_and_deserialize
     """
-    header, frames = serialize(
-        x, serializers, on_error, context, iterate_collection=iterate_collection
-    )
+    header, frames = serialize(x, serializers, on_error, context)
     num_sub_frames = []
     offsets = []
     out_frames = []
@@ -490,11 +486,8 @@ class Serialize:
     distributed.protocol.dumps
     """
 
-    def __init__(self, data, iterate_collection=None):
+    def __init__(self, data):
         self.data = data
-        # Optional `iterate_collection` argument will
-        # be passed down to `serialize` function.
-        self.iterate_collection = iterate_collection
 
     def __repr__(self):
         return "<Serialize: %s>" % str(self.data)
