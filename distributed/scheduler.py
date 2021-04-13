@@ -796,6 +796,9 @@ class TaskGroup:
     _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
+    _start: double
+    _stop: double
+    _all_durations: object
 
     def __init__(self, name: str):
         self._name = name
@@ -807,6 +810,9 @@ class TaskGroup:
         self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
+        self._start = 0.0
+        self._stop = 0.0
+        self._all_durations = defaultdict(float)
 
     @property
     def name(self):
@@ -839,6 +845,18 @@ class TaskGroup:
     @property
     def types(self):
         return self._types
+
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
 
     @ccall
     def add(self, o):
@@ -2318,6 +2336,7 @@ class SchedulerState:
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
+                    ts._group._all_durations[action] += stop - start
 
             #############################
             # Update Timing Information #
@@ -2334,6 +2353,9 @@ class SchedulerState:
 
                 ts._prefix._duration_average = avg_duration
                 ts._group._duration += new_duration
+                ts._group._start = ts._group._start or compute_start
+                if ts._group._stop < compute_stop:
+                    ts._group._stop = compute_stop
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
                 tts: TaskState

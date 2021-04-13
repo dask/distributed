@@ -9,6 +9,7 @@ import dask
 
 from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
+from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
 from distributed.utils_test import (  # noqa: F401
@@ -71,7 +72,7 @@ async def test_expect_ssl_context(cleanup):
     server_ctx = get_server_ssl_context()
 
     async with listen("wss://", lambda comm: comm, ssl_context=server_ctx) as listener:
-        with pytest.raises(TypeError):
+        with pytest.raises(FatalCommClosedError, match="TLS expects a `ssl_context` *"):
             comm = await connect(listener.contact_address)
 
 
