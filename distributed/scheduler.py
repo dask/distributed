@@ -2296,10 +2296,10 @@ class SchedulerState:
         worker_msgs: dict = {}
         try:
             ts: TaskState = self._tasks[key]
-            assert worker
-            assert isinstance(worker, str)
 
             if self._validate:
+                assert worker
+                assert isinstance(worker, str)
                 assert ts._processing_on
                 ws = ts._processing_on
                 assert ts in ws._processing
