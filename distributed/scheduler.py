@@ -1822,7 +1822,6 @@ class SchedulerState:
         status: str = None,
         thread: Py_ssize_t = -1,
         metadata: dict = None,
-        startstops=None,
         text=None,
         **kwargs,
     ):
@@ -1950,7 +1949,6 @@ class SchedulerState:
                             status=status,
                             thread=thread,
                             metadata=metadata,
-                            startstops=startstops,
                             text=text,
                             **kwargs,
                         )
