@@ -376,7 +376,10 @@ class WSConnector(Connector):
         except StreamClosedError as e:
             convert_stream_closed_error(self, e)
         except SSLError as err:
-            raise FatalCommClosedError() from err
+            raise FatalCommClosedError(
+                "TLS expects a `ssl_context` argument of type "
+                "ssl.SSLContext (perhaps check your TLS configuration?)"
+            ) from err
         return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):
@@ -388,7 +391,7 @@ class WSSConnector(WSConnector):
     comm_class = WSS
 
     def _get_connect_args(self, **connection_args):
-        ctx = _expect_tls_context(connection_args)
+        ctx = connection_args.get("ssl_context")
         return {"ssl_options": ctx, **connection_args.get("extra_conn_args", {})}
 
 
