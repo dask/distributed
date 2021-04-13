@@ -97,6 +97,9 @@ def test_dashboard(loop):
                     raise
                 sleep(0.1)
 
+    with pytest.raises(Exception):
+        requests.get(f"http://127.0.0.1:{dashboard_port}/status/")
+
 
 def test_dashboard_non_standard_ports(loop):
     pytest.importorskip("bokeh")
