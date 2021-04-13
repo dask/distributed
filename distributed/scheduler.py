@@ -2286,7 +2286,7 @@ class SchedulerState:
         nbytes=None,
         type=None,
         typename: str = None,
-        worker=None,
+        worker: str = None,
         startstops=None,
     ) -> tuple:
         ws: WorkerState
