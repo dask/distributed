@@ -2060,8 +2060,6 @@ class Worker(ServerNode):
                 "typename": typename(typ),
                 "metadata": ts.metadata,
             }
-            if ts.startstops:
-                d["startstops"] = ts.startstops
         elif ts.exception is not None:
             d = {
                 "op": "task-erred",
@@ -2075,6 +2073,8 @@ class Worker(ServerNode):
             logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
             return
 
+        if ts.startstops:
+            d["startstops"] = ts.startstops
         self.batched_stream.send(d)
 
     def put_key_in_memory(self, ts, value, transition=True):
