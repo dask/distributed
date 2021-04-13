@@ -253,7 +253,7 @@ def serialize(
             serializers=serializers,
             on_error=on_error,
             context=context,
-            iterate_collection=iterate_collection,
+            iterate_collection=True,
         )
 
     if iterate_collection is None and type(x) in (list, set, tuple, dict):
