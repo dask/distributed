@@ -611,7 +611,7 @@ class Server:
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
-            if all(cb.cancelled() for c in self._ongoing_coroutines):
+            if all(c.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
                 yield asyncio.sleep(0.01)
