@@ -140,7 +140,11 @@ async def test_async_ctx(s, a, b):
 
 @pytest.mark.slow
 def test_worker_dies():
-    with cluster() as (scheduler, workers):
+    with cluster(
+        config={
+            "distributed.scheduler.locks.lease-timeout": "0.1s",
+        }
+    ) as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             sem = Semaphore(name="x", max_leases=1)
 
@@ -156,11 +160,11 @@ def test_worker_dies():
                     return x
 
             futures = client.map(
-                f, range(100), sem=sem, kill_address=workers[0]["address"]
+                f, range(10), sem=sem, kill_address=workers[0]["address"]
             )
             results = client.gather(futures)
 
-            assert sorted(results) == list(range(100))
+            assert sorted(results) == list(range(10))
 
 
 @gen_cluster(client=True)
