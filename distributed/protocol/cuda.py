@@ -1,8 +1,8 @@
 import dask
+from dask.utils import typename
 
 from . import pickle
 from .serialize import ObjectDictSerializer, register_serialization_family
-from dask.utils import typename
 
 cuda_serialize = dask.utils.Dispatch("cuda_serialize")
 cuda_deserialize = dask.utils.Dispatch("cuda_deserialize")

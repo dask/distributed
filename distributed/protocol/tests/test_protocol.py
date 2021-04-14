@@ -1,8 +1,8 @@
 import pytest
 
-from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
+from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions
-from distributed.protocol.serialize import Serialize, Serialized, serialize, deserialize
+from distributed.protocol.serialize import Serialize, Serialized, deserialize, serialize
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 

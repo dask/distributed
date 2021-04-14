@@ -1,89 +1,85 @@
 import asyncio
-from collections import defaultdict, deque
-
-from collections.abc import Mapping, Set
-from contextlib import suppress
-from datetime import timedelta
-from functools import partial
 import inspect
 import itertools
 import json
 import logging
 import math
-from numbers import Number
 import operator
 import os
-import sys
 import random
+import sys
 import warnings
 import weakref
+from collections import defaultdict, deque
+from collections.abc import Mapping, Set
+from contextlib import suppress
+from datetime import timedelta
+from functools import partial
+from numbers import Number
+
 import psutil
 import sortedcontainers
-
 from tlz import (
-    merge,
-    pluck,
-    merge_sorted,
-    first,
-    merge_with,
-    valmap,
-    second,
     compose,
-    groupby,
     concat,
+    first,
+    groupby,
+    merge,
+    merge_sorted,
+    merge_with,
+    pluck,
+    second,
+    valmap,
 )
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
 
-from . import profile
+from . import preloading, profile
+from . import versions as version_module
 from .batched import BatchedSend
 from .comm import (
+    get_address_host,
     normalize_address,
     resolve_address,
-    get_address_host,
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import rpc, send_recv, clean_exception, CommClosedError, Status
+from .core import CommClosedError, Status, clean_exception, rpc, send_recv
 from .diagnostics.plugin import SchedulerPlugin
-
+from .event import EventExtension
 from .http import get_handlers
+from .lock import LockExtension
 from .metrics import time
+from .multi_lock import MultiLockExtension
 from .node import ServerNode
-from . import preloading
 from .proctitle import setproctitle
+from .publish import PublishExtension
+from .pubsub import PubSubSchedulerExtension
+from .queues import QueueExtension
+from .recreate_exceptions import ReplayExceptionScheduler
 from .security import Security
+from .semaphore import SemaphoreExtension
+from .stealing import WorkStealing
 from .utils import (
     All,
-    get_fileno_limit,
-    log_errors,
-    key_split,
-    validate_key,
-    no_default,
-    parse_timedelta,
-    parse_bytes,
-    key_split_group,
+    TimeoutError,
     empty_context,
-    tmpfile,
     format_bytes,
     format_time,
-    TimeoutError,
+    get_fileno_limit,
+    key_split,
+    key_split_group,
+    log_errors,
+    no_default,
+    parse_bytes,
+    parse_timedelta,
+    tmpfile,
+    validate_key,
 )
-from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
-from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
-from . import versions as version_module
-
-from .publish import PublishExtension
-from .queues import QueueExtension
-from .semaphore import SemaphoreExtension
-from .recreate_exceptions import ReplayExceptionScheduler
-from .lock import LockExtension
-from .multi_lock import MultiLockExtension
-from .event import EventExtension
-from .pubsub import PubSubSchedulerExtension
-from .stealing import WorkStealing
+from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
+from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from .variable import VariableExtension
 
 try:
@@ -93,6 +89,8 @@ except ImportError:
 
 if compiled:
     from cython import (
+        Py_hash_t,
+        Py_ssize_t,
         bint,
         cast,
         ccall,
@@ -104,15 +102,11 @@ if compiled:
         final,
         inline,
         nogil,
-        Py_hash_t,
-        Py_ssize_t,
     )
 else:
-    from ctypes import (
-        c_double as double,
-        c_ssize_t as Py_hash_t,
-        c_ssize_t as Py_ssize_t,
-    )
+    from ctypes import c_double as double
+    from ctypes import c_ssize_t as Py_hash_t
+    from ctypes import c_ssize_t as Py_ssize_t
 
     bint = bool
 
@@ -802,6 +796,9 @@ class TaskGroup:
     _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
+    _start: double
+    _stop: double
+    _all_durations: object
 
     def __init__(self, name: str):
         self._name = name
@@ -813,6 +810,9 @@ class TaskGroup:
         self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
+        self._start = 0.0
+        self._stop = 0.0
+        self._all_durations = defaultdict(float)
 
     @property
     def name(self):
@@ -845,6 +845,18 @@ class TaskGroup:
     @property
     def types(self):
         return self._types
+
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
 
     @ccall
     def add(self, o):
@@ -2338,6 +2350,7 @@ class SchedulerState:
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
+                    ts._group._all_durations[action] += stop - start
 
             #############################
             # Update Timing Information #
@@ -2354,6 +2367,9 @@ class SchedulerState:
 
                 ts._prefix._duration_average = avg_duration
                 ts._group._duration += new_duration
+                ts._group._start = ts._group._start or compute_start
+                if ts._group._stop < compute_stop:
+                    ts._group._stop = compute_stop
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
                 tts: TaskState
@@ -6431,16 +6447,16 @@ class Scheduler(SchedulerState, ServerNode):
         for k in sorted(timespent.keys()):
             tasks_timings += f"\n<li> {k} time: {format_time(timespent[k])} </li>"
 
-        from .diagnostics.task_stream import rectangles
         from .dashboard.components.scheduler import task_stream_figure
+        from .diagnostics.task_stream import rectangles
 
         rects = rectangles(task_stream)
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
         source.data.update(rects)
 
         from distributed.dashboard.components.scheduler import (
-            BandwidthWorkers,
             BandwidthTypes,
+            BandwidthWorkers,
         )
 
         bandwidth_workers = BandwidthWorkers(self, sizing_mode="stretch_both")
@@ -6448,7 +6464,8 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
 
-        from bokeh.models import Panel, Tabs, Div
+        from bokeh.models import Div, Panel, Tabs
+
         import distributed
 
         # HTML
@@ -6517,8 +6534,8 @@ class Scheduler(SchedulerState, ServerNode):
             ]
         )
 
-        from bokeh.plotting import save, output_file
         from bokeh.core.templates import get_env
+        from bokeh.plotting import output_file, save
 
         with tmpfile(extension=".html") as fn:
             output_file(filename=fn, title="Dask Performance Report")
@@ -6556,6 +6573,18 @@ class Scheduler(SchedulerState, ServerNode):
             return tuple(self.events[topic])
         else:
             return valmap(tuple, self.events)
+
+    async def get_worker_monitor_info(self, recent=False, starts=None):
+        parent: SchedulerState = cast(SchedulerState, self)
+        if starts is None:
+            starts = {}
+        results = await asyncio.gather(
+            *(
+                self.rpc(w).get_monitor_info(recent=recent, start=starts.get(w, 0))
+                for w in parent._workers_dv
+            )
+        )
+        return dict(zip(parent._workers_dv, results))
 
     ###########
     # Cleanup #

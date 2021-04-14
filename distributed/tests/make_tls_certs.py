@@ -5,8 +5,8 @@ Code heavily borrowed from Lib/tests/make_ssl_certs.py in CPython.
 
 import os
 import shutil
-import tempfile
 import subprocess
+import tempfile
 
 req_template = """
     [req]

@@ -1,10 +1,11 @@
-import pytest
 import sys
+
+import pytest
 import yaml
 
 from distributed import Client
-from distributed.utils_test import popen
 from distributed.utils_test import cleanup  # noqa: F401
+from distributed.utils_test import popen
 
 
 @pytest.mark.asyncio

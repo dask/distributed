@@ -1,5 +1,6 @@
-import pytest
 import os
+
+import pytest
 
 pynvml = pytest.importorskip("pynvml")
 
@@ -53,3 +54,20 @@ async def test_gpu_metrics(s, a, b):
         s.workers[a.address].extra["gpu"]["name"]
         == pynvml.nvmlDeviceGetName(h).decode()
     )
+
+
+@gen_cluster()
+async def test_gpu_monitoring(s, a, b):
+    h = nvml._pynvml_handles()
+    res = await s.get_worker_monitor_info(recent=True)
+
+    assert (
+        res[a.address]["range_query"]["gpu_utilization"]
+        == pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+    )
+    assert (
+        res[a.address]["range_query"]["gpu_memory_used"]
+        == pynvml.nvmlDeviceGetMemoryInfo(h).used
+    )
+    assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
+    assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total

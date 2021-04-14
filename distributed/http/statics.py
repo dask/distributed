@@ -1,5 +1,6 @@
-from tornado import web
 import os
+
+from tornado import web
 
 routes = [
     (

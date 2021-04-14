@@ -3,21 +3,22 @@ Various functional tests for TLS networking.
 Most are taken from other test files and adapted.
 """
 import asyncio
+
 import pytest
 
-from distributed import Scheduler, Worker, Client, Nanny, worker_client, Queue
-from distributed.core import Status
+from distributed import Client, Nanny, Queue, Scheduler, Worker, worker_client
 from distributed.client import wait
+from distributed.core import Status
 from distributed.metrics import time
 from distributed.nanny import Nanny
 from distributed.utils_test import (  # noqa: F401
+    cleanup,
+    double,
     gen_tls_cluster,
     inc,
-    double,
-    slowinc,
     slowadd,
+    slowinc,
     tls_config,
-    cleanup,
 )
 
 

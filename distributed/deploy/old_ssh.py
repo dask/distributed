@@ -1,6 +1,6 @@
 import logging
-import socket
 import os
+import socket
 import sys
 import time
 import traceback
@@ -13,9 +13,7 @@ except ImportError:  # Python 2.7 fix
 from threading import Thread
 
 from tlz import merge
-
 from tornado import gen
-
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ class bcolors:
 def async_ssh(cmd_dict):
     import paramiko
     from paramiko.buffered_pipe import PipeTimeout
-    from paramiko.ssh_exception import SSHException, PasswordRequiredException
+    from paramiko.ssh_exception import PasswordRequiredException, SSHException
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())

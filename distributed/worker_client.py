@@ -1,10 +1,11 @@
-from contextlib import contextmanager
 import warnings
+from contextlib import contextmanager
 
 import dask
-from .threadpoolexecutor import secede, rejoin
-from .worker import thread_state, get_client, get_worker
+
+from .threadpoolexecutor import rejoin, secede
 from .utils import parse_timedelta
+from .worker import get_client, get_worker, thread_state
 
 
 @contextmanager

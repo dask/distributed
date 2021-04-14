@@ -1,7 +1,8 @@
 import asyncio
-import click
 import json
 import sys
+
+import click
 import yaml
 
 from distributed.deploy.spec import run_spec

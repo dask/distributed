@@ -1,13 +1,12 @@
 import random
 import time
-
 from concurrent.futures import (
-    TimeoutError,
-    Future,
-    wait,
-    as_completed,
     FIRST_COMPLETED,
     FIRST_EXCEPTION,
+    Future,
+    TimeoutError,
+    as_completed,
+    wait,
 )
 
 import pytest
@@ -15,16 +14,21 @@ from tlz import take
 
 from distributed import Client
 from distributed.utils import CancelledError
-from distributed.utils_test import (
-    slowinc,
+from distributed.utils_test import (  # noqa: F401
+    a,
+    b,
+    client,
+    cluster,
+    cluster_fixture,
+    inc,
+    loop,
+    s,
     slowadd,
     slowdec,
-    inc,
+    slowinc,
     throws,
     varying,
-    cluster,
 )
-from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
 
 
 def number_of_processing_tasks(client):

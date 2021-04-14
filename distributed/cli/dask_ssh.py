@@ -1,7 +1,7 @@
-from distributed.deploy.old_ssh import SSHCluster
 import click
 
 from distributed.cli.utils import check_python_3
+from distributed.deploy.old_ssh import SSHCluster
 
 
 @click.command(

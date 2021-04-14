@@ -425,12 +425,12 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
+from docutils.parsers.rst import directives
+
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
 # See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
-from sphinx.ext.autosummary import Autosummary
-from sphinx.ext.autosummary import get_documenter
-from docutils.parsers.rst import directives
+from sphinx.ext.autosummary import Autosummary, get_documenter
 from sphinx.util.inspect import safe_getattr
 
 

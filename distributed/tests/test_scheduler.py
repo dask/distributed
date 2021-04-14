@@ -8,39 +8,40 @@ from collections import defaultdict
 from time import sleep
 
 import cloudpickle
+import pytest
+from tlz import concat, first, frequencies, merge, valmap
+
 import dask
 from dask import delayed
-from tlz import merge, concat, valmap, first, frequencies
+from dask.compatibility import apply
 
-import pytest
-
-from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.comm import Comm
-from distributed.compatibility import MACOS
-from distributed.core import connect, rpc, ConnectionPool, Status
-from distributed.scheduler import Scheduler
+from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.client import wait
+from distributed.comm import Comm
+from distributed.compatibility import MACOS, WINDOWS
+from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.worker import dumps_function, dumps_task
-from distributed.utils import tmpfile, typename, TimeoutError
+from distributed.scheduler import Scheduler
+from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
     cleanup,
-    inc,
+    cluster,
     dec,
+    div,
     gen_cluster,
     gen_test,
-    slowinc,
+    inc,
+    loop,
+    nodebug,
     slowadd,
     slowdec,
-    cluster,
-    div,
-    varying,
+    slowinc,
     tls_only_security,
+    varying,
 )
-from distributed.utils_test import loop, nodebug  # noqa: F401
-from dask.compatibility import apply
+from distributed.worker import dumps_function, dumps_task
 
 if sys.version_info < (3, 8):
     try:
@@ -1829,12 +1830,30 @@ async def test_no_danglng_asyncio_tasks(cleanup):
     assert tasks == start
 
 
-@gen_cluster(client=True)
+class NoSchedulerDelayWorker(Worker):
+    """Custom worker class which does not update `scheduler_delay`.
+
+    This worker class is useful for some tests which make time
+    comparisons using times reported from workers.
+    """
+
+    @property
+    def scheduler_delay(self):
+        return 0
+
+    @scheduler_delay.setter
+    def scheduler_delay(self, value):
+        pass
+
+
+@gen_cluster(client=True, Worker=NoSchedulerDelayWorker)
 async def test_task_groups(c, s, a, b):
+    start = time()
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
     y = (x + 1).persist(optimize_graph=False)
     y = await y
+    stop = time()
 
     tg = s.task_groups[x.name]
     tp = s.task_prefixes["arange"]
@@ -1869,6 +1888,9 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["forgotten"] == 5
     # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
+    assert tg.start > start
+    assert tg.stop < stop
+    assert "compute" in tg.all_durations
     assert sys.getrefcount(tg) == 2
 
 
@@ -2200,3 +2222,15 @@ async def test_configurable_events_log_length(c, s, a, b):
     assert s.events["test"][0][1] == "dummy message 2"
     assert s.events["test"][1][1] == "dummy message 3"
     assert s.events["test"][2][1] == "dummy message 4"
+
+
+@gen_cluster()
+async def test_get_worker_monitor_info(s, a, b):
+    res = await s.get_worker_monitor_info()
+    ms = ["cpu", "time", "read_bytes", "write_bytes"]
+    if not WINDOWS:
+        ms += ["num_fds"]
+    for w in (a, b):
+        assert all(res[w.address]["range_query"][m] is not None for m in ms)
+        assert res[w.address]["count"] is not None
+        assert res[w.address]["last_time"] is not None
