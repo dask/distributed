@@ -599,7 +599,7 @@ class Server:
         for pc in self.periodic_callbacks.values():
             pc.stop()
         for listener in self.listeners:
-            future = self.listener.stop()
+            future = listener.stop()
             if inspect.isawaitable(future):
                 yield future
         for i in range(20):  # let comms close naturally for a second
