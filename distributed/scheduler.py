@@ -2656,6 +2656,7 @@ class SchedulerState:
         cause=None,
         exception=None,
         traceback=None,
+        worker=None,
         text=None,
         startstops=None,
     ) -> tuple:
@@ -4282,6 +4283,7 @@ class Scheduler(SchedulerState, ServerNode):
                     cause=key,
                     exception=exception,
                     traceback=traceback,
+                    worker=worker,
                     **kwargs,
                 )
             recommendations, client_msgs, worker_msgs = r
