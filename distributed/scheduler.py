@@ -1818,7 +1818,7 @@ class SchedulerState:
     #####################
 
     def _transition_dispatch(self, start: str, finish: str, *args, **kwargs):
-        start_finish: str = sys_intern(f"{start}_{finish}")
+        start_finish: str = sys_intern(f"{start}_{finish}".replace("-", "_"))
 
         if start_finish is "released_waiting":  # noqa: F632
             return self.transition_released_waiting(*args, **kwargs)
@@ -1838,9 +1838,9 @@ class SchedulerState:
             return self.transition_processing_memory(*args, **kwargs)
         elif start_finish is "processing_erred":  # noqa: F632
             return self.transition_processing_erred(*args, **kwargs)
-        elif start_finish is "no-worker_released":  # noqa: F632
+        elif start_finish is "no_worker_released":  # noqa: F632
             return self.transition_no_worker_released(*args, **kwargs)
-        elif start_finish is "no-worker_waiting":  # noqa: F632
+        elif start_finish is "no_worker_waiting":  # noqa: F632
             return self.transition_no_worker_waiting(*args, **kwargs)
         elif start_finish is "memory_released":  # noqa: F632
             return self.transition_memory_released(*args, **kwargs)
