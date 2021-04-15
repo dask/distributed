@@ -148,7 +148,7 @@ else:
 @inline
 def sys_intern(s):
     if compiled:
-        return intern(s)
+        return intern(s)  # noqa: F821
     else:
         return sys.intern(s)
 
