@@ -260,8 +260,10 @@ class ClientState:
         return self._versions
 
 
+@final
+@cclass
 class MemoryState:
-    """Memory readings on a worker.
+    """Memory readings on a worker or on the whole cluster.
 
     managed
         Sum of the output of sizeof() for all dask keys held by the worker, both in
@@ -286,41 +288,43 @@ class MemoryState:
         - memory not yet free()'d by the Python memory manager to the OS
 
     unmanaged_old
-        Minimum of the "other" memory measures over the last
+        Minimum of the 'unmanaged' measures over the last
         ``distributed.memory.recent_to_old_time`` seconds
     unmanaged_recent
-        other - unmanaged_old; in other words process memory that has been recently
+        unmanaged - unmanaged_old; in other words process memory that has been recently
         allocated but is not accounted for by dask; hopefully it's mostly a temporary
         spike.
     optimistic
         managed_in_memory + unmanaged_old; in other words the memory held long-term by
-        the process under the hopeful assumption that all unmanaged_recent memory is
-        temporary
+        the process under the hopeful assumption that all unmanaged_recent memory is a
+        temporary spike
     """
 
     __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
 
-    process: int
-    managed_in_memory: int
-    managed_spilled: int
-    unmanaged_old: int
+    process: Py_ssize_t
+    managed_in_memory: Py_ssize_t
+    managed_spilled: Py_ssize_t
+    unmanaged_old: Py_ssize_t
 
     def __init__(
         self,
         *,
-        process: int,
-        unmanaged_old: int,
-        managed: int,
-        managed_spilled: int,
+        process: Py_ssize_t,
+        unmanaged_old: Py_ssize_t,
+        managed: Py_ssize_t,
+        managed_spilled: Py_ssize_t,
     ):
         # Some data arrives with the heartbeat, some other arrives in realtime as the
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
-        # This can cause temporary glitches where a partial measure is larger than the
-        # whole, so we need to force all numbers to add up exactly by definition.
+        # This can cause glitches where a partial measure is larger than the whole, so
+        # we need to force all numbers to add up exactly by definition.
         self.process = process
         self.managed_spilled = min(managed_spilled, managed)
-        self.managed_in_memory = min(managed - self.managed_spilled, process)
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self.managed_in_memory = min(int(managed) - int(self.managed_spilled), process)
+        self.unmanaged_old = min(
+            unmanaged_old, int(process) - int(self.managed_in_memory)
+        )
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
@@ -330,21 +334,21 @@ class MemoryState:
         return out
 
     @property
-    def managed(self) -> int:
+    def managed(self) -> Py_ssize_t:
         return self.managed_in_memory + self.managed_spilled
 
     @property
-    def unmanaged(self) -> int:
+    def unmanaged(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
         return self.process - self.managed_in_memory
 
     @property
-    def unmanaged_recent(self) -> int:
+    def unmanaged_recent(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
         return self.process - self.managed_in_memory - self.unmanaged_old
 
     @property
-    def optimistic(self) -> int:
+    def optimistic(self) -> Py_ssize_t:
         return self.managed_in_memory + self.unmanaged_old
 
     def __repr__(self) -> str:

@@ -263,10 +263,10 @@ class Worker(ServerNode):
         memory_limit and at least one of memory_target_fraction or
         memory_spill_fraction values are defined, in that case, this attribute
         is a zict.Buffer, from which information on LRU cache can be queried.
-    * **data.fast:** ``{key: object}``:
+    * **data.memory:** ``{key: object}``:
         Dictionary mapping keys to actual values stored in memory. Only
         available if condition for **data** being a zict.Buffer is met.
-    * **data.slow:** ``{key: object}``:
+    * **data.disk:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
         available if condition for **data** being a zict.Buffer is met.
     * **data_needed**: deque(keys)
