@@ -2,7 +2,7 @@ import asyncio
 import logging
 import pickle
 from datetime import timedelta
-from time import sleep, time
+from time import sleep
 
 import pytest
 
@@ -140,7 +140,11 @@ async def test_async_ctx(s, a, b):
 
 @pytest.mark.slow
 def test_worker_dies():
-    with cluster() as (scheduler, workers):
+    with cluster(
+        config={
+            "distributed.scheduler.locks.lease-timeout": "0.1s",
+        }
+    ) as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             sem = Semaphore(name="x", max_leases=1)
 
@@ -156,11 +160,11 @@ def test_worker_dies():
                     return x
 
             futures = client.map(
-                f, range(100), sem=sem, kill_address=workers[0]["address"]
+                f, range(10), sem=sem, kill_address=workers[0]["address"]
             )
             results = client.gather(futures)
 
-            assert sorted(results) == list(range(100))
+            assert sorted(results) == list(range(10))
 
 
 @gen_cluster(client=True)
@@ -514,7 +518,7 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
     # * `lease-timeout` should be smaller than the sleep time. This is what the
     #   test builds on. assuming the leases cannot be refreshed, e.g. wrong
     #   event loop picked / PeriodicCallback never scheduled, the semaphore
-    #   would become oversubscribed and the len(protected_ressources) becomes
+    #   would become oversubscribed and the len(protected_resources) becomes
     #   non zero. This should also trigger a log message about "unknown leases"
     #   and fails the test.
     # * `lease-validation-interval` interval should be the smallest quantity.
@@ -530,17 +534,17 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
     ):
         with Client(processes=False, threads_per_worker=4) as client:
             sem = Semaphore(max_leases=1, name="database")
-            protected_ressource = []
+            protected_resource = []
 
             def access_limited(val, sem):
                 import time
 
                 with sem:
-                    assert len(protected_ressource) == 0
-                    protected_ressource.append(val)
+                    assert len(protected_resource) == 0
+                    protected_resource.append(val)
                     # Interact with the DB
                     time.sleep(0.2)
-                    protected_ressource.remove(val)
+                    protected_resource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
 

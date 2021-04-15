@@ -435,39 +435,21 @@ async def readone(comm):
         return msg
 
 
-def run_scheduler(q, nputs, port=0, **kwargs):
-    from distributed import Scheduler
+def run_scheduler(q, nputs, config, port=0, **kwargs):
+    with dask.config.set(config):
+        from distributed import Scheduler
 
-    # On Python 2.7 and Unix, fork() is used to spawn child processes,
-    # so avoid inheriting the parent's IO loop.
-    with pristine_loop() as loop:
-
-        async def _():
-            scheduler = await Scheduler(
-                validate=True, host="127.0.0.1", port=port, **kwargs
-            )
-            for i in range(nputs):
-                q.put(scheduler.address)
-            await scheduler.finished()
-
-        try:
-            loop.run_sync(_)
-        finally:
-            loop.close(all_fds=True)
-
-
-def run_worker(q, scheduler_q, **kwargs):
-    from distributed import Worker
-
-    reset_logger_locks()
-    with log_errors():
+        # On Python 2.7 and Unix, fork() is used to spawn child processes,
+        # so avoid inheriting the parent's IO loop.
         with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
 
             async def _():
-                worker = await Worker(scheduler_addr, validate=True, **kwargs)
-                q.put(worker.address)
-                await worker.finished()
+                scheduler = await Scheduler(
+                    validate=True, host="127.0.0.1", port=port, **kwargs
+                )
+                for i in range(nputs):
+                    q.put(scheduler.address)
+                await scheduler.finished()
 
             try:
                 loop.run_sync(_)
@@ -475,20 +457,41 @@ def run_worker(q, scheduler_q, **kwargs):
                 loop.close(all_fds=True)
 
 
-def run_nanny(q, scheduler_q, **kwargs):
-    with log_errors():
-        with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
+def run_worker(q, scheduler_q, config, **kwargs):
+    with dask.config.set(config):
+        from distributed import Worker
 
-            async def _():
-                worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                q.put(worker.address)
-                await worker.finished()
+        reset_logger_locks()
+        with log_errors():
+            with pristine_loop() as loop:
+                scheduler_addr = scheduler_q.get()
 
-            try:
-                loop.run_sync(_)
-            finally:
-                loop.close(all_fds=True)
+                async def _():
+                    worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                    q.put(worker.address)
+                    await worker.finished()
+
+                try:
+                    loop.run_sync(_)
+                finally:
+                    loop.close(all_fds=True)
+
+
+def run_nanny(q, scheduler_q, config, **kwargs):
+    with dask.config.set(config):
+        with log_errors():
+            with pristine_loop() as loop:
+                scheduler_addr = scheduler_q.get()
+
+                async def _():
+                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                    q.put(worker.address)
+                    await worker.finished()
+
+                try:
+                    loop.run_sync(_)
+                finally:
+                    loop.close(all_fds=True)
 
 
 @contextmanager
@@ -595,6 +598,7 @@ def cluster(
     active_rpc_timeout=10,
     disconnect_timeout=20,
     scheduler_kwargs={},
+    config={},
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -612,7 +616,7 @@ def cluster(
         scheduler = mp_context.Process(
             name="Dask cluster test: Scheduler",
             target=run_scheduler,
-            args=(scheduler_q, nworkers + 1),
+            args=(scheduler_q, nworkers + 1, config),
             kwargs=scheduler_kwargs,
         )
         ws.add(scheduler)
@@ -635,7 +639,7 @@ def cluster(
             proc = mp_context.Process(
                 name="Dask cluster test: Worker",
                 target=_run_worker,
-                args=(q, scheduler_q),
+                args=(q, scheduler_q, config),
                 kwargs=kwargs,
             )
             ws.add(proc)

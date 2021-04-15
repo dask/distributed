@@ -796,6 +796,9 @@ class TaskGroup:
     _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
+    _start: double
+    _stop: double
+    _all_durations: object
 
     def __init__(self, name: str):
         self._name = name
@@ -807,6 +810,9 @@ class TaskGroup:
         self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
+        self._start = 0.0
+        self._stop = 0.0
+        self._all_durations = defaultdict(float)
 
     @property
     def name(self):
@@ -839,6 +845,18 @@ class TaskGroup:
     @property
     def types(self):
         return self._types
+
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
 
     @ccall
     def add(self, o):
@@ -1858,16 +1876,15 @@ class SchedulerState:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
                 a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
+
+                v = a_recs.get(key, finish)
+                func = self._transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -2123,11 +2140,24 @@ class SchedulerState:
         else:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
+            wp_vals = worker_pool.values()
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                if ws._occupancy == 0:
+                    # special case to use round-robin; linear search
+                    # for next worker with zero occupancy (or just
+                    # land back where we started).
+                    wp_i: WorkerState
+                    start: Py_ssize_t = self._n_tasks % n_workers
+                    i: Py_ssize_t
+                    for i in range(n_workers):
+                        wp_i = wp_vals[(i + start) % n_workers]
+                        if wp_i._occupancy == 0:
+                            ws = wp_i
+                            break
             else:  # dumb but fast in large case
-                ws = worker_pool.values()[self._n_tasks % n_workers]
+                ws = wp_vals[self._n_tasks % n_workers]
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -2305,6 +2335,7 @@ class SchedulerState:
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
+                    ts._group._all_durations[action] += stop - start
 
             #############################
             # Update Timing Information #
@@ -2321,6 +2352,9 @@ class SchedulerState:
 
                 ts._prefix._duration_average = avg_duration
                 ts._group._duration += new_duration
+                ts._group._start = ts._group._start or compute_start
+                if ts._group._stop < compute_stop:
+                    ts._group._stop = compute_stop
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
                 tts: TaskState
