@@ -5,6 +5,8 @@ import operator
 import re
 import sys
 from collections import defaultdict
+from itertools import product
+from textwrap import dedent
 from time import sleep
 
 import cloudpickle
@@ -22,7 +24,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.scheduler import Scheduler
+from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
@@ -2242,3 +2244,56 @@ async def test_quiet_cluster_round_robin(c, s, a, b):
     await c.submit(inc, 2)
     await c.submit(inc, 3)
     assert a.log and b.log
+
+
+def test_memorystate():
+    m = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    assert m.process == 100
+    assert m.managed == 80
+    assert m.managed_in_memory == 68
+    assert m.managed_spilled == 12
+    assert m.unmanaged == 32
+    assert m.unmanaged_old == 15
+    assert m.unmanaged_recent == 17
+    assert m.optimistic == 83
+
+    assert (
+        repr(m)
+        == dedent(
+            """
+            Managed by Dask       : 80 B
+              - in process memory : 68 B
+              - spilled to disk   : 12 B
+            Process memory (RSS)  : 100 B
+              - managed by Dask   : 68 B
+              - unmanaged (old)   : 15 B
+              - unmanaged (recent): 17 B
+            """
+        ).lstrip()
+    )
+
+
+def test_memorystate_sum():
+    m1 = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    m2 = MemoryState(process=80, unmanaged_old=10, managed=60, managed_spilled=2)
+    m3 = MemoryState.sum(m1, m2)
+    assert m3.process == 180
+    assert m3.unmanaged_old == 25
+    assert m3.managed == 140
+    assert m3.managed_spilled == 14
+
+
+@pytest.mark.parametrize(
+    "process,unmanaged_old,managed,managed_spilled", list(product(*[[0, 1, 2, 3]] * 4))
+)
+def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
+    """Input data is hammered so that everything adds up by construction"""
+    m = MemoryState(
+        process=process,
+        unmanaged_old=unmanaged_old,
+        managed=managed,
+        managed_spilled=managed_spilled,
+    )
+    assert m.managed_in_memory + m.unmanaged == m.process
+    assert m.managed_in_memory + m.managed_spilled == m.managed
+    assert m.unmanaged_old + m.unmanaged_recent == m.unmanaged
