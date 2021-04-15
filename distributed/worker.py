@@ -23,7 +23,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from dask.compatibility import apply
 from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
@@ -47,6 +46,8 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize
+from .protocol.core import DelayedExceptionRaise
+from .protocol.serialize import TaskGraphValue, collection_types, msgpack_persist_lists
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -55,7 +56,6 @@ from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
     LRU,
     TimeoutError,
-    _maybe_complex,
     get_ip,
     has_arg,
     import_file,
@@ -702,6 +702,7 @@ class Worker(ServerNode):
             stream_handlers=stream_handlers,
             io_loop=self.loop,
             connection_args=self.connection_args,
+            deserialize="delay-exception",
             **kwargs,
         )
 
@@ -878,7 +879,11 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                comm = await connect(self.scheduler.address, **self.connection_args)
+                comm = await connect(
+                    self.scheduler.address,
+                    deserialize="delay-exception",
+                    **self.connection_args,
+                )
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -3481,6 +3486,18 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
+def raise_delayed_exceptions(x):
+    typ = type(x)
+    if typ is DelayedExceptionRaise:
+        raise x.err
+    elif typ is dict:
+        for y in x.values():
+            raise_delayed_exceptions(y)
+    elif typ in collection_types:
+        for y in x:
+            raise_delayed_exceptions(y)
+
+
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
@@ -3494,6 +3511,7 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
         assert not function and not args and not kwargs
         function = execute_task
         args = (task,)
+        raise_delayed_exceptions(task)
 
     return function, args or (), kwargs or {}
 
@@ -3536,6 +3554,31 @@ def dumps_function(func):
     return result
 
 
+_warn_dumps_warned = [False]
+
+
+def warn_large_args(obj, limit=1e6):
+    if _warn_dumps_warned[0]:
+        return
+    size = sizeof(obj)
+    if size > limit:
+        _warn_dumps_warned[0] = True
+        s = str(obj)
+        if len(s) > 70:
+            s = s[:50] + " ... " + s[-15:]
+        warnings.warn(
+            "Large object of size %s detected in task graph: \n"
+            "  %s\n"
+            "Consider scattering large objects ahead of time\n"
+            "with client.scatter to reduce scheduler burden and \n"
+            "keep data on workers\n\n"
+            "    future = client.submit(func, big_data)    # bad\n\n"
+            "    big_future = client.scatter(big_data)     # good\n"
+            "    future = client.submit(func, big_future)  # good"
+            % (format_bytes(size), s)
+        )
+
+
 def dumps_task(task):
     """Serialize a dask task
 
@@ -3557,17 +3600,9 @@ def dumps_task(task):
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
     if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
+        warn_large_args(task[1:])
 
-
-_warn_dumps_warned = [False]
+    return TaskGraphValue(msgpack_persist_lists(task))
 
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):

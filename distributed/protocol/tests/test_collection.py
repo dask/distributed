@@ -25,13 +25,6 @@ def test_serialize_collection(collection, y, y_serializer):
     t = deserialize(header, frames, deserializers=("dask", "pickle", "error"))
     assert isinstance(t, collection)
 
-    assert header["is-collection"] is True
-    sub_headers = header["sub-headers"]
-
-    if collection is not dict:
-        assert sub_headers[0]["serializer"] == "dask"
-        assert sub_headers[1]["serializer"] == y_serializer
-
     if collection is dict:
         assert (t["x"] == x).all()
         assert str(t["y"]) == str(y)
@@ -43,11 +36,3 @@ def test_serialize_collection(collection, y, y_serializer):
 def test_large_collections_serialize_simply():
     header, frames = serialize(tuple(range(1000)))
     assert len(frames) == 1
-
-
-def test_nested_types():
-    x = np.ones(5)
-    header, frames = serialize([[[x]]])
-    assert "dask" in str(header)
-    assert len(frames) == 1
-    assert x.data == np.frombuffer(frames[0]).data

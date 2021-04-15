@@ -4572,8 +4572,6 @@ async def test_get_future_error_simple(c, s, a, b):
     assert f.status == "error"
 
     function, args, kwargs, deps = await c._get_futures_error(f)
-    # args contains only solid values, not keys
-    assert function.__name__ == "div"
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4591,8 +4589,7 @@ async def test_get_futures_error(c, s, a, b):
     assert f.status == "error"
 
     function, args, kwargs, deps = await c._get_futures_error(f)
-    assert function.__name__ == "div"
-    assert args == (1, y0.key)
+    assert args == ((div, 1, y0.key),)
 
 
 @gen_cluster(client=True)
@@ -4609,8 +4606,6 @@ async def test_recreate_error_delayed(c, s, a, b):
 
     function, args, kwargs = await c._recreate_error_locally(f)
     assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4628,8 +4623,6 @@ async def test_recreate_error_futures(c, s, a, b):
 
     function, args, kwargs = await c._recreate_error_locally(f)
     assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4720,14 +4713,18 @@ async def test_robust_unserializable(c, s, a, b):
         def __getstate__(self):
             raise MyException()
 
-    with pytest.raises(MyException):
+    # Notice, because serialization is delayed until `distributed.batched`
+    # we get a `CancelledError` exception.
+    # Before <https://github.com/dask/distributed/pull/4699> the serialization
+    # happed immediately in `submit()`, which would raise the `MyException`.
+    with pytest.raises(CancelledError):
         future = c.submit(identity, Foo())
 
-    futures = c.map(inc, range(10))
-    results = await c.gather(futures)
+        futures = c.map(inc, range(10))
+        results = await c.gather(futures)
 
-    assert results == list(map(inc, range(10)))
-    assert a.data and b.data
+        assert results == list(map(inc, range(10)))
+        assert a.data and b.data
 
 
 @gen_cluster(client=True)

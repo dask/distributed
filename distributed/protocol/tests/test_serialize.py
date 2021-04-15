@@ -18,6 +18,7 @@ from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
     Serialize,
     Serialized,
+    dask_deserialize,
     dask_serialize,
     deserialize,
     deserialize_bytes,
@@ -419,12 +420,16 @@ def test_compression_numpy_list():
 
     @dask_serialize.register(MyObj)
     def _(x):
-        header = {"compression": [False]}
+        header = {"compression": (False,)}
         frames = [b""]
         return header, frames
 
-    header, frames = serialize([MyObj(), MyObj()])
-    assert header["compression"] == [False, False]
+    @dask_deserialize.register(MyObj)
+    def _(header, frames):
+        assert header["compression"] == (False,)
+
+    frames = dumps([MyObj(), MyObj()])
+    loads(frames)
 
 
 @pytest.mark.parametrize(
@@ -468,7 +473,7 @@ def test_check_dask_serializable(data, is_serializable):
 )
 def test_serialize_lists(serializers):
     data_in = ["a", 2, "c", None, "e", 6]
-    header, frames = serialize(data_in, serializers=serializers)
+    header, frames = serialize(data_in, serializers=serializers, on_error="error")
     data_out = deserialize(header, frames)
 
     assert data_in == data_out

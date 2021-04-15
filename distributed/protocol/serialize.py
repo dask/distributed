@@ -1,3 +1,4 @@
+import collections.abc
 import importlib
 import traceback
 from array import array
@@ -7,7 +8,7 @@ from functools import partial
 import msgpack
 
 import dask
-from dask.base import normalize_token
+from dask.base import normalize_token, tokenize
 
 from ..utils import ensure_bytes, has_keyword, typename
 from . import pickle
@@ -20,6 +21,8 @@ dask_serialize = dask.utils.Dispatch("dask_serialize")
 dask_deserialize = dask.utils.Dispatch("dask_deserialize")
 
 _cached_allowed_modules = {}
+non_list_collection_types = (tuple, set, frozenset)
+collection_types = (list,) + non_list_collection_types
 
 
 def dask_dumps(x, context=None):
@@ -106,6 +109,42 @@ def import_allowed_module(name):
         )
 
 
+class MsgpackList(collections.abc.MutableSequence):
+    def __init__(self, x):
+        self.data = x
+
+    def __getitem__(self, i):
+        return self.data[i]
+
+    def __delitem__(self, i):
+        del self.data[i]
+
+    def __setitem__(self, i, v):
+        self.data[i] = v
+
+    def __len__(self):
+        return len(self.data)
+
+    def insert(self, i, v):
+        return self.data.insert(i, v)
+
+
+class TaskGraphValue:
+    def __init__(self, x):
+        self.data = x
+
+
+def msgpack_persist_lists(obj):
+    typ = type(obj)
+    if typ is list:
+        return MsgpackList([msgpack_persist_lists(o) for o in obj])
+    if typ in non_list_collection_types:
+        return typ(msgpack_persist_lists(o) for o in obj)
+    if typ is dict:
+        return {k: msgpack_persist_lists(v) for k, v in obj.items()}
+    return obj
+
+
 def msgpack_decode_default(obj):
     """
     Custom packer/unpacker for msgpack
@@ -116,15 +155,13 @@ def msgpack_decode_default(obj):
         return getattr(typ, obj["name"])
 
     if "__Set__" in obj:
-        return set(obj["as-list"])
+        return set(obj["as-tuple"])
 
-    if "__Serialized__" in obj:
-        # Notice, the data here is marked a Serialized rather than deserialized. This
-        # is because deserialization requires Pickle which the Scheduler cannot run
-        # because of security reasons.
-        # By marking it Serialized, the data is passed through to the workers that
-        # eventually will deserialize it.
-        return Serialized(*obj["data"])
+    if "__MsgpackList__" in obj:
+        return list(obj["as-tuple"])
+
+    if "__TaskGraphValue__" in obj:
+        return obj["data"]
 
     return obj
 
@@ -133,9 +170,7 @@ def msgpack_encode_default(obj):
     """
     Custom packer/unpacker for msgpack
     """
-
-    if isinstance(obj, Serialize):
-        return {"__Serialized__": True, "data": serialize(obj.data)}
+    typ = type(obj)
 
     if isinstance(obj, Enum):
         return {
@@ -146,14 +181,20 @@ def msgpack_encode_default(obj):
         }
 
     if isinstance(obj, set):
-        return {"__Set__": True, "as-list": list(obj)}
+        return {"__Set__": True, "as-tuple": tuple(obj)}
+
+    if typ is MsgpackList:
+        return {"__MsgpackList__": True, "as-tuple": tuple(obj.data)}
+
+    if typ is TaskGraphValue:
+        return {"__TaskGraphValue__": True, "data": obj.data}
 
     return obj
 
 
 def msgpack_dumps(x):
     try:
-        frame = msgpack.dumps(x, use_bin_type=True)
+        frame = msgpack.dumps(x, default=msgpack_encode_default, use_bin_type=True)
     except Exception:
         raise NotImplementedError()
     else:
@@ -161,7 +202,12 @@ def msgpack_dumps(x):
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b"".join(frames), use_list=False, **msgpack_opts)
+    return msgpack.loads(
+        b"".join(frames),
+        object_hook=msgpack_decode_default,
+        use_list=False,
+        **msgpack_opts,
+    )
 
 
 def serialization_error_loads(header, frames):
@@ -238,71 +284,18 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    if type(x) in (list, set, tuple, dict):
-        iterate_collection = False
-        if type(x) is list and "msgpack" in serializers:
-            # Note: "msgpack" will always convert lists to tuples
-            #       (see GitHub #3716), so we should iterate
-            #       through the list if "msgpack" comes before "pickle"
-            #       in the list of serializers.
-            iterate_collection = ("pickle" not in serializers) or (
-                serializers.index("pickle") > serializers.index("msgpack")
-            )
-        if not iterate_collection:
-            # Check for "dask"-serializable data in dict/list/set
-            iterate_collection = check_dask_serializable(x)
-
-    # Determine whether keys are safe to be serialized with msgpack
-    if type(x) is dict and iterate_collection:
-        try:
-            msgpack.dumps(list(x.keys()))
-        except Exception:
-            dict_safe = False
-        else:
-            dict_safe = True
-
+    # Note: "msgpack" will always convert lists to tuple (see GitHub #3716),
+    #       so we should persist lists if "msgpack" comes before "pickle"
+    #       in the list of serializers.
     if (
-        type(x) in (list, set, tuple)
-        and iterate_collection
-        or type(x) is dict
-        and iterate_collection
-        and dict_safe
+        type(x) is list
+        and "msgpack" in serializers
+        and (
+            "pickle" not in serializers
+            or serializers.index("pickle") > serializers.index("msgpack")
+        )
     ):
-        if isinstance(x, dict):
-            headers_frames = []
-            for k, v in x.items():
-                _header, _frames = serialize(
-                    v, serializers=serializers, on_error=on_error, context=context
-                )
-                _header["key"] = k
-                headers_frames.append((_header, _frames))
-        else:
-            headers_frames = [
-                serialize(
-                    obj, serializers=serializers, on_error=on_error, context=context
-                )
-                for obj in x
-            ]
-
-        frames = []
-        lengths = []
-        compressions = []
-        for _header, _frames in headers_frames:
-            frames.extend(_frames)
-            length = len(_frames)
-            lengths.append(length)
-            compressions.extend(_header.get("compression") or [None] * len(_frames))
-
-        headers = [obj[0] for obj in headers_frames]
-        headers = {
-            "sub-headers": headers,
-            "is-collection": True,
-            "frame-lengths": lengths,
-            "type-serialized": type(x).__name__,
-        }
-        if any(compression is not None for compression in compressions):
-            headers["compression"] = compressions
-        return headers, frames
+        x = msgpack_persist_lists(x)
 
     tb = ""
 
@@ -347,37 +340,6 @@ def deserialize(header, frames, deserializers=None):
     --------
     serialize
     """
-    if "is-collection" in header:
-        headers = header["sub-headers"]
-        lengths = header["frame-lengths"]
-        cls = {"tuple": tuple, "list": list, "set": set, "dict": dict}[
-            header["type-serialized"]
-        ]
-
-        start = 0
-        if cls is dict:
-            d = {}
-            for _header, _length in zip(headers, lengths):
-                k = _header.pop("key")
-                d[k] = deserialize(
-                    _header,
-                    frames[start : start + _length],
-                    deserializers=deserializers,
-                )
-                start += _length
-            return d
-        else:
-            lst = []
-            for _header, _length in zip(headers, lengths):
-                lst.append(
-                    deserialize(
-                        _header,
-                        frames[start : start + _length],
-                        deserializers=deserializers,
-                    )
-                )
-                start += _length
-            return cls(lst)
 
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
@@ -511,6 +473,14 @@ class Serialized:
     def __ne__(self, other):
         return not (self == other)
 
+    def __hash__(self):
+        return hash(tokenize((self.header, self.frames)))
+
+
+class SerializedCallable(Serialized):
+    def __call__(self) -> None:
+        raise NotImplementedError
+
 
 def nested_deserialize(x):
     """
@@ -522,32 +492,20 @@ def nested_deserialize(x):
     {'op': 'update', 'data': 123}
     """
 
-    def replace_inner(x):
-        if type(x) is dict:
-            x = x.copy()
-            for k, v in x.items():
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
-        elif type(x) is list:
-            x = list(x)
-            for k, v in enumerate(x):
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
-        return x
-
-    return replace_inner(x)
+    typ = type(x)
+    if typ is dict:
+        return {k: nested_deserialize(v) for k, v in x.items()}
+    if typ is MsgpackList:
+        return list(nested_deserialize(x.data))
+    if typ is TaskGraphValue:
+        return x.data
+    if typ is Serialize:
+        return x.data
+    if isinstance(x, Serialized):
+        return deserialize(x.header, x.frames)
+    if typ in collection_types:
+        return typ(nested_deserialize(o) for o in x)
+    return x
 
 
 def serialize_bytelist(x, **kwargs):

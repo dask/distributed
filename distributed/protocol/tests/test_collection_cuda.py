@@ -2,7 +2,7 @@ import pytest
 
 from dask.dataframe.utils import assert_eq
 
-from distributed.protocol import deserialize, serialize
+from distributed.protocol import dumps, loads
 
 
 @pytest.mark.parametrize("collection", [tuple, dict])
@@ -14,19 +14,13 @@ def test_serialize_cupy(collection, y, y_serializer):
     if y is not None:
         y = cupy.arange(y)
     if issubclass(collection, dict):
-        header, frames = serialize(
-            {"x": x, "y": y}, serializers=("cuda", "dask", "pickle")
-        )
+        frames = dumps({"x": x, "y": y}, serializers=("cuda", "dask", "pickle"))
     else:
-        header, frames = serialize((x, y), serializers=("cuda", "dask", "pickle"))
-    t = deserialize(header, frames, deserializers=("cuda", "dask", "pickle", "error"))
+        frames = dumps((x, y), serializers=("cuda", "dask", "pickle"))
 
-    assert header["is-collection"] is True
-    sub_headers = header["sub-headers"]
-    assert sub_headers[0]["serializer"] == "cuda"
-    assert sub_headers[1]["serializer"] == y_serializer
-    assert isinstance(t, collection)
+    assert any(isinstance(f, cupy.ndarray) for f in frames)
 
+    t = loads(frames, deserializers=("cuda", "dask", "pickle", "error"))
     assert ((t["x"] if isinstance(t, dict) else t[0]) == x).all()
     if y is None:
         assert (t["y"] if isinstance(t, dict) else t[1]) is None
@@ -46,19 +40,12 @@ def test_serialize_pandas_pandas(collection, df2, df2_serializer):
     if df2 is not None:
         df2 = cudf.from_pandas(pd.DataFrame(df2))
     if issubclass(collection, dict):
-        header, frames = serialize(
-            {"df1": df1, "df2": df2}, serializers=("cuda", "dask", "pickle")
-        )
+        frames = dumps({"df1": df1, "df2": df2}, serializers=("cuda", "dask", "pickle"))
     else:
-        header, frames = serialize((df1, df2), serializers=("cuda", "dask", "pickle"))
-    t = deserialize(header, frames, deserializers=("cuda", "dask", "pickle"))
+        frames = dumps((df1, df2), serializers=("cuda", "dask", "pickle"))
+    assert any(isinstance(f, cudf.core.buffer.Buffer) for f in frames)
 
-    assert header["is-collection"] is True
-    sub_headers = header["sub-headers"]
-    assert sub_headers[0]["serializer"] == "cuda"
-    assert sub_headers[1]["serializer"] == df2_serializer
-    assert isinstance(t, collection)
-
+    t = loads(frames, deserializers=("cuda", "dask", "pickle"))
     assert_eq(t["df1"] if isinstance(t, dict) else t[0], df1)
     if df2 is None:
         assert (t["df2"] if isinstance(t, dict) else t[1]) is None

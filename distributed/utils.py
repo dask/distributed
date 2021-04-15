@@ -38,7 +38,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
-from dask import istask
 
 # Import config serialization functions here for backward compatibility
 from dask.config import deserialize as deserialize_for_cli  # noqa
@@ -757,17 +756,6 @@ def validate_key(k):
     typ = type(k)
     if typ is not str and typ is not bytes:
         raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
-
-
-def _maybe_complex(task):
-    """ Possibly contains a nested task """
-    return (
-        istask(task)
-        or type(task) is list
-        and any(map(_maybe_complex, task))
-        or type(task) is dict
-        and any(map(_maybe_complex, task.values()))
-    )
 
 
 def seek_delimiter(file, delimiter, blocksize):
