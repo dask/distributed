@@ -46,7 +46,13 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize
-from .protocol.core import DelayedExceptionRaise
+from .protocol.core import (
+    DelayedExceptionRaise,
+    cache_loads,
+    cache_loads_lock,
+    dumps_function,
+    loads_function,
+)
 from .protocol.serialize import TaskGraphValue, collection_types, msgpack_persist_lists
 from .pubsub import PubSubWorkerExtension
 from .security import Security
@@ -54,7 +60,6 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
-    LRU,
     TimeoutError,
     get_ip,
     has_arg,
@@ -1049,7 +1054,8 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
-                cache_loads.data.clear()
+                with cache_loads_lock:
+                    cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 raise e
@@ -3471,21 +3477,6 @@ async def get_data_from_worker(
 job_counter = [0]
 
 
-cache_loads = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """ Load a function from bytes, cache bytes """
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
-
-
 def raise_delayed_exceptions(x):
     typ = type(x)
     if typ is DelayedExceptionRaise:
@@ -3532,26 +3523,6 @@ def execute_task(task):
         return list(map(execute_task, task))
     else:
         return task
-
-
-cache_dumps = LRU(maxsize=100)
-
-_cache_lock = threading.Lock()
-
-
-def dumps_function(func):
-    """ Dump a function to bytes, cache functions """
-    try:
-        with _cache_lock:
-            result = cache_dumps[func]
-    except KeyError:
-        result = pickle.dumps(func, protocol=4)
-        if len(result) < 100000:
-            with _cache_lock:
-                cache_dumps[func] = result
-    except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
-    return result
 
 
 _warn_dumps_warned = [False]

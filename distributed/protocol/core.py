@@ -1,7 +1,10 @@
 import logging
+import threading
 
 import msgpack
 
+from ..utils import LRU
+from . import pickle
 from .compression import decompress, maybe_compress
 from .serialize import (
     MsgpackList,
@@ -17,6 +20,39 @@ from .serialize import (
 from .utils import msgpack_opts
 
 logger = logging.getLogger(__name__)
+
+cache_dumps = LRU(maxsize=100)
+cache_loads = LRU(maxsize=100)
+cache_dumps_lock = threading.Lock()
+cache_loads_lock = threading.Lock()
+
+
+def dumps_function(func):
+    """ Dump a function to bytes, cache functions """
+    try:
+        with cache_dumps_lock:
+            result = cache_dumps[func]
+    except KeyError:
+        result = pickle.dumps(func, protocol=4)
+        if len(result) < 100000:
+            with cache_dumps_lock:
+                cache_dumps[func] = result
+    except TypeError:  # Unhashable function
+        result = pickle.dumps(func, protocol=4)
+    return result
+
+
+def loads_function(bytes_object):
+    """ Load a function from bytes, cache bytes """
+    if len(bytes_object) < 100000:
+        with cache_dumps_lock:
+            try:
+                result = cache_loads[bytes_object]
+            except KeyError:
+                result = pickle.loads(bytes_object)
+                cache_loads[bytes_object] = result
+            return result
+    return pickle.loads(bytes_object)
 
 
 def dumps(msg, serializers=None, on_error="message", context=None) -> list:
@@ -59,8 +95,10 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                 obj = obj.data  # TODO: remove Serialize/to_serialize completely
 
             offset = len(frames)
-            if typ is Serialized:
+            if typ in (Serialized, SerializedCallable):
                 sub_header, sub_frames = obj.header, obj.frames
+            elif callable(obj):
+                sub_header, sub_frames = {"callable": dumps_function(obj)}, []
             else:
                 sub_header, sub_frames = serialize_and_split(
                     obj, serializers=serializers, on_error=on_error, context=context
@@ -73,7 +111,7 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                 )
             )
             frames.extend(sub_frames)
-            return {"__Serialized__": offset, "callable": callable(obj)}
+            return {"__Serialized__": offset}
 
         frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
         return frames
@@ -104,6 +142,11 @@ def loads(frames, deserialize=True, deserializers=None):
                 )
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                if "callable" in sub_header:
+                    if deserialize:
+                        return loads_function(sub_header["callable"])
+                    else:
+                        return SerializedCallable(sub_header, sub_frames)
                 if deserialize:
                     if "compression" in sub_header:
                         sub_frames = decompress(sub_header, sub_frames)
@@ -116,8 +159,8 @@ def loads(frames, deserialize=True, deserializers=None):
                             return DelayedExceptionRaise(e)
                         else:
                             raise
-                elif obj["callable"]:
-                    return SerializedCallable(sub_header, sub_frames)
+                # elif obj["callable"]:
+                #     return SerializedCallable(sub_header, sub_frames)
                 else:
                     return Serialized(sub_header, sub_frames)
             else:
