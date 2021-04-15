@@ -1818,45 +1818,38 @@ class SchedulerState:
     #####################
 
     def _transition_dispatch(self, start: str, finish: str, *args, **kwargs):
-        start = sys_intern(start)
-        finish = sys_intern(finish)
+        start_finish: str = sys_intern(f"{start}_{finish}")
 
-        if start is "released":  # noqa: F632
-            if finish is "waiting":  # noqa: F632
-                return self.transition_released_waiting(*args, **kwargs)
-            elif finish is "forgotten":  # noqa: F632
-                return self.transition_released_forgotten(*args, **kwargs)
-            elif finish is "erred":  # noqa: F632
-                return self.transition_released_erred(*args, **kwargs)
-        elif start is "waiting":  # noqa: F632
-            if finish is "released":  # noqa: F632
-                return self.transition_waiting_released(*args, **kwargs)
-            elif finish is "processing":  # noqa: F632
-                return self.transition_waiting_processing(*args, **kwargs)
-            elif finish is "memory":  # noqa: F632
-                return self.transition_waiting_memory(*args, **kwargs)
-        elif start is "processing":  # noqa: F632
-            if finish is "released":  # noqa: F632
-                return self.transition_processing_released(*args, **kwargs)
-            elif finish is "memory":  # noqa: F632
-                return self.transition_processing_memory(*args, **kwargs)
-            elif finish is "erred":  # noqa: F632
-                return self.transition_processing_erred(*args, **kwargs)
-        elif start is "no-worker":  # noqa: F632
-            if finish is "released":  # noqa: F632
-                return self.transition_no_worker_released(*args, **kwargs)
-            elif finish is "waiting":  # noqa: F632
-                return self.transition_no_worker_waiting(*args, **kwargs)
-        elif start is "memory":  # noqa: F632
-            if finish is "released":  # noqa: F632
-                return self.transition_memory_released(*args, **kwargs)
-            elif finish is "forgotten":  # noqa: F632
-                return self.transition_memory_forgotten(*args, **kwargs)
-        elif start is "erred":  # noqa: F632
-            if finish is "released":  # noqa: F632
-                return self.transition_erred_released(*args, **kwargs)
-            elif finish is "forgotten":  # noqa: F632
-                return self.transition_released_forgotten(*args, **kwargs)
+        if start_finish is "released_waiting":  # noqa: F632
+            return self.transition_released_waiting(*args, **kwargs)
+        elif start_finish is "released_forgotten":  # noqa: F632
+            return self.transition_released_forgotten(*args, **kwargs)
+        elif start_finish is "released_erred":  # noqa: F632
+            return self.transition_released_erred(*args, **kwargs)
+        elif start_finish is "waiting_released":  # noqa: F632
+            return self.transition_waiting_released(*args, **kwargs)
+        elif start_finish is "waiting_processing":  # noqa: F632
+            return self.transition_waiting_processing(*args, **kwargs)
+        elif start_finish is "waiting_memory":  # noqa: F632
+            return self.transition_waiting_memory(*args, **kwargs)
+        elif start_finish is "processing_released":  # noqa: F632
+            return self.transition_processing_released(*args, **kwargs)
+        elif start_finish is "processing_memory":  # noqa: F632
+            return self.transition_processing_memory(*args, **kwargs)
+        elif start_finish is "processing_erred":  # noqa: F632
+            return self.transition_processing_erred(*args, **kwargs)
+        elif start_finish is "no-worker_released":  # noqa: F632
+            return self.transition_no_worker_released(*args, **kwargs)
+        elif start_finish is "no-worker_waiting":  # noqa: F632
+            return self.transition_no_worker_waiting(*args, **kwargs)
+        elif start_finish is "memory_released":  # noqa: F632
+            return self.transition_memory_released(*args, **kwargs)
+        elif start_finish is "memory_forgotten":  # noqa: F632
+            return self.transition_memory_forgotten(*args, **kwargs)
+        elif start_finish is "erred_released":  # noqa: F632
+            return self.transition_erred_released(*args, **kwargs)
+        elif start_finish is "erred_forgotten":  # noqa: F632
+            return self.transition_released_forgotten(*args, **kwargs)
 
     def _transition(
         self,
