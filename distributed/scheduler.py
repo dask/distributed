@@ -1876,16 +1876,15 @@ class SchedulerState:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
                 a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
+
+                v = a_recs.get(key, finish)
+                func = self._transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
