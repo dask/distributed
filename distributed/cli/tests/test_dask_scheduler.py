@@ -4,7 +4,6 @@ pytest.importorskip("requests")
 
 import os
 import shutil
-import socket
 import sys
 import tempfile
 from time import sleep
@@ -77,9 +76,6 @@ def test_dashboard(loop):
             pass
 
         names = ["localhost", "127.0.0.1", get_ip()]
-        if "linux" in sys.platform:
-            names.append(socket.gethostname())
-
         start = time()
         while True:
             try:

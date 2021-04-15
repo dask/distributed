@@ -1998,16 +1998,15 @@ class SchedulerState:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
                 a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
+
+                v = a_recs.get(key, finish)
+                func = self._transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -2263,11 +2262,24 @@ class SchedulerState:
         else:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
+            wp_vals = worker_pool.values()
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                if ws._occupancy == 0:
+                    # special case to use round-robin; linear search
+                    # for next worker with zero occupancy (or just
+                    # land back where we started).
+                    wp_i: WorkerState
+                    start: Py_ssize_t = self._n_tasks % n_workers
+                    i: Py_ssize_t
+                    for i in range(n_workers):
+                        wp_i = wp_vals[(i + start) % n_workers]
+                        if wp_i._occupancy == 0:
+                            ws = wp_i
+                            break
             else:  # dumb but fast in large case
-                ws = worker_pool.values()[self._n_tasks % n_workers]
+                ws = wp_vals[self._n_tasks % n_workers]
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
