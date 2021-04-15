@@ -395,7 +395,7 @@ properties:
             description: >-
               Settings for memory management
             properties:
-              new_to_old_lag:
+              recent_to_old_time:
                 type: string
                 description: >-
                   When there is an increase in process memory (as observed by the

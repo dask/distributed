@@ -164,9 +164,9 @@ UNKNOWN_TASK_DURATION = declare(
     double,
     parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
 )
-MEMORY_NEW_TO_OLD_LAG = declare(
+MEMORY_RECENT_TO_OLD_TIME = declare(
     double,
-    parse_timedelta(dask.config.get("distributed.worker.memory.new_to_old_lag")),
+    parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
 )
 
 DEFAULT_EXTENSIONS = [
@@ -260,7 +260,7 @@ class ClientState:
         return self._versions
 
 
-class MemoryInfo:
+class MemoryState:
     """Memory readings on a worker.
 
     managed
@@ -287,7 +287,7 @@ class MemoryInfo:
 
     unmanaged_old
         Minimum of the "other" memory measures over the last
-        ``distributed.memory.new_to_old_lag`` seconds
+        ``distributed.memory.recent_to_old_time`` seconds
     unmanaged_recent
         other - unmanaged_old; in other words process memory that has been recently
         allocated but is not accounted for by dask; hopefully it's mostly a temporary
@@ -323,7 +323,7 @@ class MemoryInfo:
         self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
 
     @classmethod
-    def sum(cls, *infos: "MemoryInfo") -> "MemoryInfo":
+    def sum(cls, *infos: "MemoryState") -> "MemoryState":
         out = object.__new__(cls)
         for k in cls.__slots__:
             setattr(out, k, sum(getattr(i, k) for i in infos))
@@ -606,8 +606,8 @@ class WorkerState:
         return self._metrics
 
     @property
-    def memory(self) -> MemoryInfo:
-        return MemoryInfo(
+    def memory(self) -> MemoryState:
+        return MemoryState(
             process=self._metrics["memory"],
             managed=self._nbytes,
             managed_spilled=self._metrics["spilled_nbytes"],
@@ -1892,8 +1892,8 @@ class SchedulerState:
         return self._workers
 
     @property
-    def memory(self) -> MemoryInfo:
-        return MemoryInfo.sum(*(w.memory for w in self.workers.values()))
+    def memory(self) -> MemoryState:
+        return MemoryState.sum(*(w.memory for w in self.workers.values()))
 
     @property
     def __pdict__(self):
@@ -3795,12 +3795,12 @@ class Scheduler(SchedulerState, ServerNode):
         ws._metrics = metrics
 
         # Calculate RSS - dask keys, separating "old" and "new" usage
-        # See MemoryInfo for details
-        max_memory_unmanaged_old_hist_age = local_now - MEMORY_NEW_TO_OLD_LAG
+        # See MemoryState for details
+        max_memory_unmanaged_old_hist_age = local_now - MEMORY_RECENT_TO_OLD_TIME
         memory_unmanaged_old = ws._memory_unmanaged_old
         while ws._memory_other_history:
-            ts, size = ws._memory_other_history[0]
-            if ts >= max_memory_unmanaged_old_hist_age:
+            timestamp, size = ws._memory_other_history[0]
+            if timestamp >= max_memory_unmanaged_old_hist_age:
                 break
             ws._memory_other_history.popleft()
             if size == memory_unmanaged_old:
@@ -3811,7 +3811,7 @@ class Scheduler(SchedulerState, ServerNode):
         if not memory_unmanaged_old:
             # The worker has just been started or the previous minimum has been expunged
             # because too old.
-            # Note: this algorithm is capped to 200 * MEMORY_NEW_TO_OLD_LAG elements
+            # Note: this algorithm is capped to 200 * MEMORY_RECENT_TO_OLD_TIME elements
             # cluster-wide by heartbeat_interval(), regardless of the number of workers
             ws._memory_unmanaged_old = min(map(second, ws._memory_other_history))
         elif size < memory_unmanaged_old:

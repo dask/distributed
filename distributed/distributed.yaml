@@ -88,7 +88,7 @@ distributed:
       # system) that is not accounted for by the dask keys stored on the worker, ignore
       # it for this long before considering it in non-critical memory measures.
       # This should be set to be longer than the duration of most dask tasks.
-      new_to_old_lag: 30s
+      recent_to_old_time: 30s
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.

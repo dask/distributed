@@ -218,6 +218,16 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
+def _nbytes_color(current: int, limit: int) -> str:
+    """Dynamic color used by NBytes and NBytesCluster"""
+    if limit and current > limit:
+        return "red"
+    elif limit and current > limit / 2:
+        return "orange"
+    else:
+        return "blue"
+
+
 class NBytesCluster(DashboardComponent):
     """Total memory usage on the cluster"""
 
@@ -236,7 +246,7 @@ class NBytesCluster(DashboardComponent):
                         "managed (in memory)",
                         "unmanaged",
                         "unmanaged, recently increased",
-                        "managed (spilled)",
+                        "managed (spilled to disk)",
                     ],
                 }
             )
@@ -273,22 +283,18 @@ class NBytesCluster(DashboardComponent):
             self.root.yaxis.visible = False
 
             hover = HoverTool()
-            hover.tooltips = "@proc_memory{0.00 b} (@width{0.00 b} @memtype)"
+            hover.tooltips = "@width{0.00 b} @memtype"
             hover.point_policy = "follow_mouse"
             self.root.add_tools(hover)
 
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = self.scheduler.workers.values()
-            limit = sum(getattr(ws, "memory_limit", 0) for ws in workers)
+            limit = sum(
+                getattr(ws, "memory_limit", 0) for ws in self.scheduler.workers.values()
+            )
             meminfo = self.scheduler.memory
-            if limit and meminfo.process > limit:
-                color = "red"
-            elif limit and meminfo.process > limit / 2:
-                color = "orange"
-            else:
-                color = "blue"
+            color = _nbytes_color(meminfo.process, limit)
 
             width = [
                 meminfo.managed_in_memory,
@@ -311,7 +317,7 @@ class NBytesCluster(DashboardComponent):
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
-                title += f" + {format_bytes(meminfo.managed_spilled)} spilled"
+                title += f" + {format_bytes(meminfo.managed_spilled)} spilled to disk"
             self.root.title.text = title
 
             update(self.source, result)
@@ -400,12 +406,7 @@ class NBytes(DashboardComponent):
                 max_limit = max(
                     max_limit, limit, meminfo.process + meminfo.managed_spilled
                 )
-                if limit and meminfo.process > limit:
-                    color_i = "red"
-                elif limit and meminfo.process > limit / 2:
-                    color_i = "orange"
-                else:
-                    color_i = "blue"
+                color_i = _nbytes_color(meminfo.process, limit)
 
                 width += [
                     meminfo.managed_in_memory,
@@ -426,7 +427,7 @@ class NBytes(DashboardComponent):
                     "managed (in memory)",
                     "unmanaged",
                     "unmanaged, recently increased",
-                    "managed (spilled)",
+                    "managed (spilled to disk)",
                 ]
                 * len(workers),
                 "proc_memory": quadlist(procmemory),
@@ -442,7 +443,7 @@ class NBytes(DashboardComponent):
             }
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
-            #       is spilled out
+            #       is spilled to disk
             self.root.x_range.end = max_limit
             update(self.source, result)
 
