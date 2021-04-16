@@ -2316,49 +2316,54 @@ def clear_leak():
     gc.collect()
 
 
+def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
+    t0 = time()
+    while True:
+        minfo = scheduler_or_workerstate.memory
+        nbytes = getattr(minfo, attr)
+        if min_ * 2 ** 20 <= nbytes <= max_ * 2 ** 20:
+            return
+        if time() - t0 > timeout:
+            raise TimeoutError(
+                f"Expected {min_} MiB <= {attr} <= {max_} MiB; got:\n{minfo!r}"
+            )
+        sleep(0.1)
+
+
 @pytest.mark.slow
 def test_memory():
     pytest.importorskip("zict")
 
     with Client(n_workers=2, threads_per_worker=1, memory_limit=500 * 2 ** 20) as c:
-        s = c.cluster.scheduler
         c.wait_for_workers(2)
+        s = c.cluster.scheduler
+        a, b = s.workers.values()
 
         s_m0 = s.memory
-        a_m0, b_m0 = (w.memory for w in s.workers.values())
-        assert s_m0.process == a_m0.process + b_m0.process
+        assert s_m0.process == a.memory.process + b.memory.process
         assert s_m0.managed == 0
-        assert a_m0.managed == 0
-        assert b_m0.managed == 0
+        assert a.memory.managed == 0
+        assert b.memory.managed == 0
         # When a worker first goes online, its RAM is immediately counted as
         # unmanaged_old
-        assert s_m0.unmanaged_recent < 20 * 2 ** 20
-        assert a_m0.unmanaged_recent < 20 * 2 ** 20
-        assert b_m0.unmanaged_recent < 20 * 2 ** 20
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
+        assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
+        assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
         f1 = c.submit(leaking, 100, 40, 1.5, pure=False)
         f2 = c.submit(leaking, 100, 40, 1.5, pure=False)
-        sleep(1)
-
-        # On each worker, we have 100 MiB temp memory + 40 MiB leak. All of it is
-        # unmanaged_recent.
-        s_m1 = s.memory
-        a_m1, b_m1 = (w.memory for w in s.workers.values())
-        assert 280 * 2 ** 20 < s_m1.unmanaged_recent < 320 * 2 ** 20
-        assert 140 * 2 ** 20 < a_m1.unmanaged_recent < 160 * 2 ** 20
-        assert 140 * 2 ** 20 < b_m1.unmanaged_recent < 160 * 2 ** 20
+        assert_memory(s, "unmanaged_recent", 280, 320)
+        assert_memory(a, "unmanaged_recent", 140, 160, timeout=0)
+        assert_memory(b, "unmanaged_recent", 140, 160, timeout=0)
 
         c.gather([f1, f2])
-        sleep(2)
-        # On each worker, we have 100 MiB managed + 40 MiB fresh leak
-        s_m2 = s.memory
-        a_m2, b_m2 = (w.memory for w in s.workers.values())
-        assert 80 * 2 ** 20 < s_m2.unmanaged_recent < 120 * 2 ** 20
-        assert 40 * 2 ** 20 < a_m2.unmanaged_recent < 60 * 2 ** 20
-        assert 40 * 2 ** 20 < b_m2.unmanaged_recent < 60 * 2 ** 20
-        assert 200 * 2 ** 20 < s_m2.managed_in_memory < 201 * 2 ** 20
-        assert 100 * 2 ** 20 < a_m2.managed_in_memory < 101 * 2 ** 20
-        assert 100 * 2 ** 20 < b_m2.managed_in_memory < 101 * 2 ** 20
+        # On each worker, we now have 100 MiB managed + 40 MiB fresh leak
+        assert_memory(s, "managed_in_memory", 200, 201)
+        assert_memory(a, "managed_in_memory", 100, 101, timeout=0)
+        assert_memory(b, "managed_in_memory", 100, 101, timeout=0)
+        assert_memory(s, "unmanaged_recent", 80, 120)
+        assert_memory(a, "unmanaged_recent", 40, 60, timeout=0)
+        assert_memory(b, "unmanaged_recent", 40, 60, timeout=0)
 
         # Force the output of f1 and f2 to spill to disk
         more_futs = []
@@ -2369,38 +2374,32 @@ def test_memory():
             ]
             sleep(1)
 
-        s_m3 = s.memory
-        assert s_m3.managed_spilled > 0
+        assert_memory(s, "managed_spilled", 1, 999)
 
         # Delete spilled keys
+        prev = s.memory
         del f1
         del f2
-        sleep(2)
-        s_m4 = s.memory
-        assert s_m4.managed_in_memory == s_m3.managed_in_memory
-        assert s_m4.managed_spilled < s_m3.managed_spilled
+        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 200)
+        assert s.memory.managed_in_memory == prev.managed_in_memory
 
         # Empty the cluster, with the exception of leaked memory
         del more_futs
-        sleep(2)
-        s_m5 = s.memory
-        assert s_m5.managed == 0
+        assert_memory(s, "managed", 0, 0)
 
         # Wait until 30s have passed since the spill to observe unmanaged_recent
         # transition into unmanaged_old
         c.run(gc.collect)
-        sleep(25)
-        s_m6 = s.memory
-        assert 80 * 2 ** 20 < s_m6.unmanaged_old - s_m0.unmanaged_old < 120 * 2 ** 20
-        assert s_m6.unmanaged_recent < 40 * 2 ** 20
+        orig_unmanaged = s_m0.unmanaged / 2 ** 20
+        orig_old = s_m0.unmanaged_old / 2 ** 20
+        assert_memory(s, "unmanaged_old", orig_old + 80, orig_old + 120, timeout=40)
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
 
         # When the leaked memory is cleared, unmanaged and unmanaged_old drop
         c.run(clear_leak)
-        sleep(2)
-        s_m7 = s.memory
-        assert s_m7.unmanaged < s_m0.unmanaged + 40 * 2 ** 20
-        assert s_m7.unmanaged_old < s_m0.unmanaged_old + 40 * 2 ** 20
-        assert s_m7.unmanaged_recent < 40 * 2 ** 20
+        assert_memory(s, "unmanaged", 0, orig_unmanaged + 40)
+        assert_memory(s, "unmanaged_old", 0, orig_old + 40, timeout=0)
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
