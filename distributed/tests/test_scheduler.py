@@ -2352,18 +2352,18 @@ def test_memory():
 
         f1 = c.submit(leaking, 100, 40, 1.5, pure=False)
         f2 = c.submit(leaking, 100, 40, 1.5, pure=False)
-        assert_memory(s, "unmanaged_recent", 280, 320)
-        assert_memory(a, "unmanaged_recent", 140, 160, timeout=0)
-        assert_memory(b, "unmanaged_recent", 140, 160, timeout=0)
+        assert_memory(s, "unmanaged_recent", 280, 360)
+        assert_memory(a, "unmanaged_recent", 140, 180, timeout=0)
+        assert_memory(b, "unmanaged_recent", 140, 180, timeout=0)
 
         c.gather([f1, f2])
         # On each worker, we now have 100 MiB managed + 40 MiB fresh leak
         assert_memory(s, "managed_in_memory", 200, 201)
         assert_memory(a, "managed_in_memory", 100, 101, timeout=0)
         assert_memory(b, "managed_in_memory", 100, 101, timeout=0)
-        assert_memory(s, "unmanaged_recent", 80, 120)
-        assert_memory(a, "unmanaged_recent", 40, 60, timeout=0)
-        assert_memory(b, "unmanaged_recent", 40, 60, timeout=0)
+        assert_memory(s, "unmanaged_recent", 80, 140)
+        assert_memory(a, "unmanaged_recent", 40, 70, timeout=0)
+        assert_memory(b, "unmanaged_recent", 40, 70, timeout=0)
 
         # Force the output of f1 and f2 to spill to disk
         more_futs = []
@@ -2392,14 +2392,14 @@ def test_memory():
         c.run(gc.collect)
         orig_unmanaged = s_m0.unmanaged / 2 ** 20
         orig_old = s_m0.unmanaged_old / 2 ** 20
-        assert_memory(s, "unmanaged_old", orig_old + 80, orig_old + 120, timeout=40)
-        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
+        assert_memory(s, "unmanaged_old", orig_old + 80, orig_old + 140, timeout=40)
+        assert_memory(s, "unmanaged_recent", 0, 60, timeout=0)
 
         # When the leaked memory is cleared, unmanaged and unmanaged_old drop
         c.run(clear_leak)
-        assert_memory(s, "unmanaged", 0, orig_unmanaged + 40)
-        assert_memory(s, "unmanaged_old", 0, orig_old + 40, timeout=0)
-        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
+        assert_memory(s, "unmanaged", 0, orig_unmanaged + 60)
+        assert_memory(s, "unmanaged_old", 0, orig_old + 60, timeout=0)
+        assert_memory(s, "unmanaged_recent", 0, 60, timeout=0)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
