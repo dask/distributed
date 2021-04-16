@@ -1,5 +1,6 @@
 import asyncio
 import random
+import types
 
 import pytest
 from tlz import assoc
@@ -7,7 +8,6 @@ from tlz import assoc
 from distributed.batched import BatchedSend
 from distributed.core import CommClosedError, connect, listen
 from distributed.metrics import time
-from distributed.protocol import to_serialize
 from distributed.utils import All
 from distributed.utils_test import captured_logger
 
@@ -234,18 +234,16 @@ async def test_serializers():
         b = BatchedSend(interval="10ms", serializers=["msgpack"])
         b.start(comm)
 
-        b.send({"x": to_serialize(123)})
-        b.send({"x": to_serialize("hello")})
+        b.send({"x": 123})
+        b.send({"x": "hello"})
         await asyncio.sleep(0.100)
 
-        b.send({"x": to_serialize(lambda x: x + 1)})
+        b.send({"x": types.SimpleNamespace()})  # Object not msgpack serializable
 
         with captured_logger("distributed.protocol") as sio:
             await asyncio.sleep(0.100)
 
         value = sio.getvalue()
-        assert "serialize" in value
-        assert "type" in value
-        assert "function" in value
-
+        assert "Failed to Serialize" in value
+        assert "SimpleNamespace" in value
         assert comm.closed()
