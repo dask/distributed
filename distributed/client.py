@@ -2565,18 +2565,12 @@ class Client:
             if resources:
                 annotations["resources"] = resources
 
-            # Merge global annotations into each layer
+            # Merge global and local annotations
             annotations = merge(dask.config.get("annotations", {}), annotations)
-            if annotations:
-                for layer in dsk.layers.values():
-                    if layer.annotations:
-                        layer.annotations = merge(layer.annotations, annotations)
-                    else:
-                        layer.annotations = annotations
 
             # Pack the high level graph before sending it to the scheduler
             keyset = set(keys)
-            dsk = dsk.__dask_distributed_pack__(self, keyset)
+            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}

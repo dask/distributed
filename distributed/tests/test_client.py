@@ -4136,9 +4136,15 @@ async def test_persist_workers_annotate2(e, s, a, b, c):
         return a.address
 
     L1 = [delayed(inc)(i) for i in range(4)]
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
+
     with dask.annotate(workers=key_to_worker):
         out = e.persist(L1, optimize_graph=False)
         await wait(out)
+
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
 
     for v in L1:
         assert s.worker_restrictions[v.key] == {a.address}
