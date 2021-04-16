@@ -32,6 +32,7 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     assert_can_connect_locally_6,
     assert_cannot_connect,
+    async_wait_for,
     captured_logger,
     gen_cluster,
     has_ipv6,
@@ -863,8 +864,9 @@ async def test_close_properly():
 
         comm = await remote.live_comm()
         await comm.write({"op": "sleep"})
-        await asyncio.sleep(0.05)
-        assert len(server._ongoing_coroutines)
+
+        await async_wait_for(lambda: not server._ongoing_coroutines, 10)
+
         listeners = server.listeners
         assert len(listeners) == len(ports)
 
