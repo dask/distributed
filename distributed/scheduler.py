@@ -321,10 +321,9 @@ class MemoryState:
         # we need to force all numbers to add up exactly by definition.
         self.process = process
         self.managed_spilled = min(managed_spilled, managed)
-        self.managed_in_memory = min(int(managed) - int(self.managed_spilled), process)
-        self.unmanaged_old = min(
-            unmanaged_old, int(process) - int(self.managed_in_memory)
-        )
+        # Subtractions between unsigned ints guaranteed by construction to be >= 0
+        self.managed_in_memory = min(managed - self.managed_spilled, process)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
