@@ -1781,7 +1781,9 @@ async def test_executor_offload(cleanup, monkeypatch):
                 x = SameThreadClass()
 
                 def f(x):
-                    return threading.get_ident() == x._thread_ident
+                    # With <https://github.com/dask/distributed/pull/4699>,
+                    # deserialization is done as part of communication.
+                    return threading.get_ident() != x._thread_ident
 
                 assert await c.submit(f, x)
 
