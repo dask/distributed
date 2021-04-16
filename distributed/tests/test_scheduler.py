@@ -2349,6 +2349,7 @@ def test_memory():
         assert 140 * 2 ** 20 < b_m1.unmanaged_recent < 160 * 2 ** 20
 
         c.gather([f1, f2])
+        sleep(2)
         # On each worker, we have 100 MiB managed + 40 MiB fresh leak
         s_m2 = s.memory
         a_m2, b_m2 = (w.memory for w in s.workers.values())
