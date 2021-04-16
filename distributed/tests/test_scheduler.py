@@ -2400,3 +2400,23 @@ def test_memory():
         assert s_m7.unmanaged < s_m0.unmanaged + 40 * 2 ** 20
         assert s_m7.unmanaged_old < s_m0.unmanaged_old + 40 * 2 ** 20
         assert s_m7.unmanaged_recent < 40 * 2 ** 20
+
+
+@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+async def test_memory_no_zict(c, s, a, b):
+    """When Worker.data is not a SpillBuffer, test that querying managed_spilled
+    defaults to 0 and doesn't raise KeyError
+    """
+    await c.wait_for_workers(2)
+    assert isinstance(a.data, dict)
+    assert isinstance(b.data, dict)
+    f = c.submit(leaking, 10, 0, 0)
+    await f
+    assert 10 * 2 ** 20 < s.memory.managed_in_memory < 11 * 2 ** 20
+    assert s.memory.managed_spilled == 0
+
+
+@gen_cluster(nthreads=[])
+async def test_memory_no_workers(s):
+    assert s.memory.process == 0
+    assert s.memory.managed == 0
