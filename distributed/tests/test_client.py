@@ -17,6 +17,7 @@ from functools import partial
 from operator import add
 from threading import Semaphore
 from time import sleep
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -5551,27 +5552,20 @@ def test_turn_off_pickle(direct):
 
             # Can't send complex data
             with pytest.raises(TypeError):
-                future = await c.scatter(inc)
+                future = await c.scatter(SimpleNamespace())
 
-            # can send complex tasks (this uses pickle regardless)
+            # Can send and receive functions tasks (this uses pickle regardless)
             future = c.submit(lambda x: x, inc)
             await wait(future)
-
-            # but can't receive complex results
-            with pytest.raises(TypeError):
-                await c.gather(future, direct=direct)
+            await c.gather(future, direct=direct)
 
             # Run works
             result = await c.run(lambda: 1)
             assert list(result.values()) == [1, 1]
             result = await c.run_on_scheduler(lambda: 1)
             assert result == 1
-
-            # But not with complex return values
-            with pytest.raises(TypeError):
-                await c.run(lambda: inc)
-            with pytest.raises(TypeError):
-                await c.run_on_scheduler(lambda: inc)
+            await c.run(lambda: inc)
+            await c.run_on_scheduler(lambda: inc)
 
     test()
 
