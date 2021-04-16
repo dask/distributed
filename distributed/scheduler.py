@@ -333,20 +333,32 @@ class MemoryState:
         return out
 
     @property
+    @ccall
+    @inline
+    @nogil
     def managed(self) -> Py_ssize_t:
         return self.managed_in_memory + self.managed_spilled
 
     @property
+    @ccall
+    @inline
+    @nogil
     def unmanaged(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
         return self.process - self.managed_in_memory
 
     @property
+    @ccall
+    @inline
+    @nogil
     def unmanaged_recent(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
         return self.process - self.managed_in_memory - self.unmanaged_old
 
     @property
+    @ccall
+    @inline
+    @nogil
     def optimistic(self) -> Py_ssize_t:
         return self.managed_in_memory + self.unmanaged_old
 

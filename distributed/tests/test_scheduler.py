@@ -2288,7 +2288,7 @@ def test_memorystate_sum():
     "process,unmanaged_old,managed,managed_spilled", list(product(*[[0, 1, 2, 3]] * 4))
 )
 def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
-    """Input data is hammered so that everything adds up by construction"""
+    """Input data is massaged by __init__ so that everything adds up by construction"""
     m = MemoryState(
         process=process,
         unmanaged_old=unmanaged_old,
@@ -2298,6 +2298,7 @@ def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
     assert m.managed_in_memory + m.unmanaged == m.process
     assert m.managed_in_memory + m.managed_spilled == m.managed
     assert m.unmanaged_old + m.unmanaged_recent == m.unmanaged
+    assert m.optimistic + m.unmanaged_recent == m.process
 
 
 def leaking(out_mib, leak_mib, sleep_time):
@@ -2317,8 +2318,8 @@ def clear_leak():
 
 @pytest.mark.slow
 def test_memory():
-    # Can't use @gen_cluster as it would create the workers in the same process as
-    # this test
+    pytest.importorskip("zict")
+
     with Client(n_workers=2, threads_per_worker=1, memory_limit=500 * 2 ** 20) as c:
         s = c.cluster.scheduler
         c.wait_for_workers(2)
