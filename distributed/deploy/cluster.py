@@ -413,14 +413,6 @@ class Cluster:
     def __exit__(self, typ, value, traceback):
         return self.sync(self.__aexit__, typ, value, traceback)
 
-    def __await__(self):
-        async def _():
-            if self.status == Status.created:
-                await self._start()
-            return self
-
-        return _().__await__()
-
     async def __aenter__(self):
         await self
         return self
