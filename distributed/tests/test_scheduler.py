@@ -2330,7 +2330,7 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
         sleep(0.1)
 
 
-#@pytest.mark.slow
+@pytest.mark.slow
 def test_memory():
     pytest.importorskip("zict")
 
