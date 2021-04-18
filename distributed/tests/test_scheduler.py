@@ -2330,7 +2330,7 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
         sleep(0.1)
 
 
-@pytest.mark.slow
+#@pytest.mark.slow
 def test_memory():
     pytest.importorskip("zict")
 
@@ -2350,13 +2350,13 @@ def test_memory():
         assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
         assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
-        f1 = c.submit(leaking, 100, 40, 1.5, pure=False)
-        f2 = c.submit(leaking, 100, 40, 1.5, pure=False)
+        f1 = c.submit(leaking, 100, 40, 5, pure=False, workers=[a.name])
+        f2 = c.submit(leaking, 100, 40, 5, pure=False, workers=[b.name])
         assert_memory(s, "unmanaged_recent", 280, 360)
         assert_memory(a, "unmanaged_recent", 140, 180, timeout=0)
         assert_memory(b, "unmanaged_recent", 140, 180, timeout=0)
-
         c.gather([f1, f2])
+
         # On each worker, we now have 100 MiB managed + 40 MiB fresh leak
         assert_memory(s, "managed_in_memory", 200, 201)
         assert_memory(a, "managed_in_memory", 100, 101, timeout=0)
@@ -2369,10 +2369,10 @@ def test_memory():
         more_futs = []
         for _ in range(10):
             more_futs += [
-                c.submit(leaking, 20, 0, 0, pure=False),
-                c.submit(leaking, 20, 0, 0, pure=False),
+                c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
+                c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
             ]
-            sleep(1)
+            c.gather(more_futs[-2:])
 
         assert_memory(s, "managed_spilled", 1, 999)
 
