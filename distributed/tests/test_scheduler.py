@@ -2353,28 +2353,26 @@ def test_memory():
         f1 = c.submit(leaking, 100, 40, 5, pure=False, workers=[a.name])
         f2 = c.submit(leaking, 100, 40, 5, pure=False, workers=[b.name])
         assert_memory(s, "unmanaged_recent", 280, 360)
-        assert_memory(a, "unmanaged_recent", 140, 180, timeout=0)
-        assert_memory(b, "unmanaged_recent", 140, 180, timeout=0)
+        assert_memory(a, "unmanaged_recent", 140, 180)
+        assert_memory(b, "unmanaged_recent", 140, 180)
         c.gather([f1, f2])
 
         # On each worker, we now have 100 MiB managed + 40 MiB fresh leak
         assert_memory(s, "managed_in_memory", 200, 201)
-        assert_memory(a, "managed_in_memory", 100, 101, timeout=0)
-        assert_memory(b, "managed_in_memory", 100, 101, timeout=0)
+        assert_memory(a, "managed_in_memory", 100, 101)
+        assert_memory(b, "managed_in_memory", 100, 101)
         assert_memory(s, "unmanaged_recent", 80, 140)
-        assert_memory(a, "unmanaged_recent", 40, 70, timeout=0)
-        assert_memory(b, "unmanaged_recent", 40, 70, timeout=0)
+        assert_memory(a, "unmanaged_recent", 40, 70)
+        assert_memory(b, "unmanaged_recent", 40, 70)
 
         # Force the output of f1 and f2 to spill to disk
         more_futs = []
-        for _ in range(10):
+        while s.memory.managed_spilled == 0:
             more_futs += [
                 c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
                 c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
             ]
-            c.gather(more_futs[-2:])
-
-        assert_memory(s, "managed_spilled", 1, 999)
+            sleep(2)
 
         # Delete spilled keys
         prev = s.memory
@@ -2393,13 +2391,13 @@ def test_memory():
         orig_unmanaged = s_m0.unmanaged / 2 ** 20
         orig_old = s_m0.unmanaged_old / 2 ** 20
         assert_memory(s, "unmanaged_old", orig_old + 80, orig_old + 140, timeout=40)
-        assert_memory(s, "unmanaged_recent", 0, 60, timeout=0)
+        assert_memory(s, "unmanaged_recent", 0, 60, timeout=40)
 
         # When the leaked memory is cleared, unmanaged and unmanaged_old drop
         c.run(clear_leak)
         assert_memory(s, "unmanaged", 0, orig_unmanaged + 60)
-        assert_memory(s, "unmanaged_old", 0, orig_old + 60, timeout=0)
-        assert_memory(s, "unmanaged_recent", 0, 60, timeout=0)
+        assert_memory(s, "unmanaged_old", 0, orig_old + 60)
+        assert_memory(s, "unmanaged_recent", 0, 60)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
