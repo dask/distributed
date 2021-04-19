@@ -322,30 +322,36 @@ def serialize(
         return headers, frames
 
     tb = ""
+    error_msg = f"Could not serialize object of type {type(x).__name__}."
+    e = None
 
-    for name in serializers:
-        dumps, loads, wants_context = families[name]
-        try:
-            header, frames = dumps(x, context=context) if wants_context else dumps(x)
-            header["serializer"] = name
-            return header, frames
-        except NotImplementedError:
-            continue
-        except Exception as e:
+    try:
+        for name in serializers:
+            dumps, loads, wants_context = families[name]
+            try:
+                header, frames = (
+                    dumps(x, context=context) if wants_context else dumps(x)
+                )
+                header["serializer"] = name
+                return header, frames
+            except NotImplementedError as e:
+                continue
+        raise NotImplementedError(
+            f"{serializers} serializer(s) raised NotImplementedError"
+        )
+    except Exception as e:
+        if on_error == "raise":
+            raise TypeError(error_msg, str(x)[:10000]) from e
+
+        if on_error == "message":
             tb = traceback.format_exc()
-            break
+            frames = [error_msg]
+            if tb:
+                frames.append(tb[:100000])
 
-    msg = "Could not serialize object of type %s." % type(x).__name__
-    if on_error == "message":
-        frames = [msg]
-        if tb:
-            frames.append(tb[:100000])
+            frames = [frame.encode() for frame in frames]
 
-        frames = [frame.encode() for frame in frames]
-
-        return {"serializer": "error"}, frames
-    elif on_error == "raise":
-        raise TypeError(msg, str(x)[:10000])
+            return {"serializer": "error"}, frames
 
 
 def deserialize(header, frames, deserializers=None):
