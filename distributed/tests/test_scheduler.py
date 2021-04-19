@@ -2384,7 +2384,7 @@ def test_memory():
         prev = s.memory
         del f1
         del f2
-        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 200)
+        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 1)
         assert s.memory.managed_in_memory == prev.managed_in_memory
 
         # Empty the cluster, with the exception of leaked memory
