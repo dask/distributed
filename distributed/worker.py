@@ -46,7 +46,7 @@ from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol import deserialize_bytes, pickle, serialize_bytelist, to_serialize
+from .protocol import pickle, to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -609,25 +609,16 @@ class Worker(ServerNode):
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
-            try:
-                from zict import Buffer, File, Func
-            except ImportError:
-                raise ImportError(
-                    "Please `python -m pip install zict` for spill-to-disk workers"
+            from .spill import SpillBuffer
+
+            self.data = SpillBuffer(
+                os.path.join(self.local_directory, "storage"),
+                target=int(
+                    self.memory_limit
+                    * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
-            path = os.path.join(self.local_directory, "storage")
-            storage = Func(
-                partial(serialize_bytelist, on_error="raise"),
-                deserialize_bytes,
-                File(path),
+                or sys.maxsize,
             )
-            target = (
-                int(float(self.memory_limit) * self.memory_target_fraction)
-                or sys.maxsize
-            )
-            self.data = Buffer({}, storage, target, weight)
-            self.data.memory = self.data.fast
-            self.data.disk = self.data.slow
         else:
             self.data = dict()
 
@@ -826,6 +817,7 @@ class Worker(ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
+            spilled_nbytes=getattr(self.data, "spilled_total", 0),
         )
         out.update(self.monitor.recent())
 
@@ -2879,8 +2871,8 @@ class Worker(ServerNode):
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
-                "Worker is at %d%% memory usage. Start spilling data to disk.",
-                int(frac * 100),
+                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
+                frac * 100,
             )
             start = time()
             target = self.memory_limit * self.memory_target_fraction
@@ -3485,9 +3477,9 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
         function = loads_function(function)
-    if args:
+    if args and isinstance(args, bytes):
         args = pickle.loads(args)
-    if kwargs:
+    if kwargs and isinstance(kwargs, bytes):
         kwargs = pickle.loads(kwargs)
 
     if task is not no_value:
@@ -3724,10 +3716,6 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
-
-
-def weight(k, v):
-    return sizeof(v)
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):

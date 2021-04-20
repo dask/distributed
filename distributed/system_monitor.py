@@ -40,9 +40,8 @@ class SystemMonitor:
             self.quantities["num_fds"] = self.num_fds
 
         if nvml is not None:
-            gpu_extra = nvml.one_time()
-            self.gpu_name = gpu_extra["name"]
-            self.gpu_memory_total = gpu_extra["memory-total"]
+            self.gpu_name = None
+            self.gpu_memory_total = None
             self.gpu_utilization = deque(maxlen=n)
             self.gpu_memory_used = deque(maxlen=n)
             self.quantities["gpu_utilization"] = self.gpu_utilization
@@ -91,7 +90,12 @@ class SystemMonitor:
             self.num_fds.append(num_fds)
             result["num_fds"] = num_fds
 
-        if nvml is not None:
+        # give external modules (like dask-cuda) a chance to initialize CUDA context
+        if nvml is not None and nvml.nvmlInit is not None:
+            if self.gpu_name is None:
+                gpu_extra = nvml.one_time()
+                self.gpu_name = gpu_extra["name"]
+                self.gpu_memory_total = gpu_extra["memory-total"]
             gpu_metrics = nvml.real_time()
             self.gpu_utilization.append(gpu_metrics["utilization"])
             self.gpu_memory_used.append(gpu_metrics["memory-used"])

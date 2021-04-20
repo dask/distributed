@@ -9,6 +9,7 @@ import dask
 
 from distributed import Client, Scheduler, Worker
 from distributed.comm import connect, listen, ws
+from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
 from distributed.utils_test import (  # noqa: F401
@@ -71,7 +72,7 @@ async def test_expect_ssl_context(cleanup):
     server_ctx = get_server_ssl_context()
 
     async with listen("wss://", lambda comm: comm, ssl_context=server_ctx) as listener:
-        with pytest.raises(TypeError):
+        with pytest.raises(FatalCommClosedError, match="TLS expects a `ssl_context` *"):
             comm = await connect(listener.contact_address)
 
 
@@ -153,6 +154,30 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
             async with Client(s.address, asynchronous=True, security=security) as c:
                 result = await c.submit(lambda x: x + 1, 10)
                 assert result == 11
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "protocol,security",
+    [
+        (
+            "ws://",
+            Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
+        ),
+        (
+            "wss://",
+            Security.temporary(
+                extra_conn_args={"headers": {"Authorization": "Token abcd"}}
+            ),
+        ),
+    ],
+)
+async def test_connection_made_with_extra_conn_args(cleanup, protocol, security):
+    async with Scheduler(protocol=protocol, security=security) as s:
+        connection_args = security.get_connection_args("worker")
+        comm = await connect(s.address, **connection_args)
+        assert comm.sock.request.headers.get("Authorization") == "Token abcd"
+        await comm.close()
 
 
 @pytest.mark.asyncio

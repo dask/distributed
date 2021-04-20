@@ -164,6 +164,10 @@ UNKNOWN_TASK_DURATION = declare(
     double,
     parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
 )
+MEMORY_RECENT_TO_OLD_TIME = declare(
+    double,
+    parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -254,6 +258,120 @@ class ClientState:
     @property
     def versions(self):
         return self._versions
+
+
+@final
+@cclass
+class MemoryState:
+    """Memory readings on a worker or on the whole cluster.
+
+    managed
+        Sum of the output of sizeof() for all dask keys held by the worker, both in
+        memory and spilled to disk
+    managed_in_memory
+        Sum of the output of sizeof() for the dask keys held in RAM
+    managed_spilled
+        Sum of the output of sizeof() for the dask keys spilled to the hard drive.
+        Note that this is the size in memory; serialized size may be different.
+    process
+        Total RSS memory measured by the OS on the worker process.
+        This is always exactly equal to managed_in_memory + unmanaged.
+    unmanaged
+        process - managed_in_memory. This is the sum of
+
+        - Python interpreter and modules
+        - global variables
+        - memory temporarily allocated by the dask tasks that are currently running
+        - memory fragmentation
+        - memory leaks
+        - memory not yet garbage collected
+        - memory not yet free()'d by the Python memory manager to the OS
+
+    unmanaged_old
+        Minimum of the 'unmanaged' measures over the last
+        ``distributed.memory.recent_to_old_time`` seconds
+    unmanaged_recent
+        unmanaged - unmanaged_old; in other words process memory that has been recently
+        allocated but is not accounted for by dask; hopefully it's mostly a temporary
+        spike.
+    optimistic
+        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        the process under the hopeful assumption that all unmanaged_recent memory is a
+        temporary spike
+    """
+
+    __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
+
+    process: Py_ssize_t
+    managed_in_memory: Py_ssize_t
+    managed_spilled: Py_ssize_t
+    unmanaged_old: Py_ssize_t
+
+    def __init__(
+        self,
+        *,
+        process: Py_ssize_t,
+        unmanaged_old: Py_ssize_t,
+        managed: Py_ssize_t,
+        managed_spilled: Py_ssize_t,
+    ):
+        # Some data arrives with the heartbeat, some other arrives in realtime as the
+        # tasks progress. Also, sizeof() is not guaranteed to return correct results.
+        # This can cause glitches where a partial measure is larger than the whole, so
+        # we need to force all numbers to add up exactly by definition.
+        self.process = process
+        self.managed_spilled = min(managed_spilled, managed)
+        # Subtractions between unsigned ints guaranteed by construction to be >= 0
+        self.managed_in_memory = min(managed - self.managed_spilled, process)
+        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+
+    @classmethod
+    def sum(cls, *infos: "MemoryState") -> "MemoryState":
+        out = object.__new__(cls)
+        for k in cls.__slots__:
+            setattr(out, k, sum(getattr(i, k) for i in infos))
+        return out
+
+    @property
+    @ccall
+    @inline
+    @nogil
+    def managed(self) -> Py_ssize_t:
+        return self.managed_in_memory + self.managed_spilled
+
+    @property
+    @ccall
+    @inline
+    @nogil
+    def unmanaged(self) -> Py_ssize_t:
+        # This is never negative thanks to __init__
+        return self.process - self.managed_in_memory
+
+    @property
+    @ccall
+    @inline
+    @nogil
+    def unmanaged_recent(self) -> Py_ssize_t:
+        # This is never negative thanks to __init__
+        return self.process - self.managed_in_memory - self.unmanaged_old
+
+    @property
+    @ccall
+    @inline
+    @nogil
+    def optimistic(self) -> Py_ssize_t:
+        return self.managed_in_memory + self.unmanaged_old
+
+    def __repr__(self) -> str:
+        return (
+            f"Managed by Dask       : {format_bytes(self.managed)}\n"
+            f"  - in process memory : {format_bytes(self.managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self.managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self.process)}\n"
+            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
+            f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
+        )
 
 
 @final
@@ -355,6 +473,8 @@ class WorkerState:
     _last_seen: double
     _local_directory: str
     _memory_limit: Py_ssize_t
+    _memory_other_history: "deque[tuple[float, Py_ssize_t]]"
+    _memory_unmanaged_old: Py_ssize_t
     _metrics: dict
     _name: object
     _nanny: str
@@ -381,6 +501,8 @@ class WorkerState:
         "_last_seen",
         "_local_directory",
         "_memory_limit",
+        "_memory_other_history",
+        "_memory_unmanaged_old",
         "_metrics",
         "_name",
         "_nanny",
@@ -424,6 +546,8 @@ class WorkerState:
         self._status = Status.running
         self._nbytes = 0
         self._occupancy = 0
+        self._memory_unmanaged_old = 0
+        self._memory_other_history = deque()
         self._metrics = {}
         self._last_seen = 0
         self._time_delay = 0
@@ -495,6 +619,15 @@ class WorkerState:
     @property
     def metrics(self):
         return self._metrics
+
+    @property
+    def memory(self) -> MemoryState:
+        return MemoryState(
+            process=self._metrics["memory"],
+            managed=self._nbytes,
+            managed_spilled=self._metrics["spilled_nbytes"],
+            unmanaged_old=self._memory_unmanaged_old,
+        )
 
     @property
     def name(self):
@@ -796,6 +929,9 @@ class TaskGroup:
     _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
+    _start: double
+    _stop: double
+    _all_durations: object
 
     def __init__(self, name: str):
         self._name = name
@@ -807,6 +943,9 @@ class TaskGroup:
         self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
+        self._start = 0.0
+        self._stop = 0.0
+        self._all_durations = defaultdict(float)
 
     @property
     def name(self):
@@ -839,6 +978,18 @@ class TaskGroup:
     @property
     def types(self):
         return self._types
+
+    @property
+    def all_durations(self):
+        return self._all_durations
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
 
     @ccall
     def add(self, o):
@@ -1756,6 +1907,10 @@ class SchedulerState:
         return self._workers
 
     @property
+    def memory(self) -> MemoryState:
+        return MemoryState.sum(*(w.memory for w in self.workers.values()))
+
+    @property
     def __pdict__(self):
         return {
             "bandwidth": self._bandwidth,
@@ -1858,16 +2013,15 @@ class SchedulerState:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
                 a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
+
+                v = a_recs.get(key, finish)
+                func = self._transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -2123,11 +2277,24 @@ class SchedulerState:
         else:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
+            wp_vals = worker_pool.values()
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                if ws._occupancy == 0:
+                    # special case to use round-robin; linear search
+                    # for next worker with zero occupancy (or just
+                    # land back where we started).
+                    wp_i: WorkerState
+                    start: Py_ssize_t = self._n_tasks % n_workers
+                    i: Py_ssize_t
+                    for i in range(n_workers):
+                        wp_i = wp_vals[(i + start) % n_workers]
+                        if wp_i._occupancy == 0:
+                            ws = wp_i
+                            break
             else:  # dumb but fast in large case
-                ws = worker_pool.values()[self._n_tasks % n_workers]
+                ws = wp_vals[self._n_tasks % n_workers]
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -2305,6 +2472,7 @@ class SchedulerState:
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
+                    ts._group._all_durations[action] += stop - start
 
             #############################
             # Update Timing Information #
@@ -2321,6 +2489,9 @@ class SchedulerState:
 
                 ts._prefix._duration_average = avg_duration
                 ts._group._duration += new_duration
+                ts._group._start = ts._group._start or compute_start
+                if ts._group._stop < compute_stop:
+                    ts._group._stop = compute_stop
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
                 tts: TaskState
@@ -3649,6 +3820,29 @@ class Scheduler(SchedulerState, ServerNode):
             }
 
         ws._metrics = metrics
+
+        # Calculate RSS - dask keys, separating "old" and "new" usage
+        # See MemoryState for details
+        max_memory_unmanaged_old_hist_age = local_now - MEMORY_RECENT_TO_OLD_TIME
+        memory_unmanaged_old = ws._memory_unmanaged_old
+        while ws._memory_other_history:
+            timestamp, size = ws._memory_other_history[0]
+            if timestamp >= max_memory_unmanaged_old_hist_age:
+                break
+            ws._memory_other_history.popleft()
+            if size == memory_unmanaged_old:
+                memory_unmanaged_old = 0  # recalculate min()
+
+        size = max(0, metrics["memory"] - ws._nbytes + ws._metrics["spilled_nbytes"])
+        ws._memory_other_history.append((local_now, size))
+        if not memory_unmanaged_old:
+            # The worker has just been started or the previous minimum has been expunged
+            # because too old.
+            # Note: this algorithm is capped to 200 * MEMORY_RECENT_TO_OLD_TIME elements
+            # cluster-wide by heartbeat_interval(), regardless of the number of workers
+            ws._memory_unmanaged_old = min(map(second, ws._memory_other_history))
+        elif size < memory_unmanaged_old:
+            ws._memory_unmanaged_old = size
 
         if host_info:
             dh: dict = parent._host_info.setdefault(host, {})
@@ -6444,9 +6638,9 @@ class Scheduler(SchedulerState, ServerNode):
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
         task_stream = Panel(child=task_stream, title="Task Stream")
         bandwidth_workers = Panel(
-            child=bandwidth_workers.fig, title="Bandwidth (Workers)"
+            child=bandwidth_workers.root, title="Bandwidth (Workers)"
         )
-        bandwidth_types = Panel(child=bandwidth_types.fig, title="Bandwidth (Types)")
+        bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
 
         tabs = Tabs(
             tabs=[
