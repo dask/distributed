@@ -3724,7 +3724,6 @@ def weight(k, v):
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
-
     kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
