@@ -392,51 +392,51 @@ properties:
 
           memory:
             type: object
-            description: |
-              When Dask workers have more data than memory they spill this data to disk.
-              They do this at a few conditions.
+            description: >-
+              Settings for memory management
             properties:
+              recent_to_old_time:
+                type: string
+                description: >-
+                  When there is an increase in process memory (as observed by the
+                  operating system) that is not accounted for by the dask keys stored on
+                  the worker, ignore it for this long before considering it in
+                  non-time-sensitive heuristics. This should be set to be longer than
+                  the duration of most dask tasks.
+
               target:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  Target fraction below which to try to keep memory
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we start spilling the dask keys holding the largest
+                  chunks of data to disk
 
               spill:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory (as observed by the operating system) gets above this amount we spill data to disk.
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we spill all data to disk.
 
               pause:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory (as observed by the operating system) gets above this amount
-                  we no longer start new tasks on this worker.
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we no longer start new tasks on this worker.
 
               terminate:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory reaches this level the nanny process will kill the worker
-                  (if a nanny is present)
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory reaches this level the nanny process will kill
+                  the worker (if a nanny is present)
 
-          http:
-            type: object
-            decription: Settings for Dask's embedded HTTP Server
-            properties:
-              routes:
-                type: array
-                description: |
-                  A list of modules like "prometheus" and "health" that can be included or excluded as desired
-
-                  These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
-                  This is also a list that can be extended with user defined modules.
           http:
             type: object
             decription: Settings for Dask's embedded HTTP Server
