@@ -1,36 +1,52 @@
+import dask.config
+
+
 class SemaphoreMetricExtension:
     def __init__(self, dask_server):
         self.server = dask_server
+        self.namespace = dask.config.get("distributed.dashboard.prometheus.namespace")
+        self.subsystem = "scheduler_semaphore"
 
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+        from prometheus_client.metrics import _build_full_name
 
         sem_ext = self.server.extensions["semaphores"]
 
         semaphore_max_leases_family = GaugeMetricFamily(
-            "semaphore_max_leases",
+            _build_full_name(
+                "max_leases", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Maximum leases allowed per semaphore, this will be constant for each semaphore during its lifetime.",
             labels=["name"],
         )
         semaphore_active_leases_family = GaugeMetricFamily(
-            "semaphore_active_leases",
+            _build_full_name(
+                "active_leases", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Amount of currently active leases per semaphore.",
             labels=["name"],
         )
         semaphore_pending_leases = GaugeMetricFamily(
-            "semaphore_pending_leases",
+            _build_full_name(
+                "pending_leases", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Amount of currently pending leases per semaphore.",
             labels=["name"],
         )
 
         semaphore_acquire_total = CounterMetricFamily(
-            "semaphore_acquire_total",
+            _build_full_name(
+                "acquire_total", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Total number of leases acquired per semaphore.",
             labels=["name"],
         )
 
         semaphore_release_total = CounterMetricFamily(
-            "semaphore_release_total",
+            _build_full_name(
+                "release_total", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Total number of leases released per semaphore.\n"
             "Note: if a semaphore is closed while there are still leases active, this count will not equal "
             "`semaphore_acquired_total` after execution.",

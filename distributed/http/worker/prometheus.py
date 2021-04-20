@@ -1,5 +1,7 @@
 import logging
 
+import dask.config
+
 from ..utils import RequestHandler
 
 
@@ -7,6 +9,8 @@ class _PrometheusCollector:
     def __init__(self, server):
         self.worker = server
         self.logger = logging.getLogger("distributed.dask_worker")
+        self.namespace = dask.config.get("distributed.dashboard.prometheus.namespace")
+        self.subsystem = "worker"
         self.crick_available = True
         try:
             import crick  # noqa: F401
@@ -18,9 +22,14 @@ class _PrometheusCollector:
 
     def collect(self):
         from prometheus_client.core import GaugeMetricFamily
+        from prometheus_client.metrics import _build_full_name
 
         tasks = GaugeMetricFamily(
-            "dask_worker_tasks", "Number of tasks at worker.", labels=["state"]
+            _build_full_name(
+                "tasks", namespace=self.namespace, subsystem=self.subsystem
+            ),
+            "Number of tasks at worker.",
+            labels=["state"],
         )
         tasks.add_metric(["stored"], len(self.worker.data))
         tasks.add_metric(["executing"], self.worker.executing_count)
@@ -30,19 +39,25 @@ class _PrometheusCollector:
         yield tasks
 
         yield GaugeMetricFamily(
-            "dask_worker_connections",
+            _build_full_name(
+                "connections", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of task connections to other workers.",
             value=len(self.worker.in_flight_workers),
         )
 
         yield GaugeMetricFamily(
-            "dask_worker_threads",
+            _build_full_name(
+                "threads", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of worker threads.",
             value=self.worker.nthreads,
         )
 
         yield GaugeMetricFamily(
-            "dask_worker_latency_seconds",
+            _build_full_name(
+                "latency_seconds", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Latency of worker connection.",
             value=self.worker.latency,
         )
@@ -51,19 +66,31 @@ class _PrometheusCollector:
         # the following metrics will export NaN, if the corresponding digests are None
         if self.crick_available:
             yield GaugeMetricFamily(
-                "dask_worker_tick_duration_median_seconds",
+                _build_full_name(
+                    "tick_duration_median_seconds",
+                    namespace=self.namespace,
+                    subsystem=self.subsystem,
+                ),
                 "Median tick duration at worker.",
                 value=self.worker.digests["tick-duration"].components[1].quantile(50),
             )
 
             yield GaugeMetricFamily(
-                "dask_worker_task_duration_median_seconds",
+                _build_full_name(
+                    "task_duration_median_seconds",
+                    namespace=self.namespace,
+                    subsystem=self.subsystem,
+                ),
                 "Median task runtime at worker.",
                 value=self.worker.digests["task-duration"].components[1].quantile(50),
             )
 
             yield GaugeMetricFamily(
-                "dask_worker_transfer_bandwidth_median_bytes",
+                _build_full_name(
+                    "transfer_bandwidth_median_bytes",
+                    namespace=self.namespace,
+                    subsystem=self.subsystem,
+                ),
                 "Bandwidth for transfer at worker in Bytes.",
                 value=self.worker.digests["transfer-bandwidth"]
                 .components[1]

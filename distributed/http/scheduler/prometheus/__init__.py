@@ -1,5 +1,7 @@
 import toolz
 
+import dask.config
+
 from distributed.http.utils import RequestHandler
 from distributed.scheduler import ALL_TASK_STATES
 
@@ -9,24 +11,33 @@ from .semaphore import SemaphoreMetricExtension
 class _PrometheusCollector:
     def __init__(self, dask_server):
         self.server = dask_server
+        self.namespace = dask.config.get("distributed.dashboard.prometheus.namespace")
+        self.subsystem = "scheduler"
 
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+        from prometheus_client.metrics import _build_full_name
 
         yield GaugeMetricFamily(
-            "dask_scheduler_clients",
+            _build_full_name(
+                "clients", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of clients connected.",
             value=len([k for k in self.server.clients if k != "fire-and-forget"]),
         )
 
         yield GaugeMetricFamily(
-            "dask_scheduler_desired_workers",
+            _build_full_name(
+                "desired_workers", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of workers scheduler needs for task graph.",
             value=self.server.adaptive_target(),
         )
 
         worker_states = GaugeMetricFamily(
-            "dask_scheduler_workers",
+            _build_full_name(
+                "workers", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of workers known by scheduler.",
             labels=["state"],
         )
@@ -36,7 +47,9 @@ class _PrometheusCollector:
         yield worker_states
 
         tasks = GaugeMetricFamily(
-            "dask_scheduler_tasks",
+            _build_full_name(
+                "tasks", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Number of tasks known by scheduler.",
             labels=["state"],
         )
@@ -46,7 +59,9 @@ class _PrometheusCollector:
         )
 
         suspicious_tasks = CounterMetricFamily(
-            "dask_scheduler_tasks_suspicious",
+            _build_full_name(
+                "tasks_suspicious", namespace=self.namespace, subsystem=self.subsystem
+            ),
             "Total number of times a task has been marked suspicious",
             labels=["task_prefix_name"],
         )
@@ -56,7 +71,9 @@ class _PrometheusCollector:
         yield suspicious_tasks
 
         yield CounterMetricFamily(
-            "dask_scheduler_tasks_forgotten",
+            _build_full_name(
+                "tasks_forgotten", namespace=self.namespace, subsystem=self.subsystem
+            ),
             (
                 "Total number of processed tasks no longer in memory and already "
                 "removed from the scheduler job queue. Note task groups on the "
