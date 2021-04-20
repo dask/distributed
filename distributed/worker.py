@@ -3718,7 +3718,13 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
+# Keep `weight` for backwards compatibility
+def weight(k, v):
+    return sizeof(v)
+
+
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
+
     kwargs = kwargs or {}
     function = pickle.loads(function)
     if is_coro is None:
