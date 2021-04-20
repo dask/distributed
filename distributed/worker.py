@@ -56,6 +56,7 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
+    deprecated,
     get_ip,
     has_arg,
     import_file,
@@ -3718,7 +3719,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
-# Keep `weight` for backwards compatibility
+@deprecated(version_removed="2021.06.0")
 def weight(k, v):
     return sizeof(v)
 
