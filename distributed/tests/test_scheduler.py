@@ -2380,17 +2380,11 @@ def test_memory():
             sleep(2)
         assert_memory(s, "managed_spilled", 1, 999)
 
-        # Wait for more_futs to finish without moving them out of the spill file
-        while any(not f.done() for f in more_futs):
-            sleep(0.1)
-        sleep(5)
-
         # Delete spilled keys
         prev = s.memory
         del f1
         del f2
-        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 1)
-        assert s.memory.managed_in_memory == prev.managed_in_memory
+        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 19)
 
         # Empty the cluster, with the exception of leaked memory
         del more_futs
