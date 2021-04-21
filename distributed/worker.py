@@ -950,9 +950,11 @@ class Worker(ServerNode):
                 address=self.contact_address,
                 now=start,
                 metrics=await self.get_metrics(),
+                # Create a copy of `self.active_threads.values()` to avoid
+                # `self.active_threads` changing size during iteration
                 executing={
                     key: start - self.tasks[key].start_time
-                    for key in self.active_threads.values()
+                    for key in list(self.active_threads.values())
                     if key in self.tasks
                 },
             )
