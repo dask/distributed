@@ -4,7 +4,7 @@ from distributed.http.prometheus import PrometheusCollector
 class SemaphoreMetricCollector(PrometheusCollector):
     def __init__(self, server):
         super().__init__(server)
-        self.subsystem = "scheduler_semaphore"
+        self.subsystem = "semaphore"
 
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
