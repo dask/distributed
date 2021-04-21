@@ -1840,7 +1840,7 @@ class Worker(ServerNode):
         self.send_task_state_to_scheduler(ts)
 
     def transition_ready_memory(self, ts, value=no_value):
-        if value:
+        if value is not no_value:
             self.put_key_in_memory(ts, value=value)
         self.send_task_state_to_scheduler(ts)
 
