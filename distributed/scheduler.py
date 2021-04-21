@@ -623,7 +623,9 @@ class WorkerState:
     @property
     def memory(self) -> MemoryState:
         return MemoryState(
-            process=self._metrics["memory"],
+            # metrics["memory"] is None if the worker sent a heartbeat before its
+            # SystemMonitor ever had a chance to run
+            process=self._metrics["memory"] or 0,
             managed=self._nbytes,
             managed_spilled=self._metrics["spilled_nbytes"],
             unmanaged_old=self._memory_unmanaged_old,
@@ -3833,7 +3835,12 @@ class Scheduler(SchedulerState, ServerNode):
             if size == memory_unmanaged_old:
                 memory_unmanaged_old = 0  # recalculate min()
 
-        size = max(0, metrics["memory"] - ws._nbytes + ws._metrics["spilled_nbytes"])
+        # metrics["memory"] is None if the worker sent a heartbeat before its
+        # SystemMonitor ever had a chance to run.
+        # ws._nbytes is updated at a different time and sizeof() may not be accurate,
+        # so size may be (temporarily) negative; floor it to zero.
+        size = max(0, (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"])
+
         ws._memory_other_history.append((local_now, size))
         if not memory_unmanaged_old:
             # The worker has just been started or the previous minimum has been expunged
