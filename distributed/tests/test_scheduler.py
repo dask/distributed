@@ -9,6 +9,7 @@ from collections import defaultdict
 from itertools import product
 from textwrap import dedent
 from time import sleep
+from unittest import mock
 
 import cloudpickle
 import pytest
@@ -2442,3 +2443,22 @@ async def test_memory_no_zict(c, s, a, b):
 async def test_memory_no_workers(s):
     assert s.memory.process == 0
     assert s.memory.managed == 0
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_memory_is_none(c, s):
+    """If Worker.heartbeat() runs before Worker.monitor.update(), then
+    Scheduler._metrics["memory"] will be None
+    """
+    with mock.patch("distributed.system_monitor.SystemMonitor.update"):
+        w = await Worker(s.address, nthreads=1)
+        await c.wait_for_workers(1)
+        f = await c.scatter(123)
+        await w.heartbeat()
+        assert s.memory.process == 0  # Forced from None
+        assert s.memory.managed == 0  # Capped by process even if we do have keys
+        assert s.memory.managed_in_memory == 0
+        assert s.memory.managed_spilled == 0
+        assert s.memory.unmanaged == 0
+        assert s.memory.unmanaged_old == 0
+        assert s.memory.unmanaged_recent == 0
