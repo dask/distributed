@@ -2330,6 +2330,10 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
         sleep(0.1)
 
 
+# This test is heavily influenced by hard-to-control factors such as memory management
+# by the Python interpreter and the OS, so it occasionally glitches
+@pytest.mark.flaky(reruns=3, reruns_delay=5)
+# ~33s runtime, or distributed.memory.recent_to_old_time + 3s
 @pytest.mark.slow
 def test_memory():
     pytest.importorskip("zict")
@@ -2379,6 +2383,9 @@ def test_memory():
             ]
             sleep(2)
         assert_memory(s, "managed_spilled", 1, 999)
+        # Wait for the spilling to finish. Note that this does not make the test take
+        # longer as we're waiting for recent_to_old_time anyway.
+        sleep(10)
 
         # Delete spilled keys
         prev = s.memory
@@ -2390,22 +2397,31 @@ def test_memory():
         del more_futs
         assert_memory(s, "managed", 0, 0)
 
+        orig_unmanaged = s_m0.unmanaged / 2 ** 20
+        orig_old = s_m0.unmanaged_old / 2 ** 20
+
         # Wait until 30s have passed since the spill to observe unmanaged_recent
         # transition into unmanaged_old
         c.run(gc.collect)
-        orig_unmanaged = s_m0.unmanaged / 2 ** 20
-        orig_old = s_m0.unmanaged_old / 2 ** 20
-        assert_memory(s, "unmanaged_old", orig_old + 90, orig_old + 190, timeout=40)
         assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
+        assert_memory(
+            s,
+            "unmanaged_old",
+            orig_old + 90,
+            # On MacOS, the process memory of the Python interpreter does not shrink as
+            # fast as on Linux/Windows
+            9999 if MACOS else orig_old + 190,
+            timeout=40,
+        )
 
         # When the leaked memory is cleared, unmanaged and unmanaged_old drop
-        # This doesn't happen on MacOS, where the process memory of the Python
-        # interpreter does not shrink (or takes much longer to shrink)
+        # On MacOS, the process memory of the Python interpreter does not shrink as fast
+        # as on Linux/Windows
         if not MACOS:
             c.run(clear_leak)
             assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
             assert_memory(s, "unmanaged_old", 0, orig_old + 95)
-            assert_memory(s, "unmanaged_recent", 0, 95)
+            assert_memory(s, "unmanaged_recent", 0, 90)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
