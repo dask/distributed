@@ -1839,7 +1839,7 @@ class Worker(ServerNode):
             assert ts.traceback is not None
         self.send_task_state_to_scheduler(ts)
 
-    def transition_ready_memory(self, ts, value=None):
+    def transition_ready_memory(self, ts, value=no_value):
         if value:
             self.put_key_in_memory(ts, value=value)
         self.send_task_state_to_scheduler(ts)
