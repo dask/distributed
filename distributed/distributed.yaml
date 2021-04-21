@@ -188,10 +188,10 @@ distributed:
 rmm:
   pool-size: null
 ucx:
-  tcp: null  # enable tcp
-  nvlink: null  # enable cuda_ipc
-  infiniband: null # enable Infiniband
-  rdmacm: null # enable RDMACM
-  cuda_copy: null  # enable cuda-copy
-  net-devices: null  # define which Infiniband device to use
+  cuda_copy: False  # enable cuda-copy
+  tcp: False  # enable tcp
+  nvlink: False  # enable cuda_ipc
+  infiniband: False # enable Infiniband
+  rdmacm: False # enable RDMACM
+  net-devices: null  # define what interface to use for UCX comm
   reuse-endpoints: True  # enable endpoint reuse
