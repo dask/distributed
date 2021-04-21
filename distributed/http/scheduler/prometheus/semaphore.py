@@ -1,52 +1,40 @@
-import dask.config
+from distributed.http.prometheus import PrometheusCollector
 
 
-class SemaphoreMetricExtension:
-    def __init__(self, dask_server):
-        self.server = dask_server
-        self.namespace = dask.config.get("distributed.dashboard.prometheus.namespace")
+class SemaphoreMetricCollector(PrometheusCollector):
+    def __init__(self, server):
+        super().__init__(server)
         self.subsystem = "scheduler_semaphore"
 
     def collect(self):
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
-        from prometheus_client.metrics import _build_full_name
 
         sem_ext = self.server.extensions["semaphores"]
 
         semaphore_max_leases_family = GaugeMetricFamily(
-            _build_full_name(
-                "max_leases", namespace=self.namespace, subsystem=self.subsystem
-            ),
+            self.build_name("max_leases"),
             "Maximum leases allowed per semaphore, this will be constant for each semaphore during its lifetime.",
             labels=["name"],
         )
         semaphore_active_leases_family = GaugeMetricFamily(
-            _build_full_name(
-                "active_leases", namespace=self.namespace, subsystem=self.subsystem
-            ),
+            self.build_name("active_leases"),
             "Amount of currently active leases per semaphore.",
             labels=["name"],
         )
         semaphore_pending_leases = GaugeMetricFamily(
-            _build_full_name(
-                "pending_leases", namespace=self.namespace, subsystem=self.subsystem
-            ),
+            self.build_name("pending_leases"),
             "Amount of currently pending leases per semaphore.",
             labels=["name"],
         )
 
         semaphore_acquire_total = CounterMetricFamily(
-            _build_full_name(
-                "acquire_total", namespace=self.namespace, subsystem=self.subsystem
-            ),
+            self.build_name("acquire_total"),
             "Total number of leases acquired per semaphore.",
             labels=["name"],
         )
 
         semaphore_release_total = CounterMetricFamily(
-            _build_full_name(
-                "release_total", namespace=self.namespace, subsystem=self.subsystem
-            ),
+            self.build_name("release_total"),
             "Total number of leases released per semaphore.\n"
             "Note: if a semaphore is closed while there are still leases active, this count will not equal "
             "`semaphore_acquired_total` after execution.",
@@ -54,7 +42,7 @@ class SemaphoreMetricExtension:
         )
 
         semaphore_average_pending_lease_time = GaugeMetricFamily(
-            "semaphore_average_pending_lease_time",
+            self.build_name("average_pending_lease_time"),
             "Exponential moving average of the time it took to acquire a lease per semaphore.\n"
             "Note: this only includes time spent on scheduler side, "
             "it does"
