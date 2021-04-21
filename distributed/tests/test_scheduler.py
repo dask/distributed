@@ -2468,3 +2468,23 @@ async def test_memory_is_none(c, s):
             assert s.memory.unmanaged == 0
             assert s.memory.unmanaged_old == 0
             assert s.memory.unmanaged_recent == 0
+
+
+@gen_cluster()
+async def test_close_scheduler__close_workers_Worker(s, a, b):
+    with captured_logger("distributed.comm", level=logging.DEBUG) as log:
+        await s.close(close_workers=True)
+        while not a.status == Status.closed:
+            await asyncio.sleep(0.05)
+    log = log.getvalue()
+    assert "retry" not in log
+
+
+@gen_cluster(Worker=Nanny)
+async def test_close_scheduler__close_workers_Nanny(s, a, b):
+    with captured_logger("distributed.comm", level=logging.DEBUG) as log:
+        await s.close(close_workers=True)
+        while not a.status == Status.closed:
+            await asyncio.sleep(0.05)
+    log = log.getvalue()
+    assert "retry" not in log
