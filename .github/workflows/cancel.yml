@@ -2,7 +2,7 @@ name: Cancel
 
 on:
   workflow_run:
-    workflows: [Tests, test_memory_stress_test]
+    workflows: [Tests]
     types:
       - requested
 
