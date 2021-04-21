@@ -2454,6 +2454,9 @@ class Worker(ServerNode):
 
             if ts.state == "executing":
                 self.executing_count -= 1
+                th = [th for th, k in self.active_threads.items() if k == key]
+                if th:
+                    self.executor.interrupt(th[0])
 
             if ts.resource_restrictions is not None:
                 if ts.state == "executing":

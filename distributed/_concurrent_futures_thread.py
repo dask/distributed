@@ -51,6 +51,28 @@ def _python_exit():
 atexit.register(_python_exit)
 
 
+class WorkerThreadInterrupt(threading.ThreadError):
+    pass
+
+
+def _async_raise(tid, exctype=WorkerThreadInterrupt):
+    """raise exception in given thread"""
+    import ctypes
+
+    if not issubclass(exctype, Exception):
+        raise TypeError("Must pass an exception type")
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(tid), ctypes.py_object(exctype)
+    )
+    if res == 0:
+        raise threading.ThreadError("No thread got set")
+    elif res != 1:
+        # if res>1, somehow more than one thread was set, so immediately roll
+        # back and raise
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, 0)
+        raise threading.ThreadError("PyThreadState_SetAsyncExc failed")
+
+
 class _WorkItem:
     def __init__(self, future, fn, args, kwargs):
         self.future = future
@@ -65,6 +87,8 @@ class _WorkItem:
         try:
             result = self.fn(*self.args, **self.kwargs)
         except BaseException as e:
+            if isinstance(e, WorkerThreadInterrupt):
+                print("In-task interrupt")
             self.future.set_exception(e)
         else:
             self.future.set_result(result)
@@ -73,22 +97,27 @@ class _WorkItem:
 def _worker(executor_reference, work_queue):
     try:
         while True:
-            work_item = work_queue.get(block=True)
-            if work_item is not None:
-                work_item.run()
-                # Delete references to object. See issue16284
-                del work_item
-                continue
-            executor = executor_reference()
-            # Exit if:
-            #   - The interpreter is shutting down OR
-            #   - The executor that owns the worker has been collected OR
-            #   - The executor that owns the worker has been shutdown.
-            if _shutdown or executor is None or executor._shutdown:
-                # Notice other workers
-                work_queue.put(None)
-                return
-            del executor
+            try:
+                work_item = work_queue.get(block=True)
+                if work_item is not None:
+                    work_item.run()
+                    # Delete references to object. See issue16284
+                    del work_item
+                    continue
+                executor = executor_reference()
+                # Exit if:
+                #   - The interpreter is shutting down OR
+                #   - The executor that owns the worker has been collected OR
+                #   - The executor that owns the worker has been shutdown.
+                if _shutdown or executor is None or executor._shutdown:
+                    # Notice other workers
+                    work_queue.put(None)
+                    return
+                del executor
+            except WorkerThreadInterrupt:
+                # thread interrupt outside of a task
+                print("Interrupt within thread!")
+                pass
     except BaseException:
         _base.LOGGER.critical("Exception in worker", exc_info=True)
 
@@ -156,6 +185,9 @@ class ThreadPoolExecutor(_base.Executor):
             t.start()
             self._threads.add(t)
             _threads_queues[t] = self._work_queue
+
+    def interrupt(self, ident):
+        _async_raise(ident)
 
     def shutdown(self, wait=True):
         with self._shutdown_lock:

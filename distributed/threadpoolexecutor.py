@@ -40,23 +40,27 @@ def _worker(executor, work_queue):
 
     try:
         while thread_state.proceed:
-            with executor._rejoin_lock:
-                if executor._rejoin_list:
-                    rejoin_thread, rejoin_event = executor._rejoin_list.pop()
-                    executor._threads.add(rejoin_thread)
-                    executor._threads.remove(threading.current_thread())
-                    rejoin_event.set()
-                    break
             try:
-                task = work_queue.get(timeout=1)
-            except queue.Empty:
-                continue
-            if task is not None:  # sentinel
-                task.run()
-                del task
-            elif thread._shutdown or executor is None or executor._shutdown:
-                work_queue.put(None)
-                return
+                with executor._rejoin_lock:
+                    if executor._rejoin_list:
+                        rejoin_thread, rejoin_event = executor._rejoin_list.pop()
+                        executor._threads.add(rejoin_thread)
+                        executor._threads.remove(threading.current_thread())
+                        rejoin_event.set()
+                        break
+                try:
+                    task = work_queue.get(timeout=1)
+                except queue.Empty:
+                    continue
+                if task is not None:  # sentinel
+                    task.run()
+                    del task
+                elif thread._shutdown or executor is None or executor._shutdown:
+                    work_queue.put(None)
+                    return
+            except thread.WorkerThreadInterrupt:
+                # interrupt outside task
+                pass
         del executor
     except BaseException:
         logger.critical("Exception in worker", exc_info=True)
