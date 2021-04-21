@@ -466,6 +466,8 @@ class Worker(ServerNode):
             ("executing", "memory"): self.transition_executing_done,
             ("flight", "memory"): self.transition_flight_memory,
             ("flight", "fetch"): self.transition_flight_fetch,
+            # Shouldn't be a valid transition but happens nonetheless
+            ("ready", "memory"): self.transition_ready_memory,
             # Scheduler intercession (re-assignment)
             ("fetch", "waiting"): self.transition_fetch_waiting,
             ("flight", "waiting"): self.transition_flight_waiting,
