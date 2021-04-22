@@ -46,12 +46,12 @@ def loads_function(bytes_object):
     """ Load a function from bytes, cache bytes """
     if len(bytes_object) < 100000:
         with cache_dumps_lock:
-            try:
-                result = cache_loads[bytes_object]
-            except KeyError:
+            if bytes_object in cache_loads:
+                return cache_loads[bytes_object]
+            else:
                 result = pickle.loads(bytes_object)
                 cache_loads[bytes_object] = result
-            return result
+                return result
     return pickle.loads(bytes_object)
 
 
@@ -144,7 +144,13 @@ def loads(frames, deserialize=True, deserializers=None):
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
                 if "callable" in sub_header:
                     if deserialize:
-                        return loads_function(sub_header["callable"])
+                        try:
+                            return loads_function(sub_header["callable"])
+                        except Exception as e:
+                            if deserialize == "delay-exception":
+                                return DelayedExceptionRaise(e)
+                            else:
+                                raise
                     else:
                         return SerializedCallable(sub_header, sub_frames)
                 if deserialize:
@@ -159,8 +165,6 @@ def loads(frames, deserialize=True, deserializers=None):
                             return DelayedExceptionRaise(e)
                         else:
                             raise
-                # elif obj["callable"]:
-                #     return SerializedCallable(sub_header, sub_frames)
                 else:
                     return Serialized(sub_header, sub_frames)
             else:
