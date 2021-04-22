@@ -2448,7 +2448,8 @@ async def test_memory_no_workers(s):
 @gen_cluster(client=True, nthreads=[])
 async def test_memory_is_none(c, s):
     """If Worker.heartbeat() runs before Worker.monitor.update(), then
-    Scheduler._metrics["memory"] will be None
+    Worker.metrics["memory"] will be None and will need special handling in
+    Worker.memory and Scheduler.heartbeat_worker().
     """
     with mock.patch("distributed.system_monitor.SystemMonitor.update"):
         w = await Worker(s.address, nthreads=1)
