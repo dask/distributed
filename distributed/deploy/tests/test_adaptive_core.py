@@ -1,12 +1,11 @@
 import asyncio
-import logging
 from unittest import mock
 
 import pytest
 
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
-from distributed.utils import tmpfile
+from distributed.utils_test import captured_logger
 
 
 class MyAdaptive(AdaptiveCore):
@@ -97,7 +96,6 @@ async def test_interval():
 @pytest.mark.asyncio
 @mock.patch("distributed.deploy.adaptive_core.AdaptiveCore.safe_target")
 async def test_adapt_oserror(mock_safe_target):
-    with tmpfile() as fn:
     with captured_logger("distributed.deploy.adaptive_core") as log:
         mock_safe_target.side_effect = OSError
         adapt = MyAdaptive(minimum=1, maximum=4)
