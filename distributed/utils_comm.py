@@ -12,6 +12,7 @@ from dask.optimization import SubgraphCallable
 from dask.utils import parse_timedelta, stringify
 
 from .core import rpc
+from .protocol.serialize import MsgpackList
 from .utils import All
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=N
     return (names, who_has, nbytes)
 
 
-collection_types = (tuple, list, set, frozenset)
+collection_types = (tuple, list, set, frozenset, MsgpackList)
 
 
 def unpack_remotedata(o, byte_keys=False, myset=None):
