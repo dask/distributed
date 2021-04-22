@@ -96,7 +96,7 @@ async def test_interval():
 
 @pytest.mark.asyncio
 @mock.patch("distributed.deploy.adaptive_core.AdaptiveCore.safe_target")
-async def test_adapt_exception(mock_safe_target):
+async def test_adapt_oserror(mock_safe_target):
     with tmpfile() as fn:
         fh = logging.FileHandler(fn)
         logger = logging.getLogger("distributed.deploy.adaptive_core")
