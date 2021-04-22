@@ -109,3 +109,4 @@ async def test_adapt_oserror(mock_safe_target):
             text = f.read()
             assert "Adaptive stopping due to error" in text
             assert "Adaptive stop" in text
+        assert not adapt._adapting
