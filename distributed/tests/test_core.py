@@ -771,8 +771,7 @@ def test_rpc_serialization(loop):
         await server.listen("tcp://")
 
         async with rpc(server.address, serializers=["msgpack"]) as r:
-            with pytest.raises(TypeError):
-                await r.echo(x=to_serialize(inc))
+            await r.echo(x=to_serialize(inc))
 
         async with rpc(server.address, serializers=["msgpack", "pickle"]) as r:
             result = await r.echo(x=to_serialize(inc))
