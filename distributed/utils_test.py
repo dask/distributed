@@ -1552,7 +1552,8 @@ def check_instances():
         # raise ValueError("Unclosed Comms", L)
 
     assert all(
-        n.status == Status.closed or n.status == Status.init for n in Nanny._instances
+        n.status in [Status.closed, Status.init, Status.stopped]
+        for n in Nanny._instances
     ), {n: n.status for n in Nanny._instances}
 
     # assert not list(SpecCluster._instances)  # TODO

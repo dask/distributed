@@ -439,11 +439,8 @@ async def test_scale_needs_to_be_awaited(cleanup):
 
     class RequiresAwaitCluster(LocalCluster):
         def scale(self, n):
-            # super invocation in the nested function scope is messy
-            method = super().scale
-
             async def _():
-                return method(n)
+                return LocalCluster.scale(self, n)
 
             return self.sync(_)
 
@@ -451,7 +448,7 @@ async def test_scale_needs_to_be_awaited(cleanup):
         async with Client(cluster, asynchronous=True) as client:
             futures = client.map(slowinc, range(5), delay=0.05)
             assert len(cluster.workers) == 0
-            cluster.adapt()
+            cluster.adapt(interval="10ms")
 
             await client.gather(futures)
 

@@ -21,6 +21,7 @@ from asyncio import TimeoutError
 from collections import OrderedDict, UserDict, deque
 from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
 from contextlib import contextmanager, suppress
+from functools import wraps
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
@@ -188,6 +189,22 @@ def get_ip_interface(ifname):
         if info.family == socket.AF_INET:
             return info.address
     raise ValueError(f"interface {ifname!r} doesn't have an IPv4 address")
+
+
+def shielded(func):
+    """
+    Shield decorated method or function from cancellation. Note that the
+    decorated coroutine will immediately scheduled as a task if the decorated
+    function is invoked.
+
+    See also https://docs.python.org/3/library/asyncio-task.html#asyncio.shield
+    """
+
+    @wraps(func)
+    def _(*args, **kwargs):
+        return asyncio.shield(func(*args, **kwargs))
+
+    return _
 
 
 async def All(args, quiet_exceptions=()):

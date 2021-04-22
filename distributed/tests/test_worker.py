@@ -38,6 +38,7 @@ from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
+    async_wait_for,
     captured_logger,
     dec,
     div,
@@ -2340,3 +2341,76 @@ async def test_forget_dependents_after_release(c, s, a):
     while fut2.key in a.tasks:
         await asyncio.sleep(0.001)
     assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_exception_in_handler(c, s, a):
+    """This test is supposed to ensure that regardless of whether a handler is
+    sync or async, the behaviour is the same."""
+
+    def raise_unhandled_exception(kind=None):
+        if kind == "runtime":
+            # some other exception, maybe handled
+            raise RuntimeError()
+        elif kind == "os":
+            # often special treatment for disconnects, etc.
+            raise OSError()
+        raise Exception()
+
+    async def async_raise_unhandled_exception(kind=None):
+        return raise_unhandled_exception(kind)
+
+    a.handlers["fail"] = raise_unhandled_exception
+    a.stream_handlers["fail"] = raise_unhandled_exception
+
+    a.handlers["fail_async"] = async_raise_unhandled_exception
+    a.stream_handlers["fail_async"] = async_raise_unhandled_exception
+
+    with rpc(a.address) as rpc_a:
+        with pytest.raises(Exception):
+            await rpc_a.fail()
+
+        with pytest.raises(Exception):
+            await rpc_a.fail_async()
+
+    # Current behaviour is that any exception in the handler causes a
+    # disconnect. The worker should automatically initiate a reconnect and
+    # return to ordinary behaviour. atm we do not differentiate between
+    # different types of exceptions
+    for kind in [None, "runtime", "os"]:
+        a_stream_comm = s.stream_comms.get(a.address)
+        a_stream_comm.send({"op": "fail", "kind": kind})
+        # Worker is still fine
+        assert a.status is Status.running
+
+        # Wait until the worker has been removed and wait for the stream comm to be repopulated
+        await async_wait_for(lambda: not s.stream_comms, 2)
+        await async_wait_for(lambda: s.stream_comms, 2)
+        assert a.status is Status.running
+
+    for kind in [None, "runtime", "os"]:
+        a_stream_comm = s.stream_comms.get(a.address)
+        a_stream_comm.send({"op": "fail_async", "kind": kind})
+        assert a.status is Status.running
+        await async_wait_for(lambda: not s.stream_comms, 2)
+        await async_wait_for(lambda: s.stream_comms, 2)
+        assert a.status is Status.running
+
+    await asyncio.sleep(0)
+    # Is the worker still operational?
+
+    futs = c.map(inc, range(10))
+    res = await c.gather(futs)
+    assert sum(res) == sum(range(1, 11))
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 0)])
+async def test_worker_terminate(s, a):
+    w_rpc = s.rpc(a.address)
+    await w_rpc.terminate(reply=False)
+
+    while a.status != Status.closed:
+        await asyncio.sleep(0.05)
+
+    # already closed should be noop
+    await a.close()

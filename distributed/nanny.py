@@ -33,6 +33,7 @@ from .utils import (
     json_load_robust,
     mp_context,
     parse_ports,
+    shielded,
     silence_logging,
 )
 from .worker import Worker, parse_memory_limit, run
@@ -194,15 +195,17 @@ class Nanny(ServerNode):
             "instantiate": self.instantiate,
             "kill": self.kill,
             "restart": self.restart,
-            # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
+            # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
         }
 
         super().__init__(
-            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
+            handlers=handlers,
+            io_loop=self.loop,
+            connection_args=self.connection_args,
         )
 
         self.scheduler = self.rpc(self.scheduler_addr)
@@ -306,6 +309,7 @@ class Nanny(ServerNode):
 
         return self
 
+    @shielded
     async def kill(self, comm=None, timeout=2):
         """Kill the local worker process
 
@@ -317,6 +321,7 @@ class Nanny(ServerNode):
             return "OK"
 
         deadline = self.loop.time() + timeout
+        self.status = Status.stopped
         await self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
 
     async def instantiate(self, comm=None) -> Status:
@@ -491,15 +496,13 @@ class Nanny(ServerNode):
         """
         self.status = Status.closing_gracefully
 
+    @shielded
     async def close(self, comm=None, timeout=5, report=None):
         """
         Close the worker process, stop all comms.
         """
-        if self.status == Status.closing:
+        if self.status in (Status.closing, Status.closed):
             await self.finished()
-            assert self.status == Status.closed
-
-        if self.status == Status.closed:
             return "OK"
 
         self.status = Status.closing
@@ -508,18 +511,15 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
-        self.stop()
         try:
             if self.process is not None:
                 await self.kill(timeout=timeout)
         except Exception:
             pass
         self.process = None
-        await self.rpc.close()
-        self.status = Status.closed
         if comm:
             await comm.write("OK")
-        await ServerNode.close(self)
+        await super().close()
 
 
 class WorkerProcess:
@@ -655,6 +655,7 @@ class WorkerProcess:
             if self.on_exit is not None:
                 self.on_exit(r)
 
+    @shielded
     async def kill(self, timeout=2, executor_wait=True):
         """
         Ensure the worker process is stopped, waiting at most
@@ -748,6 +749,7 @@ class WorkerProcess:
             loop.make_current()
             worker = Worker(**worker_kwargs)
 
+            @shielded
             async def do_stop(timeout=5, executor_wait=True):
                 try:
                     await worker.close(
@@ -797,7 +799,7 @@ class WorkerProcess:
                     # properly handled. See also
                     # WorkerProcess._wait_until_connected (the 2 is for good
                     # measure)
-                    sync_sleep(cls._init_msg_interval * 2)
+                    await asyncio.sleep(cls._init_msg_interval * 2)
                 else:
                     try:
                         assert worker.address

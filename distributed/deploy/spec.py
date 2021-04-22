@@ -332,15 +332,13 @@ class SpecCluster(Cluster):
             if to_close:
                 if self.scheduler.status == Status.running:
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
-                tasks = [
-                    asyncio.create_task(self.workers[w].close())
-                    for w in to_close
-                    if w in self.workers
-                ]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    with suppress(RuntimeError):
-                        await task
+                finished, _ = await asyncio.wait(
+                    [self.workers[w].close() for w in to_close if w in self.workers]
+                )
+                for task in finished:
+                    exc = task.exception()
+                    if exc:
+                        raise exc
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
@@ -359,10 +357,14 @@ class SpecCluster(Cluster):
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
-                await asyncio.wait(workers)
+                finished, _ = await asyncio.wait(workers)
+                for task in finished:
+                    exc = task.exception()
+                    if exc:
+                        raise exc
+
                 for w in workers:
                     w._cluster = weakref.ref(self)
-                    await w  # for tornado gen.coroutine support
             self.workers.update(dict(zip(to_open, workers)))
 
     def _update_worker_status(self, op, msg):

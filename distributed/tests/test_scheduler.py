@@ -2962,3 +2962,15 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
     while any(w.tasks for w in workers):
         await asyncio.gather(*[w.heartbeat() for w in workers])
+
+
+@gen_cluster(nthreads=[])
+async def test_scheduler_terminate(s):
+    s_rpc = rpc(s.address)
+    await s_rpc.terminate(reply=False)
+
+    while s.status != Status.closed:
+        await asyncio.sleep(0.05)
+
+    # already closed should be noop
+    await s.close()

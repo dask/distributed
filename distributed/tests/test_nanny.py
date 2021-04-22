@@ -561,3 +561,38 @@ async def test_failure_during_worker_initialization(cleanup):
                 async with Nanny(s.address, foo="bar") as n:
                     await n
         assert "Restarting worker" not in logs.getvalue()
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 0)], Worker=Nanny)
+async def test_nanny_terminate_handler(s, a):
+    a_rpc = rpc(a.address)
+    await a_rpc.terminate(reply=False)
+
+    while a.status != Status.closed:
+        await asyncio.sleep(0.05)
+
+    # already closed should be noop
+    await a.close()
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 0)], Worker=Nanny)
+async def test_nanny_kill_handler(s, a):
+    a_rpc = rpc(a.address)
+    await a_rpc.kill(reply=False)
+
+    while a.process.status != Status.stopped:
+        await asyncio.sleep(0.05)
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 0)], Worker=Nanny)
+async def test_nanny_close_gracefully_handler(s, a):
+    a_rpc = rpc(a.address)
+    await a_rpc.close_gracefully()
+    assert a.status == Status.closing_gracefully
+    await a_rpc.terminate()
+
+    while a.status != Status.closed:
+        await asyncio.sleep(0.05)
+
+    # already closed should be noop
+    await a.close()
