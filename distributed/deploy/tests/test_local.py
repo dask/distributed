@@ -1063,3 +1063,21 @@ async def test_cluster_names():
 
         async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster2:
             assert unnamed_cluster2 != unnamed_cluster
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", [True, False])
+async def test_local_cluster_redundant_kwarg(nanny):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        # Extra arguments are forwarded to the worker class. Depending on
+        # whether we use the nanny or not, the error treatment is quite
+        # different and we should assert that an exception is raised
+        async with await LocalCluster(
+            typo_kwarg="foo", processes=nanny, n_workers=1
+        ) as cluster:
+
+            # This will never work but is a reliable way to block without hard
+            # coding any sleep values
+            async with Client(cluster) as c:
+                f = c.submit(sleep, 0)
+                await f

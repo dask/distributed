@@ -572,3 +572,11 @@ async def test_worker_start_exception(cleanup):
     with pytest.raises(StartException):
         async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
             await n.start()
+
+
+@pytest.mark.asyncio
+async def test_failure_during_worker_initialization():
+    async with Scheduler() as s:
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            async with Nanny(s.address, foo="bar") as n:
+                await n
