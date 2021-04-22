@@ -98,15 +98,12 @@ async def test_interval():
 @mock.patch("distributed.deploy.adaptive_core.AdaptiveCore.safe_target")
 async def test_adapt_oserror(mock_safe_target):
     with tmpfile() as fn:
-        fh = logging.FileHandler(fn)
-        logger = logging.getLogger("distributed.deploy.adaptive_core")
-        logger.addHandler(fh)
+    with captured_logger("distributed.deploy.adaptive_core") as log:
         mock_safe_target.side_effect = OSError
-        adapt = MyAdaptive(minimum=1, maximum=4, wait_count=2)
+        adapt = MyAdaptive(minimum=1, maximum=4)
         await adapt.adapt()
-        fh.flush()
-        with open(fn) as f:
-            text = f.read()
-            assert "Adaptive stopping due to error" in text
-            assert "Adaptive stop" in text
-        assert not adapt._adapting
+    text = log.getvalue()
+    assert "Adaptive stopping due to error" in text
+    assert "Adaptive stop" in text
+    assert not adapt._adapting
+    assert not adapt.periodic_callback
