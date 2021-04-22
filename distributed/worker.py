@@ -56,6 +56,7 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
+    deprecated,
     get_ip,
     has_arg,
     import_file,
@@ -466,6 +467,8 @@ class Worker(ServerNode):
             ("executing", "memory"): self.transition_executing_done,
             ("flight", "memory"): self.transition_flight_memory,
             ("flight", "fetch"): self.transition_flight_fetch,
+            # Shouldn't be a valid transition but happens nonetheless
+            ("ready", "memory"): self.transition_ready_memory,
             # Scheduler intercession (re-assignment)
             ("fetch", "waiting"): self.transition_fetch_waiting,
             ("flight", "waiting"): self.transition_flight_waiting,
@@ -1837,8 +1840,8 @@ class Worker(ServerNode):
             assert ts.traceback is not None
         self.send_task_state_to_scheduler(ts)
 
-    def transition_ready_memory(self, ts, value=None):
-        if value:
+    def transition_ready_memory(self, ts, value=no_value):
+        if value is not no_value:
             self.put_key_in_memory(ts, value=value)
         self.send_task_state_to_scheduler(ts)
 
@@ -3716,6 +3719,11 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
+
+
+@deprecated(version_removed="2021.06.0")
+def weight(k, v):
+    return sizeof(v)
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
