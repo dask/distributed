@@ -23,6 +23,7 @@ from distributed.utils import (
     Logs,
     LoopRunner,
     TimeoutError,
+    deprecated,
     ensure_bytes,
     ensure_ip,
     format_dashboard_link,
@@ -607,3 +608,20 @@ def test_lru():
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
+
+
+def test_deprecated():
+    @deprecated()
+    def foo():
+        return "bar"
+
+    with pytest.warns(DeprecationWarning, match="foo is deprecated"):
+        assert foo() == "bar"
+
+    # Explicit version specified
+    @deprecated(version_removed="1.2.3")
+    def foo():
+        return "bar"
+
+    with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
+        assert foo() == "bar"

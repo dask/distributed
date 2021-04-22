@@ -57,12 +57,16 @@ Individual bokeh plots
 - ``/individual-profile``
 - ``/individual-profile-server``
 - ``/individual-nbytes``
+- ``/individual-nbytes-cluster``
 - ``/individual-cpu``
 - ``/individual-nprocessing``
 - ``/individual-workers``
 - ``/individual-bandwidth-types``
 - ``/individual-bandwidth-workers``
 - ``/individual-memory-by-key``
+- ``/individual-compute-time-per-key``
+- ``/individual-aggregate-time-per-action``
+- ``/individual-scheduler-system``
 - ``/individual-gpu-memory`` (GPU only)
 - ``/individual-gpu-utilization`` (GPU only)
 
