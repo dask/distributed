@@ -30,12 +30,11 @@ class WorkerMetricCollector(PrometheusCollector):
         tasks.add_metric(["executing"], self.server.executing_count)
         tasks.add_metric(["ready"], len(self.server.ready))
         tasks.add_metric(["waiting"], self.server.waiting_for_data_count)
-        tasks.add_metric(["serving"], len(self.server._comms))
         yield tasks
 
         yield GaugeMetricFamily(
-            self.build_name("connections"),
-            "Number of task connections to other workers.",
+            self.build_name("concurrent_fetch_requests"),
+            "Number of open fetch requests to other workers.",
             value=len(self.server.in_flight_workers),
         )
 
