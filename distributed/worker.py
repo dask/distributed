@@ -945,16 +945,16 @@ class Worker(ServerNode):
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
+            with self.active_threads_lock:
+                active_keys = list(self.active_threads.values())
             response = await retry_operation(
                 self.scheduler.heartbeat_worker,
                 address=self.contact_address,
                 now=start,
                 metrics=await self.get_metrics(),
-                # Create a copy of `self.active_threads.values()` to avoid
-                # `self.active_threads` changing size during iteration
                 executing={
                     key: start - self.tasks[key].start_time
-                    for key in list(self.active_threads.values())
+                    for key in active_keys
                     if key in self.tasks
                 },
             )
