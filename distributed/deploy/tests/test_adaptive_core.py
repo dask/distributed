@@ -1,9 +1,12 @@
 import asyncio
+import logging
+from unittest import mock
 
 import pytest
 
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
+from distributed.utils import tmpfile
 
 
 class MyAdaptive(AdaptiveCore):
@@ -89,3 +92,20 @@ async def test_interval():
     adapt._target = 10
     await asyncio.sleep(0.020)
     assert len(adapt.plan) == 1  # last value from before, unchanged
+
+
+@pytest.mark.asyncio
+@mock.patch("distributed.deploy.adaptive_core.AdaptiveCore.safe_target")
+async def test_adapt_exception(mock_safe_target):
+    with tmpfile() as fn:
+        fh = logging.FileHandler(fn)
+        logger = logging.getLogger("distributed.deploy.adaptive_core")
+        logger.addHandler(fh)
+        mock_safe_target.side_effect = OSError
+        adapt = MyAdaptive(minimum=1, maximum=4, wait_count=2)
+        await adapt.adapt()
+        fh.flush()
+        with open(fn) as f:
+            text = f.read()
+            assert "Adaptive stopping due to error" in text
+            assert "Adaptive stop" in text
