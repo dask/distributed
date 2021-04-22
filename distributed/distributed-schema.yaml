@@ -728,6 +728,13 @@ properties:
           export-tool:
             type: boolean
 
+          prometheus:
+            type: object
+            properties:
+              namespace:
+                type: string
+                description: Namespace prefix to use for all prometheus metrics.
+
       admin:
         type: object
         description: |
