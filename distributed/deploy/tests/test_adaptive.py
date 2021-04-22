@@ -481,17 +481,11 @@ async def test_adaptive_stopped():
     stops.
     """
     async with LocalCluster(n_workers=0, asynchronous=True) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            instance = cluster.adapt(interval="10ms")
+        instance = cluster.adapt(interval="10ms")
+        assert instance.periodic_callback is not None
 
-            await async_wait_for(
-                lambda: instance.periodic_callback is not None, timeout=5
-            )
+        await async_wait_for(lambda: instance.periodic_callback.is_running(), timeout=5)
 
-            await async_wait_for(
-                lambda: instance.periodic_callback.is_running() is not None, timeout=5
-            )
+        pc = instance.periodic_callback
 
-            pc = instance.periodic_callback
-
-    await async_wait_for(lambda: pc.is_running() is not None, timeout=5)
+    await async_wait_for(lambda: not pc.is_running(), timeout=5)

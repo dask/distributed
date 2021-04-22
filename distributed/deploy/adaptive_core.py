@@ -107,6 +107,7 @@ class AdaptiveCore:
 
     def stop(self):
         logger.info("Adaptive stop")
+        assert not self._adapting
 
         if self.periodic_callback:
             self.periodic_callback.stop()
