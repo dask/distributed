@@ -722,7 +722,7 @@ async def test_scheduler_sees_memory_limits(s):
     await w.close()
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=1000)
 async def test_retire_workers(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     [y] = await c.scatter([list(range(1000))], workers=b.address)
