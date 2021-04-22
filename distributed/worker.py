@@ -1290,7 +1290,13 @@ class Worker(ServerNode):
 
         logger.info("Closing worker gracefully: %s", self.address)
         self.status = Status.closing_gracefully
-        await self.scheduler.retire_workers(workers=[self.address], remove=False)
+        await self.scheduler.retire_workers(
+            workers=[self.address],
+            remove=False,
+            # Save one RPC call since it is unnecessary for the scheduler to
+            # close this worker since we're doing it ourself below
+            close_workers=False,
+        )
         await self.close(safe=True, nanny=not restart)
 
     async def terminate(self, comm=None, report=True, **kwargs):
@@ -1592,18 +1598,38 @@ class Worker(ServerNode):
             raise
 
     def transition(self, ts, finish, **kwargs):
-        if ts is None:
-            return
-        start = ts.state
-        if start == finish:
-            return
-        func = self._transitions[start, finish]
-        state = func(ts, **kwargs)
-        self.log.append((ts.key, start, state or finish))
-        ts.state = state or finish
-        if self.validate:
-            self.validate_task(ts)
-        self._notify_plugins("transition", ts.key, start, state or finish, **kwargs)
+        try:
+            if ts is None:
+                return
+            start = ts.state
+            if start == finish:
+                return
+            func = self._transitions[start, finish]
+            state = func(ts, **kwargs)
+            self.log.append((ts.key, start, state or finish))
+            ts.state = state or finish
+            if self.validate:
+                self.validate_task(ts)
+            self._notify_plugins("transition", ts.key, start, state or finish, **kwargs)
+        except Exception as exc:
+            # We cannot perform something like a transaction rollback. Therefore
+            # we should be unforgiving and close if we suspect something is
+            # wrong.
+            logger.critical(
+                "Caught exception in attempt to transition %s to %s. We can no "
+                "longer guarantee a valid state of this Worker and need close. "
+                "Please file a bug report at https://github.com/dask/distributed/issues "
+                "with logs leading up to this event as you see appropriate.",
+                ts,
+                finish,
+                exc_info=exc,
+            )
+            # The graceful removal of a worker will not increase any suspicious
+            # counter since it is removed with flag "safe". We might need to
+            # reconsider this behaviour in case a given task is transitioned
+            # wrongfully all the time
+            self.loop.add_callback(self.close_gracefully, restart=True)
+            raise
 
     def transition_new_waiting(self, ts):
         try:

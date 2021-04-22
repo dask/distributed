@@ -54,7 +54,14 @@ from distributed.utils_test import (  # noqa: F401
     s,
     slowinc,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
+from distributed.worker import (
+    TaskState,
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+    weight,
+)
 
 
 @pytest.mark.asyncio
@@ -1792,3 +1799,43 @@ async def test_story(c, s, w):
 def test_weight_deprecated():
     with pytest.warns(DeprecationWarning):
         weight("foo", "bar")
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
+async def test_worker_closes_if_transition_raises_Worker(s, a):
+    """Ensure that a worker closes if an exception is raised during
+    transitioning a task since we do not support transactions and transactions
+    methods are usually not atomic."""
+    with captured_logger("distributed.worker", level=logging.CRITICAL) as log:
+        # we do not care what kind of exception is raised here
+        with pytest.raises(Exception):
+            a.transition(TaskState("key"), "nope")
+    while a.status == Status.running:
+        await asyncio.sleep(0.005)
+    assert a.status in [Status.closing_gracefully, Status.closing, Status.closed]
+    log = log.getvalue()
+    assert "Caught exception in attempt to transition" in log
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], Worker=Nanny)
+async def test_worker_closes_if_transition_raises_Nanny(c, s, a):
+    """Ensure that a worker closes if an exception is raised during
+    transitioning a task since we do not support transactions and transactions
+    methods are usually not atomic.
+    If a Nanny is available, restart.
+    """
+    orig_process = a.process
+
+    # This also should log, see test_worker_closes_if_transition_raises_Worker
+    # but capturing logs is more difficult with Nanny
+    def transition_key(dask_worker):
+        dask_worker.transition(TaskState("key"), "nope")
+
+    with pytest.raises(Exception):
+        await c.run(transition_key)
+    while orig_process.is_alive():
+        await asyncio.sleep(0.005)
+
+    # A new worker should start a finish this
+    fut = c.submit(inc, 1)
+    assert await fut.result() == 2
