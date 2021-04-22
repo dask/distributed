@@ -1,5 +1,4 @@
 import asyncio
-from unittest import mock
 
 import pytest
 
@@ -94,11 +93,18 @@ async def test_interval():
 
 
 @pytest.mark.asyncio
-@mock.patch("distributed.deploy.adaptive_core.AdaptiveCore.safe_target")
-async def test_adapt_oserror(mock_safe_target):
+async def test_adapt_oserror():
+    class BadAdaptive(MyAdaptive):
+        """AdaptiveCore subclass which raises an OSError when attempting to adapt
+
+        We use this to check that error handling works properly
+        """
+
+        def safe_target(self):
+            raise OSError()
+
     with captured_logger("distributed.deploy.adaptive_core") as log:
-        mock_safe_target.side_effect = OSError
-        adapt = MyAdaptive(minimum=1, maximum=4)
+        adapt = BadAdaptive(minimum=1, maximum=4)
         await adapt.adapt()
     text = log.getvalue()
     assert "Adaptive stopping due to error" in text
