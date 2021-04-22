@@ -54,7 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     slowinc,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
 
 
 @pytest.mark.asyncio
@@ -1787,3 +1787,8 @@ async def test_story(c, s, w):
     ts = w.tasks[future.key]
     assert ts.state in str(w.story(ts))
     assert w.story(ts) == w.story(ts.key)
+
+
+def test_weight_deprecated():
+    with pytest.warns(DeprecationWarning):
+        weight("foo", "bar")
