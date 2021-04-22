@@ -2452,14 +2452,14 @@ async def test_memory_is_none(c, s):
     Worker.memory and Scheduler.heartbeat_worker().
     """
     with mock.patch("distributed.system_monitor.SystemMonitor.update"):
-        w = await Worker(s.address, nthreads=1)
-        await c.wait_for_workers(1)
-        f = await c.scatter(123)
-        await w.heartbeat()
-        assert s.memory.process == 0  # Forced from None
-        assert s.memory.managed == 0  # Capped by process even if we do have keys
-        assert s.memory.managed_in_memory == 0
-        assert s.memory.managed_spilled == 0
-        assert s.memory.unmanaged == 0
-        assert s.memory.unmanaged_old == 0
-        assert s.memory.unmanaged_recent == 0
+        async with Worker(s.address, nthreads=1) as w:
+            await c.wait_for_workers(1)
+            f = await c.scatter(123)
+            await w.heartbeat()
+            assert s.memory.process == 0  # Forced from None
+            assert s.memory.managed == 0  # Capped by process even if we do have keys
+            assert s.memory.managed_in_memory == 0
+            assert s.memory.managed_spilled == 0
+            assert s.memory.unmanaged == 0
+            assert s.memory.unmanaged_old == 0
+            assert s.memory.unmanaged_recent == 0
