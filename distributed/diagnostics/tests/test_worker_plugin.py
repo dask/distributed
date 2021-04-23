@@ -54,6 +54,32 @@ async def test_create_with_client(c, s):
 
 
 @gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+
+    worker = await Worker(s.address, loop=s.loop)
+    assert worker._my_plugin_status == "setup"
+    assert worker._my_plugin_data == 123
+
+    await c.unregister_worker_plugin("bar")
+    assert worker._my_plugin_status == "teardown"
+    assert not s.worker_plugins
+    assert not worker.plugins
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client_raises(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+
+    worker = await Worker(s.address, loop=s.loop)
+    assert worker._my_plugin_status == "setup"
+    assert worker._my_plugin_data == 123
+
+    with pytest.raises(KeyError, match="bar"):
+        await c.unregister_worker_plugin("bar")
+
+
+@gen_cluster(client=True, nthreads=[])
 async def test_create_with_client_and_plugin_from_class(c, s):
     await c.register_worker_plugin(MyPlugin, data=456)
 
