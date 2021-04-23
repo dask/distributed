@@ -1522,6 +1522,27 @@ def check_instances():
 
 
 @contextmanager
+def check_dangling_tasks(loop=None):
+    from tornado.platform.asyncio import BaseAsyncIOLoop
+
+    if loop is None:
+        asyncio_loop = asyncio.get_running_loop()
+    elif isinstance(loop, BaseAsyncIOLoop):
+        asyncio_loop = loop.asyncio_loop
+    else:
+        asyncio_loop = loop
+    start = asyncio.all_tasks()
+    start_loop = asyncio.all_tasks(asyncio_loop)
+    # If this is not true we're on the wrong loop
+    assert start == start_loop
+    yield
+    end = asyncio.all_tasks()
+    end_loop = asyncio.all_tasks(asyncio_loop)
+    assert end == end_loop
+    assert end == start
+
+
+@contextmanager
 def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
     @contextmanager
     def null():
