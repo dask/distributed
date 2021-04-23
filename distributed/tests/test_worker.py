@@ -56,7 +56,7 @@ from distributed.utils_test import (  # noqa: F401
     slowinc,
     wait_for,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
 
 
 @pytest.mark.asyncio
@@ -446,21 +446,16 @@ async def test_spill_to_disk(c, s):
 
     assert set(w.data) == {x.key, y.key}
     assert set(w.data.memory) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
 
     z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
     await wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.memory) == {y.key, z.key}
-    assert set(w.data.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
-    assert set(w.data.slow) == set(w.data.disk)
+    assert set(w.data.disk) == {x.key}
 
     await x
     assert set(w.data.memory) == {x.key, z.key}
-    assert set(w.data.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
-    assert set(w.data.slow) == set(w.data.disk)
+    assert set(w.data.disk) == {y.key}
     await w.close()
 
 
@@ -526,7 +521,6 @@ async def test_spill_by_default(c, s, w):
     y = c.persist(x)
     await wait(y)
     assert len(w.data.disk)  # something is on disk
-    del x, y
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
@@ -1797,6 +1791,7 @@ async def test_story(c, s, w):
     assert w.story(ts) == w.story(ts.key)
 
 
+<<<<<<< HEAD
 def donothing():
     import time
 
@@ -1850,3 +1845,8 @@ def test_interrupt_sync():
 
     assert fut1.result()
     assert client.cluster.workers[0].attr == "Quitting"
+
+
+def test_weight_deprecated():
+    with pytest.warns(DeprecationWarning):
+        weight("foo", "bar")
