@@ -3518,6 +3518,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
+            "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -6302,6 +6303,17 @@ class Scheduler(SchedulerState, ServerNode):
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
         )
+        return responses
+
+    async def unregister_worker_plugin(self, comm, name):
+        """ Unregisters a worker plugin"""
+
+        for idx, entry in enumerate(self.worker_plugins):
+            if entry["name"] == name:
+                break
+        del self.worker_plugins[idx]
+
+        responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):
