@@ -1791,7 +1791,6 @@ async def test_story(c, s, w):
     assert w.story(ts) == w.story(ts.key)
 
 
-<<<<<<< HEAD
 def donothing():
     import time
 
@@ -1832,8 +1831,8 @@ def test_interrupt_sync():
     client = Client(
         processes=False, asynchronous=False, n_workers=1, threads_per_worker=1
     )
-    import time
     import concurrent.futures
+    import time
 
     fut0 = client.submit(donothing)
     time.sleep(0.01)
