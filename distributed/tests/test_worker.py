@@ -54,7 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     nodebug,
     s,
     slowinc,
-    wait_for
+    wait_for,
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
@@ -1799,6 +1799,7 @@ async def test_story(c, s, w):
 
 def donothing():
     import time
+
     try:
         for _ in range(100000):
             time.sleep(0.01)
@@ -1809,6 +1810,7 @@ def donothing():
 
 def donothing():
     import time
+
     try:
         for _ in range(100000):
             time.sleep(0.01)
@@ -1818,7 +1820,6 @@ def donothing():
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=2)
 async def test_interrupt(c, s, w):
-    from distributed import _concurrent_futures_thread as thread
     import concurrent.futures
 
     fut0 = c.submit(donothing)
@@ -1833,8 +1834,9 @@ async def test_interrupt(c, s, w):
 
 
 def test_interrupt_sync():
-    client = Client(processes=False, asynchronous=False,
-                    n_workers=1, threads_per_worker=1)
+    client = Client(
+        processes=False, asynchronous=False, n_workers=1, threads_per_worker=1
+    )
     import time
     import concurrent.futures
 
@@ -1848,4 +1850,3 @@ def test_interrupt_sync():
 
     assert fut1.result()
     assert client.cluster.workers[0].attr == "Quitting"
-
