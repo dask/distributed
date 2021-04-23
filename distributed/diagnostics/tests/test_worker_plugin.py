@@ -61,7 +61,7 @@ async def test_remove_with_client(c, s):
     assert worker._my_plugin_status == "setup"
     assert worker._my_plugin_data == 123
 
-    await c.unregister_worker_plugin("bar")
+    await c.unregister_worker_plugin("foo")
     assert worker._my_plugin_status == "teardown"
     assert not s.worker_plugins
     assert not worker.plugins
