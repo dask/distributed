@@ -38,6 +38,7 @@ from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (  # noqa: F401
     TaskStateMetadataPlugin,
     a,
+    async_wait_for,
     b,
     captured_logger,
     cleanup,
@@ -53,6 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     nodebug,
     s,
     slowinc,
+    wait_for
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
@@ -1793,3 +1795,57 @@ async def test_story(c, s, w):
     ts = w.tasks[future.key]
     assert ts.state in str(w.story(ts))
     assert w.story(ts) == w.story(ts.key)
+
+
+def donothing():
+    import time
+    try:
+        for _ in range(100000):
+            time.sleep(0.01)
+    finally:
+        logger.critical("Quitting")
+        get_worker().attr = True
+
+
+def donothing():
+    import time
+    try:
+        for _ in range(100000):
+            time.sleep(0.01)
+    finally:
+        get_worker().attr = "Quitting"
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=2)
+async def test_interrupt(c, s, w):
+    from distributed import _concurrent_futures_thread as thread
+    import concurrent.futures
+
+    fut0 = c.submit(donothing)
+    await async_wait_for(lambda: bool(w.active_threads), 1)
+    fut1 = c.submit(lambda: True)  # blocked
+    assert not fut1.done()
+    await fut0.cancel()
+    with pytest.raises(concurrent.futures.CancelledError):
+        await fut0
+    assert await fut1
+    await async_wait_for(lambda: getattr(w, "attr", None) == "Quitting", 1)
+
+
+def test_interrupt_sync():
+    client = Client(processes=False, asynchronous=False,
+                    n_workers=1, threads_per_worker=1)
+    import time
+    import concurrent.futures
+
+    fut0 = client.submit(donothing)
+    time.sleep(0.01)
+    fut1 = client.submit(lambda: True)  # blocked
+    assert not fut1.done()
+    fut0.cancel()
+    with pytest.raises(concurrent.futures.CancelledError):
+        fut0.result()
+
+    assert fut1.result()
+    assert client.cluster.workers[0].attr == "Quitting"
+
