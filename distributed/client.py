@@ -498,6 +498,11 @@ class AllExit(Exception):
     """Custom exception class to exit All(...) early."""
 
 
+# So we can use secede/rejoin as boolean flags and still be able to access the functions
+_secede = secede
+_rejoin = rejoin
+
+
 class Client:
     """Connect to and submit computation to a Dask cluster
 
@@ -1921,7 +1926,8 @@ class Client:
 
         return response
 
-    def gather(self, futures, errors="raise", direct=None, asynchronous=None):
+    def gather(self, futures, errors="raise", direct=None, asynchronous=None,
+               secede=True, rejoin=None):
         """Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1937,8 +1943,16 @@ class Client:
             or skip its inclusion in the output collection
         direct : boolean
             Whether or not to connect directly to the workers, or to ask
-            the scheduler to serve as intermediary.  This can also be set when
+            the scheduler to serve as intermediary. This can also be set when
             creating the Client.
+        secede : boolean
+            Whether or not to secede the worker thread before gathering. Will
+            be forced to False if not running on a worker.
+        rejoin : Union[False, None]
+            Whether or not to rejoin the worker thread after gathering.
+            Cannot be explicitly set to True. Can only be True implicitly, if
+            secede=True. Will always be equal to secede, except if explicitly
+            set to False. Will be forced to False if not running on a worker.
 
         Returns
         -------
@@ -1959,27 +1973,51 @@ class Client:
         --------
         Client.scatter : Send data out to cluster
         """
+        
+        if rejoin:
+            raise ValueError('`rejoin` can only be True implicitly through '
+                             'secede=True')
+
+        if hasattr(thread_state, "execution_state"):  # within worker task
+            local_worker = thread_state.execution_state["worker"]
+        else:
+            local_worker = None
+
+        # only secede if on a worker
+        secede = secede and (local_worker is not None)
+
+        # Only case when rejoin != secede if rejoin is explicitly set to False
+        if rejoin is None:
+            rejoin = secede
+
+
         if isinstance(futures, pyQueue):
             raise TypeError(
                 "Dask no longer supports gathering over Iterators and Queues. "
                 "Consider using a normal for loop and Client.submit/gather"
             )
-
-        elif isinstance(futures, Iterator):
-            return (self.gather(f, errors=errors, direct=direct) for f in futures)
         else:
-            if hasattr(thread_state, "execution_state"):  # within worker task
-                local_worker = thread_state.execution_state["worker"]
-            else:
-                local_worker = None
-            return self.sync(
-                self._gather,
-                futures,
-                errors=errors,
-                direct=direct,
-                local_worker=local_worker,
-                asynchronous=asynchronous,
-            )
+            try:
+                if secede:
+                    _secede()
+
+                if isinstance(futures, Iterator):
+                    # secede=False here because secede will always be handled
+                    # external to this call
+                    return (self.gather(f, errors=errors, direct=direct, secede=False)
+                            for f in futures)
+                else:
+                    return self.sync(
+                        self._gather,
+                        futures,
+                        errors=errors,
+                        direct=direct,
+                        local_worker=local_worker,
+                        asynchronous=asynchronous,
+                    )
+            finally:
+                if rejoin:
+                    _rejoin()
 
     async def _scatter(
         self,
