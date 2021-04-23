@@ -680,6 +680,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
         }
 
@@ -2573,6 +2574,21 @@ class Worker(ServerNode):
                         return msg
 
                 return {"status": "OK"}
+
+    async def plugin_remove(self, comm=None, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Worker plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(worker=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
 
     async def actor_execute(
         self, comm=None, actor=None, function=None, args=(), kwargs={}
