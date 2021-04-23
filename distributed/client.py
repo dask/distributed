@@ -4055,6 +4055,21 @@ class Client:
 
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
+    async def _unregister_worker_plugin(self, name):
+        responses = await self.scheduler.unregister_worker_plugin(name=name)
+
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                typ = type(exc)
+                tb = response["traceback"]
+                raise exc.with_traceback(tb)
+        return responses
+
+    def unregister_worker_plugin(self, name):
+        """Unregisters a lifecycle worker plugin"""
+        return self.sync(self._unregister_worker_plugin, name=name)
+
 
 class _WorkerSetupPlugin(WorkerPlugin):
     """ This is used to support older setup functions as callbacks """
