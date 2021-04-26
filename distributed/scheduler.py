@@ -1,4 +1,5 @@
 import asyncio
+import heapq
 import inspect
 import itertools
 import json
@@ -168,6 +169,19 @@ MEMORY_RECENT_TO_OLD_TIME = declare(
     double,
     parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
 )
+MEMORY_REBALANCE_SENDER_MIN = declare(
+    double,
+    dask.config.get("distributed.worker.memory.rebalance.sender_min"),
+)
+MEMORY_REBALANCE_RECEIVER_MAX = declare(
+    double,
+    dask.config.get("distributed.worker.memory.rebalance.receiver_max"),
+)
+MEMORY_REBALANCE_HALF_GAP = declare(
+    double,
+    dask.config.get("distributed.worker.memory.rebalance.sender_recipient_gap") / 2.0,
+)
+
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -5475,6 +5489,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         **Policy**
 
+        TODO TODO TODO
+
         This orders the workers by what fraction of bytes of the existing keys
         they have.  It walks down this list from most-to-least.  At each worker
         it sends the largest results it can find and sends them to the least
@@ -5483,8 +5499,77 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState
+        ws: WorkerState
+
         with log_errors():
             async with self._lock:
+
+                # Identify workers that need to lose keys and those that can receive
+                # them, together with how many bytes each needs to lose/receive.
+                # This operation is O(n) to the number of workers in the cluster.
+                if workers:
+                    workers = [parent._workers_dv[w] for w in workers]
+                else:
+                    workers = parent._workers_dv.values()
+
+                # optimistic memory = RSS - unmanaged memory that appeared over the last
+                # 30 seconds (distributed.worker.memory.recent_to_old_time).
+                # This lets us ignore temporary spikes caused by task heap usage.
+                memory_by_worker = [(ws, ws.memory.optimistic) for ws in workers]
+                mean_memory = sum(m for _, m in memory_by_worker) / len(
+                    memory_by_worker
+                )
+
+                # Smallest-first heaps (managed by the heapq modules) of workers that
+                # need to send/receive data, with how many bytes each needs to
+                # send/receive. Bytes are negative, so that the workers farthest from
+                # the cluster mean are at the top of the heaps.
+                # Second element of each tuple is an arbitrary unique number, there just
+                # to to make sure that WorkerState objects are never used for sorting in
+                # the unlikely event that two processes have exactly the same number of
+                # bytes allocated.
+                senders: "list[tuple[int, int, WorkerState]]" = []
+                recipients: "list[tuple[int, int, WorkerState]]" = []
+
+                for ws, ws_memory in memory_by_worker:
+                    if ws.memory_limit:
+                        half_gap = MEMORY_REBALANCE_HALF_GAP * ws.memory_limit
+                        if (
+                            ws_memory >= MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
+                            and ws_memory >= mean_memory + half_gap
+                        ):
+                            senders.append((mean_memory - ws_memory, id(ws), ws))
+                        elif (
+                            ws_memory < MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
+                            and ws_memory < mean_memory - half_gap
+                        ):
+                            recipients.append((ws_memory - mean_memory, id(ws), ws))
+                    elif ws_memory >= mean_memory:
+                        senders.append((mean_memory - ws_memory, id(ws), ws))
+                    else:
+                        recipients.append((ws_memory - mean_memory, id(ws), ws))
+
+                # Fast exit in case no transfers are necessary or possible
+                if not senders or not recipients:
+                    self.log_event(
+                        "all",
+                        {
+                            "action": "rebalance",
+                            "senders": len(senders),
+                            "recipients": len(recipients),
+                            "moved_keys": 0,
+                        },
+                    )
+                    return {"status": "OK"}
+
+                heapq.heapify(senders)
+                heapq.heapify(recipients)
+
+                if keys is not None and not isinstance(keys, Set):
+                    keys = set(keys)  # unless already a set-like
+
+                # TODO TODO TODO
+
                 if keys:
                     tasks = {parent._tasks[k] for k in keys}
                     missing_data = [ts._key for ts in tasks if not ts._who_has]

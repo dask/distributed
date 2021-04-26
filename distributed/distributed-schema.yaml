@@ -404,6 +404,40 @@ properties:
                   non-time-sensitive heuristics. This should be set to be longer than
                   the duration of most dask tasks.
 
+              rebalance:
+                type: object
+                description: >-
+                  Settings for data rebalance operations
+                properties:
+                  sender_min:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: >-
+                      Fraction of worker process memory at which we stop potentially
+                      receiving data from other workers. Ignored when max_memory is not
+                      set.
+
+                  receiver_max:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: >-
+                      Fraction of worker process memory at which we start potentially
+                      transferring data to other workers.
+
+                  sender_recipient_gap: 0.1
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: >-
+                      Fraction of worker process memory, around the cluster mean, where
+                      a worker is neither a sender nor a recipient of data during a
+                      rebalance operation. E.g. if the mean cluster occupation is 50%,
+                      no_rebalance_gap=0.1 means that only nodes above 55% will donate
+                      data and only nodes below 45% will receive them. This helps avoid
+                      data from bouncing around the cluster repeatedly.
+
               target:
                 oneOf:
                   - {type: number, minimum: 0, maximum: 1}
