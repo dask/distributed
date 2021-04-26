@@ -83,9 +83,6 @@ async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
     worker = await Worker(s.address, loop=s.loop)
-    assert worker._my_plugin_status == "setup"
-    assert worker._my_plugin_data == 123
-
     with pytest.raises(KeyError, match="bar"):
         await c.unregister_worker_plugin("bar")
 
