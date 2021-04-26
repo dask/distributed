@@ -54,7 +54,14 @@ from distributed.utils_test import (  # noqa: F401
     s,
     slowinc,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
+from distributed.worker import (
+    TaskState,
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+    weight,
+)
 
 
 @pytest.mark.asyncio
@@ -1787,6 +1794,36 @@ async def test_story(c, s, w):
     ts = w.tasks[future.key]
     assert ts.state in str(w.story(ts))
     assert w.story(ts) == w.story(ts.key)
+
+
+@gen_cluster(client=True)
+async def test_story_with_deps(c, s, a, b):
+    """
+    Assert that the structure of the story does not change unintentionally and
+    expected subfields are actually filled
+    """
+    future = c.map(inc, range(10))
+    res = c.submit(sum, future)
+    await res
+
+    for w in [a, b]:
+        try:
+            ts = w.tasks[res.key]
+        except KeyError:
+            continue
+        story = w.story(ts)
+        for msg in story:
+            # There are multiple types of messages
+            # Transition
+            if isinstance(msg[-1], str):
+                assert msg[0] == ts.key
+            # events, e.g. gather-deps
+            elif msg[0] == "gather-dependencies":
+                assert msg[1] == ts.key
+                dependencies = msg[2]
+                assert isinstance(dependencies, set)
+                assert dependencies
+                assert all(isinstance(dep, TaskState) for dep in dependencies)
 
 
 def test_weight_deprecated():
