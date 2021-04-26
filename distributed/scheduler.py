@@ -6311,6 +6311,9 @@ class Scheduler(SchedulerState, ServerNode):
         for idx, entry in enumerate(self.worker_plugins):
             if entry["name"] == name:
                 break
+        else:
+            raise KeyError(f"The worker plugin {name} does not exists")
+
         del self.worker_plugins[idx]
 
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
