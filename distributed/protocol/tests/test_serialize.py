@@ -145,6 +145,23 @@ def test_nested_deserialize():
     assert x == x_orig  # x wasn't mutated
 
 
+def test_serialize_iterate_collection():
+    # Use iterate_collection to ensure elements of
+    # a collection will be serialized seperately
+
+    arr = "special-data"
+    sarr = Serialized(*serialize(arr))
+    sdarr = to_serialize(arr)
+
+    task1 = (0, sarr, "('fake-key', 3)", None)
+    task2 = (0, sdarr, "('fake-key', 3)", None)
+    expect = (0, arr, "('fake-key', 3)", None)
+
+    # Check serialize/deserialize directly
+    assert deserialize(*serialize(task1, iterate_collection=True)) == expect
+    assert deserialize(*serialize(task2, iterate_collection=True)) == expect
+
+
 from dask import delayed
 
 from distributed.utils_test import gen_cluster

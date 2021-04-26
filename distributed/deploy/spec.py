@@ -338,7 +338,11 @@ class SpecCluster(Cluster):
             if to_close:
                 if self.scheduler.status == Status.running:
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
-                tasks = [self.workers[w].close() for w in to_close if w in self.workers]
+                tasks = [
+                    asyncio.create_task(self.workers[w].close())
+                    for w in to_close
+                    if w in self.workers
+                ]
                 await asyncio.wait(tasks)
                 for task in tasks:  # for tornado gen.coroutine support
                     with suppress(RuntimeError):

@@ -392,51 +392,51 @@ properties:
 
           memory:
             type: object
-            description: |
-              When Dask workers have more data than memory they spill this data to disk.
-              They do this at a few conditions.
+            description: >-
+              Settings for memory management
             properties:
+              recent_to_old_time:
+                type: string
+                description: >-
+                  When there is an increase in process memory (as observed by the
+                  operating system) that is not accounted for by the dask keys stored on
+                  the worker, ignore it for this long before considering it in
+                  non-time-sensitive heuristics. This should be set to be longer than
+                  the duration of most dask tasks.
+
               target:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  Target fraction below which to try to keep memory
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we start spilling the dask keys holding the largest
+                  chunks of data to disk
 
               spill:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory (as observed by the operating system) gets above this amount we spill data to disk.
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we spill all data to disk.
 
               pause:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory (as observed by the operating system) gets above this amount
-                  we no longer start new tasks on this worker.
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory (as observed by the operating system) gets
+                  above this amount we no longer start new tasks on this worker.
 
               terminate:
-                type: number
-                minimum: 0
-                maximum: 1
-                description: |
-                  When the process memory reaches this level the nanny process will kill the worker
-                  (if a nanny is present)
+                oneOf:
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
+                description: >-
+                  When the process memory reaches this level the nanny process will kill
+                  the worker (if a nanny is present)
 
-          http:
-            type: object
-            decription: Settings for Dask's embedded HTTP Server
-            properties:
-              routes:
-                type: array
-                description: |
-                  A list of modules like "prometheus" and "health" that can be included or excluded as desired
-
-                  These modules will have a ``routes`` keyword that gets added to the main HTTP Server.
-                  This is also a list that can be extended with user defined modules.
           http:
             type: object
             decription: Settings for Dask's embedded HTTP Server
@@ -728,6 +728,13 @@ properties:
           export-tool:
             type: boolean
 
+          prometheus:
+            type: object
+            properties:
+              namespace:
+                type: string
+                description: Namespace prefix to use for all prometheus metrics.
+
       admin:
         type: object
         description: |
@@ -803,44 +810,51 @@ properties:
   rmm:
     type: object
     description: |
-      Configuration options for the RAPIDS Memory Manager
+      Configuration options for the RAPIDS Memory Manager.
     properties:
       pool-size:
-        type:
-        - integer
-        - "null"
-        description:
-          The size of the memory pool in bytes
+        type: [integer, 'null']
+        description: |
+          The size of the memory pool in bytes.
   ucx:
     type: object
     description: |
-      UCX provides access to other network interconnects like Infiniband and NVLINK
+      UCX provides access to other transport methods including NVLink and InfiniBand.
     properties:
-      tcp:
-        type:
-        - boolean
-        - "null"
-      nvlink:
-        type:
-        - boolean
-        - "null"
-      infiniband:
-        type:
-        - boolean
-        - "null"
-      rdmacm:
-        type:
-        - boolean
-        - "null"
       cuda_copy:
-        type:
-        - boolean
-        - "null"
+        type: boolean
+        description: |
+          Set environment variables to enable CUDA support over UCX. This may be used even if
+          InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
+      tcp:
+        type: boolean
+        description: |
+          Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
+          are not supported or disabled.
+      nvlink:
+        type: boolean
+        description: |
+          Set environment variables to enable UCX over NVLink, implies ``ucx.tcp=True``.
+      infiniband:
+        type: boolean
+        description: |
+          Set environment variables to enable UCX over InfiniBand, implies ``ucx.tcp=True``.
+      rdmacm:
+        type: boolean
+        description: |
+          Set environment variables to enable UCX RDMA connection manager support,
+          requires ``ucx.infiniband=True``.
       net-devices:
-        type:
-        - string
-        - "null"
-        description: Define which Infiniband device to use
+        type: [string, 'null']
+        description: |
+          Interface(s) used by workers for UCX communication. Can be a string (like
+          ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
+          (requires ``ucx.infiniband=True``) to pick the optimal interface per-worker based on
+          the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
+          all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
+          and compiled with hwloc support. Unexpected errors can occur when using
+          ``"auto"`` if any interfaces are disconnected or improperly configured.
       reuse-endpoints:
         type: boolean
-        description: Whether to reuse endpoints or not, default True
+        description: | 
+          Whether to reuse endpoints or not.

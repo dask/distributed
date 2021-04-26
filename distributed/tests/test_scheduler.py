@@ -1,11 +1,15 @@
 import asyncio
+import gc
 import json
 import logging
 import operator
 import re
 import sys
 from collections import defaultdict
+from itertools import product
+from textwrap import dedent
 from time import sleep
+from unittest import mock
 
 import cloudpickle
 import pytest
@@ -22,7 +26,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.scheduler import Scheduler
+from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
@@ -2234,3 +2238,228 @@ async def test_get_worker_monitor_info(s, a, b):
         assert all(res[w.address]["range_query"][m] is not None for m in ms)
         assert res[w.address]["count"] is not None
         assert res[w.address]["last_time"] is not None
+
+
+@gen_cluster(client=True)
+async def test_quiet_cluster_round_robin(c, s, a, b):
+    await c.submit(inc, 1)
+    await c.submit(inc, 2)
+    await c.submit(inc, 3)
+    assert a.log and b.log
+
+
+def test_memorystate():
+    m = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    assert m.process == 100
+    assert m.managed == 80
+    assert m.managed_in_memory == 68
+    assert m.managed_spilled == 12
+    assert m.unmanaged == 32
+    assert m.unmanaged_old == 15
+    assert m.unmanaged_recent == 17
+    assert m.optimistic == 83
+
+    assert (
+        repr(m)
+        == dedent(
+            """
+            Managed by Dask       : 80 B
+              - in process memory : 68 B
+              - spilled to disk   : 12 B
+            Process memory (RSS)  : 100 B
+              - managed by Dask   : 68 B
+              - unmanaged (old)   : 15 B
+              - unmanaged (recent): 17 B
+            """
+        ).lstrip()
+    )
+
+
+def test_memorystate_sum():
+    m1 = MemoryState(process=100, unmanaged_old=15, managed=80, managed_spilled=12)
+    m2 = MemoryState(process=80, unmanaged_old=10, managed=60, managed_spilled=2)
+    m3 = MemoryState.sum(m1, m2)
+    assert m3.process == 180
+    assert m3.unmanaged_old == 25
+    assert m3.managed == 140
+    assert m3.managed_spilled == 14
+
+
+@pytest.mark.parametrize(
+    "process,unmanaged_old,managed,managed_spilled", list(product(*[[0, 1, 2, 3]] * 4))
+)
+def test_memorystate_adds_up(process, unmanaged_old, managed, managed_spilled):
+    """Input data is massaged by __init__ so that everything adds up by construction"""
+    m = MemoryState(
+        process=process,
+        unmanaged_old=unmanaged_old,
+        managed=managed,
+        managed_spilled=managed_spilled,
+    )
+    assert m.managed_in_memory + m.unmanaged == m.process
+    assert m.managed_in_memory + m.managed_spilled == m.managed
+    assert m.unmanaged_old + m.unmanaged_recent == m.unmanaged
+    assert m.optimistic + m.unmanaged_recent == m.process
+
+
+def leaking(out_mib, leak_mib, sleep_time):
+    if leak_mib:
+        global __test_leak
+        __test_leak = "x" * (leak_mib * 2 ** 20)
+    out = "x" * (out_mib * 2 ** 20)
+    sleep(sleep_time)
+    return out
+
+
+def clear_leak():
+    global __test_leak
+    del __test_leak
+    gc.collect()
+
+
+def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
+    t0 = time()
+    while True:
+        minfo = scheduler_or_workerstate.memory
+        nbytes = getattr(minfo, attr)
+        if min_ * 2 ** 20 <= nbytes <= max_ * 2 ** 20:
+            return
+        if time() - t0 > timeout:
+            raise TimeoutError(
+                f"Expected {min_} MiB <= {attr} <= {max_} MiB; got:\n{minfo!r}"
+            )
+        sleep(0.1)
+
+
+# This test is heavily influenced by hard-to-control factors such as memory management
+# by the Python interpreter and the OS, so it occasionally glitches
+@pytest.mark.flaky(reruns=3, reruns_delay=5)
+# ~33s runtime, or distributed.memory.recent_to_old_time + 3s
+@pytest.mark.slow
+def test_memory():
+    pytest.importorskip("zict")
+
+    with Client(n_workers=2, threads_per_worker=1, memory_limit=500 * 2 ** 20) as c:
+        c.wait_for_workers(2)
+        s = c.cluster.scheduler
+        a, b = s.workers.values()
+
+        s_m0 = s.memory
+        assert s_m0.process == a.memory.process + b.memory.process
+        assert s_m0.managed == 0
+        assert a.memory.managed == 0
+        assert b.memory.managed == 0
+        # When a worker first goes online, its RAM is immediately counted as
+        # unmanaged_old
+        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
+        assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
+        assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
+
+        f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
+        f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
+        assert_memory(s, "unmanaged_recent", 300, 380)
+        assert_memory(a, "unmanaged_recent", 150, 190)
+        assert_memory(b, "unmanaged_recent", 150, 190)
+        c.gather([f1, f2])
+
+        # On each worker, we now have 100 MiB managed + 50 MiB fresh leak
+        assert_memory(s, "managed_in_memory", 200, 201)
+        assert_memory(a, "managed_in_memory", 100, 101)
+        assert_memory(b, "managed_in_memory", 100, 101)
+        assert_memory(s, "unmanaged_recent", 100, 180)
+        assert_memory(a, "unmanaged_recent", 50, 90)
+        assert_memory(b, "unmanaged_recent", 50, 90)
+
+        # Force the output of f1 and f2 to spill to disk.
+        # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
+        # process memory per worker, or roughly after 3~7 rounds of the below depending
+        # on how much RAM the interpreter is using.
+        more_futs = []
+        for _ in range(8):
+            if s.memory.managed_spilled > 0:
+                break
+            more_futs += [
+                c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
+                c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
+            ]
+            sleep(2)
+        assert_memory(s, "managed_spilled", 1, 999)
+        # Wait for the spilling to finish. Note that this does not make the test take
+        # longer as we're waiting for recent_to_old_time anyway.
+        sleep(10)
+
+        # Delete spilled keys
+        prev = s.memory
+        del f1
+        del f2
+        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 19)
+
+        # Empty the cluster, with the exception of leaked memory
+        del more_futs
+        assert_memory(s, "managed", 0, 0)
+
+        orig_unmanaged = s_m0.unmanaged / 2 ** 20
+        orig_old = s_m0.unmanaged_old / 2 ** 20
+
+        # Wait until 30s have passed since the spill to observe unmanaged_recent
+        # transition into unmanaged_old
+        c.run(gc.collect)
+        assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
+        assert_memory(
+            s,
+            "unmanaged_old",
+            orig_old + 90,
+            # On MacOS, the process memory of the Python interpreter does not shrink as
+            # fast as on Linux/Windows
+            9999 if MACOS else orig_old + 190,
+            timeout=40,
+        )
+
+        # When the leaked memory is cleared, unmanaged and unmanaged_old drop
+        # On MacOS, the process memory of the Python interpreter does not shrink as fast
+        # as on Linux/Windows
+        if not MACOS:
+            c.run(clear_leak)
+            assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
+            assert_memory(s, "unmanaged_old", 0, orig_old + 95)
+            assert_memory(s, "unmanaged_recent", 0, 90)
+
+
+@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+async def test_memory_no_zict(c, s, a, b):
+    """When Worker.data is not a SpillBuffer, test that querying managed_spilled
+    defaults to 0 and doesn't raise KeyError
+    """
+    await c.wait_for_workers(2)
+    assert isinstance(a.data, dict)
+    assert isinstance(b.data, dict)
+    f = c.submit(leaking, 10, 0, 0)
+    await f
+    assert 10 * 2 ** 20 < s.memory.managed_in_memory < 11 * 2 ** 20
+    assert s.memory.managed_spilled == 0
+
+
+@gen_cluster(nthreads=[])
+async def test_memory_no_workers(s):
+    assert s.memory.process == 0
+    assert s.memory.managed == 0
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_memory_is_none(c, s):
+    """If Worker.heartbeat() runs before Worker.monitor.update(), then
+    Worker.metrics["memory"] will be None and will need special handling in
+    Worker.memory and Scheduler.heartbeat_worker().
+    """
+    with mock.patch("distributed.system_monitor.SystemMonitor.update"):
+        async with Worker(s.address, nthreads=1) as w:
+            await c.wait_for_workers(1)
+            f = await c.scatter(123)
+            await w.heartbeat()
+            assert s.memory.process == 0  # Forced from None
+            assert s.memory.managed == 0  # Capped by process even if we do have keys
+            assert s.memory.managed_in_memory == 0
+            assert s.memory.managed_spilled == 0
+            assert s.memory.unmanaged == 0
+            assert s.memory.unmanaged_old == 0
+            assert s.memory.unmanaged_recent == 0
