@@ -6050,7 +6050,11 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        report_msg: dict = _task_to_report_msg(parent, ts)
+        report_msg: dict
+        if ts is None:
+            report_msg = {"op": "cancelled-key", "key": key}
+        else:
+            report_msg = _task_to_report_msg(parent, ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
