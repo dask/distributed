@@ -7063,9 +7063,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
 @cfunc
 @exceptval(check=False)
 def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
-    if ts is None:
-        return {"op": "cancelled-key", "key": ts._key}
-    elif ts._state == "forgotten":
+    if ts._state == "forgotten":
         return {"op": "cancelled-key", "key": ts._key}
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
