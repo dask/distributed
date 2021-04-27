@@ -4067,7 +4067,44 @@ class Client:
         return responses
 
     def unregister_worker_plugin(self, name):
-        """Unregisters a lifecycle worker plugin"""
+        """Unregisters a lifecycle worker plugin
+
+        This unregister a worker plugin using its name attribute by calling
+        the plugin's teardown method. (See the ``dask.distributed.WorkerPlugin``
+        class or the examples below for the interface and docstrings.)
+
+        Parameters
+        ----------
+        name: str
+            Name of the plugin as it was registered.
+            See ``register_worker_plugin`` docstrings for more reference.
+            If there was not a name assigned when the plugin was added, it will
+            automatically assign ``name = funcname(plugin) + "-" + str(uuid.uuid4())``
+
+        Examples
+        --------
+        >>> class MyPlugin(WorkerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     def setup(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...         pass
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...         pass
+        ...     def release_dep(self, dep: str, state: str, report: bool):
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_worker_plugin(plugin, name='foo')
+        >>> client.unregister_worker_plugin(name='foo')
+
+        See Also
+        --------
+        register_worker_plugin
+        """
         return self.sync(self._unregister_worker_plugin, name=name)
 
 
