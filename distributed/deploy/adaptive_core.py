@@ -184,6 +184,7 @@ class AdaptiveCore:
         if self._adapting:  # Semaphore to avoid overlapping adapt calls
             return
         self._adapting = True
+        status = None
 
         try:
 

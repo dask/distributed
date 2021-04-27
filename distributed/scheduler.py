@@ -2707,10 +2707,9 @@ class SchedulerState:
 
             dts: TaskState
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                if ts in s:
-                    s.discard(ts)
-                    if not s and not dts._who_wants:
+                if ts in dts._waiters:
+                    dts._waiters.discard(ts)
+                    if not dts._waiters and not dts._who_wants:
                         recommendations[dts._key] = "released"
             ts._waiting_on.clear()
 
@@ -2760,9 +2759,8 @@ class SchedulerState:
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
                     if dts._state != "released":
-                        s: set = dts._waiters
-                        s.discard(ts)
-                        if not s and not dts._who_wants:
+                        dts._waiters.discard(ts)
+                        if not dts._waiters and not dts._who_wants:
                             recommendations[dts._key] = "released"
                 ts._waiters.clear()
 
@@ -2817,9 +2815,8 @@ class SchedulerState:
                 recommendations[dts._key] = "erred"
 
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                s.discard(ts)
-                if not s and not dts._who_wants:
+                dts._waiters.discard(ts)
+                if not dts._waiters and not dts._who_wants:
                     recommendations[dts._key] = "released"
 
             ts._waiters.clear()  # do anything with this?
@@ -6975,8 +6972,7 @@ def _propagate_forgotten(
 
     for dts in ts._dependencies:
         dts._dependents.remove(ts)
-        s: set = dts._waiters
-        s.discard(ts)
+        dts._waiters.discard(ts)
         if not dts._dependents and not dts._who_wants:
             # Task not needed anymore
             assert dts is not ts
@@ -7010,9 +7006,8 @@ def _client_releases_keys(
         ts = state._tasks.get(key)
         if ts is not None and ts in cs._wants_what:
             cs._wants_what.remove(ts)
-            s: set = ts._who_wants
-            s.remove(cs)
-            if not s:
+            ts._who_wants.remove(cs)
+            if not ts._who_wants:
                 if not ts._dependents:
                     # No live dependents, can forget
                     recommendations[ts._key] = "forgotten"
