@@ -68,7 +68,7 @@ async def test_remove_with_client(c, s):
     assert s.worker_plugins[0]["name"] == "bar"
 
     # check on the worker plugins that we only have 'bar'
-    assert "foo" not in worker.plugins
+    assert len(worker.plugins) == 1
     assert "bar" in worker.plugins
 
     # let's remove 'bar' and we should have none worker plugins
@@ -83,7 +83,7 @@ async def test_remove_with_client_raises(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
 
     worker = await Worker(s.address, loop=s.loop)
-    with pytest.raises(KeyError, match="bar"):
+    with pytest.raises(ValueError, match="bar"):
         await c.unregister_worker_plugin("bar")
 
 
