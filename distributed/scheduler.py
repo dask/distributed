@@ -422,7 +422,7 @@ class WorkerState:
 
     .. attribute:: has_what: {TaskState}
 
-       The set of tasks which currently reside on this worker.
+       An insertion-sorted set-like of tasks which currently reside on this worker.
        All the tasks here are in the "memory" state.
 
        This is the reverse mapping of :class:`TaskState.who_has`.
@@ -482,7 +482,7 @@ class WorkerState:
     _bandwidth: double
     _executing: dict
     _extra: dict
-    _has_what: set
+    _has_what: dict
     _hash: Py_hash_t
     _last_seen: double
     _local_directory: str
@@ -570,7 +570,7 @@ class WorkerState:
         )
 
         self._actors = set()
-        self._has_what = set()
+        self._has_what = {}
         self._processing = {}
         self._executing = {}
         self._resources = {}
@@ -611,8 +611,8 @@ class WorkerState:
         return self._extra
 
     @property
-    def has_what(self):
-        return self._has_what
+    def has_what(self) -> "Set[TaskState]":
+        return self._has_what.keys()
 
     @property
     def host(self):
@@ -2590,7 +2590,7 @@ class SchedulerState:
                 "report": False,
             }
             for ws in ts._who_has:
-                ws._has_what.remove(ts)
+                del ws._has_what[ts]
                 ws._nbytes -= ts_nbytes
                 ts._group._nbytes_in_memory -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
@@ -3046,7 +3046,7 @@ class SchedulerState:
         on the given worker.
         """
         dts: TaskState
-        deps: set = ts._dependencies - ws._has_what
+        deps: set = ts._dependencies.difference(ws._has_what)
         nbytes: Py_ssize_t = 0
         for dts in deps:
             nbytes += dts._nbytes
@@ -4468,7 +4468,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ws: WorkerState
                 cts_nbytes: Py_ssize_t = cts.get_nbytes()
                 for ws in cts._who_has:  # TODO: this behavior is extreme
-                    ws._has_what.remove(cts)
+                    del ws._has_what[ts]
                     ws._nbytes -= cts_nbytes
                 cts._who_has.clear()
                 recommendations[cause] = "released"
@@ -5054,7 +5054,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv.get(errant_worker)
         if ws is not None and ws in ts._who_has:
             ts._who_has.remove(ws)
-            ws._has_what.remove(ts)
+            del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
         if not ts._who_has:
             if ts._run_spec:
@@ -5066,12 +5066,12 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
         tasks: set = {parent._tasks[k] for k in keys}
-        removed_tasks: set = tasks & ws._has_what
-        ws._has_what -= removed_tasks
+        removed_tasks: set = tasks.intersection(ws._has_what)
 
         ts: TaskState
         recommendations: dict = {}
         for ts in removed_tasks:
+            del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
             wh: set = ts._who_has
             wh.remove(ws)
@@ -5312,7 +5312,7 @@ class Scheduler(SchedulerState, ServerNode):
                     for worker in workers:
                         ws = parent._workers_dv.get(worker)
                         if ws is not None and ts in ws._has_what:
-                            ws._has_what.remove(ts)
+                            del ws._has_what[ts]
                             ts._who_has.remove(ws)
                             ws._nbytes -= ts_nbytes
                             parent._transitions(
@@ -5478,8 +5478,8 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv[worker_address]
         ts: TaskState
         tasks: set = {parent._tasks[key] for key in keys}
-        ws._has_what -= tasks
         for ts in tasks:
+            del ws._has_what[ts]
             ts._who_has.remove(ws)
             ws._nbytes -= ts.get_nbytes()
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
@@ -5516,7 +5516,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # 30 seconds (distributed.worker.memory.recent_to_old_time).
                 # This lets us ignore temporary spikes caused by task heap usage.
                 memory_by_worker = [(ws, ws.memory.optimistic) for ws in workers]
-                mean_memory = sum(m for _, m in memory_by_worker) / len(
+                mean_memory = sum(m for _, m in memory_by_worker) // len(
                     memory_by_worker
                 )
 
@@ -5524,30 +5524,46 @@ class Scheduler(SchedulerState, ServerNode):
                 # need to send/receive data, with how many bytes each needs to
                 # send/receive. Bytes are negative, so that the workers farthest from
                 # the cluster mean are at the top of the heaps.
-                # Second element of each tuple is an arbitrary unique number, there just
-                # to to make sure that WorkerState objects are never used for sorting in
-                # the unlikely event that two processes have exactly the same number of
-                # bytes allocated.
-                senders: "list[tuple[int, int, WorkerState]]" = []
-                recipients: "list[tuple[int, int, WorkerState]]" = []
+                # Heap elements:
+                # - maximum number of bytes to send or receive
+                # - number of bytes after which the worker should not be considered
+                #   anymore
+                # - arbitrary unique number, there just to to make sure that WorkerState
+                #   objects are never used for sorting in the unlikely event that two
+                #   processes have exactly the same number of bytes allocated.
+                # - WorkerState
+                # - iterator of all tasks in memory on the worker (senders only)
+                senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = (
+                    []
+                )
+                recipients: "list[tuple[int, int, int, WorkerState]" = []
 
                 for ws, ws_memory in memory_by_worker:
                     if ws.memory_limit:
-                        half_gap = MEMORY_REBALANCE_HALF_GAP * ws.memory_limit
-                        if (
-                            ws_memory >= MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
-                            and ws_memory >= mean_memory + half_gap
-                        ):
-                            senders.append((mean_memory - ws_memory, id(ws), ws))
-                        elif (
-                            ws_memory < MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
-                            and ws_memory < mean_memory - half_gap
-                        ):
-                            recipients.append((ws_memory - mean_memory, id(ws), ws))
-                    elif ws_memory >= mean_memory:
-                        senders.append((mean_memory - ws_memory, id(ws), ws))
+                        half_gap = int(MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
+                        sender_min = MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
+                        receiver_max = MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
                     else:
-                        recipients.append((ws_memory - mean_memory, id(ws), ws))
+                        half_gap = 0
+                        sender_min = 0.0
+                        receiver_max = math.inf
+
+                    if (
+                        ws._has_what
+                        and ws_memory >= mean_memory + half_gap
+                        and ws_memory >= sender_min
+                    ):
+                        # This may send the worker below sender_min (by design)
+                        nbytes = mean_memory - ws_memory  # negative
+                        senders.append(
+                            (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
+                        )
+                    elif (
+                        ws_memory < mean_memory - half_gap and ws_memory < receiver_max
+                    ):
+                        # This may send the worker above receiver_max (by design)
+                        nbytes = ws_memory - mean_memory  # negative
+                        recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
 
                 # Fast exit in case no transfers are necessary or possible
                 if not senders or not recipients:
@@ -5568,6 +5584,60 @@ class Scheduler(SchedulerState, ServerNode):
                 if keys is not None and not isinstance(keys, Set):
                     keys = set(keys)  # unless already a set-like
 
+                # A task from a sender should be omitted from rebalance if:
+                # - it is not in memory (nbytes=-1)
+                # - there are no recipients that have (1) enough available RAM and
+                #   and (2) don't hold a copy already
+                # - TODO it is needed as the input of a running or queued task on the
+                #        same worker
+                # These tasks are pushed to the bottom of the insertion-sorted dict
+                # WorkerState._has_what.
+
+                while senders and recipients:
+                    snd_nbytes_max, snd_nbytes_min, _, snd_ws, ts_iter = senders[0]
+
+                    # Iterate through tasks in memory, least recently inserted first
+                    reinsert_sender = True
+                    for ts in ts_iter:
+                        if keys is not None and ts.key not in keys:
+                            continue
+                        if ts.nbytes + snd_nbytes_max > 0:
+                            # Moving this task would cause the sender to go below mean
+                            # and potentially risk becoming a receiver, which would
+                            # cause tasks to bounce around.
+                            continue
+                        # Find a receiver for this task
+                        # TODO TODO TODO
+                        rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
+
+                        snd_nbytes_max += ts.nbytes
+                        snd_nbytes_min += ts.nbytes
+                        rec_nbytes_max += ts.nbytes
+                        rec_nbytes_min += ts.nbytes
+
+                        break
+                    else:
+                        # worker has no more tasks to donate
+                        reinsert_sender = False
+
+                    if snd_nbytes_min >= 0:
+                        reinsert_sender = False
+
+                    # Move skipped tasks to the end of the insertion-sorted dict
+                    # ws._has_what
+                    if reinsert_sender:
+                        heapq.heapreplace(
+                            senders,
+                            (
+                                snd_nbytes_max,
+                                snd_nbytes_min,
+                                id(snd_ws),
+                                snd_ws,
+                                ts_iter,
+                            ),
+                        )
+                    else:
+                        heapq.heappop(senders)
                 # TODO TODO TODO
 
                 if keys:
@@ -5670,7 +5740,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for sender, recipient, ts in msgs:
                     assert ts._state == "memory"
                     ts._who_has.add(recipient)
-                    recipient.has_what.add(ts)
+                    recipient._has_what[ts] = None
                     recipient.nbytes += ts.get_nbytes()
                     self.log.append(
                         (
@@ -6017,7 +6087,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = set.union(*[w.has_what for w in workers])
+                keys = set.union(*[w._has_what for w in workers])
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
                 if keys:
@@ -6071,7 +6141,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is not None and ts._state == "memory":
                 if ts not in ws._has_what:
                     ws._nbytes += ts.get_nbytes()
-                    ws._has_what.add(ts)
+                    ws._has_what[ts] = None
                     ts._who_has.add(ws)
             else:
                 self.worker_send(
@@ -6116,7 +6186,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ws: WorkerState = parent._workers_dv[w]
                     if ts not in ws._has_what:
                         ws._nbytes += ts_nbytes
-                        ws._has_what.add(ts)
+                        ws._has_what[ts] = None
                         ts._who_has.add(ws)
                 self.report(
                     {"op": "key-in-memory", "key": key, "workers": list(workers)}
@@ -6232,7 +6302,7 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts._key for ts in parent._workers_dv[w].has_what]
+                w: [ts._key for ts in parent._workers_dv[w]._has_what]
                 if w in parent._workers_dv
                 else []
                 for w in workers
@@ -6991,7 +7061,7 @@ def _add_to_memory(
         assert ts not in ws._has_what
 
     ts._who_has.add(ws)
-    ws._has_what.add(ts)
+    ws._has_what[ts] = None
     ws._nbytes += ts.get_nbytes()
 
     deps: list = list(ts._dependents)
@@ -7075,7 +7145,7 @@ def _propagate_forgotten(
 
     ws: WorkerState
     for ws in ts._who_has:
-        ws._has_what.remove(ts)
+        del ws._has_what[ts]
         ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
