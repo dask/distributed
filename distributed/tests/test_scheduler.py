@@ -413,6 +413,7 @@ async def test_delete_data(c, s, a, b):
 async def test_delete(c, s, a):
     x = c.submit(inc, 1)
     await x
+    assert x.key in s.tasks
     assert x.key in a.data
 
     await c._cancel(x)
@@ -421,6 +422,10 @@ async def test_delete(c, s, a):
     while x.key in a.data:
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+    assert x.key not in s.tasks
+
+    s.report_on_key(key=x.key)
 
 
 @gen_cluster()
