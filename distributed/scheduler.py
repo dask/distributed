@@ -5584,15 +5584,12 @@ class Scheduler(SchedulerState, ServerNode):
                 if keys is not None and not isinstance(keys, Set):
                     keys = set(keys)  # unless already a set-like
 
+                msgs = []  # (sender, recipient, key)
+
                 # A task from a sender should be omitted from rebalance if:
                 # - it is not in memory (nbytes=-1)
                 # - there are no recipients that have (1) enough available RAM and
-                #   and (2) don't hold a copy already
-                # - TODO it is needed as the input of a running or queued task on the
-                #        same worker
-                # These tasks are pushed to the bottom of the insertion-sorted dict
-                # WorkerState._has_what.
-
+                #   (2) don't hold a copy already
                 while senders and recipients:
                     snd_nbytes_max, snd_nbytes_min, _, snd_ws, ts_iter = senders[0]
 
@@ -5607,8 +5604,14 @@ class Scheduler(SchedulerState, ServerNode):
                             # cause tasks to bounce around.
                             continue
                         # Find a receiver for this task
-                        # TODO TODO TODO
                         rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
+                        if ts.nbytes + rec_nbytes_max > 0:
+                            # There are no receivers with enough available RAM to accept
+                            # this task without going above mean
+                            continue
+
+                        # TODO skip receiver if it already holds the task
+                        msgs.append((snd_ws, rec_ws, ts.key))
 
                         snd_nbytes_max += ts.nbytes
                         snd_nbytes_min += ts.nbytes
