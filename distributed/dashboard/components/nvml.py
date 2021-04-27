@@ -3,6 +3,7 @@ import math
 from bokeh.models import (
     BasicTicker,
     ColumnDataSource,
+    HelpTool,
     HoverTool,
     NumeralTickFormatter,
     OpenURL,
@@ -101,18 +102,30 @@ class GPUCurrentLoad(DashboardComponent):
                 fig.add_tools(tap)
 
                 fig.toolbar.logo = None
-                fig.toolbar_location = None
+                fig.toolbar_location = "below"
                 fig.yaxis.visible = False
 
             hover = HoverTool()
             hover.tooltips = "@worker : @utilization %"
             hover.point_policy = "follow_mouse"
-            utilization.add_tools(hover)
+            utilization.add_tools(
+                hover,
+                HelpTool(
+                    description="TODO",
+                    redirect="https://distributed.dask.org/en/latest/",
+                ),
+            )
 
             hover = HoverTool()
             hover.tooltips = "@worker : @memory_text"
             hover.point_policy = "follow_mouse"
-            memory.add_tools(hover)
+            memory.add_tools(
+                hover,
+                HelpTool(
+                    description="TODO",
+                    redirect="https://distributed.dask.org/en/latest/",
+                ),
+            )
 
             self.memory_figure = memory
             self.utilization_figure = utilization

@@ -375,7 +375,7 @@ def plot_figure(data, **kwargs):
     --------
     plot_data
     """
-    from bokeh.models import HoverTool
+    from bokeh.models import HelpTool, HoverTool
     from bokeh.plotting import ColumnDataSource, figure
 
     if "states" in data:
@@ -427,7 +427,12 @@ def plot_figure(data, **kwargs):
             </div>
             """,
     )
-    fig.add_tools(hover)
+    fig.add_tools(
+        hover,
+        HelpTool(
+            description="TODO", redirect="https://distributed.dask.org/en/latest/"
+        ),
+    )
 
     fig.xaxis.visible = False
     fig.yaxis.visible = False

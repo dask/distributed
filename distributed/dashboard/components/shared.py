@@ -7,6 +7,7 @@ from bokeh.models import (
     Button,
     ColumnDataSource,
     DataRange1d,
+    HelpTool,
     HoverTool,
     NumeralTickFormatter,
     Range1d,
@@ -249,6 +250,11 @@ class ProfileTimePlot(DashboardComponent):
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
+        self.ts_plot.add_tools(
+            HelpTool(
+                description="TODO", redirect="https://distributed.dask.org/en/latest/"
+            )
+        )
 
         def ts_change(attr, old, new):
             with log_errors():
@@ -402,6 +408,11 @@ class ProfileServer(DashboardComponent):
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
+        self.ts_plot.add_tools(
+            HelpTool(
+                description="TODO", redirect="https://distributed.dask.org/en/latest/"
+            )
+        )
 
         def ts_change(attr, old, new):
             with log_errors():
@@ -455,7 +466,7 @@ class ProfileServer(DashboardComponent):
 
 
 class SystemMonitor(DashboardComponent):
-    def __init__(self, worker, height=150, **kwargs):
+    def __init__(self, worker, height=200, **kwargs):
         self.worker = worker
 
         names = worker.monitor.quantities
@@ -477,6 +488,13 @@ class SystemMonitor(DashboardComponent):
         )
         self.cpu.line(source=self.source, x="time", y="cpu")
         self.cpu.yaxis.axis_label = "Percentage"
+        self.cpu.add_tools(
+            HelpTool(
+                description="Time series of the total CPU utilization of the Dask scheduler",
+                redirect="https://distributed.dask.org/en/latest/",
+            )
+        )
+
         self.mem = figure(
             title="Memory",
             x_axis_type="datetime",
@@ -487,6 +505,13 @@ class SystemMonitor(DashboardComponent):
         )
         self.mem.line(source=self.source, x="time", y="memory")
         self.mem.yaxis.axis_label = "Bytes"
+        self.mem.add_tools(
+            HelpTool(
+                description="Time series of the memory utilization of the Dask scheduler",
+                redirect="https://distributed.dask.org/en/latest/",
+            )
+        )
+
         self.bandwidth = figure(
             title="Bandwidth",
             x_axis_type="datetime",
@@ -498,6 +523,13 @@ class SystemMonitor(DashboardComponent):
         self.bandwidth.line(source=self.source, x="time", y="read_bytes", color="red")
         self.bandwidth.line(source=self.source, x="time", y="write_bytes", color="blue")
         self.bandwidth.yaxis.axis_label = "Bytes / second"
+        self.bandwidth.add_tools(
+            HelpTool(
+                description="Time series of the read/write bandwidth of the Dask scheduler; the red line represents "
+                "read bandwidth and the blue line represents write bandwidth",
+                redirect="https://distributed.dask.org/en/latest/",
+            )
+        )
 
         # self.cpu.yaxis[0].formatter = NumeralTickFormatter(format='0%')
         self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
@@ -516,6 +548,12 @@ class SystemMonitor(DashboardComponent):
             )
 
             self.num_fds.line(source=self.source, x="time", y="num_fds")
+            self.num_fds.add_tools(
+                HelpTool(
+                    description="Time series of the number of file descriptors used by the Dask scheduler",
+                    redirect="https://distributed.dask.org/en/latest/",
+                )
+            )
             plots.append(self.num_fds)
 
         if "sizing_mode" in kwargs:

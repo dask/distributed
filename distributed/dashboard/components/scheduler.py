@@ -17,6 +17,7 @@ from bokeh.models import (
     ColumnDataSource,
     DataRange1d,
     GroupFilter,
+    HelpTool,
     HoverTool,
     NumberFormatter,
     NumeralTickFormatter,
@@ -132,7 +133,14 @@ class Occupancy(DashboardComponent):
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
             hover.point_policy = "follow_mouse"
-            self.root.add_tools(hover, tap)
+            self.root.add_tools(
+                hover,
+                tap,
+                HelpTool(
+                    description="TODO",
+                    redirect="https://distributed.dask.org/en/latest/",
+                ),
+            )
 
     @without_property_validation
     def update(self):
@@ -1164,7 +1172,14 @@ class StealingTimeSeries(DashboardComponent):
         self.root.yaxis.minor_tick_line_color = None
 
         self.root.add_tools(
-            ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
+            ResetTool(),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width"),
+            HelpTool(
+                description="Time series of the number of idle/saturated workers; the red line represents number of "
+                "idle workers and the green line represents number of saturated workers",
+                redirect="https://distributed.dask.org/en/latest/",
+            ),
         )
 
     @without_property_validation
@@ -1231,6 +1246,9 @@ class StealingEvents(DashboardComponent):
             ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
+            HelpTool(
+                description="TODO", redirect="https://distributed.dask.org/en/latest/"
+            ),
         )
 
     def convert(self, msgs):
@@ -1327,6 +1345,9 @@ class Events(DashboardComponent):
             ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width"),
+            HelpTool(
+                description="TODO", redirect="https://distributed.dask.org/en/latest/"
+            ),
         )
 
     @without_property_validation
@@ -1529,6 +1550,9 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         ResetTool(),
         PanTool(dimensions="width"),
         WheelZoomTool(dimensions="width"),
+        HelpTool(
+            description="TODO", redirect="https://distributed.dask.org/en/latest/"
+        ),
     )
     if ExportTool:
         export = ExportTool()
@@ -1571,7 +1595,9 @@ class TaskGraph(DashboardComponent):
             palette=["gray", "green", "red", "blue", "black"],
         )
 
-        self.root = figure(title="Task Graph", **kwargs)
+        self.root = figure(
+            title="Task Graph", tools="box_zoom,xwheel_zoom,reset", **kwargs
+        )
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
@@ -1603,7 +1629,13 @@ class TaskGraph(DashboardComponent):
         )
         tap = TapTool(callback=OpenURL(url="info/task/@key.html"), renderers=[rect])
         rect.nonselection_glyph = None
-        self.root.add_tools(hover, tap)
+        self.root.add_tools(
+            hover,
+            tap,
+            HelpTool(
+                description="TODO", redirect="https://distributed.dask.org/en/latest/"
+            ),
+        )
         self.max_items = config.get("distributed.dashboard.graph-max-items", 5000)
 
     @without_property_validation
