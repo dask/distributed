@@ -3451,7 +3451,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         self.event_counts = defaultdict(int)
-        self.worker_plugins = []
+        self.worker_plugins = []  # dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -6299,6 +6299,9 @@ class Scheduler(SchedulerState, ServerNode):
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append({"plugin": plugin, "name": name})
+        #####HOW DO WE SWITCH FOR DICT (this is not working,
+        # throwing error in worker.py line 926)
+        # self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
@@ -6308,11 +6311,19 @@ class Scheduler(SchedulerState, ServerNode):
     async def unregister_worker_plugin(self, comm, name):
         """ Unregisters a worker plugin"""
 
+        # try:
+        #    worker_plugins =  self.worker_plugins.pop(name)
+        # except:
+        #   raise ValueError(f"The worker plugin {name} does not exists")
+
+        #   do we do a raise or we use the error messege(e), or this will be handfle at
+        # the worker level.
+
         for idx, entry in enumerate(self.worker_plugins):
             if entry["name"] == name:
                 break
         else:
-            raise KeyError(f"The worker plugin {name} does not exists")
+            raise ValueError(f"The worker plugin {name} does not exist")
 
         del self.worker_plugins[idx]
 
