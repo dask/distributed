@@ -4061,7 +4061,6 @@ class Client:
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
-                typ = type(exc)
                 tb = response["traceback"]
                 raise exc.with_traceback(tb)
         return responses
