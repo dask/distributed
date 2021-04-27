@@ -129,6 +129,10 @@ class DelayedExceptionRaise:
 def loads(frames, deserialize=True, deserializers=None):
     """ Transform bytestream back into Python value """
 
+    if deserializers is None:
+        # TODO: get from configuration both here and in protocol.serialize()
+        deserializers = ("dask", "pickle")
+
     try:
 
         def _decode_default(obj):
@@ -145,6 +149,11 @@ def loads(frames, deserialize=True, deserializers=None):
                 if "callable" in sub_header:
                     if deserialize:
                         try:
+                            if "pickle" not in deserializers:
+                                raise TypeError(
+                                    f"Cannot deserialize {sub_header['callable']}, "
+                                    "pickle isn't in deserializers"
+                                )
                             return loads_function(sub_header["callable"])
                         except Exception as e:
                             if deserialize == "delay-exception":
