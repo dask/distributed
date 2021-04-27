@@ -4715,17 +4715,22 @@ async def test_robust_unserializable(c, s, a, b):
             raise MyException()
 
     # Notice, because serialization is delayed until `distributed.batched`
-    # we get a `CancelledError` exception.
-    # Before <https://github.com/dask/distributed/pull/4699> the serialization
-    # happed immediately in `submit()`, which would raise the `MyException`.
-    with pytest.raises(CancelledError):
+    # we don't get an exception immediately. The exception is raised and logged
+    # when the ongoing communication between the client the scheduler encounters
+    # the `Foo` class. Before <https://github.com/dask/distributed/pull/4699>
+    # the serialization happed immediately in `submit()`, which would raise the
+    # `MyException`.
+    with captured_logger("distributed") as caplog:
         future = c.submit(identity, Foo())
+        await asyncio.sleep(c.scheduler_comm.interval)
+    # Check that the serialization error was logged
+    assert "Failed to serialize" in caplog.getvalue()
 
-        futures = c.map(inc, range(10))
-        results = await c.gather(futures)
+    futures = c.map(inc, range(10))
+    results = await c.gather(futures)
 
-        assert results == list(map(inc, range(10)))
-        assert a.data and b.data
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
 
 
 @gen_cluster(client=True)
