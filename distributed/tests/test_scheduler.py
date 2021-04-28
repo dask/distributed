@@ -3,9 +3,11 @@ import gc
 import json
 import logging
 import operator
+import os
 import re
 import sys
 from collections import defaultdict
+from distutils.util import strtobool
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -62,10 +64,22 @@ bob = "bob:1234"
 occupancy = defaultdict(lambda: 0)
 
 
-def test_is_cythonized():
+@pytest.mark.skipif(
+    "CYTHONIZED" not in os.environ, reason="CYTHONIZED environment variable not set"
+)
+def test_cythonized():
+    # This checks whether or not CI builds (where we set the CYTHONIZED environment variable) are
+    # cythonized as expected
     import distributed.scheduler
 
-    assert distributed.scheduler.__file__.endswith(".so"), distributed.scheduler
+    if strtobool(os.environ["CYTHONIZED"]):
+        expected_suffix = ".pyd" if WINDOWS else ".so"
+    else:
+        expected_suffix = ".py"
+
+    assert distributed.scheduler.__file__.endswith(
+        expected_suffix
+    ), distributed.scheduler
 
 
 @gen_cluster()
