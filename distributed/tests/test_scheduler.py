@@ -70,8 +70,6 @@ occupancy = defaultdict(lambda: 0)
 def test_cythonized():
     # This checks whether or not CI builds (where we set the CYTHONIZED environment variable) are
     # cythonized as expected
-    import distributed.scheduler
-
     assert strtobool(os.environ["CYTHONIZED"]) == COMPILED
 
 

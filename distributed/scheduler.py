@@ -185,9 +185,7 @@ ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 )
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
-COMPILED = declare(
-    bint, compiled
-)
+COMPILED = declare(bint, compiled)
 globals()["COMPILED"] = COMPILED
 
 
