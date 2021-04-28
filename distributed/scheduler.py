@@ -300,12 +300,12 @@ class MemoryState:
         temporary spike
     """
 
-    __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
+    __slots__ = ("_process", "_managed_in_memory", "_managed_spilled", "_unmanaged_old")
 
-    process: Py_ssize_t
-    managed_in_memory: Py_ssize_t
-    managed_spilled: Py_ssize_t
-    unmanaged_old: Py_ssize_t
+    _process: Py_ssize_t
+    _managed_in_memory: Py_ssize_t
+    _managed_spilled: Py_ssize_t
+    _unmanaged_old: Py_ssize_t
 
     def __init__(
         self,
@@ -319,11 +319,27 @@ class MemoryState:
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
-        self.process = process
-        self.managed_spilled = min(managed_spilled, managed)
+        self._process = process
+        self._managed_spilled = min(managed_spilled, managed)
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.managed_in_memory = min(managed - self.managed_spilled, process)
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self._managed_in_memory = min(managed - self._managed_spilled, process)
+        self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
+
+    @property
+    def process(self) -> Py_ssize_t:
+        return self._process
+
+    @property
+    def managed_in_memory(self) -> Py_ssize_t:
+        return self._managed_in_memory
+
+    @property
+    def managed_spilled(self) -> Py_ssize_t:
+        return self._managed_spilled
+
+    @property
+    def unmanaged_old(self) -> Py_ssize_t:
+        return self._unmanaged_old
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
@@ -337,7 +353,7 @@ class MemoryState:
     @inline
     @nogil
     def managed(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.managed_spilled
+        return self._managed_in_memory + self._managed_spilled
 
     @property
     @ccall
@@ -345,7 +361,7 @@ class MemoryState:
     @nogil
     def unmanaged(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self._process - self._managed_in_memory
 
     @property
     @ccall
@@ -353,23 +369,23 @@ class MemoryState:
     @nogil
     def unmanaged_recent(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self._process - self._managed_in_memory - self._unmanaged_old
 
     @property
     @ccall
     @inline
     @nogil
     def optimistic(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.unmanaged_old
+        return self._managed_in_memory + self._unmanaged_old
 
     def __repr__(self) -> str:
         return (
             f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self.managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self.managed_spilled)}\n"
-            f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
-            f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
+            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self._process)}\n"
+            f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
         )
 
