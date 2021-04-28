@@ -151,8 +151,6 @@ if sys.version_info < (3, 8):
         import pickle
 else:
     import pickle
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -1832,6 +1830,10 @@ class SchedulerState:
         else:
             self._workers = sortedcontainers.SortedDict()
         self._workers_dv: dict = cast(dict, self._workers)
+
+        self.transition_log = deque(
+            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
+        )
         super().__init__(**kwargs)
 
     @property
@@ -1974,6 +1976,15 @@ class SchedulerState:
     #####################
     # State Transitions #
     #####################
+
+    def story(self, *keys):
+        """ Get all transitions that touch one of the input keys """
+        keys = {key.key if isinstance(key, TaskState) else key for key in keys}
+        return [
+            t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
+        ]
+
+    transition_story = story
 
     def _transition(self, key, finish: str, *args, **kwargs):
         """Transition a key from its current state to the finish state
@@ -2583,8 +2594,11 @@ class SchedulerState:
             worker_msg = {
                 "op": "delete-data",
                 "keys": [key],
-                "report": False,
+                "reason": "Transition released",
             }
+            print(self.story(key))
+            print(ts.dependents)
+            print(ts.dependencies)
             for ws in ts._who_has:
                 ws._has_what.remove(ts)
                 ws._nbytes -= ts_nbytes
@@ -2757,7 +2771,7 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = [{"op": "release-task", "key": key}]
+                worker_msgs[w] = [{"op": "forget-data", "keys": [key]}]
 
             ts.state = "released"
 
@@ -3446,9 +3460,6 @@ class Scheduler(SchedulerState, ServerNode):
         ]
 
         self.plugins = list(plugins)
-        self.transition_log = deque(
-            maxlen=dask.config.get("distributed.scheduler.transition-log-length")
-        )
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -4402,7 +4413,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                worker_msgs[worker] = [{"op": "release-task", "key": key}]
+                worker_msgs[worker] = [{"op": "delete-data", "key": key}]
 
         return recommendations, client_msgs, worker_msgs
 
@@ -5466,7 +5477,9 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
         await retry_operation(
-            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+            self.rpc(addr=worker_address).delete_data,
+            keys=list(keys),
+            reason="No idea, let's find out",
         )
 
         ws: WorkerState = parent._workers_dv[worker_address]
@@ -5996,9 +6009,19 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._nbytes += ts.get_nbytes()
                     ws._has_what.add(ts)
                     ts._who_has.add(ws)
-            else:
+            elif ts is None:
+                raise RuntimeError("Received data although task {key} is not known")
                 self.worker_send(
-                    worker, {"op": "delete-data", "keys": [key], "report": False}
+                    worker,
+                    {
+                        "op": "delete-data",
+                        "keys": [key],
+                        "reason": f"Unknown task or unknown state {ts.state if ts else None}",
+                    },
+                )
+            else:
+                raise RuntimeError(
+                    "Received data although task was not in state memory {ts}"
                 )
 
         return "OK"
@@ -6362,15 +6385,6 @@ class Scheduler(SchedulerState, ServerNode):
         worker_msgs: dict = {}
         parent._transitions(recommendations, client_msgs, worker_msgs)
         self.send_all(client_msgs, worker_msgs)
-
-    def story(self, *keys):
-        """ Get all transitions that touch one of the input keys """
-        keys = {key.key if isinstance(key, TaskState) else key for key in keys}
-        return [
-            t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
-        ]
-
-    transition_story = story
 
     def reschedule(self, key=None, worker=None):
         """Reschedule a task
@@ -7015,7 +7029,7 @@ def _propagate_forgotten(
         ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = [{"op": "delete-data", "keys": [key], "report": False}]
+            worker_msgs[w] = [{"op": "forget-data", "keys": [key]}]
     ts._who_has.clear()
 
 

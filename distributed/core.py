@@ -67,6 +67,8 @@ class RPCClosed(IOError):
     pass
 
 
+import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -423,14 +425,14 @@ class Server:
         address = comm.peer_address
         op = None
 
-        logger.debug("Connection from %r to %s", address, type(self).__name__)
+        # logger.debug("Connection from %r to %s" % (address, type(self).__name__))
         self._comms[comm] = op
         await self
         try:
             while True:
                 try:
                     msg = await comm.read()
-                    logger.debug("Message from %r: %s", address, msg)
+                    logger.debug("Message from %r: %s" % (address, msg))
                 except EnvironmentError as e:
                     if not sys.is_finalizing():
                         logger.debug(
@@ -442,7 +444,7 @@ class Server:
                         )
                     break
                 except Exception as e:
-                    logger.exception("Exception while reading from %s", address)
+                    logger.exception("Exception while reading from %s" % address)
                     if comm.closed():
                         raise
                     else:
@@ -483,16 +485,16 @@ class Server:
                         handler = self.handlers[op]
                 except KeyError:
                     logger.warning(
-                        "No handler %s found in %s",
-                        op,
-                        type(self).__name__,
-                        exc_info=True,
+                        "No handler %s found in %s"
+                        % (
+                            op,
+                            type(self).__name__,
+                        )
                     )
                 else:
                     if serializers is not None and has_keyword(handler, "serializers"):
                         msg["serializers"] = serializers  # add back in
 
-                    logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
                         if inspect.isawaitable(result):
@@ -501,10 +503,10 @@ class Server:
                             result = await result
                     except (CommClosedError, CancelledError) as e:
                         if self.status == Status.running:
-                            logger.info("Lost connection to %r: %s", address, e)
+                            logger.info("Lost connection to %r: %s" % (address, e))
                         break
                     except Exception as e:
-                        logger.exception("Exception while handling op %s", op)
+                        logger.exception("Exception while handling op %s" % op)
                         if comm.closed():
                             raise
                         else:
@@ -560,6 +562,10 @@ class Server:
                     for msg in msgs:
                         if msg == "OK":  # from close
                             break
+                        if isinstance(msg, tuple):
+                            raise RuntimeError(
+                                f"Received a tuple instead of dict {msg}"
+                            )
                         op = msg.pop("op")
                         if op:
                             if op == "close-stream":
@@ -572,7 +578,7 @@ class Server:
                             else:
                                 handler(**merge(extra, msg))
                         else:
-                            logger.error("odd message %s", msg)
+                            logger.error("odd message %s" % msg)
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
@@ -1064,7 +1070,7 @@ class ConnectionPool:
         """
         Remove all Comms to a given address.
         """
-        logger.info("Removing comms to %s", addr)
+        logger.info("Removing comms to %s" % addr)
         if addr in self.available:
             comms = self.available.pop(addr)
             for comm in comms:

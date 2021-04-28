@@ -1,4 +1,5 @@
 import logging
+import uuid
 from collections import defaultdict, deque
 from math import log2
 from time import time
@@ -163,7 +164,11 @@ class WorkStealing(SchedulerPlugin):
             ) + self.scheduler.get_comm_cost(ts, thief)
 
             self.scheduler.stream_comms[victim.address].send(
-                {"op": "steal-request", "key": key}
+                {
+                    "op": "steal-request",
+                    "key": key,
+                    "transaction_id": f"steal-{uuid.uuid4().hex}",
+                }
             )
 
             self.in_flight[ts] = {
@@ -185,12 +190,18 @@ class WorkStealing(SchedulerPlugin):
                 pdb.set_trace()
             raise
 
-    async def move_task_confirm(self, key=None, worker=None, state=None):
+    async def move_task_confirm(
+        self, key=None, worker=None, state=None, transaction_id=None
+    ):
         try:
             try:
                 ts = self.scheduler.tasks[key]
             except KeyError:
-                logger.debug("Key released between request and confirm: %s", key)
+                logger.debug(
+                    "%s - Key released between request and confirm: %s",
+                    transaction_id,
+                    key,
+                )
                 return
             try:
                 d = self.in_flight.pop(ts)
@@ -199,7 +210,12 @@ class WorkStealing(SchedulerPlugin):
             thief = d["thief"]
             victim = d["victim"]
             logger.debug(
-                "Confirm move %s, %s -> %s.  State: %s", key, victim, thief, state
+                "%s - Confirm move %s, %s -> %s.  State: %s",
+                transaction_id,
+                key,
+                victim,
+                thief,
+                state,
             )
 
             self.in_flight_occupancy[thief] -= d["thief_duration"]
@@ -230,7 +246,15 @@ class WorkStealing(SchedulerPlugin):
 
             # Victim had already started execution, reverse stealing
             if state in ("memory", "executing", "long-running", None):
-                self.log(("already-computing", key, victim.address, thief.address))
+                self.log(
+                    (
+                        "already-computing",
+                        key,
+                        victim.address,
+                        thief.address,
+                        transaction_id,
+                    )
+                )
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
 
@@ -253,7 +277,9 @@ class WorkStealing(SchedulerPlugin):
                     self.scheduler.send_task_to_worker(thief.address, ts)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
-                self.log(("confirm", key, victim.address, thief.address))
+                self.log(
+                    ("confirm", key, victim.address, thief.address, transaction_id)
+                )
             else:
                 raise ValueError("Unexpected task state: %s" % state)
         except Exception as e:
