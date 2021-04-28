@@ -28,7 +28,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.scheduler import MemoryState, Scheduler
+from distributed.scheduler import COMPILED, MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
@@ -72,14 +72,7 @@ def test_cythonized():
     # cythonized as expected
     import distributed.scheduler
 
-    if strtobool(os.environ["CYTHONIZED"]):
-        expected_suffix = ".pyd" if WINDOWS else ".so"
-    else:
-        expected_suffix = ".py"
-
-    assert distributed.scheduler.__file__.endswith(
-        expected_suffix
-    ), distributed.scheduler
+    assert strtobool(os.environ["CYTHONIZED"]) == COMPILED
 
 
 @gen_cluster()
