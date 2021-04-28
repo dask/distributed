@@ -58,11 +58,6 @@ async def test_remove_with_client(c, s):
     await c.register_worker_plugin(MyPlugin(123), name="foo")
     await c.register_worker_plugin(MyPlugin(546), name="bar")
 
-    from pprint import pprint
-
-    print("#### worker_plugins ####")
-    pprint(s.worker_plugins)
-
     worker = await Worker(s.address, loop=s.loop)
     # remove the 'foo' plugin
     await c.unregister_worker_plugin("foo")
