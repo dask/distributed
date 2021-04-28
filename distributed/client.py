@@ -51,7 +51,7 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -4052,6 +4052,11 @@ class Client:
         """
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
+
+        if name is None:
+            name = _get_worker_plugin_name(plugin)
+
+        assert name
 
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 

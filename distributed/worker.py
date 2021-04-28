@@ -7,7 +7,6 @@ import os
 import random
 import sys
 import threading
-import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
@@ -41,6 +40,7 @@ from .core import (
     pingpong,
     send_recv,
 )
+from .diagnostics.plugin import _get_worker_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
@@ -2550,11 +2550,9 @@ class Worker(ServerNode):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
-            if not name:
-                if hasattr(plugin, "name"):
-                    name = plugin.name
-                else:
-                    name = funcname(plugin) + "-" + str(uuid.uuid4())
+
+            if name is None:
+                name = _get_worker_plugin_name(plugin)
 
             assert name
 
