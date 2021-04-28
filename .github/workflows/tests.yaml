@@ -48,14 +48,15 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.9' }}
         run: mamba uninstall ipython
 
-      - name: Cythonize
-        shell: bash -l {0}
-        if: ${{ matrix.python-version == '3.7' }}
-        run: python setup.py build_ext --with-cython
-
       - name: Install
         shell: bash -l {0}
-        run: python -m pip install --no-deps -e .
+        run: |
+          # Cythonize scheduler on Python 3.7 builds
+          if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
+              python -m pip install -vv --no-deps --install-option="--with-cython" -e .
+          else
+              python -m pip install --no-deps -e .
+          fi
 
       - name: mamba list
         shell: bash -l {0}
