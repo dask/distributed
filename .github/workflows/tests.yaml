@@ -81,7 +81,6 @@ jobs:
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
-          CYTHONIZED: ${{ matrix.python-version == '3.7' }}
         run: |
           if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
               # FIXME ipv6-related failures on Ubuntu github actions CI
