@@ -327,7 +327,7 @@ class MemoryState:
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = object.__new__(cls)
+        out = MemoryState.__new__(MemoryState)
         for k in cls.__slots__:
             setattr(out, k, sum(getattr(i, k) for i in infos))
         return out
