@@ -188,13 +188,14 @@ class WorkerPlugin:
             Whether the worker should report the released dependency to the scheduler.
         """
 
-    def _get_worker_plugin_name(plugin) -> str:
-        """Returns the worker plugin name. If plugin has no name
-        it assigns a random name using funcname and uuid"""
-        if hasattr(plugin, "name"):
-            return plugin.name
-        else:
-            return funcname(plugin) + "-" + str(uuid.uuid4())
+
+def _get_worker_plugin_name(plugin) -> str:
+    """Returns the worker plugin name. If plugin has no name
+    it assigns a random name using funcname and uuid"""
+    if hasattr(plugin, "name"):
+        return plugin.name
+    else:
+        return funcname(plugin) + "-" + str(uuid.uuid4())
 
 
 class PipInstall(WorkerPlugin):
