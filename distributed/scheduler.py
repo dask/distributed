@@ -343,9 +343,13 @@ class MemoryState:
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = MemoryState.__new__(MemoryState)
-        for k in cls.__slots__:
-            setattr(out, k, sum(getattr(i, k) for i in infos))
+        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        ms: MemoryState
+        for ms in infos:
+            out._process += ms._process
+            out._managed_spilled += ms._managed_spilled
+            out._managed_in_memory += ms._managed_in_memory
+            out._unmanaged_old += ms._unmanaged_old
         return out
 
     @property
