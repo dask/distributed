@@ -3,11 +3,9 @@ import gc
 import json
 import logging
 import operator
-import os
 import re
 import sys
 from collections import defaultdict
-from distutils.util import strtobool
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -28,7 +26,7 @@ from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.scheduler import COMPILED, MemoryState, Scheduler
+from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
@@ -62,15 +60,6 @@ alice = "alice:1234"
 bob = "bob:1234"
 
 occupancy = defaultdict(lambda: 0)
-
-
-@pytest.mark.skipif(
-    "CYTHONIZED" not in os.environ, reason="CYTHONIZED environment variable not set"
-)
-def test_cythonized():
-    # This checks whether or not CI builds (where we set the CYTHONIZED environment variable) are
-    # cythonized as expected
-    assert strtobool(os.environ["CYTHONIZED"]) == COMPILED
 
 
 @gen_cluster()
