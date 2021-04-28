@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 
@@ -272,11 +271,12 @@ async def test_pickle_safe(c, s, a, b):
         assert result == [1, 2, 3]
 
         with pytest.raises(TypeError):
-            # SimpleNamespace() is not serializable
-            await c2.publish_dataset(y=SimpleNamespace())
+            await c2.publish_dataset(y=lambda x: x)
 
         await c.publish_dataset(z=lambda x: x)  # this can use pickle
-        await c2.get_dataset("z")
+
+        with pytest.raises(TypeError):
+            await c2.get_dataset("z")
 
 
 @gen_cluster(client=True)
