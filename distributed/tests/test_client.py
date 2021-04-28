@@ -5298,6 +5298,15 @@ async def test_cleaned_filenames_in_profile(c, s, a, b):
     # #print('sys.platlibdir:', sys.platlibdir) #starts working on py3.9
 
 
+@gen_cluster(client=True)
+async def test_cleaned_filenames_in_profile_raises(c, s, a, b):
+    # no work done by the client, should give empty profile
+    profile = await c.profile()
+
+    with pytest.raises(AssertionError):
+        assert profile["children"] != {}
+
+
 @gen_cluster()
 async def test_client_with_name(s, a, b):
     with captured_logger("distributed.scheduler") as sio:
