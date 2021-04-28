@@ -66,7 +66,7 @@ def info_frame(frame):
     co = frame.f_code
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
     return {
-        "filename": co.co_filename,
+        "filename": co.co_filename.replace(sys.exec_prefix, ""),
         "name": co.co_name,
         "line_number": frame.f_lineno,
         "line": line,
