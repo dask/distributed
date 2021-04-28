@@ -65,6 +65,11 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
     encounters an object it cannot serialize like a NumPy array, it is handled
     out-of-band by `_encode_default()` and appended to the output frame list.
     """
+
+    if serializers is None:
+        # TODO: get from configuration both here and in protocol.serialize()
+        serializers = ("dask", "pickle")
+
     try:
         if context and "compression" in context:
             compress_opts = {"compression": context["compression"]}
@@ -98,6 +103,10 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
             if typ in (Serialized, SerializedCallable):
                 sub_header, sub_frames = obj.header, obj.frames
             elif callable(obj):
+                if "pickle" not in serializers:
+                    raise TypeError(
+                        f"Cannot serialize {repr(obj)} since pickle isn't in serializers"
+                    )
                 sub_header, sub_frames = {"callable": dumps_function(obj)}, []
             else:
                 sub_header, sub_frames = serialize_and_split(
@@ -151,8 +160,8 @@ def loads(frames, deserialize=True, deserializers=None):
                         try:
                             if "pickle" not in deserializers:
                                 raise TypeError(
-                                    f"Cannot deserialize {sub_header['callable']}, "
-                                    "pickle isn't in deserializers"
+                                    f"Cannot deserialize {sub_header['callable']}, since "
+                                    f"pickle isn't in deserializers"
                                 )
                             return loads_function(sub_header["callable"])
                         except Exception as e:

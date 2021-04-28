@@ -5574,9 +5574,9 @@ def test_turn_off_pickle(direct):
             assert result == 1
 
             # But not with complex return values
-            with pytest.raises(TypeError):
+            with pytest.raises(CommClosedError):
                 await c.run(lambda: inc)
-            with pytest.raises(TypeError):
+            with pytest.raises(CommClosedError):
                 await c.run_on_scheduler(lambda: inc)
 
     test()
