@@ -62,6 +62,12 @@ bob = "bob:1234"
 occupancy = defaultdict(lambda: 0)
 
 
+def test_is_cythonized():
+    import distributed.scheduler
+
+    assert distributed.scheduler.__file__.endswith(".so"), distributed.scheduler
+
+
 @gen_cluster()
 async def test_administration(s, a, b):
     assert isinstance(s.address, str)

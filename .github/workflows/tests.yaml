@@ -86,7 +86,7 @@ jobs:
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "not avoid_ci" --runslow
+          pytest distributed/tests/test_scheduler.py::test_is_cythonized
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
