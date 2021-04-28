@@ -922,8 +922,10 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(**plugin_kwargs)
-                    for plugin_kwargs in response["worker-plugins"]
+                    # self.plugin_add(**plugin_kwargs)
+                    # for plugin_kwargs in response["worker-plugins"]
+                    self.plugin_add(name=name, plugin=plugin)
+                    for name, plugin in response["worker-plugins"].items()
                 ]
             )
 
