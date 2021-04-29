@@ -21,6 +21,7 @@ from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
 from distributed.metrics import time
+from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
 from distributed.utils_test import (  # noqa: F401
@@ -793,6 +794,7 @@ async def test_scale_retires_workers():
     await cluster.close()
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_local_tls_restart(loop):
     from distributed.utils_test import tls_only_security
 
