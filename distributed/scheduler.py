@@ -5498,7 +5498,10 @@ class Scheduler(SchedulerState, ServerNode):
         keys: "Iterable[Hashable]" = None,
         workers: "Iterable[str]" = None,
     ) -> dict:
-        """Rebalance keys so that each worker stores roughly equal bytes
+        """Rebalance keys so that each worker ends up with roughly the same process
+        memory (managed+unmanaged).
+
+        FIXME this method is not robust when the cluster is not idle.
 
         **Algorithm**
 
@@ -5740,7 +5743,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Perform the actual transfer of data across the network in rebalance().
         Takes in input the output of _rebalance_find_msgs().
 
-        FIXME this method is not robust when the cluster is not idle
+        FIXME this method is not robust when the cluster is not idle.
         """
         ts: TaskState
         ws: WorkerState
