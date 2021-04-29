@@ -1764,18 +1764,18 @@ async def test_taskstate_metadata(cleanup):
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
-                # await c.register_worker_plugin(TaskStateMetadataPlugin())
+                await c.register_worker_plugin(TaskStateMetadataPlugin())
 
                 f = c.submit(inc, 1)
                 await f
 
-                # ts = w.tasks[f.key]
-                # assert "start_time" in ts.metadata
-                # assert "stop_time" in ts.metadata
-                # assert ts.metadata["stop_time"] > ts.metadata["start_time"]
+                ts = w.tasks[f.key]
+                assert "start_time" in ts.metadata
+                assert "stop_time" in ts.metadata
+                assert ts.metadata["stop_time"] > ts.metadata["start_time"]
 
-                # # Check that Scheduler TaskState.metadata was also updated
-                # assert s.tasks[f.key].metadata == ts.metadata
+                # Check that Scheduler TaskState.metadata was also updated
+                assert s.tasks[f.key].metadata == ts.metadata
 
 
 @pytest.mark.asyncio
@@ -1875,7 +1875,7 @@ def test_weight_deprecated():
 
 
 def test_assert_state_definition():
-    pytest.xfail("foo")
+    pytest.xfail("not done, yet")
     assert isinstance(ACTIVE_STATES, set)
     assert isinstance(TRANSITION_STATES, set)
     assert len(StateID) == len(ACTIVE_STATES) + len(TRANSITION_STATES)

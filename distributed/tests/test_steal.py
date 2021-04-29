@@ -544,36 +544,36 @@ async def assert_balanced(inp, expected, c, s, *workers):
 @pytest.mark.parametrize(
     "inp,expected",
     [
-        # ([[1], []], [[1], []]),  # don't move unnecessarily
-        # ([[0, 0], []], [[0], [0]]),  # balance
-        # ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
-        # ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
-        # ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
-        # ([[0, 0, 0], [0], []], [[0, 0], [0], [0]]),  # move to smaller
+        ([[1], []], [[1], []]),  # don't move unnecessarily
+        ([[0, 0], []], [[0], [0]]),  # balance
+        ([[0.1, 0.1], []], [[0], [0]]),  # balance even if results in even
+        ([[0, 0, 0], []], [[0, 0], [0]]),  # don't over balance
+        ([[0, 0], [0, 0, 0], []], [[0, 0], [0, 0], [0]]),  # move from larger
+        ([[0, 0, 0], [0], []], [[0, 0], [0], [0]]),  # move to smaller
         ([[0, 1], []], [[1], [0]]),  # choose easier first
-        # ([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]]),  # spread evenly
-        # ([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]]),  # move easier
-        # ([[1, 1, 1], []], [[1, 1], [1]]),  # be willing to move costly items
-        # ([[1, 1, 1, 1], []], [[1, 1, 1], [1]]),  # but don't move too many
-        # (
-        #     [[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
-        #     [[0, 0], [0, 0], [0], [0]],
-        # ),
-        # (
-        #     [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
-        #     [[4, 2, 2, 2, 2], [4, 2, 1], [1], [1], [1]],
-        # ),
-        # pytest.param(
-        #     [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
-        #     [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
-        #     # Can't mark as flaky as when it fails it does so every time for some reason
-        #     marks=pytest.mark.xfail(
-        #         reason="Some uncertainty based on executing stolen task"
-        #     ),
-        # ),
+        ([[0, 0, 0, 0], [], []], [[0, 0], [0], [0]]),  # spread evenly
+        ([[1, 0, 2, 0], [], []], [[2, 1], [0], [0]]),  # move easier
+        ([[1, 1, 1], []], [[1, 1], [1]]),  # be willing to move costly items
+        ([[1, 1, 1, 1], []], [[1, 1, 1], [1]]),  # but don't move too many
+        (
+            [[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
+            [[0, 0], [0, 0], [0], [0]],
+        ),
+        (
+            [[4, 2, 2, 2, 2, 1, 1], [4, 2, 1, 1], [], [], []],
+            [[4, 2, 2, 2, 2], [4, 2, 1], [1], [1], [1]],
+        ),
+        pytest.param(
+            [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
+            [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            # Can't mark as flaky as when it fails it does so every time for some reason
+            marks=pytest.mark.xfail(
+                reason="Some uncertainty based on executing stolen task"
+            ),
+        ),
     ],
 )
-def test_balance_vanilla(inp, expected):
+def test_balance_parametrized(inp, expected):
     async def test(*args, **kwargs):
         await assert_balanced(inp, expected, *args, **kwargs)
 
