@@ -5597,9 +5597,9 @@ class Scheduler(SchedulerState, ServerNode):
         - ke is the number of keys that need to be moved in order to achieve a balanced
           cluster
 
-        There is a degenerate edge case O(wt + kt*log(we)) when kt >> the number of
-        whitelisted keys, or when most keys are replicated or cannot be moved for some
-        other reason.
+        There is a degenerate edge case O(wt + kt*log(we)) when kt is much greater than
+        the number of whitelisted keys, or when most keys are replicated or cannot be
+        moved for some other reason.
 
         Returns list of tuples to feed into _rebalance_move_data:
 
