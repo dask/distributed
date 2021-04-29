@@ -1,6 +1,42 @@
 Changelog
 =========
 
+2021.04.1
+---------
+
+Released on April 23, 2021
+
+- Avoid ``active_threads`` changing size during iteration (:pr:`4729`) `James Bourbeau`_
+- Fix ``UnboundLocalError`` in ``AdaptiveCore.adapt()`` (:pr:`4731`) `Anderson Banihirwe`_
+- Minor formatting updates for HTTP endpoints doc (:pr:`4736`) `James Bourbeau`_
+- Unit test for ``metrics["memory"]=None`` (:pr:`4727`) `crusaderky`_
+- Enable configuration of prometheus metrics namespace (:pr:`4722`) `Jacob Tomlinson`_
+- Reintroduce ``weight`` function (:pr:`4723`) `James Bourbeau`_
+- Add ``ready->memory`` to transitions in worker (:pr:`4728`) `Gil Forsyth`_
+- Fix regressions in :pr:`4651` (:pr:`4719`) `crusaderky`_
+- Add descriptions for UCX config options (:pr:`4683`) `Charles Blackmon-Luca`_
+- Split RAM measure into dask keys/other old/other new (:pr:`4651`) `crusaderky`_
+- Fix ``DeprecationWarning`` on Python 3.9 (:pr:`4717`) `George Sakkis`_
+- ipython causes ``test_profile_nested_sizeof`` crash on windows (:pr:`4713`) `crusaderky`_
+- Add ``iterate_collection`` argument to ``serialize`` (:pr:`4641`) `Richard J Zamora`_
+- When closing ``Server``, close all listeners (:pr:`4704`) `Florian Jetter`_
+- Fix timeout in ``client.restart`` (:pr:`4690`) `Matteo De Wint`_
+- Avoid repeatedly using the same worker on first task with quiet cluster (:pr:`4638`) `Doug Davis`_
+- Grab ``func`` for ``finish`` case only if used (:pr:`4702`) `jakirkham`_
+- Remove hostname check in ``test_dashboard`` (:pr:`4706`) `James Bourbeau`_
+- Faster ``tests_semaphore::test_worker_dies`` (:pr:`4703`) `Florian Jetter`_
+- Clean up ``test_dashboard`` (:pr:`4700`) `crusaderky`_
+- Add timing information to ``TaskGroup`` (:pr:`4671`) `Matthew Rocklin`_
+- Remove ``WSSConnector`` TLS presence check (:pr:`4695`) `Marcos Moyano`_
+- Fix typo and remove unused ``time.time`` import (:pr:`4689`) `Hristo Georgiev`_
+- Don't initialize CUDA context in monitor (:pr:`4688`) `Charles Blackmon-Luca`_
+- Add support for extra conn args for HTTP protocols (:pr:`4682`) `Marcos Moyano`_
+- Adjust timings in ``test_threadpoolworkers`` (:pr:`4681`) `Florian Jetter`_
+- Add GPU metrics to ``SystemMonitor`` (:pr:`4661`) `Charles Blackmon-Luca`_
+- Removing ``dumps_msgpack()`` and ``loads_msgpack()`` (:pr:`4677`) `Mads R. B. Kristensen`_
+- Expose worker ``SystemMonitor`` s to scheduler via RPC (:pr:`4657`) `Charles Blackmon-Luca`_
+
+
 2021.04.0
 ---------
 
@@ -2297,3 +2333,4 @@ significantly without many new features.
 .. _`Marcos Moyano`: https://github.com/marcosmoyano
 .. _`James Lamb`: https://github.com/jameslamb
 .. _`Hristo Georgiev`: https://github.com/hristog
+.. _`Matteo De Wint`: https://github.com/mdwint

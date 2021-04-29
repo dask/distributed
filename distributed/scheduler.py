@@ -199,6 +199,8 @@ ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 )
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
+COMPILED = declare(bint, compiled)
+globals()["COMPILED"] = COMPILED
 
 
 @final
@@ -314,12 +316,12 @@ class MemoryState:
         temporary spike
     """
 
-    __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
+    __slots__ = ("_process", "_managed_in_memory", "_managed_spilled", "_unmanaged_old")
 
-    process: Py_ssize_t
-    managed_in_memory: Py_ssize_t
-    managed_spilled: Py_ssize_t
-    unmanaged_old: Py_ssize_t
+    _process: Py_ssize_t
+    _managed_in_memory: Py_ssize_t
+    _managed_spilled: Py_ssize_t
+    _unmanaged_old: Py_ssize_t
 
     def __init__(
         self,
@@ -333,57 +335,65 @@ class MemoryState:
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
-        self.process = process
-        self.managed_spilled = min(managed_spilled, managed)
+        self._process = process
+        self._managed_spilled = min(managed_spilled, managed)
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.managed_in_memory = min(managed - self.managed_spilled, process)
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self._managed_in_memory = min(managed - self._managed_spilled, process)
+        self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
+
+    @property
+    def process(self) -> Py_ssize_t:
+        return self._process
+
+    @property
+    def managed_in_memory(self) -> Py_ssize_t:
+        return self._managed_in_memory
+
+    @property
+    def managed_spilled(self) -> Py_ssize_t:
+        return self._managed_spilled
+
+    @property
+    def unmanaged_old(self) -> Py_ssize_t:
+        return self._unmanaged_old
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = object.__new__(cls)
-        for k in cls.__slots__:
-            setattr(out, k, sum(getattr(i, k) for i in infos))
+        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        ms: MemoryState
+        for ms in infos:
+            out._process += ms._process
+            out._managed_spilled += ms._managed_spilled
+            out._managed_in_memory += ms._managed_in_memory
+            out._unmanaged_old += ms._unmanaged_old
         return out
 
     @property
-    @ccall
-    @inline
-    @nogil
     def managed(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.managed_spilled
+        return self._managed_in_memory + self._managed_spilled
 
     @property
-    @ccall
-    @inline
-    @nogil
     def unmanaged(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self._process - self._managed_in_memory
 
     @property
-    @ccall
-    @inline
-    @nogil
     def unmanaged_recent(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self._process - self._managed_in_memory - self._unmanaged_old
 
     @property
-    @ccall
-    @inline
-    @nogil
     def optimistic(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.unmanaged_old
+        return self._managed_in_memory + self._unmanaged_old
 
     def __repr__(self) -> str:
         return (
             f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self.managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self.managed_spilled)}\n"
-            f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
-            f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
+            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self._process)}\n"
+            f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
         )
 
@@ -2721,10 +2731,9 @@ class SchedulerState:
 
             dts: TaskState
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                if ts in s:
-                    s.discard(ts)
-                    if not s and not dts._who_wants:
+                if ts in dts._waiters:
+                    dts._waiters.discard(ts)
+                    if not dts._waiters and not dts._who_wants:
                         recommendations[dts._key] = "released"
             ts._waiting_on.clear()
 
@@ -2774,9 +2783,8 @@ class SchedulerState:
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
                     if dts._state != "released":
-                        s: set = dts._waiters
-                        s.discard(ts)
-                        if not s and not dts._who_wants:
+                        dts._waiters.discard(ts)
+                        if not dts._waiters and not dts._who_wants:
                             recommendations[dts._key] = "released"
                 ts._waiters.clear()
 
@@ -2831,9 +2839,8 @@ class SchedulerState:
                 recommendations[dts._key] = "erred"
 
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                s.discard(ts)
-                if not s and not dts._who_wants:
+                dts._waiters.discard(ts)
+                if not dts._waiters and not dts._who_wants:
                     recommendations[dts._key] = "released"
 
             ts._waiters.clear()  # do anything with this?
@@ -6208,7 +6215,11 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        report_msg: dict = _task_to_report_msg(parent, ts)
+        report_msg: dict
+        if ts is None:
+            report_msg = {"op": "cancelled-key", "key": key}
+        else:
+            report_msg = _task_to_report_msg(parent, ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -7133,8 +7144,7 @@ def _propagate_forgotten(
 
     for dts in ts._dependencies:
         dts._dependents.remove(ts)
-        s: set = dts._waiters
-        s.discard(ts)
+        dts._waiters.discard(ts)
         if not dts._dependents and not dts._who_wants:
             # Task not needed anymore
             assert dts is not ts
@@ -7168,9 +7178,8 @@ def _client_releases_keys(
         ts = state._tasks.get(key)
         if ts is not None and ts in cs._wants_what:
             cs._wants_what.remove(ts)
-            s: set = ts._who_wants
-            s.remove(cs)
-            if not s:
+            ts._who_wants.remove(cs)
+            if not ts._who_wants:
                 if not ts._dependents:
                     # No live dependents, can forget
                     recommendations[ts._key] = "forgotten"
@@ -7221,9 +7230,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
 @cfunc
 @exceptval(check=False)
 def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
-    if ts is None:
-        return {"op": "cancelled-key", "key": ts._key}
-    elif ts._state == "forgotten":
+    if ts._state == "forgotten":
         return {"op": "cancelled-key", "key": ts._key}
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
@@ -7242,16 +7249,12 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
 @cfunc
 @exceptval(check=False)
 def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
-    report_msg: dict = _task_to_report_msg(state, ts)
-    client_msgs: dict
-    if ts is None:
-        # Notify all clients
-        client_msgs = {k: [report_msg] for k in state._clients}
-    else:
-        # Notify clients interested in key
-        cs: ClientState
-        client_msgs = {cs._client_key: [report_msg] for cs in ts._who_wants}
-    return client_msgs
+    if ts._who_wants:
+        report_msg: dict = _task_to_report_msg(state, ts)
+        if report_msg is not None:
+            cs: ClientState
+            return {cs._client_key: [report_msg] for cs in ts._who_wants}
+    return {}
 
 
 @cfunc
