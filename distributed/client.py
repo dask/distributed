@@ -4079,10 +4079,8 @@ class Client:
         Parameters
         ----------
         name : str
-            Name of the plugin as it was registered.
-            See ``register_worker_plugin`` docstrings for more reference.
-            If there was not a name assigned when the plugin was added, it will
-            automatically assign ``name = funcname(plugin) + "-" + str(uuid.uuid4())``
+            Name of the plugin to unregister. See the :meth:`Client.register_worker_plugin`
+            docstring for more information.
 
         Examples
         --------
