@@ -4050,6 +4050,7 @@ class Client:
         See Also
         --------
         distributed.WorkerPlugin
+        unregister_worker_plugin
         """
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
