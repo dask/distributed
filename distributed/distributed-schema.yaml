@@ -418,7 +418,7 @@ properties:
                       receiving data from other workers. Ignored when max_memory is not
                       set.
 
-                  receiver_max:
+                  recipient_max:
                     type: number
                     minimum: 0
                     maximum: 1

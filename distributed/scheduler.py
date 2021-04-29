@@ -174,9 +174,9 @@ MEMORY_REBALANCE_SENDER_MIN = declare(
     double,
     dask.config.get("distributed.worker.memory.rebalance.sender_min"),
 )
-MEMORY_REBALANCE_RECEIVER_MAX = declare(
+MEMORY_REBALANCE_RECIPIENT_MAX = declare(
     double,
-    dask.config.get("distributed.worker.memory.rebalance.receiver_max"),
+    dask.config.get("distributed.worker.memory.rebalance.recipient_max"),
 )
 MEMORY_REBALANCE_HALF_GAP = declare(
     double,
@@ -5512,22 +5512,22 @@ class Scheduler(SchedulerState, ServerNode):
         #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
            (``distributed.worker.memory.rebalance.sender_recipient_gap`` / 2).
            This helps avoid data from bouncing around the cluster repeatedly.
-        #. Workers above the mean are senders; those below are receivers.
+        #. Workers above the mean are senders; those below are recipients.
         #. Discard senders whose absolute occupancy is below 40%
            (``distributed.worker.memory.rebalance.sender_min``). In other words, no data
            is moved regardless of imbalancing as long as all workers are below 40%.
-        #. Discard receivers whose absolute occupancy is above 60%
-           (``distributed.worker.memory.rebalance.receiver_max``).
+        #. Discard recipients whose absolute occupancy is above 60%
+           (``distributed.worker.memory.rebalance.recipient_max``).
            Note that this threshold by default is the same as
            ``distributed.worker.memory.target`` to prevent workers from accepting data
            and immediately spilling it out to disk.
-        #. Iteratively pick the sender and receiver that are farthest from the mean and
+        #. Iteratively pick the sender and recipient that are farthest from the mean and
            move the *least recently inserted* key between the two, until either all
-           senders or all receivers fall within 5% of the mean.
+           senders or all recipients fall within 5% of the mean.
 
-           A receiver will be skipped if it already has a copy of the data. In other
+           A recipient will be skipped if it already has a copy of the data. In other
            words, this method does not degrade replication.
-           A key will be skipped if there are no receivers that have both enough memory
+           A key will be skipped if there are no recipients that have both enough memory
            to accept and don't already hold a copy.
 
         The least recently insertd (LRI) policy is a greedy choice with the advantage of
@@ -5549,11 +5549,11 @@ class Scheduler(SchedulerState, ServerNode):
             whitelist of dask keys that should be considered for moving. All other keys
             will be ignored. Note that this offers no guarantee that a key will actually
             be moved (e.g. because it is unnecessary or because there are no viable
-            receiver workers for it).
+            recipient workers for it).
         workers: optional
-            whitelist of workers addresses to be considered as senders or receivers. All
-            other workers will be ignored. The mean cluster occupancy will be calculated
-            only using the whitelisted workers.
+            whitelist of workers addresses to be considered as senders or recipients.
+            All other workers will be ignored. The mean cluster occupancy will be
+            calculated only using the whitelisted workers.
         """
         with log_errors():
             if workers is not None:
@@ -5587,7 +5587,7 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
         """Identify workers that need to lose keys and those that can receive them,
         together with how many bytes each needs to lose/receive. Then, pair a sender
-        worker with a receiver worker for each key, until the cluster is rebalanced.
+        worker with a recipient worker for each key, until the cluster is rebalanced.
 
         This method only defines the work to be performed; it does not start any network
         transfers itself.
@@ -5596,7 +5596,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         - wt is the total number of workers on the cluster (or the number of whitelisted
           workers, if explicitly stated by the user)
-        - we is the number of workers that are eligible to be senders or receivers
+        - we is the number of workers that are eligible to be senders or recipients
         - kt is the total number of keys on the cluster (or on the whitelisted workers)
         - ke is the number of keys that need to be moved in order to achieve a balanced
           cluster
@@ -5608,7 +5608,7 @@ class Scheduler(SchedulerState, ServerNode):
         Returns list of tuples to feed into _rebalance_move_data:
 
             - sender worker
-            - receiver worker
+            - recipient worker
             - task to be transferred
         """
         ts: TaskState
@@ -5641,11 +5641,11 @@ class Scheduler(SchedulerState, ServerNode):
             if ws.memory_limit:
                 half_gap = int(MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
                 sender_min = MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
-                receiver_max = MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
+                recipient_max = MEMORY_REBALANCE_RECIPIENT_MAX * ws.memory_limit
             else:
                 half_gap = 0
                 sender_min = 0.0
-                receiver_max = math.inf
+                recipient_max = math.inf
 
             if (
                 ws._has_what
@@ -5657,8 +5657,8 @@ class Scheduler(SchedulerState, ServerNode):
                 senders.append(
                     (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
                 )
-            elif ws_memory < mean_memory - half_gap and ws_memory < receiver_max:
-                # This may send the worker above receiver_max (by design)
+            elif ws_memory < mean_memory - half_gap and ws_memory < recipient_max:
+                # This may send the worker above recipient_max (by design)
                 nbytes = ws_memory - mean_memory  # negative
                 recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
 
@@ -5688,7 +5688,7 @@ class Scheduler(SchedulerState, ServerNode):
                 nbytes = ts.nbytes
                 if nbytes + snd_nbytes_max > 0:
                     # Moving this task would cause the sender to go below mean
-                    # and potentially risk becoming a receiver, which would
+                    # and potentially risk becoming a recipient, which would
                     # cause tasks to bounce around. Move on to the next task
                     # of the same sender.
                     continue
@@ -5703,7 +5703,9 @@ class Scheduler(SchedulerState, ServerNode):
                 while recipients and not use_recipient:
                     rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
                     if nbytes + rec_nbytes_max > 0:
-                        break  # recipients are sorted by rec_nbytes_max
+                        # recipients are sorted by rec_nbytes_max.
+                        # The next ones will be worse; no reason to continue iterating
+                        break
                     use_recipient = ts.key not in rec_ws._has_what
                     if not use_recipient:
                         skipped_recipients.append(heapq.heappop(recipients))
@@ -5712,7 +5714,7 @@ class Scheduler(SchedulerState, ServerNode):
                     heapq.heappush(recipients, recipient)
 
                 if not use_recipient:
-                    # This task has no receivers available. Leave it on the
+                    # This task has no recipients available. Leave it on the
                     # sender and move on to the next task of the same sender
                     continue
 
@@ -5730,11 +5732,19 @@ class Scheduler(SchedulerState, ServerNode):
                         senders,
                         (snd_nbytes_max, snd_nbytes_min, id(snd_ws), snd_ws, ts_iter),
                     )
+                else:
+                    heapq.heappop(senders)
+
                 if rec_nbytes_min < 0:
                     heapq.heapreplace(
                         recipients,
                         (rec_nbytes_max, rec_nbytes_min, id(rec_ws), rec_ws),
                     )
+                else:
+                    heapq.heappop(recipients)
+
+                # Move to next sender with the most data to lose.
+                # It may or may not be the same sender again.
                 break
             else:
                 # Exhausted tasks on this sender

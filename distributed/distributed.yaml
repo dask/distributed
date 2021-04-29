@@ -91,12 +91,12 @@ distributed:
       recent_to_old_time: 30s
 
       rebalance:
-        # Fraction of worker process memory at which we start potentially transferring
+        # Fraction of worker process memory at which we start potentially sending
         # data to other workers. Ignored when max_memory is not set.
         sender_min: 0.40
-        # Fraction of worker process memory at which we stop potentially receiving
+        # Fraction of worker process memory at which we stop potentially accepting
         # data from other workers. Ignored when max_memory is not set.
-        receiver_max: 0.60
+        recipient_max: 0.60
         # Fraction of worker process memory, around the cluster mean, where a worker is
         # neither a sender nor a recipient of data during a rebalance operation. E.g.
         # if the mean cluster occupation is 50%, no_rebalance_gap=0.10 means that only
