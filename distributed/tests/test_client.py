@@ -5854,7 +5854,6 @@ async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     assert result.equals(df.astype("f8"))
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_direct_to_workers(s, loop):
     with Client(s["address"], loop=loop, direct_to_workers=True) as client:
         future = client.scatter(1)
