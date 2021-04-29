@@ -4073,9 +4073,8 @@ class Client:
     def unregister_worker_plugin(self, name):
         """Unregisters a lifecycle worker plugin
 
-        This unregister a worker plugin using its name attribute by calling
-        the plugin's teardown method. (See the ``dask.distributed.WorkerPlugin``
-        class or the examples below for the interface and docstrings.)
+        This unregisters an existing worker plugin. As part of the unregistration process
+        the plugin's ``teardown`` method will be called.
 
         Parameters
         ----------
