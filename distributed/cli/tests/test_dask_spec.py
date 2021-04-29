@@ -4,12 +4,10 @@ import pytest
 import yaml
 
 from distributed import Client
-from distributed.scheduler import COMPILED
 from distributed.utils_test import cleanup  # noqa: F401
 from distributed.utils_test import popen
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @pytest.mark.asyncio
 async def test_text(cleanup):
     with popen(
@@ -39,7 +37,6 @@ async def test_text(cleanup):
                 assert w["nthreads"] == 3
 
 
-@pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
 @pytest.mark.asyncio
 async def test_file(cleanup, tmp_path):
     fn = str(tmp_path / "foo.yaml")

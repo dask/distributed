@@ -58,12 +58,7 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.scheduler import (
-    COMPILED,
-    CollectTaskMetaDataPlugin,
-    KilledWorker,
-    Scheduler,
-)
+from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
 from distributed.utils_test import (  # noqa: F401
@@ -5101,7 +5096,6 @@ def test_dynamic_workloads_sync_random(c):
     _test_dynamic_workloads_sync(c, delay="random")
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"
@@ -5854,7 +5848,6 @@ async def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     assert result.equals(df.astype("f8"))
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_direct_to_workers(s, loop):
     with Client(s["address"], loop=loop, direct_to_workers=True) as client:
         future = client.scatter(1)
