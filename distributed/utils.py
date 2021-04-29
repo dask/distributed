@@ -1543,3 +1543,27 @@ def clean_dashboard_address(addr, default_listen_ip=""):
         port = addr
 
     return {"address": host, "port": port}
+
+
+@functools.lru_cache(maxsize=256)
+def _format_filename(filename):
+    """Cleans filename from sensitive information"""
+
+    if filename.startswith(sys.exec_prefix):
+        filename = filename.replace(sys.exec_prefix, "...")
+    elif filename.startswith(os.path.expanduser("~")):
+        filename = filename.replace(os.path.expanduser("~"), "")
+        filename = ".../" + "/".join(filename.split("/")[-3:])
+    else:
+        filename = ".../" + "/".join(filename.split("/")[-3:])
+
+    path_remove = r"lib/python[.0-9]*/"
+    temp = re.compile(path_remove)
+    res_search = temp.search(filename)
+
+    if res_search:
+        filename = filename.replace(res_search.group(0), "")
+
+    filename = filename.replace("site-packages/", "")
+
+    return filename
