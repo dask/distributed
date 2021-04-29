@@ -34,7 +34,7 @@ from time import sleep
 import tlz as toolz
 
 from .metrics import time
-from .utils import color_of, format_time, parse_timedelta
+from .utils import _clean_filename, color_of, format_time, parse_timedelta
 
 
 def identifier(frame):
@@ -66,7 +66,7 @@ def info_frame(frame):
     co = frame.f_code
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
     return {
-        "filename": co.co_filename.replace(sys.exec_prefix, ""),
+        "filename": _clean_filename(co.co_filename),
         "name": co.co_name,
         "line_number": frame.f_lineno,
         "line": line,
