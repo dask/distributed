@@ -5287,6 +5287,9 @@ async def test_cleaned_filenames_in_profile(c, s, a, b):
     children = profile["children"]
     children_vals = list(children.values())[0]
     assert sys.exec_prefix not in children_vals["description"]["filename"]
+    assert os.path.expanduser("~") not in children_vals["description"]["filename"]
+    assert "lib/python" not in children_vals["description"]["filename"]
+    assert "site-packages" not in children_vals["description"]["filename"]
 
     # print('THE OUTPUT OF profile is:')
     # from pprint import pprint
