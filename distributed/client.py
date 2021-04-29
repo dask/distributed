@@ -4078,7 +4078,7 @@ class Client:
 
         Parameters
         ----------
-        name: str
+        name : str
             Name of the plugin as it was registered.
             See ``register_worker_plugin`` docstrings for more reference.
             If there was not a name assigned when the plugin was added, it will
