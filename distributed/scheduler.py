@@ -4002,7 +4002,7 @@ class Scheduler(SchedulerState, ServerNode):
                             "memory",
                             worker=address,
                             nbytes=nbytes[key],
-                            typename=types[key],
+                            typename=types.get(key),  # FIXME: How is type not there?
                         )
                         recommendations, client_msgs, worker_msgs = t
                         parent._transitions(recommendations, client_msgs, worker_msgs)
@@ -4413,7 +4413,13 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                worker_msgs[worker] = [{"op": "delete-data", "key": key}]
+                worker_msgs[worker] = [
+                    {
+                        "op": "delete-data",
+                        "keys": [key],
+                        "reason": "Wrong worker finished",
+                    }
+                ]
 
         return recommendations, client_msgs, worker_msgs
 
@@ -4458,7 +4464,7 @@ class Scheduler(SchedulerState, ServerNode):
         """ Mark that certain keys have gone missing.  Recover. """
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
-            logger.debug("Stimulus missing data %s, %s", key, worker)
+            logger.info("Stimulus missing data %s, %s", key, worker)
 
             recommendations: dict = {}
             client_msgs: dict = {}
@@ -5479,7 +5485,7 @@ class Scheduler(SchedulerState, ServerNode):
         await retry_operation(
             self.rpc(addr=worker_address).delete_data,
             keys=list(keys),
-            reason="No idea, let's find out",
+            reason="Replicate/Rebalance",
         )
 
         ws: WorkerState = parent._workers_dv[worker_address]
@@ -6010,18 +6016,18 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what.add(ts)
                     ts._who_has.add(ws)
             elif ts is None:
-                raise RuntimeError("Received data although task {key} is not known")
                 self.worker_send(
                     worker,
                     {
                         "op": "delete-data",
                         "keys": [key],
-                        "reason": f"Unknown task or unknown state {ts.state if ts else None}",
+                        "reason": "Unknown task",
                     },
                 )
             else:
+                # TODO: This should be fine but should probably cause a proper transition
                 raise RuntimeError(
-                    "Received data although task was not in state memory {ts}"
+                    f"Received data although task was not in state memory {ts}"
                 )
 
         return "OK"

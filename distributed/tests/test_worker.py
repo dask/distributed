@@ -1819,35 +1819,36 @@ def test_weight_deprecated():
         weight("foo", "bar")
 
 
-# from distributed.comm.registry import backends, get_backend
+# from tornado.ioloop import IOLoop
+
+# from distributed.comm.registry import backends
+
 
 # @pytest.mark.asyncio
-# async def test_broken_dep(monkeypatch, event_loop):
+# async def test_broken_dep(monkeypatch):
 #     """This test simulates comm failures during get_data requests."""
 #     from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
 
 #     tornado_loop = IOLoop.current()
-#     # assert tornado_loop.asyncio_loop is event_loop
 
-#     # class BrokenInGetDataComm(TCP):
-#     #     async def write(self, msg, *args, **kwargs):
-#     #         if "op" in msg and msg["op"] == "get_data":
+#     class BrokenInGetDataComm(TCP):
+#         async def write(self, msg, *args, **kwargs):
+#             if "op" in msg and msg["op"] == "get_data":
 
-#     #             import random
+#                 import random
 
-#     #             if random.random() < 0.99 and False:
-#     #                 raise OSError("This happens a lot")
-#     #         return await super().write(msg, *args, **kwargs)
+#                 if random.random() < 0.99:
+#                     raise OSError("This happens a lot")
+#             return await super().write(msg, *args, **kwargs)
 
-#     # class BrokenGetDataConnector(TCPConnector):
-#     #     comm_class = BrokenInGetDataComm
+#     class BrokenGetDataConnector(TCPConnector):
+#         comm_class = BrokenInGetDataComm
 
-#     # class BrokenGetDataBackend(TCPBackend):
-#     #     _connector_class = BrokenGetDataConnector
+#     class BrokenGetDataBackend(TCPBackend):
+#         _connector_class = BrokenGetDataConnector
 
-#     # monkeypatch.setitem(backends, "tcp", BrokenGetDataBackend())
+#     monkeypatch.setitem(backends, "tcp", BrokenGetDataBackend())
 
-#     import dask.array as da
 #     import dask
 
 #     (scheduler, workers) = await start_cluster(
@@ -1867,7 +1868,6 @@ def test_weight_deprecated():
 #             ddf = dask.datasets.timeseries()
 #             ddf2 = ddf.shuffle(on="x")
 #             await client.compute(ddf2, sync=False)
-
 #     finally:
 #         await scheduler.close()
 #         for w in workers:

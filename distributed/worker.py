@@ -122,17 +122,7 @@ class StateID(Enum):
     forgotten = "forgotten"
 
 
-IN_PLAY = (StateID.waiting, StateID.ready, StateID.executing, "long-running")
-PENDING = (StateID.waiting, StateID.ready, StateID.constrained)
-PROCESSING = (
-    StateID.waiting,
-    StateID.ready,
-    StateID.constrained,
-    StateID.executing,
-    "long-running",
-)
-READY = (StateID.ready, StateID.constrained)
-
+# States which are intended for computation on this worker
 COMPUTE_STATES = {
     StateID.waiting,
     StateID.ready,
@@ -141,15 +131,22 @@ COMPUTE_STATES = {
     StateID.constrained,
     StateID.long_running,
 }
+
+# States which will no longer change unless external stimuli retrigger
 FINAL_STATES = {
     StateID.released,
     StateID.error,
     StateID.forgotten,
 }
 
+# States which are coming from another worker
 FETCH_STATES = {StateID.fetch, StateID.flight}
 
+# The collection of all states where we still need to do something
 ACTIVE_STATES = FETCH_STATES | COMPUTE_STATES
+
+# TODO: Figure out if this makes sense
+# Some intermediary states. This is currently not well defined
 TRANSITION_STATES = {
     StateID.new,
     StateID.canceled,
@@ -468,6 +465,7 @@ class Worker(ServerNode):
         lifetime_restart=None,
         **kwargs,
     ):
+        self.ensure_computing_running = False
         self.tasks = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
@@ -540,10 +538,13 @@ class Worker(ServerNode):
                 StateID.constrained,
                 StateID.executing,
             ): self.transition_constrained_executing,
-            (StateID.executing, "long-running"): self.transition_executing_long_running,
-            ("long-running", "error"): self.transition_executing_done,
-            ("long-running", StateID.memory): self.transition_executing_done,
-            ("long-running", "rescheduled"): self.transition_executing_done,
+            (
+                StateID.executing,
+                StateID.long_running,
+            ): self.transition_executing_long_running,
+            (StateID.long_running, "error"): self.transition_executing_done,
+            (StateID.long_running, StateID.memory): self.transition_executing_done,
+            (StateID.long_running, "rescheduled"): self.transition_executing_done,
         }
 
         self.incoming_transfer_log = deque(maxlen=100000)
@@ -729,7 +730,7 @@ class Worker(ServerNode):
             "run_coroutine": self.run_coroutine,
             "get_data": self.get_data,
             "update_data": self.update_data,
-            "delete_data": self.stimulus_delete_data,
+            "delete_data": self.handle_delete_data,
             "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
@@ -1496,6 +1497,7 @@ class Worker(ServerNode):
 
         for key, value in data.items():
             ts = self._create_task_state(key)
+            self.log.append((ts.key, None, ts.state.name, {}, transaction_id))
             recs, msgs = self.transition(
                 ts.key, StateID.memory, value=value, transaction_id=transaction_id
             )
@@ -1530,6 +1532,13 @@ class Worker(ServerNode):
             {key: StateID.forgotten for key in keys if key in self.tasks},
             transaction_id=transaction_id,
         )
+
+    def handle_delete_data(self, comm, keys, reason):
+        # comm handlers need to support the comm argument. To allow for cleaner
+        # and less error prone signatures, have this indirecation
+
+        # This route is currently only used for replicate/rebalance
+        return self.stimulus_delete_data(keys, reason)
 
     def stimulus_delete_data(self, keys, reason):
         transaction_id = reason + f"-{uuid.uuid4().hex}"
@@ -1667,6 +1676,7 @@ class Worker(ServerNode):
             self.transitions(recs)
 
     def transition_forget(self, key):
+        """Purge all knowledge of the given task"""
         ts = self.tasks.pop(key, None)
         if ts is None:
             return {}, []
@@ -1674,14 +1684,25 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             dep.dependencies.remove(ts)
-            # if the dependent is a node w/out edges and is already released we're allowed to forget
+            # if the dependent is a node w/out edges and is already released
+            # we're allowed to forget
             if dep.state in FINAL_STATES:
                 recommendations[dep.key] = StateID.forgotten
-
+        for worker in ts.who_has:
+            self.has_what[worker].remove(ts.key)
         for dep in ts.dependencies:
             dep.dependents.remove(ts)
-            if not dep.dependents and dep.state in FINAL_STATES:
-                recommendations[dep.key] = StateID.forgotten
+            if not dep.dependents:
+                if dep.state in FINAL_STATES:
+                    recommendations[dep.key] = StateID.forgotten
+                elif dep.state not in (StateID.memory,):
+                    # Canceled
+                    # Common for work stealing. Stolen task is ready and
+                    # dependencies are being fetched. In this case we'll need to
+                    # cancel those fetches
+                    recommendations[dep.key] = StateID.released
+                else:
+                    logger.info("No dependents any more but in memory... pass")
 
         return recommendations, []
 
@@ -1708,7 +1729,7 @@ class Worker(ServerNode):
         ts = self.tasks[key]
         ts.state = StateID.waiting
         ts.instructed_compute = True
-        ts.keys_waiting = ts.dependent.copy()
+        ts.keys_waiting = ts.dependents.copy()
         ts.exception = None
         ts.traceback = None
         ts.start_time = None
@@ -1719,22 +1740,20 @@ class Worker(ServerNode):
         # START - ENTER WAITING
         recommendations = {}
 
-        if ts.dependencies:
-            for dependency in ts.dependencies:
-                if dependency.state == StateID.memory:
-                    continue
-                ts.waiting_for_data.add(dependency)
-                if (
-                    not dependency.instructed_compute
-                    and dependency.state not in FETCH_STATES
-                ):
-                    recommendations[dependency.key] = StateID.fetch
-                elif (
-                    dependency.instructed_compute
-                    and dependency.state not in COMPUTE_STATES
-                ):
-                    # TODO: Is the worker allowed to make such a decision?
-                    recommendations[dependency.key] = StateID.waiting
+        for dependency in ts.dependencies:
+            if dependency.state == StateID.memory:
+                continue
+            ts.waiting_for_data.add(dependency)
+            if (
+                not dependency.instructed_compute
+                and dependency.state not in FETCH_STATES
+            ):
+                recommendations[dependency.key] = StateID.fetch
+            elif (
+                dependency.instructed_compute and dependency.state not in COMPUTE_STATES
+            ):
+                # TODO: Is the worker allowed to make such a decision?
+                recommendations[dependency.key] = StateID.waiting
 
         if not ts.waiting_for_data:
             recommendations[ts.key] = StateID.ready
@@ -1749,6 +1768,11 @@ class Worker(ServerNode):
         # There should be
         # * One easy way to transition a single key (key, finish)
         # * An easy way to transition multiple keys (recommendations)
+        if isinstance(key, TaskState):
+            logger.critical(
+                "Recived task state instead of key for %s -> %s", key, finish
+            )
+            key = key.key
         transaction_id = transaction_id or uuid.uuid4().hex
         recommendations = {}
         messages = []
@@ -1776,9 +1800,9 @@ class Worker(ServerNode):
             messages.extend(msgs)
             del rec_b, msgs
         else:
-            r = self._transition(key, finish, transaction_id=transaction_id, **kwargs)
-            if not isinstance(r, tuple):
-                breakpoint()
+            r = self._do_transition(
+                key, finish, transaction_id=transaction_id, **kwargs
+            )
             recs, msgs = r
             recommendations.update(recs)
             messages.extend(msgs)
@@ -1794,8 +1818,7 @@ class Worker(ServerNode):
         from collections import OrderedDict
 
         recommendations = OrderedDict(recommendations)
-        if self.validate:
-            self.validate_state()
+
         while recommendations:
             # The default dict has a LIFO policy which is sometimes trouble
             key, finish = recommendations.popitem(last=False)
@@ -1818,7 +1841,7 @@ class Worker(ServerNode):
         transaction_id = transaction_id or uuid.uuid4().hex
         self._transitions(recommendations, transaction_id=transaction_id)
 
-    def _transition(
+    def _do_transition(
         self, key: str, finish: StateID, transaction_id: str, **kwargs
     ) -> Tuple[Dict[str, StateID], List[Dict]]:
         """Actually perform a transition"""
@@ -1834,18 +1857,21 @@ class Worker(ServerNode):
                 start_finish = (start, finish)
                 if start_finish not in self._transition_table:
                     if (None, finish) in self._transition_table:
+                        logger.critical("Used catchall transition to %s", finish)
                         func = self._transition_table[(None, finish)]
                     else:
                         logger.error(
-                            "Unknown state transition",
-                            start=start,
-                            finish=finish,
-                            key=key,
-                            transaction_id=transaction_id,
+                            "Unknown state transition %s",
+                            dict(
+                                start=start,
+                                finish=finish,
+                                key=key,
+                                transaction_id=transaction_id,
+                            ),
                         )
                         raise RuntimeError(
                             "Unknown state transtition encountered "
-                            f"{start.name} -> {finish.name} for "
+                            f"{start} -> {finish} for "
                             f"key {key} - {transaction_id}."
                         )
                 else:
@@ -1862,8 +1888,8 @@ class Worker(ServerNode):
                 )
                 # TODO: this is more a structlog msg
                 logger.info(
-                    "Transition key",
-                    extra={
+                    "Transition key %s",
+                    {
                         "key": ts.key,
                         "start": start.name,
                         "finish": finish.name,
@@ -1936,6 +1962,9 @@ class Worker(ServerNode):
     def transition_new_fetch(self, key):
         try:
             ts = self.tasks[key]
+            if not ts.dependents:
+                logger.critical("Trying to fetch a task %s without dependents", ts)
+                return {key: StateID.released}, []
             # TODO: Probably not correct in case of resheduling of partial
             # results? Should we even track the data needed or rather the "needs
             # fetching"? There is the optimization about fetching groups of
@@ -1956,77 +1985,12 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_fetch_waiting(self, ts, runspec):
-        """This is a rescheduling transition that occurs after a worker failure.
-        A task was available from another worker but that worker died and the
-        scheduler reassigned the task for computation here.
-        """
-        try:
-            if self.validate:
-                assert ts.state == StateID.fetch
-                assert ts.runspec is None
-                assert runspec is not None
-
-            ts.runspec = runspec
-
-            # remove any stale entries in `has_what`
-            for worker in self.has_what.keys():
-                self.has_what[worker].discard(ts.key)
-
-            # clear `who_has` of stale info
-            ts.who_has.clear()
-
-            # remove entry from dependents to avoid a spurious `gather_dep` call``
-            for dependent in ts.dependents:
-                dependent.waiting_for_data.discard(ts.key)
-            return {}, []
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def transition_flight_waiting(self, key, runspec):
-        """This is a rescheduling transition that occurs after
-        a worker failure.  A task was in flight from another worker to this
-        worker when that worker died and the scheduler reassigned the task for
-        computation here.
-        """
-        try:
-            ts = self.tasks[key]
-            if self.validate:
-                assert ts.state == StateID.flight
-                assert ts.runspec is None
-                assert runspec is not None
-
-            ts.runspec = runspec
-
-            # remove any stale entries in `has_what`
-            for worker in self.has_what.keys():
-                self.has_what[worker].discard(ts.key)
-
-            # clear `who_has` of stale info
-            ts.who_has.clear()
-
-            # remove entry from dependents to avoid a spurious `gather_dep` call``
-            for dependent in ts.dependents:
-                dependent.waiting_for_data.discard(ts.key)
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
     def transition_fetch_flight(self, key, worker):
         try:
             ts = self.tasks[key]
             if self.validate:
-                assert ts.state == StateID.fetch
-                assert ts.dependents
+                assert ts.state == StateID.fetch, ts
+                assert ts.dependents, ts
 
             ts.coming_from = worker
             self.in_flight_tasks += 1
@@ -2053,6 +2017,8 @@ class Worker(ServerNode):
                 if ts.key not in self._missing_dep_flight:
                     self._missing_dep_flight.add(ts.key)
                     self.loop.add_callback(self.handle_missing_dep, ts)
+            if not ts.dependents:
+                logger.critical("no dependents")
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts)
                 if dependent.state == StateID.waiting:
@@ -2077,16 +2043,10 @@ class Worker(ServerNode):
             self.in_flight_tasks -= 1
             ts.coming_from = None
             self.put_key_in_memory(ts, value)
-            for dependent in ts.dependents:
-                try:
-                    dependent.waiting_for_data.remove(ts)
-                    self.waiting_for_data_count -= 1
-                    if not dependent.waiting_for_data:
-                        recommendations[dependent.key] = StateID.ready
-                except KeyError:
-                    pass
-            ts.state = StateID.memory
-            msgs = [{"op": "add-keys", "keys": [ts.key]}]
+            recs, msgs = self._transition_enter_memory(key)
+            recommendations.update(recs)
+
+            msgs.append({"op": "add-keys", "keys": [ts.key]})
             return recommendations, msgs
 
         except Exception as e:
@@ -2105,6 +2065,7 @@ class Worker(ServerNode):
             if ts.resource_restrictions is not None:
                 self.constrained.append(ts.key)
                 ts.state = StateID.constrained
+                logger.critical("Used the ready transition for constrained task")
             else:
                 ts.state = StateID.ready
                 heapq.heappush(self.ready, (ts.priority, ts.key))
@@ -2191,7 +2152,7 @@ class Worker(ServerNode):
             if ts.state == StateID.executing:
                 self.executing_count -= 1
                 self.executed_count += 1
-            elif ts.state == "long-running":
+            elif ts.state == StateID.long_running:
                 self.long_running.remove(ts.key)
 
             if value is not no_value:
@@ -2227,22 +2188,25 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_executing_long_running(self, ts, compute_duration=None):
+    def transition_executing_long_running(self, key, compute_duration=None):
         try:
+            ts = self.tasks[key]
             if self.validate:
                 assert ts.state == StateID.executing
 
             self._transition_executing_exit(ts.key)
             self.long_running.add(ts.key)
-            self.batched_stream.send(
+            messages = [
                 {
                     "op": "long-running",
                     "key": ts.key,
                     "compute_duration": compute_duration,
                 }
-            )
-
+            ]
+            ts.state = StateID.long_running
+            # TODO: Is this how we want to do the transitions? ready->executing is calling execute
             self.io_loop.add_callback(self.ensure_computing)
+            return {}, messages
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2253,7 +2217,9 @@ class Worker(ServerNode):
 
     def maybe_transition_long_running(self, ts, compute_duration=None):
         if ts.state == StateID.executing:
-            self.transition(ts, "long-running", compute_duration=compute_duration)
+            self.transition(ts, StateID.long_running, compute_duration=compute_duration)
+        else:
+            logger.critical("Seceded from a non-executing task %s", ts)
 
     def stateof(self, key):
         ts = self.tasks[key]
@@ -2288,13 +2254,21 @@ class Worker(ServerNode):
 
     def ensure_communicating(self):
         changed = True
+        logger.info("ensure_communicating needed: %s", len(self.data_needed))
+        logger.info(
+            "Ensure communicating. %s Pending: %d.  Connections: %d/%d",
+            changed,
+            len(self.data_needed),
+            len(self.in_flight_workers),
+            self.total_out_connections,
+        )
         try:
             while (
                 changed
                 and self.data_needed
                 and len(self.in_flight_workers) < self.total_out_connections
             ):
-                logger.debug(
+                logger.info(
                     "Ensure communicating. %s Pending: %d.  Connections: %d/%d",
                     changed,
                     len(self.data_needed),
@@ -2382,7 +2356,7 @@ class Worker(ServerNode):
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
-                        self._transition(
+                        self.transition(
                             d, StateID.flight, worker=worker, transaction_id="TODO"
                         )
                         changed = True
@@ -2468,12 +2442,12 @@ class Worker(ServerNode):
 
         for dep in ts.dependents:
             try:
-                dep.waiting_for_data.remove(ts.key)
+                dep.waiting_for_data.remove(ts)
                 self.waiting_for_data_count -= 1
             except KeyError:
                 pass
             if not dep.waiting_for_data:
-                self._transition(dep, StateID.ready, transaction_id="TODO")
+                self.transition(dep, StateID.ready, transaction_id="TODO")
 
         self.log.append((ts.key, "put-in-memory"))
 
@@ -2596,8 +2570,12 @@ class Worker(ServerNode):
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
+                # FIXME: Why remove the entire worker here?
                 for d in self.has_what.pop(worker):
-                    self.tasks[d].who_has.remove(worker)
+                    if d in self.tasks:
+                        self.tasks[d].who_has.remove(worker)
+                    else:
+                        logger.critical("Key %s already forgotten during gather", d)
 
             except Exception as e:
                 logger.exception(e)
@@ -2617,29 +2595,32 @@ class Worker(ServerNode):
                 # TODO: This is only safe because we ensure there is at most one
                 # gather_dep coro running per worker. This is ensured in
                 # ensure_communicating but feels fragile
-                for d in self.in_flight_workers.pop(worker):
+
+                for d in self.in_flight_workers[worker]:
 
                     ts = self.tasks.get(d)
-
                     recs, msgs = {}, []
-                    if not busy and d in data:
+                    if ts is None:
+                        logger.critical(
+                            "Task for key %s already forgotten after fetch finished", d
+                        )
+                    elif not busy and d in data:
                         recs, msgs = self.transition(
                             ts.key, StateID.memory, value=data[d]
                         )
-                    elif ts is None or ts.state == StateID.executing:
-                        self.release_key(d, cause="already executing at gather")
-                        continue
                     elif ts.state not in (StateID.ready, StateID.memory):
                         recs, msgs = self.transition(ts.key, StateID.fetch)
 
-                    if not busy and d not in data and ts.dependents:
+                    if ts is not None and not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
-                        self.batched_stream.send(
+                        logger.critical("Missing data %s for worker %s", d, worker)
+                        msgs.append(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
                     self.transitions(recs)
                     self.send_scheduler_msgs(msgs)
-
+                # Only pop afterwards to allow transitions some sanity checks
+                self.in_flight_workers.pop(worker)
                 if self.validate:
                     self.validate_state()
 
@@ -2659,7 +2640,6 @@ class Worker(ServerNode):
                 self.ensure_communicating()
 
     def bad_dep(self, dep):
-        raise RuntimeError("not current state anymore")
         exc = ValueError(
             "Could not find dependent %s.  Check worker logs" % str(dep.key)
         )
@@ -2667,8 +2647,8 @@ class Worker(ServerNode):
             msg = error_message(exc)
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
-            self._transition(ts, "error")
-        self.release_key(dep.key, cause="bad dep")
+            self.transition(ts, StateID.error)
+        self.transition(dep.key, StateID.error, cause="bad dep")
 
     async def handle_missing_dep(self, *deps, **kwargs):
         self.log.append(("handle-missing", deps))
@@ -2691,6 +2671,8 @@ class Worker(ServerNode):
                     dep.suspicious_count,
                 )
 
+            deps = {d for d in deps if d.key in self.tasks}
+            # TODO: check if dep is still known
             who_has = await retry_operation(
                 self.scheduler.who_has, keys=list(dep.key for dep in deps)
             )
@@ -2701,7 +2683,7 @@ class Worker(ServerNode):
 
                 if not who_has.get(dep.key):
                     self.log.append((dep.key, "no workers found", dep.dependents))
-                    self.release_key(dep.key)
+                    self.transition(dep.key, StateID.released)
                 else:
                     self.log.append((dep.key, "new workers found"))
                     for dependent in dep.dependents:
@@ -2787,12 +2769,6 @@ class Worker(ServerNode):
             messages.extend(msgs)
             recommendations.update(recs)
 
-            # # If task is marked as StateID.constrained we haven't yet assigned it an
-            # # `available_resources` to run on, that happens in
-            # # `transition_constrained_executing`
-            # self.release_key(ts.key, cause="stolen")
-            # if self.validate:
-            #     assert ts.key not in self.tasks
         else:
 
             logger.info(
@@ -2814,10 +2790,8 @@ class Worker(ServerNode):
         return recommendations, messages
 
     def _transition_enter_released(self, key):
-        ts = self.tasks[key]
         recommendations, messages = {}, []
         ts = self.tasks[key]
-        ts.state = StateID.released
 
         recommendations = {}
         for dep in ts.dependencies:
@@ -2837,6 +2811,7 @@ class Worker(ServerNode):
         # TODO: Does this belong to enter released or exit memory?
         if key in self.threads:
             del self.threads[key]
+        ts.state = StateID.released
         return recommendations, messages
 
     def _transition_enter_memory(self, key):
@@ -2844,6 +2819,10 @@ class Worker(ServerNode):
         ts = self.tasks[key]
         ts.state = StateID.memory
         ts.who_has.add(self.address)
+        self.has_what[self.address].add(ts.key)
+        # FIXME: consolidate with puy_key_in_memory
+        if not ts.nbytes:
+            ts.nbytes = sizeof(self.data[key])
         # Don't release the dependency keys, but do remove them from `dependents`
         for dependency in ts.dependencies:
             # This should've been cleared way earlier
@@ -2853,10 +2832,10 @@ class Worker(ServerNode):
         ts.keys_waiting.clear()
 
         for dep in ts.dependents:
-            dep.waiting_for_data.remove(dep)
+            # FIXME: MAke this a hard remove
+            dep.waiting_for_data.discard(dep)
             if not dep.waiting_for_data:
                 recommendations[dep.key] = StateID.ready
-
         return recommendations, messages
 
     def _transition_exit_memory(self, key):
@@ -2864,12 +2843,13 @@ class Worker(ServerNode):
         ts = self.tasks[key]
         if key in self.data:
             del self.data[key]
+            ts.who_has.remove(self.address)
+            self.has_what[self.address].remove(ts.key)
         else:
             logger.critical(
                 "Transitioned key=%s out of memory but there was no data", key
             )
         ts.nbytes = None
-        ts.who_has.discard(self.address)
         return recommendations, messages
 
     def transition_memory_released(self, key):
@@ -2880,95 +2860,6 @@ class Worker(ServerNode):
         recommendations.update(recs_b)
         messages = msgs_a + msgs_b
         return recommendations, messages
-
-    def release_key(self, key, cause=None, reason=None, report=True):
-        raise NotImplementedError()
-        try:
-            if self.validate:
-                assert isinstance(key, str)
-            ts = self.tasks.get(key, TaskState(key=key))
-
-            if cause:
-                self.log.append((key, "release-key", {"cause": cause}))
-            else:
-                self.log.append((key, "release-key"))
-            if key in self.data and not ts.dependents:
-                try:
-                    del self.data[key]
-                    ts.nbytes = None
-                except FileNotFoundError:
-                    logger.error("Tried to delete %s but no file found", exc_info=True)
-            if key in self.actors and not ts.dependents:
-                del self.actors[key]
-
-            # for any dependencies of key we are releasing remove task as dependent
-            for dependency in ts.dependencies:
-                dependency.dependents.discard(ts)
-                # don't boot keys that are in flight
-                # we don't know if they're already queued up for transit
-                # in a gather_dep callback
-                if not dependency.dependents and dependency.state in (
-                    StateID.waiting,
-                    StateID.fetch,
-                ):
-                    self.release_key(dependency.key, cause=f"Dependent {ts} released")
-
-            for worker in ts.who_has:
-                self.has_what[worker].discard(ts.key)
-            ts.who_has.clear()
-
-            if key in self.threads:
-                del self.threads[key]
-
-            if ts.resource_restrictions is not None:
-                if ts.state == StateID.executing:
-                    for resource, quantity in ts.resource_restrictions.items():
-                        self.available_resources[resource] += quantity
-
-            # Inform the scheduler of keys which will have gone missing
-            # We are releasing them before they have completed
-            if report and ts.state in PROCESSING:
-                self.batched_stream.send({"op": "release", "key": key, "cause": cause})
-
-            self._notify_plugins("release_key", key, ts.state, cause, reason, report)
-            if key in self.tasks and not ts.dependents:
-                self.tasks.pop(key)
-            del ts
-        except CommClosedError:
-            pass
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def rescind_key(self, key):
-        try:
-            if self.tasks[key].state not in PENDING:
-                return
-
-            ts = self.tasks.pop(key)
-
-            # Task has been rescinded
-            # For every task that it required
-            for dependency in ts.dependencies:
-                # Remove it as a dependent
-                dependency.dependents.remove(key)
-                # If the dependent is now without purpose (no dependencies), remove it
-                if not dependency.dependents:
-                    self.release_key(
-                        dependency.key, reason="All dependent keys rescinded"
-                    )
-
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
 
     ################
     # Execute Task #
@@ -3128,10 +3019,28 @@ class Worker(ServerNode):
             raise
 
     async def ensure_computing(self):
-        # Instead of relying on the ensure computing, implement a queue (i.e. self.ready) and continuously watch
+        # Instead of relying on the ensure computing, implement a queue (i.e.
+        # self.ready) and continuously watch
+        # FIXME: I think there can be a race condition since ensure_computing is
+        # scheduled as a callback and we wait for deserialization and schedule
+        # the execute as a callback as well. The executing counter is only
+        # increased *after* the deserialization
+        logger.info(
+            "ensure_computing ready: %s constrained: %s executing/nthreads %s/%s",
+            len(self.ready),
+            len(self.constrained),
+            self.executing_count,
+            self.nthreads,
+        )
         if self.paused:
+            # FIXME: Is this causing deadlocks?
+            logger.info("Skip ensure_computing due to pause")
+            return
+        if self.ensure_computing_running:
+            logger.info("Skip ensure_computing since already running")
             return
         try:
+            self.ensure_computing_running = True
             recommendations = {}
             messages = []
             while self.constrained and self.executing_count < self.nthreads:
@@ -3164,7 +3073,7 @@ class Worker(ServerNode):
                     continue
                 elif ts.key in self.data:
                     recs, msgs = self.transition(ts, StateID.memory)
-                elif ts.state in READY:
+                elif ts.state in (StateID.ready, StateID.constrained):
                     try:
                         # Ensure task is deserialized prior to execution
                         ts.runspec = await self._maybe_deserialize_task(ts)
@@ -3185,6 +3094,8 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
             raise
+        finally:
+            self.ensure_computing_running = False
 
     async def execute(self, key, report=False):
         executor_error = None
@@ -3569,6 +3480,7 @@ class Worker(ServerNode):
         assert not ts.waiting_for_data
         assert ts.key not in self.ready
         assert ts.state == StateID.memory
+        assert self.address in ts.who_has
 
     def validate_task_executing(self, ts):
         assert ts.state == StateID.executing
@@ -3600,8 +3512,6 @@ class Worker(ServerNode):
         assert ts.key in self.in_flight_workers[ts.coming_from]
 
     def validate_task_fetch(self, ts):
-        if ts.key in self.data:
-            breakpoint()
         assert ts.key not in self.data
         assert ts.instructed_compute is False
 
@@ -3631,7 +3541,6 @@ class Worker(ServerNode):
         if self.status != Status.running:
             return
         try:
-            return
             for ts in self.tasks.values():
                 assert ts.state is not None
                 # check that worker has task
@@ -3646,8 +3555,8 @@ class Worker(ServerNode):
                     # Might need better bookkeeping
                     assert dep.state is not None
                     assert ts in dep.dependents
-                for key in ts.waiting_for_data:
-                    ts_wait = self.tasks[key]
+                for t in ts.waiting_for_data:
+                    ts_wait = self.tasks[t.key]
                     assert (
                         ts_wait.state == StateID.flight
                         or ts_wait.state == StateID.fetch
