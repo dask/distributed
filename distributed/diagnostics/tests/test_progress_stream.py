@@ -6,7 +6,6 @@ from dask import delayed
 
 from distributed.client import wait
 from distributed.diagnostics.progress_stream import progress_quads, progress_stream
-from distributed.scheduler import COMPILED
 from distributed.utils_test import div, gen_cluster, inc
 
 
@@ -57,7 +56,6 @@ def test_progress_quads_too_many():
     assert len(d["name"]) == 6 * 3
 
 
-@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_progress_stream(c, s, a, b):
     futures = c.map(div, [1] * 10, range(10))
