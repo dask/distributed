@@ -22,6 +22,8 @@ def counts(scheduler, allprogress):
 
 
 def remove_plugin(*args, **kwargs):
+    # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
+    # `PicklingError` when using a cythonized scheduler
     return Scheduler.remove_plugin(*args, **kwargs)
 
 
