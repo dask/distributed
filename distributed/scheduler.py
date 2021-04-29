@@ -5560,10 +5560,14 @@ class Scheduler(SchedulerState, ServerNode):
                 workers = [self._workers_dv[w] for w in workers]
             else:
                 workers = self._workers_dv.values()
+            if not workers:
+                return {"status": "OK"}
 
             if keys is not None:
                 if not isinstance(keys, Set):
                     keys = set(keys)  # unless already a set-like
+                if not keys:
+                    return {"status": "OK"}
                 tasks = [self._tasks[k] for k in keys]
                 missing_data = [ts._key for ts in tasks if not ts._who_has]
                 if missing_data:
@@ -5700,7 +5704,7 @@ class Scheduler(SchedulerState, ServerNode):
                     rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
                     if nbytes + rec_nbytes_max > 0:
                         break  # recipients are sorted by rec_nbytes_max
-                    use_recipient = ts.key not in rec_ws._tasks
+                    use_recipient = ts.key not in rec_ws._has_what
                     if not use_recipient:
                         skipped_recipients.append(heapq.heappop(recipients))
 

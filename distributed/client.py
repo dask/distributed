@@ -3051,8 +3051,11 @@ class Client:
         )
 
     async def _rebalance(self, futures=None, workers=None):
-        await _wait(futures)
-        keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        if futures is not None:
+            await _wait(futures)
+            keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        else:
+            keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
             raise ValueError(
