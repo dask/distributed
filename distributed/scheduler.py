@@ -6134,7 +6134,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = set.union(*[w._has_what for w in workers])
+                keys = {k for w in workers for k in w._has_what}
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
                 if keys:

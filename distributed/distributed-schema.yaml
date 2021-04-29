@@ -426,7 +426,7 @@ properties:
                       Fraction of worker process memory at which we start potentially
                       transferring data to other workers.
 
-                  sender_recipient_gap: 0.1
+                  sender_recipient_gap:
                     type: number
                     minimum: 0
                     maximum: 1
