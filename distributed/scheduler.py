@@ -12,11 +12,12 @@ import sys
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Mapping, Set
+from collections.abc import Hashable, Iterable, Iterator, Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
+from typing import Optional
 
 import psutil
 import sortedcontainers
@@ -5491,282 +5492,315 @@ class Scheduler(SchedulerState, ServerNode):
             ws._nbytes -= ts.get_nbytes()
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
-    async def rebalance(self, comm=None, keys=None, workers=None):
+    async def rebalance(
+        self,
+        comm=None,
+        keys: "Iterable[Hashable]" = None,
+        workers: "Iterable[str]" = None,
+    ) -> dict:
         """Rebalance keys so that each worker stores roughly equal bytes
 
-        **Policy**
+        **Algorithm**
 
-        TODO TODO TODO
+        #. Find the mean occupancy of the cluster, defined as data managed by dask +
+           unmanaged process memory that has been there for at least 30 seconds
+           (``distributed.worker.memory.recent_to_old_time``).
+           This lets us ignore temporary spikes caused by task heap usage.
+        #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
+           (``distributed.worker.memory.rebalance.sender_recipient_gap`` / 2).
+           This helps avoid data from bouncing around the cluster repeatedly.
+        #. Workers above the mean are senders; those below are receivers.
+        #. Discard senders whose absolute occupancy is below 40%
+           (``distributed.worker.memory.rebalance.sender_min``). In other words, no data
+           is moved regardless of imbalancing as long as all workers are below 40%.
+        #. Discard receivers whose absolute occupancy is above 60%
+           (``distributed.worker.memory.rebalance.receiver_max``).
+           Note that this threshold by default is the same as
+           ``distributed.worker.memory.target`` to prevent workers from accepting data
+           and immediately spilling it out to disk.
+        #. Iteratively pick the sender and receiver that are farthest from the mean and
+           move the *least recently inserted* key between the two, until either all
+           senders or all receivers fall within 5% of the mean.
 
-        This orders the workers by what fraction of bytes of the existing keys
-        they have.  It walks down this list from most-to-least.  At each worker
-        it sends the largest results it can find and sends them to the least
-        occupied worker until either the sender or the recipient are at the
-        average expected load.
+           A receiver will be skipped if it already has a copy of the data. In other
+           words, this method does not degrade replication.
+           A key will be skipped if there are no receivers that have both enough memory
+           to accept and don't already hold a copy.
+
+        The least recently insertd (LRI) policy is a greedy choice with the advantage of
+        being O(1), trivial to implement (it relies on python dict insertion-sorting)
+        and hopefully good enough in most cases. Discarded alternative policies were:
+
+        - Largest first. O(n*log(n)) save for non-trivial additional data structures and
+          risks causing the largest chunks of data to repeatedly move around the
+          cluster like pinballs.
+        - Least recently utilized. This information is currently available on the
+          workers only and not trivial to replicate on the scheduler; transmitting it
+          over the network would be very expensive. Also, note that dask will go out of
+          its way to minimise the amount of time intermediate keys are held in memory,
+          so in such a case LRI is a close approximation of LRU.
+
+        Parameters
+        ----------
+        keys: optional
+            whitelist of dask keys that should be considered for moving. All other keys
+            will be ignored. Note that this offers no guarantee that a key will actually
+            be moved (e.g. because it is unnecessary or because there are no viable
+            receiver workers for it).
+        workers: optional
+            whitelist of workers addresses to be considered as senders or receivers. All
+            other workers will be ignored. The mean cluster occupancy will be calculated
+            only using the whitelisted workers.
         """
-        parent: SchedulerState = cast(SchedulerState, self)
+        with log_errors():
+            if workers is not None:
+                workers = [self._workers_dv[w] for w in workers]
+            else:
+                workers = self._workers_dv.values()
+
+            if keys is not None:
+                if not isinstance(keys, Set):
+                    keys = set(keys)  # unless already a set-like
+                tasks = [self._tasks[k] for k in keys]
+                missing_data = [ts._key for ts in tasks if not ts._who_has]
+                if missing_data:
+                    return {"status": "missing-data", "keys": missing_data}
+
+            msgs = self._rebalance_find_msgs(keys, workers)
+            if not msgs:
+                return {"status": "OK"}
+
+            async with self._lock:
+                return await self._rebalance_move_data(msgs)
+
+    def _rebalance_find_msgs(
+        self: SchedulerState,
+        keys: "Optional[Set[Hashable]]",
+        workers: "Iterable[WorkerState]",
+    ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
+        """Identify workers that need to lose keys and those that can receive them,
+        together with how many bytes each needs to lose/receive. Then, pair a sender
+        worker with a receiver worker for each key, until the cluster is rebalanced.
+
+        This method only defines the work to be performed; it does not start any network
+        transfers itself.
+
+        The big-O complexity is O(wt + ke*log(we)), where
+
+        - wt is the total number of workers on the cluster (or the number of whitelisted
+          workers, if explicitly stated by the user)
+        - we is the number of workers that are eligible to be senders or receivers
+        - kt is the total number of keys on the cluster (or on the whitelisted workers)
+        - ke is the number of keys that need to be moved in order to achieve a balanced
+          cluster
+
+        There is a degenerate edge case O(wt + kt*log(we)) when kt >> the number of
+        whitelisted keys, or when most keys are replicated or cannot be moved for some
+        other reason.
+
+        Returns list of tuples to feed into _rebalance_move_data:
+
+            - sender worker
+            - receiver worker
+            - task to be transferred
+        """
         ts: TaskState
         ws: WorkerState
 
-        with log_errors():
-            async with self._lock:
+        # Smallest-first heapsof workers that need to send/receive data, with how many
+        # bytes each needs to send/receive. Bytes are negative, so that the workers
+        # farthest from the cluster mean are at the top of the heaps.
+        # Heap elements:
+        # - maximum number of bytes to send or receive
+        # - number of bytes after which the worker should not be considered anymore
+        # - arbitrary unique number, there just to to make sure that WorkerState objects
+        #   are never used for sorting in the unlikely event that two processes have
+        #   exactly the same number of bytes allocated.
+        # - WorkerState
+        # - iterator of all tasks in memory on the worker (senders only)
+        senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = []
+        recipients: "list[tuple[int, int, int, WorkerState]]" = []
 
-                # Identify workers that need to lose keys and those that can receive
-                # them, together with how many bytes each needs to lose/receive.
-                # This operation is O(n) to the number of workers in the cluster.
-                if workers:
-                    workers = [parent._workers_dv[w] for w in workers]
-                else:
-                    workers = parent._workers_dv.values()
+        # Output: [(sender, recipient, task), ...]
+        msgs: "list[tuple[WorkerState, WorkerState, TaskState]]" = []
 
-                # optimistic memory = RSS - unmanaged memory that appeared over the last
-                # 30 seconds (distributed.worker.memory.recent_to_old_time).
-                # This lets us ignore temporary spikes caused by task heap usage.
-                memory_by_worker = [(ws, ws.memory.optimistic) for ws in workers]
-                mean_memory = sum(m for _, m in memory_by_worker) // len(
-                    memory_by_worker
+        # optimistic memory = RSS - unmanaged memory that appeared over the last 30
+        # seconds (distributed.worker.memory.recent_to_old_time).
+        # This lets us ignore temporary spikes caused by task heap usage.
+        memory_by_worker = [(ws, ws.memory.optimistic) for ws in workers]
+        mean_memory = sum(m for _, m in memory_by_worker) // len(memory_by_worker)
+
+        for ws, ws_memory in memory_by_worker:
+            if ws.memory_limit:
+                half_gap = int(MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
+                sender_min = MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
+                receiver_max = MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
+            else:
+                half_gap = 0
+                sender_min = 0.0
+                receiver_max = math.inf
+
+            if (
+                ws._has_what
+                and ws_memory >= mean_memory + half_gap
+                and ws_memory >= sender_min
+            ):
+                # This may send the worker below sender_min (by design)
+                nbytes = mean_memory - ws_memory  # negative
+                senders.append(
+                    (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
                 )
+            elif ws_memory < mean_memory - half_gap and ws_memory < receiver_max:
+                # This may send the worker above receiver_max (by design)
+                nbytes = ws_memory - mean_memory  # negative
+                recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
 
-                # Smallest-first heaps (managed by the heapq modules) of workers that
-                # need to send/receive data, with how many bytes each needs to
-                # send/receive. Bytes are negative, so that the workers farthest from
-                # the cluster mean are at the top of the heaps.
-                # Heap elements:
-                # - maximum number of bytes to send or receive
-                # - number of bytes after which the worker should not be considered
-                #   anymore
-                # - arbitrary unique number, there just to to make sure that WorkerState
-                #   objects are never used for sorting in the unlikely event that two
-                #   processes have exactly the same number of bytes allocated.
-                # - WorkerState
-                # - iterator of all tasks in memory on the worker (senders only)
-                senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = (
-                    []
-                )
-                recipients: "list[tuple[int, int, int, WorkerState]" = []
+        # Fast exit in case no transfers are necessary or possible
+        if not senders or not recipients:
+            self.log_event(
+                "all",
+                {
+                    "action": "rebalance",
+                    "senders": len(senders),
+                    "recipients": len(recipients),
+                    "moved_keys": 0,
+                },
+            )
+            return []
 
-                for ws, ws_memory in memory_by_worker:
-                    if ws.memory_limit:
-                        half_gap = int(MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
-                        sender_min = MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
-                        receiver_max = MEMORY_REBALANCE_RECEIVER_MAX * ws.memory_limit
-                    else:
-                        half_gap = 0
-                        sender_min = 0.0
-                        receiver_max = math.inf
+        heapq.heapify(senders)
+        heapq.heapify(recipients)
 
-                    if (
-                        ws._has_what
-                        and ws_memory >= mean_memory + half_gap
-                        and ws_memory >= sender_min
-                    ):
-                        # This may send the worker below sender_min (by design)
-                        nbytes = mean_memory - ws_memory  # negative
-                        senders.append(
-                            (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
-                        )
-                    elif (
-                        ws_memory < mean_memory - half_gap and ws_memory < receiver_max
-                    ):
-                        # This may send the worker above receiver_max (by design)
-                        nbytes = ws_memory - mean_memory  # negative
-                        recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
+        while senders and recipients:
+            snd_nbytes_max, snd_nbytes_min, _, snd_ws, ts_iter = senders[0]
 
-                # Fast exit in case no transfers are necessary or possible
-                if not senders or not recipients:
-                    self.log_event(
-                        "all",
-                        {
-                            "action": "rebalance",
-                            "senders": len(senders),
-                            "recipients": len(recipients),
-                            "moved_keys": 0,
-                        },
+            # Iterate through tasks in memory, least recently inserted first
+            for ts in ts_iter:
+                if keys is not None and ts.key not in keys:
+                    continue
+                nbytes = ts.nbytes
+                if nbytes + snd_nbytes_max > 0:
+                    # Moving this task would cause the sender to go below mean
+                    # and potentially risk becoming a receiver, which would
+                    # cause tasks to bounce around. Move on to the next task
+                    # of the same sender.
+                    continue
+
+                # Find the recipient, farthest from the mean, which
+                # 1. has enough available RAM for this task
+                # 2. don't hold a copy already
+                # There may not be any that satisfies these conditions; in this
+                # case this task won't be moved.
+                skipped_recipients = []
+                use_recipient = False
+                while recipients and not use_recipient:
+                    rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
+                    if nbytes + rec_nbytes_max > 0:
+                        break  # recipients are sorted by rec_nbytes_max
+                    use_recipient = ts.key not in rec_ws._tasks
+                    if not use_recipient:
+                        skipped_recipients.append(heapq.heappop(recipients))
+
+                for recipient in skipped_recipients:
+                    heapq.heappush(recipients, recipient)
+
+                if not use_recipient:
+                    # This task has no receivers available. Leave it on the
+                    # sender and move on to the next task of the same sender
+                    continue
+
+                # Stop iterating on the tasks of this sender for now and, if it
+                # still has bytes to lose, push it back into the senders heap.
+                # It may or may not come back on top again.
+                msgs.append((snd_ws, rec_ws, ts))
+                # nbytes_max/nbytes_min are all negative for heap sorting
+                snd_nbytes_max += nbytes
+                snd_nbytes_min += nbytes
+                rec_nbytes_max += nbytes
+                rec_nbytes_min += nbytes
+                if snd_nbytes_min < 0:
+                    heapq.heapreplace(
+                        senders,
+                        (snd_nbytes_max, snd_nbytes_min, id(snd_ws), snd_ws, ts_iter),
                     )
-                    return {"status": "OK"}
-
-                heapq.heapify(senders)
-                heapq.heapify(recipients)
-
-                if keys is not None and not isinstance(keys, Set):
-                    keys = set(keys)  # unless already a set-like
-
-                msgs = []  # (sender, recipient, key)
-
-                # A task from a sender should be omitted from rebalance if:
-                # - it is not in memory (nbytes=-1)
-                # - there are no recipients that have (1) enough available RAM and
-                #   (2) don't hold a copy already
-                while senders and recipients:
-                    snd_nbytes_max, snd_nbytes_min, _, snd_ws, ts_iter = senders[0]
-
-                    # Iterate through tasks in memory, least recently inserted first
-                    reinsert_sender = True
-                    for ts in ts_iter:
-                        if keys is not None and ts.key not in keys:
-                            continue
-                        if ts.nbytes + snd_nbytes_max > 0:
-                            # Moving this task would cause the sender to go below mean
-                            # and potentially risk becoming a receiver, which would
-                            # cause tasks to bounce around.
-                            continue
-                        # Find a receiver for this task
-                        rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
-                        if ts.nbytes + rec_nbytes_max > 0:
-                            # There are no receivers with enough available RAM to accept
-                            # this task without going above mean
-                            continue
-
-                        # TODO skip receiver if it already holds the task
-                        msgs.append((snd_ws, rec_ws, ts.key))
-
-                        snd_nbytes_max += ts.nbytes
-                        snd_nbytes_min += ts.nbytes
-                        rec_nbytes_max += ts.nbytes
-                        rec_nbytes_min += ts.nbytes
-
-                        break
-                    else:
-                        # worker has no more tasks to donate
-                        reinsert_sender = False
-
-                    if snd_nbytes_min >= 0:
-                        reinsert_sender = False
-
-                    # Move skipped tasks to the end of the insertion-sorted dict
-                    # ws._has_what
-                    if reinsert_sender:
-                        heapq.heapreplace(
-                            senders,
-                            (
-                                snd_nbytes_max,
-                                snd_nbytes_min,
-                                id(snd_ws),
-                                snd_ws,
-                                ts_iter,
-                            ),
-                        )
-                    else:
-                        heapq.heappop(senders)
-                # TODO TODO TODO
-
-                if keys:
-                    tasks = {parent._tasks[k] for k in keys}
-                    missing_data = [ts._key for ts in tasks if not ts._who_has]
-                    if missing_data:
-                        return {"status": "missing-data", "keys": missing_data}
-                else:
-                    tasks = set(parent._tasks.values())
-
-                if workers:
-                    workers = {parent._workers_dv[w] for w in workers}
-                    workers_by_task = {ts: ts._who_has & workers for ts in tasks}
-                else:
-                    workers = set(parent._workers_dv.values())
-                    workers_by_task = {ts: ts._who_has for ts in tasks}
-
-                ws: WorkerState
-                tasks_by_worker = {ws: set() for ws in workers}
-
-                for k, v in workers_by_task.items():
-                    for vv in v:
-                        tasks_by_worker[vv].add(k)
-
-                worker_bytes = {
-                    ws: sum(ts.get_nbytes() for ts in v)
-                    for ws, v in tasks_by_worker.items()
-                }
-
-                avg = sum(worker_bytes.values()) / len(worker_bytes)
-
-                sorted_workers = list(
-                    map(first, sorted(worker_bytes.items(), key=second, reverse=True))
-                )
-
-                recipients = reversed(sorted_workers)
-                recipient = next(recipients)
-                msgs = []  # (sender, recipient, key)
-                for sender in sorted_workers[: len(workers) // 2]:
-                    sender_keys = {
-                        ts: ts.get_nbytes() for ts in tasks_by_worker[sender]
-                    }
-                    sender_keys = iter(
-                        sorted(sender_keys.items(), key=second, reverse=True)
+                if rec_nbytes_min < 0:
+                    heapq.heapreplace(
+                        recipients,
+                        (rec_nbytes_max, rec_nbytes_min, id(rec_ws), rec_ws),
                     )
+                break
+            else:
+                # Exhausted tasks on this sender
+                heapq.heappop(senders)
+        return msgs
 
-                    try:
-                        while avg < worker_bytes[sender]:
-                            while worker_bytes[recipient] < avg < worker_bytes[sender]:
-                                ts, nb = next(sender_keys)
-                                if ts not in tasks_by_worker[recipient]:
-                                    tasks_by_worker[recipient].add(ts)
-                                    # tasks_by_worker[sender].remove(ts)
-                                    msgs.append((sender, recipient, ts))
-                                    worker_bytes[sender] -= nb
-                                    worker_bytes[recipient] += nb
-                            if avg < worker_bytes[sender]:
-                                recipient = next(recipients)
-                    except StopIteration:
-                        break
+    async def _rebalance_move_data(
+        self, msgs: "list[tuple[WorkerState, WorkerState, TaskState]]"
+    ) -> dict:
+        """Perform the actual transfer of data across the network in rebalance().
+        Takes in input the output of _rebalance_find_msgs().
 
-                to_recipients = defaultdict(lambda: defaultdict(list))
-                to_senders = defaultdict(list)
-                for sender, recipient, ts in msgs:
-                    to_recipients[recipient.address][ts._key].append(sender.address)
-                    to_senders[sender.address].append(ts._key)
+        FIXME this method is not robust when the cluster is not idle
+        """
+        ts: TaskState
+        ws: WorkerState
 
-                result = await asyncio.gather(
-                    *(
-                        retry_operation(self.rpc(addr=r).gather, who_has=v)
-                        for r, v in to_recipients.items()
+        to_recipients = defaultdict(lambda: defaultdict(list))
+        to_senders = defaultdict(list)
+        for sender, recipient, ts in msgs:
+            to_recipients[recipient.address][ts._key].append(sender.address)
+            to_senders[sender.address].append(ts._key)
+
+        result = await asyncio.gather(
+            *(
+                retry_operation(self.rpc(addr=r).gather, who_has=v)
+                for r, v in to_recipients.items()
+            )
+        )
+        for r, v in to_recipients.items():
+            self.log_event(r, {"action": "rebalance", "who_has": v})
+
+        self.log_event(
+            "all",
+            {
+                "action": "rebalance",
+                "senders": valmap(len, to_senders),
+                "recipients": valmap(len, to_recipients),
+                "moved_keys": len(msgs),
+            },
+        )
+
+        if any(r["status"] != "OK" for r in result):
+            return {
+                "status": "missing-data",
+                "keys": list(
+                    concat(
+                        r["keys"].keys()
+                        for r in result
+                        if r["status"] == "missing-data"
                     )
+                ),
+            }
+
+        for sender, recipient, ts in msgs:
+            assert ts._state == "memory"
+            ts._who_has.add(recipient)
+            recipient._has_what[ts] = None
+            recipient.nbytes += ts.get_nbytes()
+            self.log.append(
+                (
+                    "rebalance",
+                    ts._key,
+                    time(),
+                    sender.address,
+                    recipient.address,
                 )
-                for r, v in to_recipients.items():
-                    self.log_event(r, {"action": "rebalance", "who_has": v})
+            )
 
-                self.log_event(
-                    "all",
-                    {
-                        "action": "rebalance",
-                        "total-keys": len(tasks),
-                        "senders": valmap(len, to_senders),
-                        "recipients": valmap(len, to_recipients),
-                        "moved_keys": len(msgs),
-                    },
-                )
-
-                if any(r["status"] != "OK" for r in result):
-                    return {
-                        "status": "missing-data",
-                        "keys": tuple(
-                            concat(
-                                r["keys"].keys()
-                                for r in result
-                                if r["status"] == "missing-data"
-                            )
-                        ),
-                    }
-
-                for sender, recipient, ts in msgs:
-                    assert ts._state == "memory"
-                    ts._who_has.add(recipient)
-                    recipient._has_what[ts] = None
-                    recipient.nbytes += ts.get_nbytes()
-                    self.log.append(
-                        (
-                            "rebalance",
-                            ts._key,
-                            time(),
-                            sender.address,
-                            recipient.address,
-                        )
-                    )
-
-                await asyncio.gather(
-                    *(self._delete_worker_data(r, v) for r, v in to_senders.items())
-                )
-
-                return {"status": "OK"}
+        await asyncio.gather(
+            *(self._delete_worker_data(r, v) for r, v in to_senders.items())
+        )
+        return {"status": "OK"}
 
     async def replicate(
         self,
