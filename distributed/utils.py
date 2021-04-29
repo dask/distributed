@@ -1261,7 +1261,7 @@ def color_of(x, palette=palette):
 
 @functools.lru_cache(None)
 def iscoroutinefunction(f):
-    return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
 
 @contextmanager
