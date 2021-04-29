@@ -1546,7 +1546,7 @@ def clean_dashboard_address(addr, default_listen_ip=""):
 
 
 @functools.lru_cache(maxsize=256)
-def _format_filename(filename):
+def _clean_filename(filename):
     """Cleans filename from sensitive information"""
 
     if filename.startswith(sys.exec_prefix):
