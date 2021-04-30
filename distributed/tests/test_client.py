@@ -5274,11 +5274,6 @@ async def test_profile_keys(c, s, a, b):
 async def test_cleaned_filenames_in_profile(c, s, a, b):
     # do some work with the client
     x = await c.submit(sleep, 1)
-
-    # When doing something like this, the sys.exec_prefix is not
-    # in filename, probably need to handle this case differently
-    # y = await c.submit(slowdec, 2, delay=2)
-
     profile = await c.profile()
 
     # check that profile is non-empty profile
@@ -5288,17 +5283,7 @@ async def test_cleaned_filenames_in_profile(c, s, a, b):
     children_vals = list(children.values())[0]
     assert sys.exec_prefix not in children_vals["description"]["filename"]
     assert os.path.expanduser("~") not in children_vals["description"]["filename"]
-    assert "lib/python" not in children_vals["description"]["filename"]
     assert "site-packages" not in children_vals["description"]["filename"]
-
-    # print('THE OUTPUT OF profile is:')
-    # from pprint import pprint
-    # pprint(profile)
-
-    # print('Some useful outputs:\n')
-    # print('sys.executable:', sys.executable)
-    # print('sys.exec_prefix:', sys.exec_prefix)
-    # #print('sys.platlibdir:', sys.platlibdir) #starts working on py3.9
 
 
 @gen_cluster(client=True)
