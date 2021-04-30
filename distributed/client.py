@@ -51,7 +51,7 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -4016,6 +4016,7 @@ class Client:
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+            If plugin has no name attribute a random name is used.
         **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
@@ -4052,11 +4053,65 @@ class Client:
         See Also
         --------
         distributed.WorkerPlugin
+        unregister_worker_plugin
         """
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
 
+        if name is None:
+            name = _get_worker_plugin_name(plugin)
+
+        assert name
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+
+    async def _unregister_worker_plugin(self, name):
+        responses = await self.scheduler.unregister_worker_plugin(name=name)
+
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                tb = response["traceback"]
+                raise exc.with_traceback(tb)
+        return responses
+
+    def unregister_worker_plugin(self, name):
+        """Unregisters a lifecycle worker plugin
+
+        This unregisters an existing worker plugin. As part of the unregistration process
+        the plugin's ``teardown`` method will be called.
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to unregister. See the :meth:`Client.register_worker_plugin`
+            docstring for more information.
+
+        Examples
+        --------
+        >>> class MyPlugin(WorkerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     def setup(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...         pass
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...         pass
+        ...     def release_dep(self, dep: str, state: str, report: bool):
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_worker_plugin(plugin, name='foo')
+        >>> client.unregister_worker_plugin(name='foo')
+
+        See Also
+        --------
+        register_worker_plugin
+        """
+        return self.sync(self._unregister_worker_plugin, name=name)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
