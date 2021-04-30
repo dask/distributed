@@ -599,6 +599,7 @@ def cluster(
     disconnect_timeout=20,
     scheduler_kwargs={},
     config={},
+    allow_dead_workers=False,
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -676,6 +677,11 @@ def cluster(
                 {"address": w["address"], "proc": weakref.ref(w["proc"])}
                 for w in workers
             ]
+            if not allow_dead_workers:
+                for w in workers:
+                    proc = w["proc"]
+                    if proc.exitcode or not proc.is_alive():
+                        raise AssertionError(f"Dead worker detected {w}")
         finally:
             logger.debug("Closing out test cluster")
 
@@ -849,6 +855,7 @@ def gen_cluster(
     active_rpc_timeout=1,
     config={},
     clean_kwargs={},
+    allow_dead_workers=False,
     allow_unclosed=False,
 ):
     from distributed import Client
@@ -923,7 +930,15 @@ def gen_cluster(
                             result = await future
                             if s.validate:
                                 s.validate_state()
+
+                            if not allow_dead_workers:
+                                for w in workers:
+                                    if w.status != Status.running:
+                                        raise AssertionError(
+                                            f"Dead worker detected {w}"
+                                        )
                         finally:
+
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == Status.closed)
                             await end_cluster(s, workers)

@@ -722,7 +722,7 @@ async def test_scheduler_sees_memory_limits(s):
     await w.close()
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True, allow_dead_workers=True, timeout=1000)
 async def test_retire_workers(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     [y] = await c.scatter([list(range(1000))], workers=b.address)
@@ -742,7 +742,7 @@ async def test_retire_workers(c, s, a, b):
     assert not workers
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_retire_workers_n(c, s, a, b):
     await s.retire_workers(n=1, close_workers=True)
     assert len(s.workers) == 1
@@ -811,7 +811,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
     assert set(s.workers_to_close(key=key)) == {workers[0].address, workers[1].address}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     future = c.submit(
         slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True
@@ -1146,7 +1146,7 @@ async def test_close_nanny(c, s, a, b):
         assert time() < start + 10
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_retire_workers_close(c, s, a, b):
     await s.retire_workers(close_workers=True)
     assert not s.workers

@@ -173,7 +173,7 @@ async def test_worker_client_executor(c, s, a, b):
     assert result == 30 * 29
 
 
-@gen_tls_cluster(client=True, Worker=Nanny)
+@gen_tls_cluster(client=True, Worker=Nanny, allow_dead_workers=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.worker_address, b.worker_address}
     await c.retire_workers(workers=[a.worker_address], close_workers=True)

@@ -1,7 +1,7 @@
 import asyncio
 import socket
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, suppress
 from time import sleep
 
 import pytest
@@ -230,3 +230,48 @@ def test_tls_cluster(tls_client):
 async def test_tls_scheduler(security, cleanup):
     async with Scheduler(security=security, host="localhost") as s:
         assert s.address.startswith("tls")
+
+
+@pytest.mark.xfail(reason="gen cluster should raise here", strict=True)
+@gen_cluster(allow_dead_workers=False)
+async def test_gen_cluster_allow_dead_workers_false(s, a, b):
+    await a.close()
+
+
+@gen_cluster(allow_dead_workers=True)
+async def test_gen_cluster_allow_dead_workers_true(s, a, b):
+    await a.close()
+
+
+@pytest.mark.parametrize("allow_dead", [True, False])
+def test_cluster_allow_dead_worker_terminate(allow_dead):
+    if allow_dead:
+        ctx = nullcontext()
+    else:
+        ctx = pytest.raises(AssertionError, match="Dead worker detected")
+    with ctx:
+        with cluster(allow_dead_workers=allow_dead) as (scheduler_dct, worker_dcts):
+            proc = worker_dcts[0]["proc"]()
+            proc.terminate()
+            while proc.is_alive():
+                sleep(0.05)
+
+
+@pytest.mark.parametrize("allow_dead", [True, False])
+def test_cluster_allow_dead_worker_close(allow_dead):
+    if allow_dead:
+        ctx = nullcontext()
+    else:
+        ctx = pytest.raises(AssertionError, match="Dead worker detected")
+    with ctx:
+        with cluster(allow_dead_workers=allow_dead) as (scheduler_dct, worker_dcts):
+            with Client(scheduler_dct["address"]) as client:
+
+                async def _close_worker(dask_worker):
+                    await dask_worker.close()
+
+                with suppress(OSError):
+                    client.run(_close_worker, workers=[worker_dcts[0]["address"]])
+
+                while worker_dcts[0]["proc"]().is_alive():
+                    sleep(0.05)

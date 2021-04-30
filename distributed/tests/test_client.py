@@ -696,8 +696,6 @@ async def test_gather_errors(c, s, a, b):
     with pytest.raises(AttributeError):
         await c.gather(future_g)
 
-    await a.close()
-
 
 @gen_cluster(client=True)
 async def test_wait(c, s, a, b):
@@ -2979,7 +2977,7 @@ async def test_rebalance_raises_missing_data(c, s, a, b):
         await c.rebalance(keys)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])
     await x
@@ -3400,7 +3398,7 @@ def assert_dict_key_equal(expected, actual):
         assert list(ev) == list(av)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, allow_dead_workers=True)
 async def test_get_foo_lost_keys(c, s, u, v, w):
     x = c.submit(inc, 1, workers=[u.address])
     y = await c.scatter(3, workers=[v.address])
@@ -3495,7 +3493,7 @@ def test_get_returns_early(c):
 
 
 @pytest.mark.slow
-@gen_cluster(Worker=Nanny, client=True)
+@gen_cluster(Worker=Nanny, client=True, allow_dead_workers=True)
 async def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
@@ -3513,7 +3511,7 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
     assert key not in c.refcount
 
 
-@gen_cluster(Worker=Nanny, client=True)
+@gen_cluster(Worker=Nanny, client=True, allow_dead_workers=True)
 async def test_restart_timeout_is_logged(c, s, a, b):
     with captured_logger(logging.getLogger("distributed.client")) as logger:
         await c.restart(timeout="0.5s")
@@ -3865,7 +3863,7 @@ def test_threaded_get_within_distributed(c):
         assert future.result() == 1
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_lose_scattered_data(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
@@ -3876,7 +3874,7 @@ async def test_lose_scattered_data(c, s, a, b):
     assert x.key not in s.tasks
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, allow_dead_workers=True)
 async def test_partially_lose_scattered_data(e, s, a, b, c):
     x = await e.scatter(1, workers=a.address)
     await e.replicate(x, n=2)
@@ -3888,7 +3886,7 @@ async def test_partially_lose_scattered_data(e, s, a, b, c):
     assert s.get_task_status(keys=[x.key]) == {x.key: "memory"}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_scatter_compute_lose(c, s, a, b):
     [x] = await c.scatter([[1, 2, 3, 4]], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
@@ -3906,7 +3904,7 @@ async def test_scatter_compute_lose(c, s, a, b):
     assert z.status == "cancelled"
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_scatter_compute_store_lose(c, s, a, b):
     """
     Create irreplaceable data on one machine,
@@ -3953,7 +3951,7 @@ async def test_scatter_compute_store_lose(c, s, a, b):
         assert time() < start + 2
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_scatter_compute_store_lose_processing(c, s, a, b):
     """
     Create irreplaceable data on one machine,
@@ -4232,7 +4230,7 @@ async def test_scatter_type(c, s, a, b):
     assert d["x"].type == float
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_retire_workers_2(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
@@ -4244,7 +4242,7 @@ async def test_retire_workers_2(c, s, a, b):
     assert a.address not in s.workers
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, allow_dead_workers=True)
 async def test_retire_many_workers(c, s, *workers):
     futures = await c.scatter(list(range(100)))
 
@@ -4703,7 +4701,7 @@ def test_recreate_error_not_error(c):
         c.recreate_error_locally(f)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
     await c.retire_workers(workers=[a.address], close_workers=True)
