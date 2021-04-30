@@ -1547,23 +1547,22 @@ def clean_dashboard_address(addr, default_listen_ip=""):
 
 @functools.lru_cache(maxsize=256)
 def _clean_filename(filename):
-    """Cleans filename from sensitive information"""
+    """Removes potentially sensitive information from a Python module file path"""
 
     if filename.startswith(sys.exec_prefix):
         filename = filename.replace(sys.exec_prefix, "...")
+        if "site-packages" not in filename:
+            # Python standard library module
+            return filename
+        else:
+            lib = r"lib[0-9]*"
+            res_search = re.compile(lib).search(filename)
+            filename = filename.replace(res_search.group(0), "")
+
+            return filename.replace(
+                f"{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
+                "",
+            )
+
     elif filename.startswith(os.path.expanduser("~")):
-        filename = filename.replace(os.path.expanduser("~"), "")
-        filename = ".../" + "/".join(filename.split("/")[-3:])
-    else:
-        filename = ".../" + "/".join(filename.split("/")[-3:])
-
-    path_remove = r"lib/python[.0-9]*/"
-    temp = re.compile(path_remove)
-    res_search = temp.search(filename)
-
-    if res_search:
-        filename = filename.replace(res_search.group(0), "")
-
-    filename = filename.replace("site-packages/", "")
-
-    return filename
+        return filename.replace(os.path.expanduser("~"), "...")
