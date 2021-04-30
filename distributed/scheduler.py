@@ -3458,7 +3458,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         self.event_counts = defaultdict(int)
-        self.worker_plugins = []
+        self.worker_plugins = dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3525,6 +3525,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
+            "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -6308,11 +6309,21 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
-        self.worker_plugins.append({"plugin": plugin, "name": name})
+        self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
         )
+        return responses
+
+    async def unregister_worker_plugin(self, comm, name):
+        """ Unregisters a worker plugin"""
+        try:
+            worker_plugins = self.worker_plugins.pop(name)
+        except KeyError:
+            raise ValueError(f"The worker plugin {name} does not exists")
+
+        responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):
