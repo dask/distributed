@@ -466,7 +466,9 @@ def _scrub_ucx_config():
     # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config
+    from ucp import get_config, get_ucx_version
+
+    ucx_110 = get_ucx_version() >= (1, 10, 0)
 
     options = {}
 
@@ -481,11 +483,11 @@ def _scrub_ucx_config():
         ]
     ):
         if dask.config.get("ucx.rdmacm"):
-            tls = "tcp"
+            tls = "tcp" if ucx_110 else "tcp,rdmacm"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp"
-            tls_priority = "tcp"
+            tls = "tcp" if ucx_110 else "tcp,sockcm"
+            tls_priority = "tcp" if ucx_110 else "sockcm"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
