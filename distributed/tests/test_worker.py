@@ -54,14 +54,7 @@ from distributed.utils_test import (  # noqa: F401
     s,
     slowinc,
 )
-from distributed.worker import (
-    TaskState,
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-    weight,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
 
 
 @pytest.mark.asyncio
@@ -1802,28 +1795,29 @@ async def test_story_with_deps(c, s, a, b):
     Assert that the structure of the story does not change unintentionally and
     expected subfields are actually filled
     """
-    future = c.map(inc, range(10))
-    res = c.submit(sum, future)
+    futures = c.map(inc, range(10), workers=[a.address])
+    res = c.submit(sum, futures, workers=[b.address])
     await res
+    key = res.key
 
-    for w in [a, b]:
-        try:
-            ts = w.tasks[res.key]
-        except KeyError:
-            continue
-        story = w.story(ts)
-        for msg in story:
-            # There are multiple types of messages
-            # Transition
-            if isinstance(msg[-1], str):
-                assert msg[0] == ts.key
-            # events, e.g. gather-deps
-            elif msg[0] == "gather-dependencies":
-                assert msg[1] == ts.key
-                dependencies = msg[2]
-                assert isinstance(dependencies, set)
-                assert dependencies
-                assert all(isinstance(dep, TaskState) for dep in dependencies)
+    story = a.story(key)
+    assert story == []
+    story = b.story(key)
+
+    expected_story = [
+        (key, "new"),
+        (key, "new", "waiting"),
+        (
+            "gather-dependencies",
+            key,
+            {fut.key for fut in futures},
+        ),
+        (key, "waiting", "ready"),
+        (key, "ready", "executing"),
+        (key, "put-in-memory"),
+        (key, "executing", "memory"),
+    ]
+    assert story == expected_story
 
 
 def test_weight_deprecated():
