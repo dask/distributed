@@ -170,6 +170,9 @@ MEMORY_RECENT_TO_OLD_TIME = declare(
     double,
     parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
 )
+MEMORY_REBALANCE_MEASURE = declare(
+    str, dask.config.get("distributed.worker.memory.rebalance.measure")
+)
 MEMORY_REBALANCE_SENDER_MIN = declare(
     double,
     dask.config.get("distributed.worker.memory.rebalance.sender_min"),
@@ -5634,7 +5637,9 @@ class Scheduler(SchedulerState, ServerNode):
         # optimistic memory = RSS - unmanaged memory that appeared over the last 30
         # seconds (distributed.worker.memory.recent_to_old_time).
         # This lets us ignore temporary spikes caused by task heap usage.
-        memory_by_worker = [(ws, ws.memory.optimistic) for ws in workers]
+        memory_by_worker = [
+            (ws, getattr(ws.memory, MEMORY_REBALANCE_MEASURE)) for ws in workers
+        ]
         mean_memory = sum(m for _, m in memory_by_worker) // len(memory_by_worker)
 
         for ws, ws_memory in memory_by_worker:

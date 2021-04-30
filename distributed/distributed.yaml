@@ -91,9 +91,24 @@ distributed:
       recent_to_old_time: 30s
 
       rebalance:
+        # Memory measure to rebalance upon. Possible choices are:
+        # process
+        #     Total process memory, as measured by the OS.
+        # optimistic
+        #     Managed by dask (instantaneous) + unmanaged (without any increases
+        #     happened in the last <distributed.worker.memory.recent_to_old_time>).
+        #     Recommended for use on CPython with large (2MiB+) numpy-based data chunks.
+        # managed_in_memory
+        #     Only consider the data allocated by dask in RAM. Recommended if RAM is not
+        #     released in a timely fashion back to the OS after the Python objects are
+        #     dereferenced, but remains available for reuse by PyMalloc.
+        # managed
+        #     Only consider data allocated by dask, including that spilled to disk.
+        #     Recommended if disk occupation of the spill file is an issue.
+        measure: optimistic
         # Fraction of worker process memory at which we start potentially sending
         # data to other workers. Ignored when max_memory is not set.
-        sender_min: 0.40
+        sender_min: 0.30
         # Fraction of worker process memory at which we stop potentially accepting
         # data from other workers. Ignored when max_memory is not set.
         recipient_max: 0.60

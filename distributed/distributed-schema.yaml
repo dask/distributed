@@ -409,6 +409,15 @@ properties:
                 description: >-
                   Settings for data rebalance operations
                 properties:
+                  measure:
+                    enum:
+                      - process
+                      - optimistic
+                      - managed
+                      - managed_in_memory
+                    description: >-
+                      Which of the properties of distributed.scheduler.MemoryState
+                      should be used for measuring worker memory usage
                   sender_min:
                     type: number
                     minimum: 0
