@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import threading
+import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
@@ -514,6 +515,24 @@ class Worker(ServerNode):
             validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
 
+        self._transition_exit = {
+            StateID.memory: self._transition_exit_memory,
+            StateID.waiting: self._transition_noop,
+            StateID.new: self._transition_exit_new,
+            StateID.fetch: self._transition_exit_fetch,
+            StateID.flight: self._transition_exit_flight,
+            StateID.released: self._transition_noop,
+            StateID.ready: self._transition_noop,
+        }
+        self._transition_enter = {
+            StateID.memory: self._transition_enter_memory,
+            StateID.waiting: self._transition_enter_waiting,
+            StateID.fetch: self._transition_enter_fetch,
+            StateID.flight: self._transition_enter_flight,
+            StateID.released: self._transition_enter_released,
+            StateID.ready: self._transition_enter_ready,
+        }
+
         self._transition_table = {
             (None, StateID.error): self.transition_error_catchall,
             (None, StateID.released): self.transition_memory_released,
@@ -528,7 +547,7 @@ class Worker(ServerNode):
             (StateID.new, StateID.waiting): self.transition_new_waiting,
             (StateID.waiting, StateID.ready): self.transition_waiting_ready,
             (StateID.ready, StateID.executing): self.transition_ready_executing,
-            (StateID.executing, StateID.memory): self.transition_executing_done,
+            (StateID.executing, StateID.memory): self.transition_executing_memory,
             (StateID.new, StateID.fetch): self.transition_new_fetch,
             (StateID.fetch, StateID.flight): self.transition_fetch_flight,
             (StateID.flight, StateID.memory): self.transition_flight_memory,
@@ -1497,6 +1516,7 @@ class Worker(ServerNode):
 
         for key, value in data.items():
             ts = self._create_task_state(key)
+            ts.instructed_compute = False
             self.log.append((ts.key, None, ts.state.name, {}, transaction_id))
             recs, msgs = self.transition(
                 ts.key, StateID.memory, value=value, transaction_id=transaction_id
@@ -1505,10 +1525,10 @@ class Worker(ServerNode):
             messages.extend(msgs)
             self.log.append((key, "receive-from-scatter", transaction_id))
 
+        # TODO: This is strictly speaking the way transitions currently work.
+        # There is currently no way to batch/optimize the messages further
         if report:
-            messages.append({"op": "add-keys", "keys": list(data)})
-
-        self.send_scheduler_msgs(messages)
+            self.send_scheduler_msgs(messages)
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
@@ -1664,7 +1684,7 @@ class Worker(ServerNode):
             ts = self.tasks[key]
         else:
             ts = TaskState(key)
-
+        ts.instructed_compute = True
         ts.runspec = SerializedTask(function, args, kwargs, task)
         ts.priority = priority
         ts.duration = duration
@@ -1708,14 +1728,52 @@ class Worker(ServerNode):
 
     def transition_new_memory(self, key, value):
         """This should only be relevant for scatter"""
-        self.data[key] = value
-        return self._transition_enter_memory(key)
+        self._transition_exit_new(key)
+        return self._transition_enter_memory(key, value)
 
     def transition_ready_released(self, key):
         recs_b, msgs_b = self._transition_enter_released(key)
         recommendations = {}
         recommendations.update(recs_b)
         return recs_b, msgs_b
+
+    def _transition_exit_new(self, key):
+
+        # START - EXIT NEW/RELEASED
+        ts = self.tasks[key]
+        ts.keys_waiting = ts.dependents.copy()
+        ts.exception = None
+        ts.traceback = None
+        ts.start_time = None
+        ts.stop_time = None
+        ts.waiting_for_data.clear()  # TODO: IS this necessary?
+        # END - EXIT NEW/RELEASED
+        return {}, []
+
+    def _transition_enter_waiting(self, key):
+        recommendations, messages = {}, []
+        ts = self.tasks[key]
+        ts.state = StateID.waiting
+        if ts.dependencies:
+            for dependency in ts.dependencies:
+                if dependency.state == StateID.memory:
+                    continue
+                ts.waiting_for_data.add(dependency)
+                if (
+                    not dependency.instructed_compute
+                    and dependency.state not in FETCH_STATES
+                ):
+                    recommendations[dependency.key] = StateID.fetch
+                elif (
+                    dependency.instructed_compute
+                    and dependency.state not in COMPUTE_STATES
+                ):
+                    # TODO: Is the worker allowed to make such a decision?
+                    recommendations[dependency.key] = StateID.waiting
+
+        if not ts.waiting_for_data:
+            recommendations[ts.key] = StateID.ready
+        return recommendations, messages
 
     def transition_released_waiting(self, key):
         # FIXME: Is this really the same as new_waiting?
@@ -1725,40 +1783,13 @@ class Worker(ServerNode):
         # enter/exit function instead of full transition functions. That would
         # reduce complexity significantly. For some this is true.
 
-        # START - EXIT NEW/RELEASED
-        ts = self.tasks[key]
-        ts.state = StateID.waiting
-        ts.instructed_compute = True
-        ts.keys_waiting = ts.dependents.copy()
-        ts.exception = None
-        ts.traceback = None
-        ts.start_time = None
-        ts.stop_time = None
-        ts.waiting_for_data.clear()  # TODO: IS this necessary?
-        # END - EXIT NEW/RELEASED
-
-        # START - ENTER WAITING
+        recs_a, msgs_a = self._transition_exit_new(key)
+        recs_b, msgs_b = self._transition_enter_waiting(key)
         recommendations = {}
-
-        for dependency in ts.dependencies:
-            if dependency.state == StateID.memory:
-                continue
-            ts.waiting_for_data.add(dependency)
-            if (
-                not dependency.instructed_compute
-                and dependency.state not in FETCH_STATES
-            ):
-                recommendations[dependency.key] = StateID.fetch
-            elif (
-                dependency.instructed_compute and dependency.state not in COMPUTE_STATES
-            ):
-                # TODO: Is the worker allowed to make such a decision?
-                recommendations[dependency.key] = StateID.waiting
-
-        if not ts.waiting_for_data:
-            recommendations[ts.key] = StateID.ready
-        # END - ENTER WAITING
-        return recommendations, []
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
 
     def transition(self, key: str, finish: StateID, transaction_id=None, **kwargs):
         """
@@ -1909,40 +1940,13 @@ class Worker(ServerNode):
 
     def transition_new_waiting(self, key: str, **kwargs):
         try:
-            ts = self.tasks[key]
-            ts.state = StateID.waiting
-            ts.instructed_compute = True
-            ts.keys_waiting = set(ts.dependents)
-            ts.exception = None
-            ts.traceback = None
-            ts.start_time = None
-            ts.stop_time = None
-
-            ts.waiting_for_data.clear()
-
+            recs_a, msgs_a = self._transition_exit_new(key)
+            recs_b, msgs_b = self._transition_enter_waiting(key)
             recommendations = {}
-
-            if ts.dependencies:
-                for dependency in ts.dependencies:
-                    if dependency.state == StateID.memory:
-                        continue
-                    ts.waiting_for_data.add(dependency)
-                    if (
-                        not dependency.instructed_compute
-                        and dependency.state not in FETCH_STATES
-                    ):
-                        recommendations[dependency.key] = StateID.fetch
-                    elif (
-                        dependency.instructed_compute
-                        and dependency.state not in COMPUTE_STATES
-                    ):
-                        # TODO: Is the worker allowed to make such a decision?
-                        recommendations[dependency.key] = StateID.waiting
-
-            if not ts.waiting_for_data:
-                recommendations[ts.key] = StateID.ready
-
-            return recommendations, []
+            recommendations.update(recs_a)
+            recommendations.update(recs_b)
+            messages = msgs_a + msgs_b
+            return recommendations, messages
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1957,54 +1961,74 @@ class Worker(ServerNode):
 
     def _transition_executing_exit(self, key):
         self.executing_count -= 1
+        ts = self.tasks[key]
+        if ts.resource_restrictions is not None:
+            for resource, quantity in ts.resource_restrictions.items():
+                self.available_resources[resource] += quantity
         return {}, []
 
+    def _transition_enter_fetch(self, key):
+        ts = self.tasks[key]
+        if not ts.dependents:
+            logger.critical("Trying to fetch a task %s without dependents", ts)
+            return {key: StateID.released}, []
+
+        for dep in ts.dependents:
+            self.data_needed.append(dep.key)
+        ts.state = StateID.fetch
+        return {}, []
+
+    def _transition_exit_fetch(self, key):
+        recommendations, messages = {}, []
+        return recommendations, messages
+
     def transition_new_fetch(self, key):
-        try:
-            ts = self.tasks[key]
-            if not ts.dependents:
-                logger.critical("Trying to fetch a task %s without dependents", ts)
-                return {key: StateID.released}, []
-            # TODO: Probably not correct in case of resheduling of partial
-            # results? Should we even track the data needed or rather the "needs
-            # fetching"? There is the optimization about fetching groups of
-            # tasks first belonging to the same computation but is there a more
-            # robust way?
-            for dep in ts.dependents:
-                self.data_needed.append(dep.key)
-            ts.state = StateID.fetch
-            if self.validate:
-                assert not ts.instructed_compute
 
-            return {}, []
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
+        recs_a, msgs_a = self._transition_exit_new(key)
+        recs_b, msgs_b = self._transition_enter_fetch(key)
+        recommendations = {}
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
 
-                pdb.set_trace()
-            raise
+    def _transition_enter_flight(self, key, worker):
+        recommendations, messages = {}, []
+        ts = self.tasks[key]
+        ts.coming_from = worker
+        self.in_flight_tasks += 1
+        ts.state = StateID.flight
+        return recommendations, messages
 
     def transition_fetch_flight(self, key, worker):
-        try:
-            ts = self.tasks[key]
-            if self.validate:
-                assert ts.state == StateID.fetch, ts
-                assert ts.dependents, ts
+        recs_a, msgs_a = self._transition_exit_fetch(key)
+        recs_b, msgs_b = self._transition_enter_flight(key, worker)
+        recommendations = {}
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
 
-            ts.coming_from = worker
-            self.in_flight_tasks += 1
-            ts.state = StateID.flight
-            return {}, []
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
+    def _transition_exit_flight(self, key):
+        recommendations, messages = {}, []
+        ts = self.tasks[key]
+        self.in_flight_tasks -= 1
+        ts.coming_from = None
+        if not ts.who_has:
+            if ts.key not in self._missing_dep_flight:
+                self._missing_dep_flight.add(ts.key)
+                self.loop.add_callback(self.handle_missing_dep, ts)
+        return recommendations, messages
 
     def transition_flight_fetch(self, key):
+
+        recs_a, msgs_a = self._transition_exit_flight(key)
+        recs_b, msgs_b = self._transition_enter_fetch(key)
+        recommendations = {}
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
         try:
             ts = self.tasks[key]
             if self.validate:
@@ -2033,7 +2057,14 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_flight_memory(self, key, value=None):
+    def transition_flight_memory(self, key, value):
+        recs_a, msgs_a = self._transition_exit_flight(key)
+        recs_b, msgs_b = self._transition_enter_memory(key, value)
+        recommendations = {}
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
         try:
             recommendations = {}
             ts = self.tasks[key]
@@ -2056,6 +2087,20 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
             raise
+
+    def _transition_noop(self, key):
+        return {}, []
+
+    def _transition_enter_ready(self, key):
+        ts = self.tasks[key]
+        if ts.resource_restrictions is not None:
+            self.constrained.append(ts.key)
+            ts.state = StateID.constrained
+            logger.critical("Used the ready transition for constrained task")
+        else:
+            ts.state = StateID.ready
+            heapq.heappush(self.ready, (ts.priority, ts.key))
+        return {}, []
 
     def transition_waiting_ready(self, key):
         try:
@@ -2135,7 +2180,16 @@ class Worker(ServerNode):
             assert all(v >= 0 for v in self.available_resources.values())
         return recs, msgs
 
-    def transition_executing_done(self, key, value=no_value, report=True):
+    def transition_executing_memory(self, key, value):
+        recs_a, msgs_a = self._transition_executing_exit(key)
+        recs_b, msgs_b = self._transition_enter_memory(key, value)
+        recommendations = {}
+        recommendations.update(recs_a)
+        recommendations.update(recs_b)
+        messages = msgs_a + msgs_b
+        return recommendations, messages
+
+    def transition_executing_done(self, key, value, report=True):
         try:
             recommendations = {}
             messages = []
@@ -2155,25 +2209,21 @@ class Worker(ServerNode):
             elif ts.state == StateID.long_running:
                 self.long_running.remove(ts.key)
 
-            if value is not no_value:
-                try:
-                    self.put_key_in_memory(ts, value)
-                    ts.state = StateID.memory
-                except Exception as e:
-                    logger.info("Failed to put key in memory", exc_info=True)
-                    recs, msgs = self.transition(
-                        key, StateID.error, error_message=error_message(e)
-                    )
-                    recommendations.update(recs)
-                    messages.extend(msgs)
-                    return recommendations, messages
-
-                recs, msgs = self._transition_enter_memory(key)
+            try:
+                self.put_key_in_memory(ts, value)
+                ts.state = StateID.memory
+            except Exception as e:
+                logger.info("Failed to put key in memory", exc_info=True)
+                recs, msgs = self.transition(
+                    key, StateID.error, error_message=error_message(e)
+                )
                 recommendations.update(recs)
                 messages.extend(msgs)
+                return recommendations, messages
 
-            else:
-                raise RuntimeError("No value provided. How did this task finish?")
+            recs, msgs = self._transition_enter_memory(key, value)
+            recommendations.update(recs)
+            messages.extend(msgs)
 
             messages.append(self.get_task_finished_message(ts))
             return recommendations, messages
@@ -2420,8 +2470,6 @@ class Worker(ServerNode):
         # 2. Ensure this is not modifying state, other than data. The task
         #    transition stuff is the responsibility of a transition function so
         #    this method should return statistics only
-        if ts.key in self.data:
-            return
 
         if ts.key in self.actors:
             self.actors[ts.key] = value
@@ -2439,15 +2487,6 @@ class Worker(ServerNode):
             ts.nbytes = sizeof(value)
 
         ts.type = type(value)
-
-        for dep in ts.dependents:
-            try:
-                dep.waiting_for_data.remove(ts)
-                self.waiting_for_data_count -= 1
-            except KeyError:
-                pass
-            if not dep.waiting_for_data:
-                self.transition(dep, StateID.ready, transaction_id="TODO")
 
         self.log.append((ts.key, "put-in-memory"))
 
@@ -2793,7 +2832,6 @@ class Worker(ServerNode):
         recommendations, messages = {}, []
         ts = self.tasks[key]
 
-        recommendations = {}
         for dep in ts.dependencies:
             dep.keys_waiting.discard(dep.key)
 
@@ -2814,15 +2852,25 @@ class Worker(ServerNode):
         ts.state = StateID.released
         return recommendations, messages
 
-    def _transition_enter_memory(self, key):
+    def _transition_enter_memory(self, key, value):
         recommendations, messages = {}, []
         ts = self.tasks[key]
         ts.state = StateID.memory
         ts.who_has.add(self.address)
         self.has_what[self.address].add(ts.key)
-        # FIXME: consolidate with puy_key_in_memory
-        if not ts.nbytes:
-            ts.nbytes = sizeof(self.data[key])
+
+        try:
+            self.put_key_in_memory(ts, value)
+            ts.state = StateID.memory
+        except Exception as e:
+            logger.info("Failed to put key in memory", exc_info=True)
+            recs, msgs = self.transition(
+                key, StateID.error, error_message=error_message(e)
+            )
+            recommendations.update(recs)
+            messages.extend(msgs)
+            return recommendations, messages
+
         # Don't release the dependency keys, but do remove them from `dependents`
         for dependency in ts.dependencies:
             # This should've been cleared way earlier
@@ -2832,10 +2880,16 @@ class Worker(ServerNode):
         ts.keys_waiting.clear()
 
         for dep in ts.dependents:
-            # FIXME: MAke this a hard remove
-            dep.waiting_for_data.discard(dep)
+            dep.waiting_for_data.remove(ts)
             if not dep.waiting_for_data:
                 recommendations[dep.key] = StateID.ready
+
+        # This is technically not an enter->memory condition but actually a
+        # executing->memory
+        if ts.instructed_compute:
+            messages.append(self.get_task_finished_message(ts))
+        else:
+            messages.append({"op": "add-keys", "keys": [ts.key]})
         return recommendations, messages
 
     def _transition_exit_memory(self, key):

@@ -577,7 +577,7 @@ async def test_gather(c, s, a, b):
     assert result == {"x": 11, "y": [12]}
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_gather_lost(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
@@ -999,7 +999,7 @@ async def dont_test_bad_restrictions_raise_exception(c, s, a, b):
         assert z.key in str(e)
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, allow_dead_workers=True)
 async def test_remove_worker(c, s, a, b):
     L = c.map(inc, range(20))
     await wait(L)
@@ -1716,7 +1716,7 @@ async def test_upload_file_new_worker(c, s):
 
 
 @pytest.mark.skip
-@gen_cluster()
+@gen_cluster(allow_dead_workers=True)
 async def test_multiple_clients(s, a, b):
     a = await Client(s.address, asynchronous=True)
     b = await Client(s.address, asynchronous=True)

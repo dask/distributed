@@ -6016,6 +6016,8 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what.add(ts)
                     ts._who_has.add(ws)
             elif ts is None:
+                # # FIXME This can happen in scatter if report=True
+                # Why do we even implement this route? Isn't this somehow faulty?
                 self.worker_send(
                     worker,
                     {

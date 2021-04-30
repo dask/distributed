@@ -672,8 +672,12 @@ async def test_clean_nbytes(c, s, a, b):
 
     future = c.compute(total)
     await wait(future)
+    while (
+        len(list([ts for ts in a.tasks.values() if ts.state == StateID.memory]))
+        + len(list([ts for ts in b.tasks.values() if ts.state == StateID.memory]))
+    ) > 1:
+        await asyncio.sleep(0.01)
 
-    await asyncio.sleep(1)
     assert (
         len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
         + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
