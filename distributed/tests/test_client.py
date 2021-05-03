@@ -5277,7 +5277,7 @@ async def test_cleaned_filenames_in_profile(c, s, a, b):
     profile = await c.profile()
 
     # check that profile is non-empty profile
-    assert profile["children"] != {}
+    assert profile["children"]
 
     children = profile["children"]
     children_vals = list(children.values())[0]
@@ -5291,8 +5291,7 @@ async def test_cleaned_filenames_in_profile_raises(c, s, a, b):
     # no work done by the client, should give empty profile
     profile = await c.profile()
 
-    with pytest.raises(AssertionError):
-        assert profile["children"] != {}
+    assert not profile["children"]
 
 
 @gen_cluster()
