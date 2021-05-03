@@ -11,6 +11,7 @@ from functools import partial
 from time import sleep
 
 import pytest
+import toolz
 from tornado.ioloop import IOLoop
 
 import dask
@@ -23,6 +24,7 @@ from distributed.utils import (
     Logs,
     LoopRunner,
     TimeoutError,
+    _clean_filename,
     _maybe_complex,
     deprecated,
     ensure_bytes,
@@ -635,3 +637,33 @@ def test_deprecated():
 
     with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
         assert foo() == "bar"
+
+
+def test__clean_filename():
+    # python standard library case
+    # path with sys.exec_prefix and no site-packages
+    path_no_sp = os.path.join.__code__.co_filename
+    clean_path_no_sp = _clean_filename(path_no_sp)
+
+    if f"lib{os.sep}" in path_no_sp:
+        assert (
+            clean_path_no_sp
+            == f"...{os.sep}lib{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}posixpath.py"
+        )
+    elif f"lib64{os.sep}" in path_no_sp:
+        assert (
+            clean_path_no_sp
+            == f"...{os.sep}lib64{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}posixpath.py"
+        )
+
+    # Third-party package - site-packages
+    path_third_party = toolz.merge.__code__.co_filename
+    clean_path_third_party = _clean_filename(path_third_party)
+    assert clean_path_third_party == f"...{os.sep}toolz{os.sep}dicttoolz.py"
+
+    # Other case where esername in path
+    path_usr = (
+        os.path.expanduser("~") + f"{os.sep}repository{os.sep}folder{os.sep}filename.py"
+    )
+    clean_path_usr = _clean_filename(path_usr)
+    assert clean_path_usr == f"...{os.sep}repository{os.sep}folder{os.sep}filename.py"
