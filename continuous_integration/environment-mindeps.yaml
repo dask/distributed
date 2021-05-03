@@ -1,0 +1,18 @@
+name: dask-distributed
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.7
+  - click=6.6
+  - cloudpickle=1.5.0
+  - dask=2021.03.0
+  - msgpack=0.6.0
+  - psutil=5.0
+  - sortedcontainers=2.0.2
+  - tblib=1.6.0
+  - toolz=0.8.2
+  - tornado=5
+  - zict=0.1.3
+  - pyyaml
+  - setuptools
