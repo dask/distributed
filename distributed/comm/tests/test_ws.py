@@ -22,7 +22,16 @@ from distributed.utils_test import (  # noqa: F401
 
 from .test_comms import check_tls_extra
 
-security = Security.temporary()
+try:
+    import cryptography
+except ImportError:
+    cryptography = None
+
+
+@pytest.fixture
+def security():
+    pytest.importorskip("cryptography")
+    return Security.temporary()
 
 
 def test_registered():
@@ -77,7 +86,7 @@ async def test_expect_ssl_context(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_expect_scheduler_ssl_when_sharing_server(cleanup):
+async def test_expect_scheduler_ssl_when_sharing_server(cleanup, security):
     with tempfile.TemporaryDirectory() as tempdir:
         key_path = os.path.join(tempdir, "dask.pem")
         cert_path = os.path.join(tempdir, "dask.crt")
@@ -133,16 +142,19 @@ async def test_large_transfer(cleanup):
     "dashboard,protocol,security,port",
     [
         (True, "ws://", None, 8787),
-        (True, "wss://", security, 8787),
+        (True, "wss://", True, 8787),
         (False, "ws://", None, 8787),
-        (False, "wss://", security, 8787),
+        (False, "wss://", True, 8787),
         (True, "ws://", None, 8786),
-        (True, "wss://", security, 8786),
+        (True, "wss://", True, 8786),
         (False, "ws://", None, 8786),
-        (False, "wss://", security, 8786),
+        (False, "wss://", True, 8786),
     ],
 )
 async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port):
+    if security:
+        pytest.importorskip("cryptography")
+        security = Security.temporary()
     async with Scheduler(
         protocol=protocol, dashboard=dashboard, port=port, security=security
     ) as s:
@@ -156,18 +168,27 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
                 assert result == 11
 
 
+@pytest.mark.skipif(not cryptography, reason="Requires cryptography")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "protocol,security",
     [
         (
             "ws://",
-            Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
+            pytest.param(
+                Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
+                marks=pytest.mark.skipif(
+                    not cryptography, reason="Requires cryptography"
+                ),
+            ),
         ),
         (
             "wss://",
-            Security.temporary(
-                extra_conn_args={"headers": {"Authorization": "Token abcd"}}
+            pytest.param(
+                Security(extra_conn_args={"headers": {"Authorization": "Token abcd"}}),
+                marks=pytest.mark.skipif(
+                    not cryptography, reason="Requires cryptography"
+                ),
             ),
         ),
     ],
@@ -203,6 +224,7 @@ async def test_ws_roundtrip(c, s, a, b):
     assert (x == y).all()
 
 
+@pytest.mark.skipif(not cryptography, reason="Requires cryptography")
 @gen_cluster(
     client=True,
     security=security,
