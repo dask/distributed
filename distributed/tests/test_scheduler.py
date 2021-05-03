@@ -413,6 +413,7 @@ async def test_delete_data(c, s, a, b):
 async def test_delete(c, s, a):
     x = c.submit(inc, 1)
     await x
+    assert x.key in s.tasks
     assert x.key in a.data
 
     await c._cancel(x)
@@ -421,6 +422,10 @@ async def test_delete(c, s, a):
     while x.key in a.data:
         await asyncio.sleep(0.01)
         assert time() < start + 5
+
+    assert x.key not in s.tasks
+
+    s.report_on_key(key=x.key)
 
 
 @gen_cluster()
@@ -2463,3 +2468,23 @@ async def test_memory_is_none(c, s):
             assert s.memory.unmanaged == 0
             assert s.memory.unmanaged_old == 0
             assert s.memory.unmanaged_recent == 0
+
+
+@gen_cluster()
+async def test_close_scheduler__close_workers_Worker(s, a, b):
+    with captured_logger("distributed.comm", level=logging.DEBUG) as log:
+        await s.close(close_workers=True)
+        while not a.status == Status.closed:
+            await asyncio.sleep(0.05)
+    log = log.getvalue()
+    assert "retry" not in log
+
+
+@gen_cluster(Worker=Nanny)
+async def test_close_scheduler__close_workers_Nanny(s, a, b):
+    with captured_logger("distributed.comm", level=logging.DEBUG) as log:
+        await s.close(close_workers=True)
+        while not a.status == Status.closed:
+            await asyncio.sleep(0.05)
+    log = log.getvalue()
+    assert "retry" not in log
