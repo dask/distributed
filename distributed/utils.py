@@ -1555,14 +1555,16 @@ def _clean_filename(filename):
             # Python standard library module
             return filename
         else:
-            lib = r"lib[0-9]*"
-            res_search = re.compile(lib).search(filename)
-            filename = filename.replace(res_search.group(0), "")
-
-            return filename.replace(
-                f"{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
-                "",
-            )
+            if f"lib{os.sep}" in filename:
+                return filename.replace(
+                    f"lib{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
+                    "",
+                )
+            elif f"lib64{os.sep}" in filename:
+                return filename.replace(
+                    f"lib64{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
+                    "",
+                )
 
     elif filename.startswith(os.path.expanduser("~")):
         return filename.replace(os.path.expanduser("~"), "...")
