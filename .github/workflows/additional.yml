@@ -18,6 +18,7 @@ jobs:
           use-mamba: true
           channels: conda-forge,defaults
           channel-priority: true
+          python-version: 3.7
           environment-file: continuous_integration/environment-mindeps.yaml
           activate-environment: dask-distributed
           auto-activate-base: false
