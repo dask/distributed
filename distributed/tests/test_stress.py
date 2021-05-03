@@ -1,34 +1,32 @@
 import asyncio
-from contextlib import suppress
 import random
 import sys
+from contextlib import suppress
 from operator import add
 from time import sleep
 
-from dask import delayed
 import pytest
 from tlz import concat, sliding_window
 
-from distributed import Client, wait, Nanny
+from dask import delayed
+
+from distributed import Client, Nanny, wait
+from distributed.client import wait
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All, CancelledError
-from distributed.utils_test import (
-    gen_cluster,
-    cluster,
-    inc,
-    slowinc,
-    slowadd,
-    slowsum,
-    bump_rlimit,
-)
 from distributed.utils_test import (  # noqa: F401
+    bump_rlimit,
+    cluster,
+    gen_cluster,
+    inc,
     loop,
     nodebug_setup_module,
     nodebug_teardown_module,
+    slowadd,
+    slowinc,
+    slowsum,
 )
-from distributed.client import wait
-
 
 # All tests here are slow in some way
 setup_module = nodebug_setup_module
@@ -171,7 +169,7 @@ def vsum(*args):
     return sum(args)
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
 async def test_stress_communication(c, s, *workers):
@@ -240,11 +238,13 @@ async def test_close_connections(c, s, *workers):
     await wait(future)
 
 
+@pytest.mark.slow
 @pytest.mark.xfail(
-    reason="IOStream._handle_write blocks on large write_buffer"
-    " https://github.com/tornadoweb/tornado/issues/2110"
+    reason="flaky and re-fails on rerun; "
+    "IOStream._handle_write blocks on large write_buffer"
+    " https://github.com/tornadoweb/tornado/issues/2110",
 )
-@gen_cluster(client=True, timeout=20, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_no_delay_during_large_transfer(c, s, w):
     pytest.importorskip("crick")
     np = pytest.importorskip("numpy")
@@ -252,10 +252,12 @@ async def test_no_delay_during_large_transfer(c, s, w):
     x_nbytes = x.nbytes
 
     # Reset digests
-    from distributed.counter import Digest
     from collections import defaultdict
     from functools import partial
+
     from dask.diagnostics import ResourceProfiler
+
+    from distributed.counter import Digest
 
     for server in [s, w]:
         server.digests = defaultdict(partial(Digest, loop=server.io_loop))

@@ -1,17 +1,23 @@
 import asyncio
-from collections.abc import Iterator
-from operator import add
 import queue
 import random
+from collections.abc import Iterator
+from operator import add
 from time import sleep
 
 import pytest
 
-from distributed.client import _as_completed, as_completed, _first_completed, wait
+from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
-from distributed.utils_test import gen_cluster, inc, throws
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster_fixture,
+    gen_cluster,
+    inc,
+    loop,
+    throws,
+)
 
 
 @gen_cluster(client=True)
@@ -202,6 +208,7 @@ async def test_as_completed_with_results_async(c, s, a, b):
     assert str(exc.value) == "hello!"
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_as_completed_with_results_no_raise(client):
     x = client.submit(throws, 1)
     y = client.submit(inc, 5)
@@ -212,7 +219,7 @@ def test_as_completed_with_results_no_raise(client):
     res = list(ac)
 
     dd = {r[0]: r[1:] for r in res}
-    assert set(dd.keys()) == {y, x, z}
+    assert dd.keys() == {x, y, z}
     assert x.status == "error"
     assert y.status == "cancelled"
     assert z.status == "finished"

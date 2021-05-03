@@ -3,13 +3,20 @@ import gc
 import math
 from time import sleep
 
-import dask
 import pytest
 
-from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
-from distributed.utils_test import gen_test, slowinc, clean
-from distributed.utils_test import loop, nodebug, cleanup  # noqa: F401
+import dask
+
+from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    clean,
+    cleanup,
+    gen_test,
+    loop,
+    nodebug,
+    slowinc,
+)
 
 
 @pytest.mark.asyncio
@@ -51,7 +58,11 @@ async def test_simultaneous_scale_up_and_down(cleanup):
 
 def test_adaptive_local_cluster(loop):
     with LocalCluster(
-        0, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        loop=loop,
     ) as cluster:
         alc = cluster.adapt(interval="100 ms")
         with Client(cluster, loop=loop) as c:
@@ -76,7 +87,7 @@ def test_adaptive_local_cluster(loop):
 @pytest.mark.asyncio
 async def test_adaptive_local_cluster_multi_workers(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         silence_logs=False,
         processes=False,
@@ -146,7 +157,7 @@ async def test_adaptive_scale_down_override(cleanup):
 @gen_test()
 async def test_min_max():
     cluster = await LocalCluster(
-        0,
+        n_workers=0,
         scheduler_port=0,
         silence_logs=False,
         processes=False,
@@ -201,7 +212,7 @@ async def test_avoid_churn(cleanup):
     user is taking a brief pause between work
     """
     async with LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
         scheduler_port=0,
@@ -226,7 +237,7 @@ async def test_adapt_quickly():
     user is taking a brief pause between work
     """
     cluster = await LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
         scheduler_port=0,
@@ -298,7 +309,7 @@ async def test_adapt_down():
             start = time()
             while len(cluster.scheduler.workers) != 2:
                 await asyncio.sleep(0.1)
-                assert time() < start + 3
+                assert time() < start + 60
 
 
 @gen_test(timeout=30)

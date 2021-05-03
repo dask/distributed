@@ -1,12 +1,12 @@
+import filecmp
 import inspect
 import logging
 import os
 import shutil
 import sys
-from typing import List
-from types import ModuleType
-import filecmp
 from importlib import import_module
+from types import ModuleType
+from typing import List
 
 import click
 from tornado.httpclient import AsyncHTTPClient
@@ -79,9 +79,9 @@ def _import_module(name, file_dir=None) -> ModuleType:
 
     Parameters
     ----------
-    name: str
+    name : str
         Module name, file path, or text of module or script
-    file_dir: string
+    file_dir : string
         Path of a directory where files should be copied
 
     Returns

@@ -1,18 +1,20 @@
 import asyncio
 import re
-from time import sleep
 import warnings
+from time import sleep
+
+import pytest
+import tlz as toolz
 
 import dask
-from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
-from distributed.core import Status
+from dask.distributed import Client, Nanny, Scheduler, SpecCluster, Worker
+
 from distributed.compatibility import WINDOWS
-from distributed.deploy.spec import close_clusters, ProcessInterface, run_spec
+from distributed.core import Status
+from distributed.deploy.spec import ProcessInterface, close_clusters, run_spec
 from distributed.metrics import time
-from distributed.utils_test import loop, cleanup  # noqa: F401
 from distributed.utils import is_valid_xml
-import tlz as toolz
-import pytest
+from distributed.utils_test import cleanup, loop  # noqa: F401
 
 
 class MyWorker(Worker):
@@ -196,6 +198,7 @@ async def test_unexpected_closed_worker(cleanup):
             assert len(cluster.workers) == 2
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_restart(cleanup):
@@ -209,11 +212,11 @@ async def test_restart(cleanup):
                 cluster.scale(2)
                 await cluster
                 assert len(cluster.workers) == 2
-
                 await client.restart()
-                await asyncio.sleep(3)
-
-                assert len(cluster.workers) == 2
+                start = time()
+                while len(cluster.workers) < 2:
+                    await asyncio.sleep(0.5)
+                    assert time() < start + 60
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
@@ -360,8 +363,9 @@ async def test_widget(cleanup):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
-        assert "3" in cluster._widget_status()
-        assert "GB" in cluster._widget_status()
+        text = cluster._widget_status()
+        assert "3" in text
+        assert "GB" in text or "GiB" in text
 
         cluster.scale(5)
         assert "3 / 5" in cluster._widget_status()
@@ -494,7 +498,7 @@ async def test_run_spec_cluster_worker_names(cleanup):
 
     class MyCluster(SpecCluster):
         def _new_worker_name(self, worker_number):
-            return f"prefix-{self._name }-{worker_number}-suffix"
+            return f"prefix-{self.name}-{worker_number}-suffix"
 
     async with SpecCluster(
         asynchronous=True, scheduler=scheduler, worker=worker

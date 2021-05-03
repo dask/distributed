@@ -1,27 +1,27 @@
 import asyncio
 import datetime
-from contextlib import suppress
 import logging
 import threading
+import uuid
 import warnings
+from contextlib import suppress
+
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.utils import format_bytes
 
-from .adaptive import Adaptive
-
 from ..core import Status
 from ..utils import (
-    log_errors,
-    sync,
     Log,
     Logs,
-    thread_state,
     format_dashboard_link,
+    log_errors,
     parse_timedelta,
+    sync,
+    thread_state,
 )
-
+from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +50,9 @@ class Cluster:
     """
 
     _supports_scaling = True
+    name = None
 
-    def __init__(self, asynchronous, quiet=False):
+    def __init__(self, asynchronous, quiet=False, name=None):
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
@@ -61,6 +62,10 @@ class Cluster:
         self.quiet = quiet
         self.scheduler_comm = None
 
+        if name is not None:
+            self.name = name
+        elif self.name is None:
+            self.name = str(uuid.uuid4())[:8]
         self.status = Status.created
 
     async def _start(self):
@@ -154,7 +159,7 @@ class Cluster:
 
         Parameters
         ----------
-        n: int
+        n : int
             Target number of workers
 
         Examples
@@ -304,7 +309,7 @@ class Cluster:
             pass
 
         try:
-            from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+            from ipywidgets import HTML, Accordion, Button, HBox, IntText, Layout, VBox
         except ImportError:
             self._cached_widget = None
             return None
@@ -424,8 +429,9 @@ class Cluster:
         return getattr(self, "_name", type(self).__name__)
 
     def __repr__(self):
-        text = "%s(%r, workers=%d, threads=%d" % (
+        text = "%s(%s, %r, workers=%d, threads=%d" % (
             self._cluster_class_name,
+            self.name,
             self.scheduler_address,
             len(self.scheduler_info["workers"]),
             sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
@@ -449,3 +455,9 @@ class Cluster:
     @property
     def observed(self):
         return {d["name"] for d in self.scheduler_info["workers"].values()}
+
+    def __eq__(self, other):
+        return self.name == other.name
+
+    def __hash__(self):
+        return id(self)

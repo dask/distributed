@@ -11,7 +11,6 @@ import dask
 
 from . import locket
 
-
 logger = logging.getLogger(__name__)
 
 DIR_LOCK_EXT = ".dirlock"
@@ -228,9 +227,9 @@ class WorkSpace:
 
         Parameters
         ----------
-        prefix: str (optional)
+        prefix : str (optional)
             The prefix of the temporary subdirectory name for the workdir
-        name: str (optional)
+        name : str (optional)
             The subdirectory name for the workdir
         """
         try:

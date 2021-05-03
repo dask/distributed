@@ -25,16 +25,16 @@ We represent this tree as a nested dictionary with the following form:
     }
 """
 import bisect
-from collections import defaultdict, deque
 import linecache
 import sys
 import threading
+from collections import defaultdict, deque
 from time import sleep
 
 import tlz as toolz
 
 from .metrics import time
-from .utils import format_time, color_of, parse_timedelta
+from .utils import color_of, format_time, parse_timedelta
 
 
 def identifier(frame):
@@ -284,16 +284,16 @@ def watch(
 
     Parameters
     ----------
-    thread_id: int
-    interval: str
+    thread_id : int
+    interval : str
         Time per sample
-    cycle: str
+    cycle : str
         Time per refreshing to a new profile state
-    maxlen: int
+    maxlen : int
         Passed onto deque, maximum number of periods
-    omit: str
+    omit : str
         Don't include entries that start with this filename
-    stop: callable
+    stop : callable
         Function to call to see if we should stop
 
     Returns
@@ -328,12 +328,12 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
 
     Parameters
     ----------
-    history: Sequence[Tuple[time, Dict]]
+    history : Sequence[Tuple[time, Dict]]
         A list or deque of profile states
-    recent: dict
+    recent : dict
         The most recent accumulating state
-    start: time
-    stop: time
+    start : time
+    stop : time
     """
     now = time()
     if start is None:
@@ -375,8 +375,8 @@ def plot_figure(data, **kwargs):
     --------
     plot_data
     """
-    from bokeh.plotting import ColumnDataSource, figure
     from bokeh.models import HoverTool
+    from bokeh.plotting import ColumnDataSource, figure
 
     if "states" in data:
         data = toolz.dissoc(data, "states")

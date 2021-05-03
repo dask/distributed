@@ -1,8 +1,10 @@
 import asyncio
+
 import pytest
 
 from distributed.deploy.adaptive_core import AdaptiveCore
 from distributed.metrics import time
+from distributed.utils_test import captured_logger
 
 
 class MyAdaptive(AdaptiveCore):
@@ -88,3 +90,24 @@ async def test_interval():
     adapt._target = 10
     await asyncio.sleep(0.020)
     assert len(adapt.plan) == 1  # last value from before, unchanged
+
+
+@pytest.mark.asyncio
+async def test_adapt_oserror():
+    class BadAdaptive(MyAdaptive):
+        """AdaptiveCore subclass which raises an OSError when attempting to adapt
+
+        We use this to check that error handling works properly
+        """
+
+        def safe_target(self):
+            raise OSError()
+
+    with captured_logger("distributed.deploy.adaptive_core") as log:
+        adapt = BadAdaptive(minimum=1, maximum=4)
+        await adapt.adapt()
+    text = log.getvalue()
+    assert "Adaptive stopping due to error" in text
+    assert "Adaptive stop" in text
+    assert not adapt._adapting
+    assert not adapt.periodic_callback

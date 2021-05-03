@@ -1,32 +1,34 @@
 import errno
+import functools
 import logging
 import socket
-from ssl import SSLError
 import struct
 import sys
-from tornado import gen
 import weakref
+from ssl import SSLError
+
+from tornado import gen
 
 try:
     import ssl
 except ImportError:
     ssl = None
 
-import dask
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
+import dask
+
+from ..protocol.utils import pack_frames_prelude, unpack_frames
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
-
-from .registry import Backend, backends
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta
 from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
-from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
-
+from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
+from .registry import Backend, backends
+from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +128,16 @@ def convert_stream_closed_error(obj, exc):
         raise CommClosedError("in %s: %s" % (obj, exc)) from exc
 
 
-def _do_nothing():
-    pass
+def _close_comm(ref):
+    """Callback to close Dask Comm when Tornado Stream closes
+
+    Parameters
+    ----------
+        ref: weak reference to a Dask comm
+    """
+    comm = ref()
+    if comm:
+        comm._closed = True
 
 
 class TCP(Comm):
@@ -136,6 +146,7 @@ class TCP(Comm):
     """
 
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
+        self._closed = False
         Comm.__init__(self)
         self._local_addr = local_addr
         self._peer_addr = peer_addr
@@ -145,18 +156,12 @@ class TCP(Comm):
         self._finalizer.atexit = False
         self._extra = {}
 
+        ref = weakref.ref(self)
+
+        stream.set_close_callback(functools.partial(_close_comm, ref))
+
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
-        # set a close callback, to make `self.stream.closed()` more reliable.
-        # Background: if `stream` is unused (e.g. because it's in `ConnectionPool.available`),
-        # the underlying fd is not watched for changes. In this case, even if the
-        # connection is actively closed by the remote end, `self.closed()` would still return `False`.
-        # Registering a closed callback will make tornado register the underlying fd
-        # for changes, and this would be reflected in `self.closed()` even without reading/writing.
-        #
-        # Use a global method (instead of a lambda) to avoid creating a reference
-        # to the local scope.
-        stream.set_close_callback(_do_nothing)
         self._read_extra()
 
     def _read_extra(self):
@@ -164,8 +169,9 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            if not stream.closed():
-                logger.warning("Closing dangling stream in %s" % (r,))
+            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            if stream is not None and not stream.closed():
+                logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
 
         return finalize
@@ -181,24 +187,22 @@ class TCP(Comm):
     async def read(self, deserializers=None):
         stream = self.stream
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
+
+        fmt = "Q"
+        fmt_size = struct.calcsize(fmt)
 
         try:
-            n_frames = await stream.read_bytes(8)
-            n_frames = struct.unpack("Q", n_frames)[0]
-            lengths = await stream.read_bytes(8 * n_frames)
-            lengths = struct.unpack("Q" * n_frames, lengths)
+            frames_nbytes = await stream.read_bytes(fmt_size)
+            (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = []
-            for length in lengths:
-                frame = bytearray(length)
-                if length:
-                    n = await stream.read_into(frame)
-                    assert n == length, (n, length)
-                frames.append(frame)
+            frames = bytearray(frames_nbytes)
+            n = await stream.read_into(frames)
+            assert n == frames_nbytes, (n, frames_nbytes)
         except StreamClosedError as e:
             self.stream = None
-            if not shutting_down():
+            self._closed = True
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
             # Some OSError or a another "low-level" exception. We do not really know what
@@ -209,6 +213,8 @@ class TCP(Comm):
             raise
         else:
             try:
+                frames = unpack_frames(frames)
+
                 msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
@@ -223,9 +229,8 @@ class TCP(Comm):
 
     async def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
-        bytes_since_last_yield = 0
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
 
         frames = await to_frames(
             msg,
@@ -238,42 +243,52 @@ class TCP(Comm):
                 **self.handshake_options,
             },
         )
+        frames_nbytes = [nbytes(f) for f in frames]
+        frames_nbytes_total = sum(frames_nbytes)
+
+        header = pack_frames_prelude(frames)
+        header = struct.pack("Q", nbytes(header) + frames_nbytes_total) + header
+
+        frames = [header, *frames]
+        frames_nbytes = [nbytes(header), *frames_nbytes]
+        frames_nbytes_total += frames_nbytes[0]
+
+        if frames_nbytes_total < 2 ** 17:  # 128kiB
+            # small enough, send in one go
+            frames = [b"".join(frames)]
+            frames_nbytes = [frames_nbytes_total]
 
         try:
-            nframes = len(frames)
-            lengths = [nbytes(frame) for frame in frames]
-            length_bytes = struct.pack(f"Q{nframes}Q", nframes, *lengths)
-            if sum(lengths) < 2 ** 17:  # 128kiB
-                # small enough, send in one go
-                stream.write(b"".join([length_bytes, *frames]))
-            else:
-                # avoid large memcpy, send in many
-                stream.write(length_bytes)
+            # trick to enque all frames for writing beforehand
+            for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
+                if each_frame_nbytes:
+                    if stream._write_buffer is None:
+                        raise StreamClosedError()
 
-                for frame, frame_bytes in zip(frames, lengths):
-                    # Can't wait for the write() Future as it may be lost
-                    # ("If write is called again before that Future has resolved,
-                    #   the previous future will be orphaned and will never resolve")
-                    future = stream.write(frame)
-                    bytes_since_last_yield += frame_bytes
-                    if bytes_since_last_yield > 32e6:
-                        await future
-                        bytes_since_last_yield = 0
+                    if isinstance(each_frame, memoryview):
+                        # Make sure that `len(data) == data.nbytes`
+                        # See <https://github.com/tornadoweb/tornado/pull/2996>
+                        each_frame = memoryview(each_frame).cast("B")
+
+                    stream._write_buffer.append(each_frame)
+                    stream._total_write_index += each_frame_nbytes
+
+            # start writing frames
+            stream.write(b"")
         except StreamClosedError as e:
             self.stream = None
-            if not shutting_down():
+            self._closed = True
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already written to the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
-            if stream._write_buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
+            # Some OSError or a another "low-level" exception. We do not really know
+            # what was already written to the underlying socket, so it is not even safe
+            # to retry here using the same stream. The only safe thing to do is to
+            # abort. (See also GitHub #4133).
             self.abort()
             raise
 
-        return sum(lengths)
+        return frames_nbytes_total
 
     @gen.coroutine
     def close(self):
@@ -281,6 +296,7 @@ class TCP(Comm):
         # Task was destroyed but it is pending!
         # Triggered by distributed.deploy.tests.test_local::test_silent_startup
         stream, self.stream = self.stream, None
+        self._closed = True
         if stream is not None and not stream.closed():
             try:
                 # Flush the stream's write buffer by waiting for a last write.
@@ -295,12 +311,13 @@ class TCP(Comm):
 
     def abort(self):
         stream, self.stream = self.stream, None
+        self._closed = True
         if stream is not None and not stream.closed():
             self._finalizer.detach()
             stream.close()
 
     def closed(self):
-        return self.stream is None or self.stream.closed()
+        return self._closed
 
     @property
     def extra_info(self):

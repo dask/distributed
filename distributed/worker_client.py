@@ -1,10 +1,11 @@
-from contextlib import contextmanager
 import warnings
+from contextlib import contextmanager
 
 import dask
-from .threadpoolexecutor import secede, rejoin
-from .worker import thread_state, get_client, get_worker
+
+from .threadpoolexecutor import rejoin, secede
 from .utils import parse_timedelta
+from .worker import get_client, get_worker, thread_state
 
 
 @contextmanager
@@ -17,10 +18,10 @@ def worker_client(timeout=None, separate_thread=True):
 
     Parameters
     ----------
-    timeout: Number or String
+    timeout : Number or String
         Timeout after which to error out. Defaults to the
         ``distributed.comm.timeouts.connect`` configuration value.
-    separate_thread: bool, optional
+    separate_thread : bool, optional
         Whether to run this function outside of the normal thread pool
         defaults to True
 

@@ -3,8 +3,9 @@ import logging.config
 import os
 import sys
 
-import dask
 import yaml
+
+import dask
 
 from .compatibility import logging_names
 

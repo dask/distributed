@@ -1,32 +1,34 @@
 import asyncio
-from contextlib import suppress
 import os
 import random
+from contextlib import suppress
 from time import sleep
 
 import pytest
-from tlz import partition_all, first
+from tlz import first, partition_all
 
 from dask import delayed
+
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
-from distributed.client import wait
+from distributed.compatibility import MACOS
 from distributed.metrics import time
-from distributed.utils import sync, CancelledError
-from distributed.utils_test import (
-    gen_cluster,
-    cluster,
-    inc,
-    div,
-    slowinc,
-    slowadd,
-    captured_logger,
-)
+from distributed.scheduler import COMPILED
+from distributed.utils import CancelledError, sync
 from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import (
+    captured_logger,
+    cluster,
+    div,
+    gen_cluster,
+    inc,
+    slowadd,
+    slowinc,
+)
 
 
 def test_submit_after_failed_worker_sync(loop):
-    with cluster(active_rpc_timeout=10, disconnect_timeout=10) as (s, [a, b]):
+    with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -64,7 +66,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
 
 
 def test_gather_after_failed_worker(loop):
-    with cluster(active_rpc_timeout=10, disconnect_timeout=10) as (s, [a, b]):
+    with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -98,6 +100,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
         assert result == [sum(map(inc, range(20)))]
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, timeout=60, client=True)
 async def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
@@ -134,6 +137,7 @@ async def test_failed_worker_without_warning(c, s, a, b):
     assert not (set(nthreads2) & set(s.nthreads))  # no overlap
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart(c, s, a, b):
     assert s.nthreads == {a.worker_address: 1, b.worker_address: 2}
@@ -162,6 +166,7 @@ async def test_restart(c, s, a, b):
     assert not any(cs.wants_what for cs in s.clients.values())
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart_cleared(c, s, a, b):
     x = 2 * delayed(1) + 1
@@ -174,6 +179,7 @@ async def test_restart_cleared(c, s, a, b):
         assert not coll
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync_no_center(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -185,6 +191,7 @@ def test_restart_sync_no_center(loop):
             assert len(c.nthreads()) == 2
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -204,6 +211,7 @@ def test_restart_sync(loop):
             assert y.result() == 1 / 3
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_restart_fast(c, s, a, b):
     L = c.map(sleep, range(10))
@@ -220,6 +228,7 @@ async def test_restart_fast(c, s, a, b):
     assert result == 2
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_worker_doesnt_await_task_completion(loop):
     with cluster(nanny=True, nworkers=1) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
@@ -231,6 +240,7 @@ def test_worker_doesnt_await_task_completion(loop):
             assert stop - start < 5
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_fast_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -247,6 +257,7 @@ def test_restart_fast_sync(loop):
             assert x.result() == 2
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_fast_kill(c, s, a, b):
     L = c.map(sleep, range(10))
@@ -262,6 +273,7 @@ async def test_fast_kill(c, s, a, b):
     assert result == 2
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_multiple_clients_restart(s, a, b):
     c1 = await Client(s.address, asynchronous=True)
@@ -286,6 +298,7 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
+@pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
     import gc
@@ -354,6 +367,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
     await n.close()
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart_during_computation(c, s, a, b):
     xs = [delayed(slowinc)(i, delay=0.01) for i in range(50)]

@@ -2,12 +2,11 @@ import collections
 import logging
 import math
 
-from tornado.ioloop import IOLoop, PeriodicCallback
 import tlz as toolz
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from ..metrics import time
 from ..utils import parse_timedelta
-
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +184,7 @@ class AdaptiveCore:
         if self._adapting:  # Semaphore to avoid overlapping adapt calls
             return
         self._adapting = True
+        status = None
 
         try:
 
@@ -201,7 +201,9 @@ class AdaptiveCore:
                 await self.scale_up(**recommendations)
             if status == "down":
                 await self.scale_down(**recommendations)
-        except OSError:
-            self.stop()
+        except OSError as e:
+            if status != "down":
+                logger.error("Adaptive stopping due to error %s", str(e))
+                self.stop()
         finally:
             self._adapting = False

@@ -1,24 +1,31 @@
 import asyncio
 import random
 import threading
-from time import sleep
 import warnings
+from time import sleep
+
+import pytest
 
 import dask
 from dask import delayed
-import pytest
 
 from distributed import (
-    worker_client,
     Client,
     as_completed,
+    get_client,
     get_worker,
     wait,
-    get_client,
+    worker_client,
 )
 from distributed.metrics import time
-from distributed.utils_test import double, gen_cluster, inc
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster_fixture,
+    double,
+    gen_cluster,
+    inc,
+    loop,
+)
 
 
 @gen_cluster(client=True)

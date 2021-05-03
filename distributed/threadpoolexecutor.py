@@ -20,13 +20,13 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
-from . import _concurrent_futures_thread as thread
-import os
+import itertools
 import logging
+import os
 import queue
 import threading
-import itertools
 
+from . import _concurrent_futures_thread as thread
 from .metrics import time
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ def secede(adjust=True):
 
     See Also
     --------
-    rejoin: rejoin the thread pool
+    rejoin : rejoin the thread pool
     """
     thread_state.proceed = False
     with threads_lock:
@@ -127,7 +127,7 @@ def rejoin():
 
     See Also
     --------
-    secede: leave the thread pool
+    secede : leave the thread pool
     """
     thread = threading.current_thread()
     event = threading.Event()

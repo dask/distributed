@@ -5,10 +5,16 @@ from time import sleep
 import pytest
 
 import dask
-from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import cluster, gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+
+from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 
 class Counter:
@@ -425,8 +431,8 @@ async def test_load_balance_map(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 async def bench_param_server(c, s, *workers):
+    np = pytest.importorskip("numpy")
     import dask.array as da
-    import numpy as np
 
     x = da.random.random((500000, 1000), chunks=(1000, 1000))
     x = x.persist()
@@ -465,7 +471,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.xfail(reason="unknown")
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
@@ -488,7 +494,7 @@ async def test_compute(c, s, a, b):
     start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert time() < start + 30
 
 
 def test_compute_sync(client):
@@ -515,7 +521,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 2
+        assert time() < start + 30
 
 
 @gen_cluster(
