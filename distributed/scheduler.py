@@ -164,6 +164,10 @@ UNKNOWN_TASK_DURATION = declare(
     double,
     parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
 )
+MEMORY_RECENT_TO_OLD_TIME = declare(
+    double,
+    parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -181,6 +185,8 @@ ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 )
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
+COMPILED = declare(bint, compiled)
+globals()["COMPILED"] = COMPILED
 
 
 @final
@@ -254,6 +260,128 @@ class ClientState:
     @property
     def versions(self):
         return self._versions
+
+
+@final
+@cclass
+class MemoryState:
+    """Memory readings on a worker or on the whole cluster.
+
+    managed
+        Sum of the output of sizeof() for all dask keys held by the worker, both in
+        memory and spilled to disk
+    managed_in_memory
+        Sum of the output of sizeof() for the dask keys held in RAM
+    managed_spilled
+        Sum of the output of sizeof() for the dask keys spilled to the hard drive.
+        Note that this is the size in memory; serialized size may be different.
+    process
+        Total RSS memory measured by the OS on the worker process.
+        This is always exactly equal to managed_in_memory + unmanaged.
+    unmanaged
+        process - managed_in_memory. This is the sum of
+
+        - Python interpreter and modules
+        - global variables
+        - memory temporarily allocated by the dask tasks that are currently running
+        - memory fragmentation
+        - memory leaks
+        - memory not yet garbage collected
+        - memory not yet free()'d by the Python memory manager to the OS
+
+    unmanaged_old
+        Minimum of the 'unmanaged' measures over the last
+        ``distributed.memory.recent_to_old_time`` seconds
+    unmanaged_recent
+        unmanaged - unmanaged_old; in other words process memory that has been recently
+        allocated but is not accounted for by dask; hopefully it's mostly a temporary
+        spike.
+    optimistic
+        managed_in_memory + unmanaged_old; in other words the memory held long-term by
+        the process under the hopeful assumption that all unmanaged_recent memory is a
+        temporary spike
+    """
+
+    __slots__ = ("_process", "_managed_in_memory", "_managed_spilled", "_unmanaged_old")
+
+    _process: Py_ssize_t
+    _managed_in_memory: Py_ssize_t
+    _managed_spilled: Py_ssize_t
+    _unmanaged_old: Py_ssize_t
+
+    def __init__(
+        self,
+        *,
+        process: Py_ssize_t,
+        unmanaged_old: Py_ssize_t,
+        managed: Py_ssize_t,
+        managed_spilled: Py_ssize_t,
+    ):
+        # Some data arrives with the heartbeat, some other arrives in realtime as the
+        # tasks progress. Also, sizeof() is not guaranteed to return correct results.
+        # This can cause glitches where a partial measure is larger than the whole, so
+        # we need to force all numbers to add up exactly by definition.
+        self._process = process
+        self._managed_spilled = min(managed_spilled, managed)
+        # Subtractions between unsigned ints guaranteed by construction to be >= 0
+        self._managed_in_memory = min(managed - self._managed_spilled, process)
+        self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
+
+    @property
+    def process(self) -> Py_ssize_t:
+        return self._process
+
+    @property
+    def managed_in_memory(self) -> Py_ssize_t:
+        return self._managed_in_memory
+
+    @property
+    def managed_spilled(self) -> Py_ssize_t:
+        return self._managed_spilled
+
+    @property
+    def unmanaged_old(self) -> Py_ssize_t:
+        return self._unmanaged_old
+
+    @classmethod
+    def sum(cls, *infos: "MemoryState") -> "MemoryState":
+        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        ms: MemoryState
+        for ms in infos:
+            out._process += ms._process
+            out._managed_spilled += ms._managed_spilled
+            out._managed_in_memory += ms._managed_in_memory
+            out._unmanaged_old += ms._unmanaged_old
+        return out
+
+    @property
+    def managed(self) -> Py_ssize_t:
+        return self._managed_in_memory + self._managed_spilled
+
+    @property
+    def unmanaged(self) -> Py_ssize_t:
+        # This is never negative thanks to __init__
+        return self._process - self._managed_in_memory
+
+    @property
+    def unmanaged_recent(self) -> Py_ssize_t:
+        # This is never negative thanks to __init__
+        return self._process - self._managed_in_memory - self._unmanaged_old
+
+    @property
+    def optimistic(self) -> Py_ssize_t:
+        return self._managed_in_memory + self._unmanaged_old
+
+    def __repr__(self) -> str:
+        return (
+            f"Managed by Dask       : {format_bytes(self.managed)}\n"
+            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self._process)}\n"
+            f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
+            f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
+        )
 
 
 @final
@@ -355,6 +483,8 @@ class WorkerState:
     _last_seen: double
     _local_directory: str
     _memory_limit: Py_ssize_t
+    _memory_other_history: "deque[tuple[float, Py_ssize_t]]"
+    _memory_unmanaged_old: Py_ssize_t
     _metrics: dict
     _name: object
     _nanny: str
@@ -381,6 +511,8 @@ class WorkerState:
         "_last_seen",
         "_local_directory",
         "_memory_limit",
+        "_memory_other_history",
+        "_memory_unmanaged_old",
         "_metrics",
         "_name",
         "_nanny",
@@ -424,6 +556,8 @@ class WorkerState:
         self._status = Status.running
         self._nbytes = 0
         self._occupancy = 0
+        self._memory_unmanaged_old = 0
+        self._memory_other_history = deque()
         self._metrics = {}
         self._last_seen = 0
         self._time_delay = 0
@@ -495,6 +629,17 @@ class WorkerState:
     @property
     def metrics(self):
         return self._metrics
+
+    @property
+    def memory(self) -> MemoryState:
+        return MemoryState(
+            # metrics["memory"] is None if the worker sent a heartbeat before its
+            # SystemMonitor ever had a chance to run
+            process=self._metrics["memory"] or 0,
+            managed=self._nbytes,
+            managed_spilled=self._metrics["spilled_nbytes"],
+            unmanaged_old=self._memory_unmanaged_old,
+        )
 
     @property
     def name(self):
@@ -1774,6 +1919,10 @@ class SchedulerState:
         return self._workers
 
     @property
+    def memory(self) -> MemoryState:
+        return MemoryState.sum(*(w.memory for w in self.workers.values()))
+
+    @property
     def __pdict__(self):
         return {
             "bandwidth": self._bandwidth,
@@ -1876,16 +2025,15 @@ class SchedulerState:
                 a: tuple = func(key, *args, **kwargs)
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                func = self._transitions_table["released", finish]
                 assert not args and not kwargs
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
                 a: tuple = self._transition(key, "released")
                 a_recs, a_cmsgs, a_wmsgs = a
-                v = a_recs.get(key)
-                if v is not None:
-                    func = self._transitions_table["released", v]
+
+                v = a_recs.get(key, finish)
+                func = self._transitions_table["released", v]
                 b_recs: dict
                 b_cmsgs: dict
                 b_wmsgs: dict
@@ -2141,11 +2289,24 @@ class SchedulerState:
         else:
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
+            wp_vals = worker_pool.values()
             n_workers: Py_ssize_t = len(worker_pool_dv)
             if n_workers < 20:  # smart but linear in small case
-                ws = min(worker_pool.values(), key=operator.attrgetter("occupancy"))
+                ws = min(wp_vals, key=operator.attrgetter("occupancy"))
+                if ws._occupancy == 0:
+                    # special case to use round-robin; linear search
+                    # for next worker with zero occupancy (or just
+                    # land back where we started).
+                    wp_i: WorkerState
+                    start: Py_ssize_t = self._n_tasks % n_workers
+                    i: Py_ssize_t
+                    for i in range(n_workers):
+                        wp_i = wp_vals[(i + start) % n_workers]
+                        if wp_i._occupancy == 0:
+                            ws = wp_i
+                            break
             else:  # dumb but fast in large case
-                ws = worker_pool.values()[self._n_tasks % n_workers]
+                ws = wp_vals[self._n_tasks % n_workers]
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -2556,10 +2717,9 @@ class SchedulerState:
 
             dts: TaskState
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                if ts in s:
-                    s.discard(ts)
-                    if not s and not dts._who_wants:
+                if ts in dts._waiters:
+                    dts._waiters.discard(ts)
+                    if not dts._waiters and not dts._who_wants:
                         recommendations[dts._key] = "released"
             ts._waiting_on.clear()
 
@@ -2609,9 +2769,8 @@ class SchedulerState:
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
                     if dts._state != "released":
-                        s: set = dts._waiters
-                        s.discard(ts)
-                        if not s and not dts._who_wants:
+                        dts._waiters.discard(ts)
+                        if not dts._waiters and not dts._who_wants:
                             recommendations[dts._key] = "released"
                 ts._waiters.clear()
 
@@ -2666,9 +2825,8 @@ class SchedulerState:
                 recommendations[dts._key] = "erred"
 
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                s.discard(ts)
-                if not s and not dts._who_wants:
+                dts._waiters.discard(ts)
+                if not dts._waiters and not dts._who_wants:
                     recommendations[dts._key] = "released"
 
             ts._waiters.clear()  # do anything with this?
@@ -3295,12 +3453,12 @@ class Scheduler(SchedulerState, ServerNode):
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
         self.events = defaultdict(
-            lambda: deque(
-                maxlen=dask.config.get("distributed.scheduler.events-log-length")
+            partial(
+                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
             )
         )
         self.event_counts = defaultdict(int)
-        self.worker_plugins = []
+        self.worker_plugins = dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3367,6 +3525,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
+            "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -3671,6 +3830,34 @@ class Scheduler(SchedulerState, ServerNode):
             }
 
         ws._metrics = metrics
+
+        # Calculate RSS - dask keys, separating "old" and "new" usage
+        # See MemoryState for details
+        max_memory_unmanaged_old_hist_age = local_now - MEMORY_RECENT_TO_OLD_TIME
+        memory_unmanaged_old = ws._memory_unmanaged_old
+        while ws._memory_other_history:
+            timestamp, size = ws._memory_other_history[0]
+            if timestamp >= max_memory_unmanaged_old_hist_age:
+                break
+            ws._memory_other_history.popleft()
+            if size == memory_unmanaged_old:
+                memory_unmanaged_old = 0  # recalculate min()
+
+        # metrics["memory"] is None if the worker sent a heartbeat before its
+        # SystemMonitor ever had a chance to run.
+        # ws._nbytes is updated at a different time and sizeof() may not be accurate,
+        # so size may be (temporarily) negative; floor it to zero.
+        size = max(0, (metrics["memory"] or 0) - ws._nbytes + metrics["spilled_nbytes"])
+
+        ws._memory_other_history.append((local_now, size))
+        if not memory_unmanaged_old:
+            # The worker has just been started or the previous minimum has been expunged
+            # because too old.
+            # Note: this algorithm is capped to 200 * MEMORY_RECENT_TO_OLD_TIME elements
+            # cluster-wide by heartbeat_interval(), regardless of the number of workers
+            ws._memory_unmanaged_old = min(map(second, ws._memory_other_history))
+        elif size < memory_unmanaged_old:
+            ws._memory_unmanaged_old = size
 
         if host_info:
             dh: dict = parent._host_info.setdefault(host, {})
@@ -5873,7 +6060,11 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        report_msg: dict = _task_to_report_msg(parent, ts)
+        report_msg: dict
+        if ts is None:
+            report_msg = {"op": "cancelled-key", "key": key}
+        else:
+            report_msg = _task_to_report_msg(parent, ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -6120,11 +6311,21 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
-        self.worker_plugins.append({"plugin": plugin, "name": name})
+        self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
         )
+        return responses
+
+    async def unregister_worker_plugin(self, comm, name):
+        """ Unregisters a worker plugin"""
+        try:
+            worker_plugins = self.worker_plugins.pop(name)
+        except KeyError:
+            raise ValueError(f"The worker plugin {name} does not exists")
+
+        responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):
@@ -6468,9 +6669,9 @@ class Scheduler(SchedulerState, ServerNode):
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
         task_stream = Panel(child=task_stream, title="Task Stream")
         bandwidth_workers = Panel(
-            child=bandwidth_workers.fig, title="Bandwidth (Workers)"
+            child=bandwidth_workers.root, title="Bandwidth (Workers)"
         )
-        bandwidth_types = Panel(child=bandwidth_types.fig, title="Bandwidth (Types)")
+        bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
 
         tabs = Tabs(
             tabs=[
@@ -6798,8 +6999,7 @@ def _propagate_forgotten(
 
     for dts in ts._dependencies:
         dts._dependents.remove(ts)
-        s: set = dts._waiters
-        s.discard(ts)
+        dts._waiters.discard(ts)
         if not dts._dependents and not dts._who_wants:
             # Task not needed anymore
             assert dts is not ts
@@ -6833,9 +7033,8 @@ def _client_releases_keys(
         ts = state._tasks.get(key)
         if ts is not None and ts in cs._wants_what:
             cs._wants_what.remove(ts)
-            s: set = ts._who_wants
-            s.remove(cs)
-            if not s:
+            ts._who_wants.remove(cs)
+            if not ts._who_wants:
                 if not ts._dependents:
                     # No live dependents, can forget
                     recommendations[ts._key] = "forgotten"
@@ -6886,9 +7085,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
 @cfunc
 @exceptval(check=False)
 def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
-    if ts is None:
-        return {"op": "cancelled-key", "key": ts._key}
-    elif ts._state == "forgotten":
+    if ts._state == "forgotten":
         return {"op": "cancelled-key", "key": ts._key}
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
@@ -6907,16 +7104,12 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
 @cfunc
 @exceptval(check=False)
 def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
-    report_msg: dict = _task_to_report_msg(state, ts)
-    client_msgs: dict
-    if ts is None:
-        # Notify all clients
-        client_msgs = {k: [report_msg] for k in state._clients}
-    else:
-        # Notify clients interested in key
-        cs: ClientState
-        client_msgs = {cs._client_key: [report_msg] for cs in ts._who_wants}
-    return client_msgs
+    if ts._who_wants:
+        report_msg: dict = _task_to_report_msg(state, ts)
+        if report_msg is not None:
+            cs: ClientState
+            return {cs._client_key: [report_msg] for cs in ts._who_wants}
+    return {}
 
 
 @cfunc

@@ -58,7 +58,12 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.scheduler import CollectTaskMetaDataPlugin, KilledWorker, Scheduler
+from distributed.scheduler import (
+    COMPILED,
+    CollectTaskMetaDataPlugin,
+    KilledWorker,
+    Scheduler,
+)
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
 from distributed.utils_test import (  # noqa: F401
@@ -3508,6 +3513,14 @@ async def test_Client_clears_references_after_restart(c, s, a, b):
     assert key not in c.refcount
 
 
+@gen_cluster(Worker=Nanny, client=True)
+async def test_restart_timeout_is_logged(c, s, a, b):
+    with captured_logger(logging.getLogger("distributed.client")) as logger:
+        await c.restart(timeout="0.5s")
+    text = logger.getvalue()
+    assert "Restart timed out after 0.50 seconds" in text
+
+
 def test_get_stops_work_after_error(c):
     with pytest.raises(RuntimeError):
         c.get({"x": (throws, 1), "y": (sleep, 1.5)}, ["x", "y"])
@@ -5108,6 +5121,7 @@ def test_dynamic_workloads_sync_random(c):
     _test_dynamic_workloads_sync(c, delay="random")
 
 
+@pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True)
 async def test_bytes_keys(c, s, a, b):
     key = b"inc-123"

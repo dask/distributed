@@ -30,16 +30,15 @@ Pages and JSON endpoints served by the scheduler
 - ``/info/main/workers.html`` basic info about workers and links to their dashboards and logs
 - ``info/worker/(worker).html``: more detail about given worker, keyed by TCP address; links to tasks
 - ``info/task/(task).html``: details about a task on the cluster, by dask key; links to worker,
-            related tasks, and client
+  related tasks, and client
 - ``/info/call-stacks/(worker).html``: tasks currently handled by given worker
 - ``/info/call-stack/(task).html``: state of task (where it is running)
 - ``/info/main/logs.html``: scheduler logs
 - ``/info/logs/(worker).html``: logs of given worker
 - ``/individual-plots.json``: map of path to description for available individual
-            (i.e,. one-pane, non-dashboard) plots
+  (i.e,. one-pane, non-dashboard) plots
 - ``/eventstream``: scheduler events on a websocket
-- ``/proxy/(port)/(address)/(path): proxy to worker HTTP locations
-            (if you have jupyter-server-proxy)
+- ``/proxy/(port)/(address)/(path)``: proxy to worker HTTP locations (if you have jupyter-server-proxy)
 - ``/metrics``: prometheus endpoint
 - ``/json/counts.json``: cluster count stats
 - ``/json/identity.json``: scheduler information
@@ -57,12 +56,16 @@ Individual bokeh plots
 - ``/individual-profile``
 - ``/individual-profile-server``
 - ``/individual-nbytes``
+- ``/individual-nbytes-cluster``
 - ``/individual-cpu``
 - ``/individual-nprocessing``
 - ``/individual-workers``
 - ``/individual-bandwidth-types``
 - ``/individual-bandwidth-workers``
 - ``/individual-memory-by-key``
+- ``/individual-compute-time-per-key``
+- ``/individual-aggregate-time-per-action``
+- ``/individual-scheduler-system``
 - ``/individual-gpu-memory`` (GPU only)
 - ``/individual-gpu-utilization`` (GPU only)
 
