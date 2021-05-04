@@ -712,7 +712,7 @@ class WorkerState:
 
     @ccall
     def clean(self):
-        """ Return a version of this object that is appropriate for serialization """
+        """Return a version of this object that is appropriate for serialization"""
         ws: WorkerState = WorkerState(
             address=self._address,
             pid=self._pid,
@@ -1197,6 +1197,10 @@ class TaskState:
        failed task is stored here (possibly itself).  Otherwise this
        is ``None``.
 
+    .. attribute:: erred_on: set(str)
+
+        Worker addresses on which errors appeard causing this task to be in an error state.
+
     .. attribute:: suspicious: int
 
        The number of times this task has been involved in a worker death.
@@ -1285,6 +1289,7 @@ class TaskState:
     _exception: object
     _traceback: object
     _exception_blame: object
+    _erred_on: set
     _suspicious: Py_ssize_t
     _host_restrictions: set
     _worker_restrictions: set
@@ -1335,6 +1340,7 @@ class TaskState:
         "_who_wants",
         "_exception",
         "_traceback",
+        "_erred_on",
         "_exception_blame",
         "_suspicious",
         "_retries",
@@ -1373,6 +1379,7 @@ class TaskState:
         self._group = None
         self._metadata = {}
         self._annotations = {}
+        self._erred_on = set()
 
     def __hash__(self):
         return self._hash
@@ -1520,9 +1527,13 @@ class TaskState:
     def prefix_key(self):
         return self._prefix._name
 
+    @property
+    def erred_on(self):
+        return self._erred_on
+
     @ccall
     def add_dependency(self, other: "TaskState"):
-        """ Add another task as a dependency of this task """
+        """Add another task as a dependency of this task"""
         self._dependencies.add(other)
         self._group._dependencies.add(other._group)
         other._dependents.add(self)
@@ -1814,7 +1825,6 @@ class SchedulerState:
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
-            ("erred", "forgotten"): self.transition_released_forgotten,
             ("erred", "released"): self.transition_erred_released,
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
@@ -1949,7 +1959,7 @@ class SchedulerState:
     @ccall
     @exceptval(check=False)
     def new_task(self, key: str, spec: object, state: str) -> TaskState:
-        """ Create a new task, and associated states """
+        """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
         ts._state = state
 
@@ -1978,7 +1988,7 @@ class SchedulerState:
     #####################
 
     def story(self, *keys):
-        """ Get all transitions that touch one of the input keys """
+        """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
         return [
             t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
@@ -2596,7 +2606,10 @@ class SchedulerState:
                 "keys": [key],
                 "reason": "Transition released",
             }
+            # if key == "('transpose-aa672032c354ce5f11f9c91760d9a55d', 0, 0)":
+            #     breakpoint()
             print(self.story(key))
+            print(ts.who_has)
             print(ts.dependents)
             print(ts.dependencies)
             for ws in ts._who_has:
@@ -2604,7 +2617,16 @@ class SchedulerState:
                 ws._nbytes -= ts_nbytes
                 ts._group._nbytes_in_memory -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
-
+            # {<Worker 'tcp://127.0.0.1:62516', name: 1, memory: 3, processing: 0>}
+            # <Task "('transpose-aa672032c354ce5f11f9c91760d9a55d', 0, 0)" memory>
+            # ipdb> self.tasks[key].dependents
+            # {<Task "('tensordot-eea3b9b6e5dce74497e8bd954247c6d2', 0, 0)" memory>}
+            # ipdb> dep = list(self.tasks[key].dependents)[0]
+            # ipdb> dep
+            # <Task "('tensordot-eea3b9b6e5dce74497e8bd954247c6d2', 0, 0)" memory>
+            # ipdb> dep.who_has
+            # {<Worker 'tcp://127.0.0.1:62516', name: 1, memory: 3, processing: 0>}
+            # "('eye-feddd2ced9970de4d175979febcf8b3d', 0, 0)" culprit
             ts._who_has.clear()
 
             ts.state = "released"
@@ -2620,6 +2642,8 @@ class SchedulerState:
                 recommendations[key] = "forgotten"
             elif ts._who_wants or ts._waiters:
                 recommendations[key] = "waiting"
+            elif not ts._who_wants and not ts._dependents:
+                recommendations[key] = "forgotten"
 
             if self._validate:
                 assert not ts._waiting_on
@@ -2688,9 +2712,7 @@ class SchedulerState:
 
             if self._validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert all([dts._state != "erred" for dts in ts._dependencies])
                     assert ts._exception_blame
-                    assert not ts._who_has
                     assert not ts._waiting_on
                     assert not ts._waiters
 
@@ -2701,6 +2723,14 @@ class SchedulerState:
             for dts in ts._dependents:
                 if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
+
+            w_msg = {
+                "op": "forget-data",
+                "keys": [key],
+            }  # "reason": "Error release"}
+            for w in ts._erred_on:
+                worker_msgs[w] = [w_msg]
+            ts._erred_on.clear()
 
             report_msg = {"op": "task-retried", "key": key}
             cs: ClientState
@@ -2771,7 +2801,13 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = [{"op": "forget-data", "keys": [key]}]
+                worker_msgs[w] = [
+                    {
+                        "op": "delete-data",
+                        "keys": [key],
+                        "reason": "processing-released",
+                    }
+                ]
 
             ts.state = "released"
 
@@ -2801,7 +2837,7 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, **kwargs
+        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
     ):
         ws: WorkerState
         try:
@@ -2822,8 +2858,9 @@ class SchedulerState:
                 ws = ts._processing_on
                 ws._actors.remove(ts)
 
-            _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
 
+            ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
             if traceback is not None:
@@ -2920,6 +2957,21 @@ class SchedulerState:
         ts._processing_on = None
         ts._exception_blame = ts._exception = ts._traceback = None
         self._task_metadata.pop(key, None)
+
+    def transition_erred_forgotten(self, key):
+        try:
+            ts: TaskState = self._tasks[key]
+            dts: TaskState
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
     def transition_memory_forgotten(self, key):
         ws: WorkerState
@@ -3259,6 +3311,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     default_port = 8786
     _instances = weakref.WeakSet()
+    _async_worker_instances = weakref.WeakValueDictionary()
 
     def __init__(
         self,
@@ -3597,7 +3650,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
     def identity(self, comm=None):
-        """ Basic information about ourselves and our cluster """
+        """Basic information about ourselves and our cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         d = {
             "type": type(self).__name__,
@@ -3640,7 +3693,7 @@ class Scheduler(SchedulerState, ServerNode):
             return ws.host, port
 
     async def start(self):
-        """ Clear out old state and restart all running coroutines """
+        """Clear out old state and restart all running coroutines"""
         await super().start()
         assert self.status != Status.running
 
@@ -3910,7 +3963,7 @@ class Scheduler(SchedulerState, ServerNode):
         nanny=None,
         extra=None,
     ):
-        """ Add a new worker to the cluster """
+        """Add a new worker to the cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
             address = self.coerce_address(address, resolve_address)
@@ -4382,8 +4435,8 @@ class Scheduler(SchedulerState, ServerNode):
 
         # TODO: balance workers
 
-    def stimulus_task_finished(self, key=None, worker=None, **kwargs):
-        """ Mark that a task has finished execution on a particular worker """
+    def stimulus_task_finished(self, key=None, worker=None, metadata=None, **kwargs):
+        """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
@@ -4395,7 +4448,7 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             return recommendations, client_msgs, worker_msgs
         ws: WorkerState = parent._workers_dv[worker]
-        ts._metadata.update(kwargs["metadata"])
+        ts._metadata.update(metadata or {})
 
         if ts._state == "processing":
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
@@ -4426,7 +4479,7 @@ class Scheduler(SchedulerState, ServerNode):
     def stimulus_task_erred(
         self, key=None, worker=None, exception=None, traceback=None, **kwargs
     ):
-        """ Mark that a task has erred on a particular worker """
+        """Mark that a task has erred on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
@@ -4461,7 +4514,7 @@ class Scheduler(SchedulerState, ServerNode):
     def stimulus_missing_data(
         self, cause=None, key=None, worker=None, ensure=True, **kwargs
     ):
-        """ Mark that certain keys have gone missing.  Recover. """
+        """Mark that certain keys have gone missing.  Recover."""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
             logger.info("Stimulus missing data %s, %s", key, worker)
@@ -4648,7 +4701,7 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
-        """ Stop execution on a list of keys """
+        """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
@@ -4658,7 +4711,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.cancel_key(key, client, force=force)
 
     def cancel_key(self, key, client, retries=5, force=False):
-        """ Cancel a particular key and all dependents """
+        """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks.get(key)
@@ -4701,7 +4754,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.report_on_key(ts=ts, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
-        """ Remove keys from client desired list """
+        """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
         if not isinstance(keys, list):
@@ -4713,7 +4766,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.transitions(recommendations)
 
     def client_heartbeat(self, client=None):
-        """ Handle heartbeats from Client """
+        """Handle heartbeats from Client"""
         parent: SchedulerState = cast(SchedulerState, self)
         cs: ClientState = parent._clients[client]
         cs._last_seen = time()
@@ -4958,7 +5011,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pass
 
     def remove_client(self, client=None):
-        """ Remove client from network """
+        """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
         if self.status == Status.running:
             logger.info("Remove client %s", client)
@@ -4992,7 +5045,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: double = -1):
-        """ Send a single computational task to a worker """
+        """Send a single computational task to a worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         try:
             msg: dict = _task_to_msg(parent, ts, duration)
@@ -5161,7 +5214,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.plugins.append(plugin)
 
     def remove_plugin(self, plugin):
-        """ Remove external plugin from scheduler """
+        """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
 
     def worker_send(self, worker, msg):
@@ -5265,7 +5318,7 @@ class Scheduler(SchedulerState, ServerNode):
         return keys
 
     async def gather(self, comm=None, keys=None, serializers=None):
-        """ Collect data in from workers """
+        """Collect data in from workers"""
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         keys = list(keys)
@@ -5342,7 +5395,7 @@ class Scheduler(SchedulerState, ServerNode):
             collection.clear()
 
     async def restart(self, client=None, timeout=3):
-        """ Restart all workers.  Reset local state. """
+        """Restart all workers.  Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
 
@@ -5430,7 +5483,7 @@ class Scheduler(SchedulerState, ServerNode):
         nanny=False,
         serializers=None,
     ):
-        """ Broadcast message to workers, return all results """
+        """Broadcast message to workers, return all results"""
         parent: SchedulerState = cast(SchedulerState, self)
         if workers is None or workers is True:
             if hosts is None:
@@ -5465,7 +5518,7 @@ class Scheduler(SchedulerState, ServerNode):
         return dict(zip(workers, results))
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
-        """ Proxy a communication through the scheduler to some other worker """
+        """Proxy a communication through the scheduler to some other worker"""
         d = await self.broadcast(
             comm=comm, msg=msg, workers=[worker], serializers=serializers
         )
@@ -6027,10 +6080,14 @@ class Scheduler(SchedulerState, ServerNode):
                     },
                 )
             else:
+                r: tuple = self.stimulus_task_finished(key=key, worker=worker)
+                recommendations, client_msgs, worker_msgs = r
+                parent._transitions(recommendations, client_msgs, worker_msgs)
                 # TODO: This should be fine but should probably cause a proper transition
-                raise RuntimeError(
-                    f"Received data although task was not in state memory {ts}"
-                )
+                # breakpoint()
+                # raise RuntimeError(
+                #     f"Received data although task was not in state memory {ts}"
+                # )
 
         return "OK"
 
@@ -6339,7 +6396,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
-        """ Registers a setup function, and call it on every worker """
+        """Registers a setup function, and call it on every worker"""
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -6348,7 +6405,7 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def unregister_worker_plugin(self, comm, name):
-        """ Unregisters a worker plugin"""
+        """Unregisters a worker plugin"""
         try:
             worker_plugins = self.worker_plugins.pop(name)
         except KeyError:
@@ -7046,8 +7103,8 @@ def _propagate_forgotten(
 def _client_releases_keys(
     state: SchedulerState, keys: list, cs: ClientState, recommendations: dict
 ):
-    """ Remove keys from client desired list """
-    logger.debug("Client %s releases keys: %s", cs._client_key, keys)
+    """Remove keys from client desired list"""
+    logger.critical("Client %s releases keys: %s", cs._client_key, keys)
     ts: TaskState
     for key in keys:
         ts = state._tasks.get(key)
@@ -7056,16 +7113,23 @@ def _client_releases_keys(
             ts._who_wants.remove(cs)
             if not ts._who_wants:
                 if not ts._dependents:
-                    # No live dependents, can forget
-                    recommendations[ts._key] = "forgotten"
+                    if ts._who_has:
+                        # There may be workers with left over references, e.g.
+                        # in an error case
+                        recommendations[ts._key] = "released"
+                    else:
+                        # No live dependents, can forget
+                        recommendations[ts._key] = "forgotten"
                 elif ts._state != "erred" and not ts._waiters:
                     recommendations[ts._key] = "released"
+                elif ts._state == "erred":
+                    print("Why am I not releasing?")
 
 
 @cfunc
 @exceptval(check=False)
 def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) -> dict:
-    """ Convert a single computational task to a message """
+    """Convert a single computational task to a message"""
     ws: WorkerState
     dts: TaskState
 
@@ -7135,7 +7199,7 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 @cfunc
 @exceptval(check=False)
 def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
-    """ See reevaluate_occupancy """
+    """See reevaluate_occupancy"""
     old: double = ws._occupancy
     new: double = 0
     diff: double

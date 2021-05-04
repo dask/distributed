@@ -814,6 +814,8 @@ async def start_cluster(
     ]
     # for w in workers:
     #     w.rpc = workers[0].rpc
+    for w_inst in workers:
+        s._async_worker_instances[w_inst.name] = w_inst
 
     await asyncio.gather(*workers)
 

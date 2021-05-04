@@ -3,9 +3,9 @@ from contextlib import contextmanager
 
 import dask
 
-from .threadpoolexecutor import rejoin, secede
+from .threadpoolexecutor import rejoin
 from .utils import parse_timedelta
-from .worker import get_client, get_worker, thread_state
+from .worker import get_client, get_worker, secede
 
 
 @contextmanager
@@ -52,9 +52,6 @@ def worker_client(timeout=None, separate_thread=True):
     client = get_client(timeout=timeout)
     if separate_thread:
         secede()  # have this thread secede from the thread pool
-        worker.loop.add_callback(
-            worker.transition, worker.tasks[thread_state.key], "long-running"
-        )
 
     yield client
 

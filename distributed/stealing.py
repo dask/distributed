@@ -167,7 +167,7 @@ class WorkStealing(SchedulerPlugin):
                 {
                     "op": "steal-request",
                     "key": key,
-                    "transaction_id": f"steal-{uuid.uuid4().hex}",
+                    "stimulus_id": f"steal-{uuid.uuid4().hex}",
                 }
             )
 
@@ -191,7 +191,7 @@ class WorkStealing(SchedulerPlugin):
             raise
 
     async def move_task_confirm(
-        self, key=None, worker=None, state=None, transaction_id=None
+        self, key=None, worker=None, state=None, stimulus_id=None
     ):
         try:
             try:
@@ -199,7 +199,7 @@ class WorkStealing(SchedulerPlugin):
             except KeyError:
                 logger.debug(
                     "%s - Key released between request and confirm: %s",
-                    transaction_id,
+                    stimulus_id,
                     key,
                 )
                 return
@@ -211,7 +211,7 @@ class WorkStealing(SchedulerPlugin):
             victim = d["victim"]
             logger.debug(
                 "%s - Confirm move %s, %s -> %s.  State: %s",
-                transaction_id,
+                stimulus_id,
                 key,
                 victim,
                 thief,
@@ -252,7 +252,7 @@ class WorkStealing(SchedulerPlugin):
                         key,
                         victim.address,
                         thief.address,
-                        transaction_id,
+                        stimulus_id,
                     )
                 )
                 self.scheduler.check_idle_saturated(thief)
@@ -277,9 +277,7 @@ class WorkStealing(SchedulerPlugin):
                     self.scheduler.send_task_to_worker(thief.address, ts)
                 except CommClosedError:
                     await self.scheduler.remove_worker(thief.address)
-                self.log(
-                    ("confirm", key, victim.address, thief.address, transaction_id)
-                )
+                self.log(("confirm", key, victim.address, thief.address, stimulus_id))
             else:
                 raise ValueError("Unexpected task state: %s" % state)
         except Exception as e:

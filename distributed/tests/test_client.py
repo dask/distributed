@@ -1109,6 +1109,18 @@ async def test_aliases_2(c, s, a, b):
     for dsk, keys in dsk_keys:
         result = await c.gather(c.get(dsk, keys, sync=False))
         assert list(result) == list(dask.get(dsk, keys))
+        while s.tasks or a.tasks or b.tasks:
+            await asyncio.sleep(0)
+
+
+@gen_cluster(client=True)
+async def test_scheduler_forgets_client_get(c, s, a, b):
+    dsk = {"x": (inc, 1), "y": "x", "z": "x", "w": (add, "y", "z")}
+    keys = ["y", "w"]
+    result = await c.gather(c.get(dsk, keys, sync=False))
+    assert list(result) == list(dask.get(dsk, keys))
+    del result
+    while s.tasks:
         await asyncio.sleep(0)
 
 
@@ -1954,7 +1966,7 @@ class FatallySerializedObject:
         sys.exit(0)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=3)
 async def test_badly_serialized_input(c, s, a, b):
     o = BadlySerializedObject()
 
@@ -4672,12 +4684,13 @@ async def test_recreate_error_collection(c, s, a, b):
         function(*args, **kwargs)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=3600)
 async def test_recreate_error_array(c, s, a, b):
     da = pytest.importorskip("dask.array")
     pytest.importorskip("scipy")
     z = (da.linalg.inv(da.zeros((10, 10), chunks=10)) + 1).sum()
     zz = z.persist()
+    await asyncio.sleep(1)
     func, args, kwargs = await c._recreate_error_locally(zz)
     assert "0.,0.,0." in str(args).replace(" ", "")  # args contain actual arrays
 
@@ -4816,6 +4829,7 @@ async def test_fire_and_forget_err(c, s, a, b):
         assert time() < start + 1
 
 
+@pytest.mark.xfail()
 def test_quiet_client_close(loop):
     with captured_logger(logging.getLogger("distributed")) as logger:
         with Client(loop=loop, processes=False, threads_per_worker=4) as c:

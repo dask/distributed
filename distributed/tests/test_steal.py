@@ -663,8 +663,8 @@ async def test_steal_twice(c, s, a, b):
         )
     assert max(map(len, has_what.values())) < 30
 
-    assert a.in_flight_tasks == 0
-    assert b.in_flight_tasks == 0
+    assert not a.in_flight_tasks
+    assert not b.in_flight_tasks
 
     await c._close()
     await asyncio.gather(*[w.close() for w in workers])
@@ -697,9 +697,14 @@ async def test_dont_steal_already_released(c, s, a, b):
     # In case the system is slow (e.g. network) ensure that nothing bad happens
     # if the key was already released
     assert key not in a.tasks
-    a.stimulus_steal_data(key, transaction_id=None)
+    a.stimulus_steal_data(key, stimulus_id="test")
+    assert len(a.batched_stream.buffer) == 1
+    msg = a.batched_stream.buffer[0]
+    del msg[
+        "stimulus_id"
+    ]  # there is a UUID appended. No need to assert that as long as it's there
     assert a.batched_stream.buffer == [
-        {"op": "steal-response", "key": key, "state": None, "transaction_id": None}
+        {"op": "steal-response", "key": key, "state": None}
     ]
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG

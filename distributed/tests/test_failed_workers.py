@@ -28,7 +28,7 @@ from distributed.utils_test import (
 
 
 def test_submit_after_failed_worker_sync(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(allow_dead_workers=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -37,7 +37,7 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
-@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
+@gen_cluster(client=True, timeout=60, active_rpc_timeout=10, allow_dead_workers=True)
 async def test_submit_after_failed_worker_async(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
     while len(s.workers) < 3:
@@ -54,7 +54,7 @@ async def test_submit_after_failed_worker_async(c, s, a, b):
     await n.close()
 
 
-@gen_cluster(client=True, timeout=60)
+@gen_cluster(client=True, timeout=60, allow_dead_workers=True)
 async def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -66,7 +66,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
 
 
 def test_gather_after_failed_worker(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(allow_dead_workers=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -80,6 +80,7 @@ def test_gather_after_failed_worker(loop):
     Worker=Nanny,
     nthreads=[("127.0.0.1", 1)] * 4,
     config={"distributed.comm.timeouts.connect": "1s"},
+    allow_dead_workers=True,
 )
 async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     L = c.map(inc, range(20))
@@ -101,7 +102,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, timeout=60, client=True)
+@gen_cluster(Worker=Nanny, timeout=60, client=True, allow_dead_workers=True)
 async def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -138,7 +139,7 @@ async def test_failed_worker_without_warning(c, s, a, b):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(Worker=Nanny, client=True, timeout=60, allow_dead_workers=True)
 async def test_restart(c, s, a, b):
     assert s.nthreads == {a.worker_address: 1, b.worker_address: 2}
 
@@ -167,7 +168,7 @@ async def test_restart(c, s, a, b):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(Worker=Nanny, client=True, timeout=60, allow_dead_workers=True)
 async def test_restart_cleared(c, s, a, b):
     x = 2 * delayed(1) + 1
     f = c.compute(x)
@@ -181,7 +182,7 @@ async def test_restart_cleared(c, s, a, b):
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync_no_center(loop):
-    with cluster(nanny=True) as (s, [a, b]):
+    with cluster(nanny=True, allow_dead_workers=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             x = c.submit(inc, 1)
             c.restart()
@@ -193,7 +194,7 @@ def test_restart_sync_no_center(loop):
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
+    with cluster(nanny=True, allow_dead_workers=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             x = c.submit(div, 1, 2)
             x.result()
@@ -212,7 +213,7 @@ def test_restart_sync(loop):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(Worker=Nanny, client=True, timeout=60, allow_dead_workers=True)
 async def test_restart_fast(c, s, a, b):
     L = c.map(sleep, range(10))
 
@@ -230,7 +231,7 @@ async def test_restart_fast(c, s, a, b):
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_worker_doesnt_await_task_completion(loop):
-    with cluster(nanny=True, nworkers=1) as (s, [w]):
+    with cluster(nanny=True, nworkers=1, allow_dead_workers=True) as (s, [w]):
         with Client(s["address"], loop=loop) as c:
             future = c.submit(sleep, 100)
             sleep(0.1)
@@ -242,7 +243,7 @@ def test_worker_doesnt_await_task_completion(loop):
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 def test_restart_fast_sync(loop):
-    with cluster(nanny=True) as (s, [a, b]):
+    with cluster(nanny=True, allow_dead_workers=True) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             L = c.map(sleep, range(10))
 
@@ -258,7 +259,7 @@ def test_restart_fast_sync(loop):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(Worker=Nanny, client=True, timeout=60, allow_dead_workers=True)
 async def test_fast_kill(c, s, a, b):
     L = c.map(sleep, range(10))
 
@@ -274,7 +275,7 @@ async def test_fast_kill(c, s, a, b):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, timeout=60)
+@gen_cluster(Worker=Nanny, timeout=60, allow_dead_workers=True)
 async def test_multiple_clients_restart(s, a, b):
     c1 = await Client(s.address, asynchronous=True)
     c2 = await Client(s.address, asynchronous=True)
@@ -299,7 +300,7 @@ async def test_multiple_clients_restart(s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
-@gen_cluster(Worker=Nanny, timeout=60)
+@gen_cluster(Worker=Nanny, timeout=60, allow_dead_workers=True)
 async def test_restart_scheduler(s, a, b):
     import gc
 
@@ -312,7 +313,7 @@ async def test_restart_scheduler(s, a, b):
     assert addrs != addrs2
 
 
-@gen_cluster(Worker=Nanny, client=True, timeout=60)
+@gen_cluster(Worker=Nanny, client=True, timeout=60, allow_dead_workers=True)
 async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     x = c.submit(inc, 1)
     await c.restart()
@@ -325,7 +326,7 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await y
 
 
-@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
+@gen_cluster(client=True, timeout=60, active_rpc_timeout=10, allow_dead_workers=True)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
@@ -368,7 +369,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(client=True, Worker=Nanny, timeout=60)
+@gen_cluster(client=True, Worker=Nanny, timeout=60, allow_dead_workers=True)
 async def test_restart_during_computation(c, s, a, b):
     xs = [delayed(slowinc)(i, delay=0.01) for i in range(50)]
     ys = [delayed(slowinc)(i, delay=0.01) for i in xs]
@@ -385,7 +386,7 @@ async def test_restart_during_computation(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, timeout=60)
+@gen_cluster(client=True, timeout=60, allow_dead_workers=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
@@ -419,7 +420,13 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, timeout=60, Worker=Nanny, nthreads=[("127.0.0.1", 1)])
+@gen_cluster(
+    client=True,
+    timeout=60,
+    Worker=Nanny,
+    nthreads=[("127.0.0.1", 1)],
+    allow_dead_workers=True,
+)
 async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
         future = c.submit(sleep, 3600)
@@ -431,7 +438,9 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, scheduler_kwargs={"worker_ttl": "500ms"})
+@gen_cluster(
+    client=True, scheduler_kwargs={"worker_ttl": "500ms"}, allow_dead_workers=True
+)
 async def test_worker_time_to_live(c, s, a, b):
     from distributed.scheduler import heartbeat_interval
 
