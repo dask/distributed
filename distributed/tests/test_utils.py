@@ -646,7 +646,8 @@ def test__clean_filename():
     result = _clean_filename(filename)
     assert sys.exec_prefix not in result
     assert result.startswith(os.path.join("...", "lib"))
-    assert f"python{sys.version_info[0]}.{sys.version_info[1]}" in result
+    if os.sep != "\\":
+        assert f"python{sys.version_info[0]}.{sys.version_info[1]}" in result
 
     # Third-party package - site-packages
     filename = toolz.merge.__code__.co_filename
