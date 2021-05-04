@@ -1555,16 +1555,21 @@ def _clean_filename(filename):
             # Python standard library module
             return filename
         else:
-            if f"lib{os.sep}" in filename:
-                return filename.replace(
-                    f"lib{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
-                    "",
-                )
-            elif f"lib64{os.sep}" in filename:
-                return filename.replace(
-                    f"lib64{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}site-packages{os.sep}",
-                    "",
-                )
+            # TODO: Use `sys.platlibdir` once Python 3.9 is the minimum supported python version
+            if filename.startswith(os.path.join("...", "lib64")):
+                platlibdir = "lib64"
+            else:
+                platlibdir = "lib"
+            return filename.replace(
+                os.path.join(
+                    os.sep + platlibdir,
+                    f"python{sys.version_info[0]}.{sys.version_info[1]}",
+                    "site-packages",
+                ),
+                "",
+            )
 
     elif filename.startswith(os.path.expanduser("~")):
         return filename.replace(os.path.expanduser("~"), "...")
+    else:
+        return filename

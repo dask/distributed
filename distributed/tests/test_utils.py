@@ -642,28 +642,20 @@ def test_deprecated():
 def test__clean_filename():
     # python standard library case
     # path with sys.exec_prefix and no site-packages
-    path_no_sp = os.path.join.__code__.co_filename
-    clean_path_no_sp = _clean_filename(path_no_sp)
-
-    if f"lib{os.sep}" in path_no_sp:
-        assert (
-            clean_path_no_sp
-            == f"...{os.sep}lib{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}posixpath.py"
-        )
-    elif f"lib64{os.sep}" in path_no_sp:
-        assert (
-            clean_path_no_sp
-            == f"...{os.sep}lib64{os.sep}python{sys.version_info[0]}.{sys.version_info[1]}{os.sep}posixpath.py"
-        )
+    filename = os.path.join.__code__.co_filename
+    result = _clean_filename(filename)
+    assert sys.exec_prefix not in result
+    assert result.startswith(os.path.join("...", "lib"))
+    assert f"python{sys.version_info[0]}.{sys.version_info[1]}" in result
 
     # Third-party package - site-packages
-    path_third_party = toolz.merge.__code__.co_filename
-    clean_path_third_party = _clean_filename(path_third_party)
-    assert clean_path_third_party == f"...{os.sep}toolz{os.sep}dicttoolz.py"
+    filename = toolz.merge.__code__.co_filename
+    result = _clean_filename(filename)
+    assert sys.exec_prefix not in result
+    assert result.startswith(os.path.join("...", "toolz"))
+    assert "site-packages" not in result
 
     # Other case where esername in path
-    path_usr = (
-        os.path.expanduser("~") + f"{os.sep}repository{os.sep}folder{os.sep}filename.py"
-    )
-    clean_path_usr = _clean_filename(path_usr)
-    assert clean_path_usr == f"...{os.sep}repository{os.sep}folder{os.sep}filename.py"
+    filename = os.path.join(os.path.expanduser("~"), "dir", "filename.py")
+    result = _clean_filename(filename)
+    assert result == filename.replace(os.path.expanduser("~"), "...")
