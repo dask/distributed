@@ -11,15 +11,7 @@ import weakref
 
 import dask
 
-from ..utils import (
-    CancelledError,
-    ensure_ip,
-    get_ip,
-    get_ipv6,
-    log_errors,
-    nbytes,
-    parse_bytes,
-)
+from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes, parse_bytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
@@ -262,7 +254,7 @@ class UCX(Comm):
                 (shutdown, nframes) = struct.unpack("?Q", msg)
 
                 if shutdown:  # The writer is closing the connection
-                    raise CancelledError("Connection closed by writer")
+                    raise CommClosedError("Connection closed by writer")
 
                 # Recv which frames are CUDA (bool) and
                 # how large each frame is (uint64)
@@ -271,9 +263,12 @@ class UCX(Comm):
                 await self.ep.recv(header)
                 header = struct.unpack(header_fmt, header)
                 cuda_frames, sizes = header[:nframes], header[nframes:]
-            except (ucp.exceptions.UCXBaseException, CancelledError):
+            except (
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ())):
                 self.abort()
-                raise CommClosedError("While reading, the connection was closed")
+                raise CommClosedError("Connection closed by writer")
             else:
                 # Recv frames
                 frames = [
@@ -307,7 +302,7 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except ucp.exceptions.UCXError:
+            except (ucp.exceptions.UCXError, ucp.exceptions.UCXCloseError):
                 # If the other end is in the process of closing,
                 # UCX will sometimes raise a `Input/output` error,
                 # which we can ignore.
@@ -340,7 +335,13 @@ class UCXConnector(Connector):
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
         init_once()
-        ep = await ucx_create_endpoint(ip, port)
+        try:
+            ep = await ucx_create_endpoint(ip, port)
+        except (
+            ucp.exceptions.UCXCloseError,
+            ucp.exceptions.UCXCanceled,
+        ) + (getattr(ucp.exceptions, "UCXConnectionReset", ())):
+            raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
             local_addr=None,
