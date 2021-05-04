@@ -1560,14 +1560,23 @@ def _clean_filename(filename):
                 platlibdir = "lib64"
             else:
                 platlibdir = "lib"
-            return filename.replace(
-                os.path.join(
-                    os.sep + platlibdir,
-                    f"python{sys.version_info[0]}.{sys.version_info[1]}",
-                    "site-packages",
-                ),
-                "",
-            )
+            if os.sep == "\\":
+                return filename.replace(
+                    os.path.join(
+                        os.sep + platlibdir,
+                        "site-packages",
+                    ),
+                    "",
+                )
+            else:
+                return filename.replace(
+                    os.path.join(
+                        os.sep + platlibdir,
+                        f"python{sys.version_info[0]}.{sys.version_info[1]}",
+                        "site-packages",
+                    ),
+                    "",
+                )
 
     elif filename.startswith(os.path.expanduser("~")):
         return filename.replace(os.path.expanduser("~"), "...")
