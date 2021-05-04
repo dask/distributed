@@ -301,7 +301,9 @@ async def connect(
             upper_cap = min(time_left(), backoff_base * (2 ** attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
-            logger.debug("Could not connect, waiting for %s before retrying", backoff)
+            logger.debug(
+                "Could not connect to %s, waiting for %s before retrying", loc, backoff
+            )
             await asyncio.sleep(backoff)
     else:
         raise IOError(

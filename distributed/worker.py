@@ -7,7 +7,6 @@ import os
 import random
 import sys
 import threading
-import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
@@ -40,6 +39,7 @@ from .core import (
     pingpong,
     send_recv,
 )
+from .diagnostics.plugin import _get_worker_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
@@ -685,6 +685,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "plugin-remove": self.plugin_remove,
             "get_monitor_info": self.get_monitor_info,
         }
 
@@ -931,8 +932,8 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(**plugin_kwargs)
-                    for plugin_kwargs in response["worker-plugins"]
+                    self.plugin_add(name=name, plugin=plugin)
+                    for name, plugin in response["worker-plugins"].items()
                 ]
             )
 
@@ -2562,11 +2563,9 @@ class Worker(ServerNode):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
-            if not name:
-                if hasattr(plugin, "name"):
-                    name = plugin.name
-                else:
-                    name = funcname(plugin) + "-" + str(uuid.uuid4())
+
+            if name is None:
+                name = _get_worker_plugin_name(plugin)
 
             assert name
 
@@ -2586,6 +2585,21 @@ class Worker(ServerNode):
                         return msg
 
                 return {"status": "OK"}
+
+    async def plugin_remove(self, comm=None, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Worker plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(worker=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
 
     async def actor_execute(
         self, comm=None, actor=None, function=None, args=(), kwargs={}
