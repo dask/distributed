@@ -14,7 +14,6 @@ from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from contextlib import suppress
 from datetime import timedelta
-from functools import partial
 from inspect import isawaitable
 from pickle import PicklingError
 from typing import Dict, Iterable
@@ -188,6 +187,7 @@ class TaskState:
         self.metadata = {}
         self.nbytes = None
         self.annotations = None
+        self.scheduler_holds_ref = False
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -706,7 +706,7 @@ class Worker(ServerNode):
         stream_handlers = {
             "close": self.close,
             "compute-task": self.add_task,
-            "release-task": partial(self.release_key, report=False),
+            "release-task": self.release_task,
             "delete-data": self.delete_data,
             "steal-request": self.steal_request,
         }
@@ -1477,6 +1477,7 @@ class Worker(ServerNode):
                 self.put_key_in_memory(ts, value)
                 ts.priority = None
                 ts.duration = None
+            ts.scheduler_holds_ref = True
 
             self.log.append((key, "receive-from-scatter"))
 
@@ -1485,9 +1486,18 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
+    def release_task(self, key):
+        ts = self.tasks.get(key)
+        if ts:
+            ts.scheduler_holds_ref = False
+        self.release_key(key, report=False)
+
     def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
+                ts = self.tasks.get(key)
+                if ts:
+                    ts.scheduler_holds_ref = False
                 self.log.append((key, "delete"))
                 self.release_key(key, cause="delete data")
 
@@ -1532,6 +1542,7 @@ class Worker(ServerNode):
             runspec = SerializedTask(function, args, kwargs, task)
             if key in self.tasks:
                 ts = self.tasks[key]
+                ts.scheduler_holds_ref = True
                 if ts.state == "memory":
                     assert key in self.data or key in self.actors
                     logger.debug(
@@ -1555,7 +1566,6 @@ class Worker(ServerNode):
                     key=key, runspec=SerializedTask(function, args, kwargs, task)
                 )
                 self.transition(ts, "waiting")
-
             # TODO: move transition of `ts` to end of `add_task`
             # This will require a chained recommendation transition system like
             # the scheduler
@@ -1567,6 +1577,7 @@ class Worker(ServerNode):
             if actor:
                 self.actors[ts.key] = None
 
+            ts.scheduler_holds_ref = True
             ts.runspec = runspec
             ts.priority = priority
             ts.duration = duration
@@ -2504,12 +2515,23 @@ class Worker(ServerNode):
             # for any dependencies of key we are releasing remove task as dependent
             for dependency in ts.dependencies:
                 dependency.dependents.discard(ts)
-                # don't boot keys that are in flight
-                # we don't know if they're already queued up for transit
-                # in a gather_dep callback
-                if not dependency.dependents and dependency.state in (
-                    "waiting",
-                    "fetch",
+
+                if (
+                    not dependency.dependents
+                    and dependency.state
+                    not in (
+                        # don't boot keys that are in flight
+                        # we don't know if they're already queued up for transit
+                        # in a gather_dep callback
+                        "flight",
+                        # The same is true for already executing keys.
+                        "executing",
+                    )
+                    # If the scheduler holds a reference which is usually the
+                    # case when it instructed the task to be computed here or if
+                    # data was scattered we must not release it unless the
+                    # scheduler allow us to. See also handle_delete_data and
+                    and not dependency.scheduler_holds_ref
                 ):
                     self.release_key(dependency.key, cause=f"Dependent {ts} released")
 

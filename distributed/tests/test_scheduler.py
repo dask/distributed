@@ -1890,11 +1890,25 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["released"] == 5
     assert tp.states["memory"] == 0
     assert tp.states["released"] == 5
+    assert tp.groups == [tg]
     assert tg.prefix is tp
-    assert tg in tp.groups
+    # these must be true since in this simple case there is a 1to1 mapping
+    # between prefix and group
     assert tg.duration == tp.duration
     assert tg.nbytes_in_memory == tp.nbytes_in_memory
     assert tg.nbytes_total == tp.nbytes_total
+    # It should map down to individual tasks
+    assert tg.nbytes_total == sum(
+        [ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg]
+    )
+    in_memory_ts = sum(
+        [
+            ts.get_nbytes()
+            for ts in s.tasks.values()
+            if ts.group is tg and ts.state == "memory"
+        ]
+    )
+    assert tg.nbytes_in_memory == in_memory_ts
 
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -1902,6 +1916,7 @@ async def test_task_groups(c, s, a, b):
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
     await c.replicate(y)
+    # TODO: Are we supposed to track repliacted memory here? See also Scheduelr.add_keys
     assert tg.nbytes_in_memory == y.nbytes
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)

@@ -131,6 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "error"},
+        {"key": "task", "state": "error"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
