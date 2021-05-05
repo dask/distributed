@@ -56,7 +56,11 @@ def init_once():
     # remove/process dask.ucx flags for valid ucx options
     ucx_config = _scrub_ucx_config()
     if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
-        import numba.cuda
+        try:
+            import numba.cuda
+        except ImportError:
+            raise ImportError("CUDA support with UCX requires Numba for context management")
+
         numba.cuda.current_context()
 
     import ucp as _ucp
