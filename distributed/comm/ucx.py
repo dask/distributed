@@ -59,7 +59,9 @@ def init_once():
         try:
             import numba.cuda
         except ImportError:
-            raise ImportError("CUDA support with UCX requires Numba for context management")
+            raise ImportError(
+                "CUDA support with UCX requires Numba for context management"
+            )
 
         numba.cuda.current_context()
 
@@ -396,12 +398,7 @@ class UCXListener(Listener):
                 await self.comm_handler(ucx)
 
         init_once()
-        try:
-            self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
-        except ucp.exceptions.UCXError as e:
-            print("Error %s, retrying" % str(e))
-            self.ip, self._input_port = parse_host_port(self.ip, default_port=0)
-            self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
+        self.ucp_server = ucx_create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
         self.ucp_server = None
