@@ -32,6 +32,7 @@ from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
+from distributed.protocol.serialize import TaskGraphValue
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
@@ -1148,7 +1149,7 @@ async def check_deserialize_roundtrip(addr):
             assert isinstance(got["to_ser"][0], (bytes, bytearray))
             assert isinstance(got["ser"], (bytes, bytearray))
         else:
-            assert isinstance(got["to_ser"][0], (to_serialize, Serialized))
+            assert isinstance(got["to_ser"][0], TaskGraphValue)
             assert isinstance(got["ser"], Serialized)
 
 

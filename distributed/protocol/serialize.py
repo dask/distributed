@@ -135,8 +135,27 @@ class MsgpackList(collections.abc.MutableSequence):
 
 
 class TaskGraphValue:
-    def __init__(self, x):
-        self.data = x
+    """Mark object as a graph value not concerning the scheduler
+
+    This is usefull for objects we don't want the scheduler to interpret
+    literally such as `False` and `None`, which makes code like
+    `dsk.pop("key", None)` work as expected.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return f"<TaskGraphValue: {repr(self.data)}>"
+
+    def __eq__(self, other):
+        return isinstance(other, TaskGraphValue) and other.data == self.data
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.data)
 
 
 def msgpack_persist_lists(obj):
@@ -432,39 +451,16 @@ def merge_and_deserialize(header, frames, deserializers=None):
     return deserialize(header, merged_frames, deserializers=deserializers)
 
 
-class Serialize:
-    """Mark an object that should be serialized
-
-    Examples
-    --------
-    >>> msg = {'op': 'update', 'data': to_serialize(123)}
-    >>> msg  # doctest: +SKIP
-    {'op': 'update', 'data': <Serialize: 123>}
-
-    See also
-    --------
-    distributed.protocol.dumps
+# TODO: remove Serialize and to_serialize and use TaskGraphValue instead
+def to_serialize(x):
     """
-
-    def __init__(self, data):
-        self.data = data
-
-    def __repr__(self):
-        return "<Serialize: %s>" % str(self.data)
-
-    def __eq__(self, other):
-        return isinstance(other, Serialize) and other.data == self.data
-
-    def __ne__(self, other):
-        return not (self == other)
-
-    def __hash__(self):
-        return hash(self.data)
+    Traditionally, `to_serialize()` has been used to mark data for serialization.
+    Now, we use it to preserve lists through msgpack serialization.
+    """
+    return TaskGraphValue(msgpack_persist_lists(x))
 
 
-# Historically, `to_serialize()` has been used to mark data for serialization.
-# Now, we use it to preserve lists through msgpack serialization.
-to_serialize = msgpack_persist_lists
+Serialize = TaskGraphValue
 
 
 class Serialized:
