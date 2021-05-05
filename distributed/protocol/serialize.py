@@ -462,7 +462,9 @@ class Serialize:
         return hash(self.data)
 
 
-to_serialize = Serialize
+# Historically, `to_serialize()` has been used to mark data for serialization.
+# Now, we use it to preserve lists through msgpack serialization.
+to_serialize = msgpack_persist_lists
 
 
 class Serialized:
