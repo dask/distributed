@@ -110,6 +110,8 @@ def import_allowed_module(name):
 
 
 class MsgpackList(collections.abc.MutableSequence):
+    __class__ = list  # Make `isinstance(x, list)` true
+
     def __init__(self, x):
         self.data = x
 
@@ -127,6 +129,9 @@ class MsgpackList(collections.abc.MutableSequence):
 
     def insert(self, i, v):
         return self.data.insert(i, v)
+
+    def __repr__(self):
+        return f"MsgpackList({repr(self.data)})"
 
 
 class TaskGraphValue:
