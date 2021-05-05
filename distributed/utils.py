@@ -640,7 +640,9 @@ def key_split_group(x):
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
     >>> key_split_group('x')
+    'x'
     >>> key_split_group('x-1')
+    'x'
     """
     typ = type(x)
     if typ is tuple:
@@ -1319,24 +1321,24 @@ def parse_ports(port):
     A single port can be specified using an integer:
 
     >>> parse_ports(8787)
-    >>> [8787]
+    [8787]
 
     or a string:
 
     >>> parse_ports("8787")
-    >>> [8787]
+    [8787]
 
     A sequential range of ports can be specified by a string which indicates
     the first and last ports which should be included in the sequence of ports:
 
     >>> parse_ports("8787:8790")
-    >>> [8787, 8788, 8789, 8790]
+    [8787, 8788, 8789, 8790]
 
     An input of ``None`` is also valid and can be used to indicate that no port
     has been specified:
 
     >>> parse_ports(None)
-    >>> [None]
+    [None]
 
     """
     if isinstance(port, str) and ":" not in port:
@@ -1451,7 +1453,7 @@ def import_term(name: str):
 
     Examples
     --------
-    >>> import_term("math.sin")
+    >>> import_term("math.sin") # doctest: +SKIP
     <function math.sin(x, /)>
     """
     try:
