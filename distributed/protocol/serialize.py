@@ -493,8 +493,8 @@ class Serialized:
 
 
 class SerializedCallable(Serialized):
-    def __call__(self) -> None:
-        raise NotImplementedError
+    def __call__(self, *args, **kwargs) -> None:
+        raise RuntimeError("SerializedCallable should never be called!")
 
 
 def nested_deserialize(x):
