@@ -6178,7 +6178,7 @@ async def test_performance_report(c, s, a, b):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
-    async def f():
+    async def f(stacklevel):
         """
         We wrap this in a function so that the assertions aren't in the
         performanace report itself
@@ -6187,14 +6187,15 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
-            async with performance_report(filename=fn):
+            async with performance_report(filename=fn, stacklevel=stacklevel):
                 await c.compute((x + x.T).sum())
 
             with open(fn) as f:
                 data = f.read()
         return data
 
-    data = await f()
+    # Ensure default kwarg maintains backward compatability
+    data = await f(stacklevel=1)
 
     assert "Also, we want this comment to appear" in data
     assert "bokeh" in data
@@ -6203,6 +6204,18 @@ async def test_performance_report(c, s, a, b):
     assert "x = da.random" in data
     assert "Threads: 4" in data
     assert dask.__version__ in data
+
+    # Stacklevel two captures code two frames back -- which in this case
+    # is the testing function
+    data = await f(stacklevel=2)
+    assert "async def test_performance_report(c, s, a, b):" in data
+    assert "Dask Performance Report" in data
+
+    # Stacklevel zero or lower is overridden to stacklevel=1 so we don't see
+    # distributed internals
+    data = await f(stacklevel=0)
+    assert "Also, we want this comment to appear" in data
+    assert "Dask Performance Report" in data
 
 
 @pytest.mark.asyncio
