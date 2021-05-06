@@ -167,6 +167,10 @@ class Server:
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
 
+        if kwargs:
+            for key in kwargs:
+                raise NameError(f"{self.__class__.__name__} has no such option {key}.")
+
         if not hasattr(self.io_loop, "profile"):
             ref = weakref.ref(self.io_loop)
 
@@ -238,7 +242,7 @@ class Server:
 
         self.__stopped = False
 
-        super().__init__(**kwargs)
+        super().__init__()
 
     @property
     def status(self):
