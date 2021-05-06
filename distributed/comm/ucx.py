@@ -53,12 +53,25 @@ def init_once():
     if ucp is not None:
         return
 
+    # remove/process dask.ucx flags for valid ucx options
+    ucx_config = _scrub_ucx_config()
+
+    # We ensure the CUDA context is created before initializing UCX. This can't
+    # be safely handled externally because communications in Dask start before
+    # preload scripts run.
+    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+        try:
+            import numba.cuda
+        except ImportError:
+            raise ImportError(
+                "CUDA support with UCX requires Numba for context management"
+            )
+
+        numba.cuda.current_context()
+
     import ucp as _ucp
 
     ucp = _ucp
-
-    # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _scrub_ucx_config()
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
@@ -458,7 +471,9 @@ def _scrub_ucx_config():
     # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config
+    from ucp import get_config, get_ucx_version
+
+    ucx_110 = get_ucx_version() >= (1, 10, 0)
 
     options = {}
 
@@ -473,11 +488,11 @@ def _scrub_ucx_config():
         ]
     ):
         if dask.config.get("ucx.rdmacm"):
-            tls = "tcp,rdmacm"
+            tls = "tcp" if ucx_110 else "tcp,rdmacm"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp,sockcm"
-            tls_priority = "sockcm"
+            tls = "tcp" if ucx_110 else "tcp,sockcm"
+            tls_priority = "tcp" if ucx_110 else "sockcm"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
