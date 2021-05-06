@@ -1551,9 +1551,9 @@ class TaskState:
         if old_nbytes >= 0:
             diff -= old_nbytes
         self._group._nbytes_total += diff
-        self._group._nbytes_in_memory += diff
         ws: WorkerState
         for ws in self._who_has:
+            self._group._nbytes_in_memory += diff
             ws._nbytes += diff
         self._nbytes = nbytes
 
@@ -2447,7 +2447,7 @@ class SchedulerState:
     def transition_processing_memory(
         self,
         key,
-        nbytes=None,
+        nbytes,
         type=None,
         typename: str = None,
         worker=None,
@@ -2606,8 +2606,7 @@ class SchedulerState:
                 "keys": [key],
                 "reason": "Transition released",
             }
-            # if key == "('transpose-aa672032c354ce5f11f9c91760d9a55d', 0, 0)":
-            #     breakpoint()
+
             print(self.story(key))
             print(ts.who_has)
             print(ts.dependents)
@@ -2617,16 +2616,6 @@ class SchedulerState:
                 ws._nbytes -= ts_nbytes
                 ts._group._nbytes_in_memory -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
-            # {<Worker 'tcp://127.0.0.1:62516', name: 1, memory: 3, processing: 0>}
-            # <Task "('transpose-aa672032c354ce5f11f9c91760d9a55d', 0, 0)" memory>
-            # ipdb> self.tasks[key].dependents
-            # {<Task "('tensordot-eea3b9b6e5dce74497e8bd954247c6d2', 0, 0)" memory>}
-            # ipdb> dep = list(self.tasks[key].dependents)[0]
-            # ipdb> dep
-            # <Task "('tensordot-eea3b9b6e5dce74497e8bd954247c6d2', 0, 0)" memory>
-            # ipdb> dep.who_has
-            # {<Worker 'tcp://127.0.0.1:62516', name: 1, memory: 3, processing: 0>}
-            # "('eye-feddd2ced9970de4d175979febcf8b3d', 0, 0)" culprit
             ts._who_has.clear()
 
             ts.state = "released"
@@ -4884,6 +4873,12 @@ class Scheduler(SchedulerState, ServerNode):
                 assert not ws._occupancy
                 assert ws._address in parent._idle_dv
 
+            assert ws._nbytes >= 0
+            actual_nbytes = 0
+            for ts in ws._has_what:
+                actual_nbytes += ts.get_nbytes()
+            assert actual_nbytes == ws._nbytes
+
         ts: TaskState
         for k, ts in parent._tasks.items():
             assert isinstance(ts, TaskState), (type(ts), ts)
@@ -6064,13 +6059,20 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
+                nbytes = ts.get_nbytes()
                 if ts not in ws._has_what:
-                    ws._nbytes += ts.get_nbytes()
+                    ws._nbytes += nbytes
                     ws._has_what.add(ts)
                     ts._who_has.add(ws)
+                    # TODO: Are we supposed to track repliacted memory here? See
+                    # also distributed/tests/test_scheduler::test_task_groups
+                    # Alternatively, see Scheduler.add_keys where we subtract
+                    # nbytes for every who_has
+                    ts._group._nbytes_in_memory += nbytes
             elif ts is None:
                 # # FIXME This can happen in scatter if report=True
                 # Why do we even implement this route? Isn't this somehow faulty?
+                logger.critical("Received unknown task %s from worker %s", key, worker)
                 self.worker_send(
                     worker,
                     {
@@ -6127,6 +6129,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ws: WorkerState = parent._workers_dv[w]
                     if ts not in ws._has_what:
                         ws._nbytes += ts_nbytes
+                        ts._group._nbytes_in_memory += ts_nbytes
                         ws._has_what.add(ts)
                         ts._who_has.add(ws)
                 self.report(
@@ -7007,8 +7010,11 @@ def _add_to_memory(
         assert ts not in ws._has_what
 
     ts._who_has.add(ws)
+    if ts not in ws._has_what:
+        nbytes = ts.get_nbytes()
+        ws._nbytes += nbytes
+        ts._group._nbytes_in_memory += nbytes
     ws._has_what.add(ts)
-    ws._nbytes += ts.get_nbytes()
 
     deps: list = list(ts._dependents)
     if len(deps) > 1:
@@ -7085,11 +7091,10 @@ def _propagate_forgotten(
     ts._waiting_on.clear()
 
     ts_nbytes: Py_ssize_t = ts.get_nbytes()
-    if ts._who_has:
-        ts._group._nbytes_in_memory -= ts_nbytes
 
     ws: WorkerState
     for ws in ts._who_has:
+        ts._group._nbytes_in_memory -= ts_nbytes
         ws._has_what.remove(ts)
         ws._nbytes -= ts_nbytes
         w: str = ws._address

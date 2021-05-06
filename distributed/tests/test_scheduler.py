@@ -236,7 +236,10 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     s.validate_state()
 
 
-@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
+@gen_cluster(
+    config={"distributed.scheduler.events-cleanup-delay": "10 ms"},
+    allow_dead_workers=True,
+)
 async def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
     assert a.address in s.nthreads
@@ -1100,7 +1103,7 @@ async def test_run_on_scheduler(c, s, a, b):
     assert response == s.address
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_close_worker(c, s, a, b):
     assert len(s.workers) == 2
 
@@ -1154,7 +1157,7 @@ async def test_retire_workers_close(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, allow_dead_workers=True)
 async def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
     await s.retire_workers(close_workers=True, remove=True)
@@ -1344,7 +1347,10 @@ async def test_cancel_fire_and_forget(c, s, a, b):
 
 
 @gen_cluster(
-    client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
+    client=True,
+    Worker=Nanny,
+    clean_kwargs={"processes": False, "threads": False},
+    allow_dead_workers=True,
 )
 async def test_log_tasks_during_restart(c, s, a, b):
     future = c.submit(sys.exit, 0)
@@ -1432,7 +1438,7 @@ async def test_retries(c, s, a, b):
 @pytest.mark.flaky(
     reruns=10, reruns_delay=5, reason="second worker also errant for some reason"
 )
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3, allow_dead_workers=True)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         np = pytest.importorskip("numpy")
@@ -1554,7 +1560,7 @@ async def test_dont_recompute_if_erred(c, s, a, b):
     assert list(s.transition_log) == old
 
 
-@gen_cluster()
+@gen_cluster(allow_dead_workers=True)
 async def test_closing_scheduler_closes_workers(s, a, b):
     await s.close()
 
@@ -1649,7 +1655,11 @@ async def test_idle_timeout(c, s, a, b):
     assert s.idle_since > beginning
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
+@gen_cluster(
+    client=True,
+    config={"distributed.scheduler.bandwidth": "100 GB"},
+    allow_dead_workers=True,
+)
 async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
     x = c.submit(operator.mul, b"0", 1000001, workers=a.address)
@@ -1665,7 +1675,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, allow_dead_workers=True)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = c.submit(np.arange, 1000000, workers=[a.worker_address], pure=False)
@@ -1700,7 +1710,7 @@ async def test_result_type(c, s, a, b):
     assert "int" in s.tasks[x.key].type
 
 
-@gen_cluster()
+@gen_cluster(allow_dead_workers=True)
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)
     assert a.status == Status.closed
@@ -1866,17 +1876,33 @@ async def test_task_groups(c, s, a, b):
 
     tg = s.task_groups[x.name]
     tp = s.task_prefixes["arange"]
+
     repr(tg)
     repr(tp)
     assert tg.states["memory"] == 0
     assert tg.states["released"] == 5
     assert tp.states["memory"] == 0
     assert tp.states["released"] == 5
+
+    assert tp.groups == [tg]
     assert tg.prefix is tp
-    assert tg in tp.groups
+    # these must be true since in this simple case there is a 1to1 mapping
+    # between prefix and group
     assert tg.duration == tp.duration
     assert tg.nbytes_in_memory == tp.nbytes_in_memory
     assert tg.nbytes_total == tp.nbytes_total
+    # It should map down to individual tasks
+    assert tg.nbytes_total == sum(
+        [ts.get_nbytes() for ts in s.tasks.values() if ts._group is tg]
+    )
+    in_memory_ts = sum(
+        [
+            ts.get_nbytes()
+            for ts in s.tasks.values()
+            if ts._group is tg and ts.state == "memory"
+        ]
+    )
+    assert tg.nbytes_in_memory == in_memory_ts
 
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -1884,7 +1910,8 @@ async def test_task_groups(c, s, a, b):
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
     await c.replicate(y)
-    assert tg.nbytes_in_memory == y.nbytes
+    # TODO: Are we supposed to track repliacted memory here? See also Scheduelr.add_keys
+    assert tg.nbytes_in_memory == 2 * y.nbytes
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
 
@@ -2030,7 +2057,7 @@ async def test_gather_failing_cnn_error(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, allow_dead_workers=True)
 async def test_gather_no_workers(c, s, a, b):
     await asyncio.sleep(1)
     x = await c.scatter({"x": 1}, workers=a.address)
@@ -2203,7 +2230,7 @@ async def test_unknown_task_duration_config(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True, timeout=None, allow_dead_workers=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))
@@ -2470,7 +2497,7 @@ async def test_memory_is_none(c, s):
             assert s.memory.unmanaged_recent == 0
 
 
-@gen_cluster()
+@gen_cluster(allow_dead_workers=True)
 async def test_close_scheduler__close_workers_Worker(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
         await s.close(close_workers=True)
@@ -2480,7 +2507,7 @@ async def test_close_scheduler__close_workers_Worker(s, a, b):
     assert "retry" not in log
 
 
-@gen_cluster(Worker=Nanny)
+@gen_cluster(Worker=Nanny, allow_dead_workers=True)
 async def test_close_scheduler__close_workers_Nanny(s, a, b):
     with captured_logger("distributed.comm", level=logging.DEBUG) as log:
         await s.close(close_workers=True)

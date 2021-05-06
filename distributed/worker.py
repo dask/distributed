@@ -1256,6 +1256,12 @@ class Worker(ServerNode):
         await self._register_with_scheduler()
 
         self.start_periodic_callbacks()
+
+        # There may be already registered tasks. Populate the state accordingly
+        for ts in self.tasks.values():
+            if ts.state == StateID.memory:
+                ts.who_has.add(self.address)
+                self.has_what[self.address].add(ts.key)
         return self
 
     def _close(self, *args, **kwargs):
@@ -2682,8 +2688,10 @@ class Worker(ServerNode):
         recommendations, messages = {}, []
         ts = self.tasks[key]
         assert not ts.state == StateID.memory
-        ts.who_has.add(self.address)
-        self.has_what[self.address].add(ts.key)
+
+        if self.status == Status.running:
+            ts.who_has.add(self.address)
+            self.has_what[self.address].add(ts.key)
 
         try:
             self.put_key_in_memory(ts, value)
