@@ -37,9 +37,6 @@ class MyPlugin(WorkerPlugin):
     def release_key(self, key, state, cause, reason, report):
         self.observed_notifications.append({"key": key, "state": state})
 
-    def release_dep(self, dep, state, report):
-        self.observed_notifications.append({"dep": dep, "state": state})
-
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client(c, s):
@@ -164,7 +161,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_release_dep_called(c, s, w):
+async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
