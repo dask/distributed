@@ -5619,17 +5619,23 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
         ws: WorkerState
 
-        # Smallest-first heapsof workers that need to send/receive data, with how many
-        # bytes each needs to send/receive. Bytes are negative, so that the workers
-        # farthest from the cluster mean are at the top of the heaps.
-        # Heap elements:
-        # - maximum number of bytes to send or receive
-        # - number of bytes after which the worker should not be considered anymore
+        # Heaps of workers that need to send/receive data, with how many bytes each
+        # needs to send/receive.
+        #
+        # Each element of the heap is a tuple constructed as follows:
+        # - snd_bytes_max/rec_bytes_max: maximum number of bytes to send or receive.
+        #   This number is negative, so that the workers farthest from the cluster mean
+        #   are at the top of the smallest-first heaps.
+        # - snd_bytes_min/rec_bytes_min: minimum number of bytes after sending/receiving
+        #   which the worker should not be considered anymore. This is also negative.
         # - arbitrary unique number, there just to to make sure that WorkerState objects
         #   are never used for sorting in the unlikely event that two processes have
         #   exactly the same number of bytes allocated.
         # - WorkerState
-        # - iterator of all tasks in memory on the worker (senders only)
+        # - iterator of all tasks in memory on the worker (senders only).
+        #   Note that this iterator of keys will typically *not* be exhausted. It will
+        #   only be exhausted if, after moving away from the worker all keys that can be
+        #   moved, is insufficient to drop snd_bytes_min above 0.
         senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = []
         recipients: "list[tuple[int, int, int, WorkerState]]" = []
 
@@ -5660,19 +5666,18 @@ class Scheduler(SchedulerState, ServerNode):
                 and ws_memory >= sender_min
             ):
                 # This may send the worker below sender_min (by design)
-                nbytes = mean_memory - ws_memory  # negative
+                snd_bytes_max = mean_memory - ws_memory  # negative
+                snd_bytes_min = snd_bytes_max + half_gap  # negative
                 # See definition of senders above
-                # Note that the iterator of keys will typically *not* be exhausted.
-                # It will only be exhausted if moving away from the worker all keys that
-                # can be moved is insufficient to drop nbytes + half_gap above 0.
                 senders.append(
-                    (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
+                    (snd_bytes_max, snd_bytes_min, id(ws), ws, iter(ws._has_what))
                 )
             elif ws_memory < mean_memory - half_gap and ws_memory < recipient_max:
                 # This may send the worker above recipient_max (by design)
-                nbytes = ws_memory - mean_memory  # negative
+                rec_bytes_max = ws_memory - mean_memory  # negative
+                rec_bytes_min = rec_bytes_max + half_gap  # negative
                 # See definition of recipients above
-                recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
+                recipients.append((rec_bytes_max, rec_bytes_min, id(ws), ws))
 
         # Fast exit in case no transfers are necessary or possible
         if not senders or not recipients:
@@ -5691,14 +5696,14 @@ class Scheduler(SchedulerState, ServerNode):
         heapq.heapify(recipients)
 
         while senders and recipients:
-            snd_nbytes_max, snd_nbytes_min, _, snd_ws, ts_iter = senders[0]
+            snd_bytes_max, snd_bytes_min, _, snd_ws, ts_iter = senders[0]
 
             # Iterate through tasks in memory, least recently inserted first
             for ts in ts_iter:
                 if keys is not None and ts.key not in keys:
                     continue
                 nbytes = ts.nbytes
-                if nbytes + snd_nbytes_max > 0:
+                if nbytes + snd_bytes_max > 0:
                     # Moving this task would cause the sender to go below mean
                     # and potentially risk becoming a recipient, which would
                     # cause tasks to bounce around. Move on to the next task
@@ -5713,9 +5718,9 @@ class Scheduler(SchedulerState, ServerNode):
                 skipped_recipients = []
                 use_recipient = False
                 while recipients and not use_recipient:
-                    rec_nbytes_max, rec_nbytes_min, _, rec_ws = recipients[0]
-                    if nbytes + rec_nbytes_max > 0:
-                        # recipients are sorted by rec_nbytes_max.
+                    rec_bytes_max, rec_bytes_min, _, rec_ws = recipients[0]
+                    if nbytes + rec_bytes_max > 0:
+                        # recipients are sorted by rec_bytes_max.
                         # The next ones will be worse; no reason to continue iterating
                         break
                     use_recipient = ts.key not in rec_ws._has_what
@@ -5734,25 +5739,31 @@ class Scheduler(SchedulerState, ServerNode):
                 # still has bytes to lose, push it back into the senders heap.
                 # It may or may not come back on top again.
                 msgs.append((snd_ws, rec_ws, ts))
-                # nbytes_max/nbytes_min are all negative for heap sorting
-                snd_nbytes_max += nbytes
-                snd_nbytes_min += nbytes
-                rec_nbytes_max += nbytes
-                rec_nbytes_min += nbytes
-                if snd_nbytes_min < 0:
+                # *_bytes_max/min are all negative for heap sorting
+                snd_bytes_max += nbytes
+                snd_bytes_min += nbytes
+                rec_bytes_max += nbytes
+                rec_bytes_min += nbytes
+                if snd_bytes_min < 0:
                     # See definition of senders above
                     heapq.heapreplace(
                         senders,
-                        (snd_nbytes_max, snd_nbytes_min, id(snd_ws), snd_ws, ts_iter),
+                        (
+                            snd_bytes_max,
+                            snd_bytes_min,
+                            id(snd_ws),
+                            snd_ws,
+                            ts_iter,
+                        ),
                     )
                 else:
                     heapq.heappop(senders)
 
-                if rec_nbytes_min < 0:
+                if rec_bytes_min < 0:
                     # See definition of recipients above
                     heapq.heapreplace(
                         recipients,
-                        (rec_nbytes_max, rec_nbytes_min, id(rec_ws), rec_ws),
+                        (rec_bytes_max, rec_bytes_min, id(rec_ws), rec_ws),
                     )
                 else:
                     heapq.heappop(recipients)
