@@ -1,55 +1,62 @@
-import asyncio
 import array
+import asyncio
 import datetime
-from functools import partial
 import io
 import os
 import queue
 import socket
 import sys
-from time import sleep
 import traceback
+from functools import partial
+from time import sleep
 
-import numpy as np
 import pytest
 from tornado.ioloop import IOLoop
 
 import dask
+
 from distributed.metrics import time
 from distributed.utils import (
+    LRU,
     All,
     Log,
     Logs,
-    sync,
+    LoopRunner,
+    TimeoutError,
+    _maybe_complex,
+    deprecated,
+    ensure_bytes,
+    ensure_ip,
+    format_dashboard_link,
+    funcname,
+    get_ip_interface,
+    get_traceback,
     is_kernel,
     is_valid_xml,
-    ensure_ip,
-    str_graph,
-    truncate_exception,
-    get_traceback,
-    _maybe_complex,
+    nbytes,
+    offload,
+    open_port,
+    parse_bytes,
+    parse_ports,
+    parse_timedelta,
     read_block,
     seek_delimiter,
-    funcname,
-    ensure_bytes,
-    open_port,
-    get_ip_interface,
-    nbytes,
     set_thread_state,
+    sync,
     thread_state,
-    LoopRunner,
-    parse_bytes,
-    parse_timedelta,
-    parse_ports,
+    truncate_exception,
     warn_on_duration,
-    format_dashboard_link,
-    LRU,
-    offload,
-    TimeoutError,
 )
-from distributed.utils_test import loop, loop_in_thread  # noqa: F401
-from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
-from dask.optimization import SubgraphCallable
+from distributed.utils_test import (  # noqa: F401
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    loop,
+    loop_in_thread,
+    throws,
+)
 
 
 def test_All(loop):
@@ -110,6 +117,9 @@ def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
     with pytest.raises(TimeoutError):
         sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        sync(loop_in_thread, asyncio.sleep, 0.5, callback_timeout="50ms")
 
 
 def test_sync_closed_loop():
@@ -193,37 +203,6 @@ def test_get_traceback():
         assert type(tb).__name__ == "traceback"
 
 
-def test_str_graph():
-    dsk = {"x": 1}
-    assert str_graph(dsk) == dsk
-
-    dsk = {("x", 1): (inc, 1)}
-    assert str_graph(dsk) == {str(("x", 1)): (inc, 1)}
-
-    dsk = {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))}
-    assert str_graph(dsk) == {
-        str(("x", 1)): (inc, 1),
-        str(("x", 2)): (inc, str(("x", 1))),
-    }
-
-    dsks = [
-        {"x": 1},
-        {("x", 1): (inc, 1), ("x", 2): (inc, ("x", 1))},
-        {("x", 1): (sum, [1, 2, 3]), ("x", 2): (sum, [("x", 1), ("x", 1)])},
-    ]
-    for dsk in dsks:
-        sdsk = str_graph(dsk)
-        keys = list(dsk)
-        skeys = [str(k) for k in keys]
-        assert all(isinstance(k, str) for k in sdsk)
-        assert dask.get(dsk, keys) == dask.get(sdsk, skeys)
-
-    dsk = {("y", 1): (SubgraphCallable({"x": ("y", 1)}, "x", (("y", 1),)), (("z", 1),))}
-    dsk = str_graph(dsk, extra_values=(("z", 1),))
-    assert dsk["('y', 1)"][0].dsk["x"] == "('y', 1)"
-    assert dsk["('y', 1)"][1][0] == "('z', 1)"
-
-
 def test_maybe_complex():
     assert not _maybe_complex(1)
     assert not _maybe_complex("x")
@@ -299,6 +278,7 @@ def test_ensure_bytes():
 
 
 def test_ensure_bytes_ndarray():
+    np = pytest.importorskip("numpy")
     result = ensure_bytes(np.arange(12))
     assert isinstance(result, bytes)
 
@@ -311,6 +291,8 @@ def test_ensure_bytes_pyarrow_buffer():
 
 
 def test_nbytes():
+    np = pytest.importorskip("numpy")
+
     def check(obj, expected):
         assert nbytes(obj) == expected
         assert nbytes(memoryview(obj)) == expected
@@ -636,3 +618,20 @@ def test_lru():
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
+
+
+def test_deprecated():
+    @deprecated()
+    def foo():
+        return "bar"
+
+    with pytest.warns(DeprecationWarning, match="foo is deprecated"):
+        assert foo() == "bar"
+
+    # Explicit version specified
+    @deprecated(version_removed="1.2.3")
+    def foo():
+        return "bar"
+
+    with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
+        assert foo() == "bar"

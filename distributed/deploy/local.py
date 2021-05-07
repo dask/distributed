@@ -4,15 +4,16 @@ import math
 import warnings
 import weakref
 
-from dask.utils import factors
-from dask.system import CPU_COUNT
 import toolz
 
-from .spec import SpecCluster
+from dask.system import CPU_COUNT
+
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
 from ..worker import Worker, parse_memory_limit
+from .spec import SpecCluster
+from .utils import nprocesses_nthreads
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class LocalCluster(SpecCluster):
 
     Examples
     --------
-    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster  # doctest: +SKIP
     >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, threads=8)
 
@@ -94,6 +95,7 @@ class LocalCluster(SpecCluster):
 
     def __init__(
         self,
+        name=None,
         n_workers=None,
         threads_per_worker=None,
         processes=True,
@@ -227,6 +229,7 @@ class LocalCluster(SpecCluster):
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
+            name=name,
             scheduler=scheduler,
             workers=workers,
             worker=worker,
@@ -241,34 +244,6 @@ class LocalCluster(SpecCluster):
             "The `cluster.start_worker` function has been removed. "
             "Please see the `cluster.scale` method instead."
         )
-
-
-def nprocesses_nthreads(n=CPU_COUNT):
-    """
-    The default breakdown of processes and threads for a given number of cores
-
-    Parameters
-    ----------
-    n: int
-        Number of available cores
-
-    Examples
-    --------
-    >>> nprocesses_nthreads(4)
-    (4, 1)
-    >>> nprocesses_nthreads(32)
-    (8, 4)
-
-    Returns
-    -------
-    nprocesses, nthreads
-    """
-    if n <= 4:
-        processes = n
-    else:
-        processes = min(f for f in factors(n) if f >= math.sqrt(n))
-    threads = n // processes
-    return (processes, threads)
 
 
 clusters_to_close = weakref.WeakSet()

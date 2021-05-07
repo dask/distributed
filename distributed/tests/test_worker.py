@@ -1,60 +1,60 @@
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import importlib
 import logging
+import os
+import sys
+import threading
+import traceback
+from concurrent.futures import ThreadPoolExecutor
 from numbers import Number
 from operator import add
-import os
-import psutil
-import sys
 from time import sleep
-import traceback
 from unittest import mock
-import asyncio
+
+import psutil
+import pytest
+from tlz import first, pluck, sliding_window
 
 import dask
 from dask import delayed
-from dask.utils import format_bytes
 from dask.system import CPU_COUNT
-import pytest
-from tlz import pluck, sliding_window, first
+from dask.utils import format_bytes
 
 from distributed import (
     Client,
     Nanny,
-    get_client,
-    default_client,
-    get_worker,
     Reschedule,
+    default_client,
+    get_client,
+    get_worker,
     wait,
 )
+from distributed.compatibility import MACOS, WINDOWS
+from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
-from distributed.compatibility import WINDOWS
-from distributed.core import rpc, CommClosedError, Status
-from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
-from distributed.utils import tmpfile, TimeoutError
+from distributed.scheduler import Scheduler
+from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (  # noqa: F401
-    cleanup,
-    inc,
-    mul,
-    gen_cluster,
-    div,
-    dec,
-    slowinc,
-    gen_test,
-    captured_logger,
-)
-from distributed.utils_test import (  # noqa: F401
-    client,
-    loop,
-    nodebug,
-    cluster_fixture,
-    s,
+    TaskStateMetadataPlugin,
     a,
     b,
-    TaskStateMetadataPlugin,
+    captured_logger,
+    cleanup,
+    client,
+    cluster_fixture,
+    dec,
+    div,
+    gen_cluster,
+    gen_test,
+    inc,
+    loop,
+    mul,
+    nodebug,
+    s,
+    slowinc,
 )
+from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
 
 
 @pytest.mark.asyncio
@@ -444,21 +444,16 @@ async def test_spill_to_disk(c, s):
 
     assert set(w.data) == {x.key, y.key}
     assert set(w.data.memory) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
 
     z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
     await wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.memory) == {y.key, z.key}
-    assert set(w.data.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
-    assert set(w.data.slow) == set(w.data.disk)
+    assert set(w.data.disk) == {x.key}
 
     await x
     assert set(w.data.memory) == {x.key, z.key}
-    assert set(w.data.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.memory)
-    assert set(w.data.slow) == set(w.data.disk)
+    assert set(w.data.disk) == {y.key}
     await w.close()
 
 
@@ -524,7 +519,6 @@ async def test_spill_by_default(c, s, w):
     y = c.persist(x)
     await wait(y)
     assert len(w.data.disk)  # something is on disk
-    del x, y
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False})
@@ -573,7 +567,6 @@ async def test_clean(c, s, a, b):
     collections = [
         a.tasks,
         a.data,
-        a.nbytes,
         a.threads,
     ]
     for c in collections:
@@ -667,7 +660,11 @@ async def test_clean_nbytes(c, s, a, b):
     await wait(future)
 
     await asyncio.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    assert (
+        len(list(filter(None, [ts.nbytes for ts in a.tasks.values()])))
+        + len(list(filter(None, [ts.nbytes for ts in b.tasks.values()])))
+        == 1
+    )
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
@@ -704,6 +701,7 @@ async def test_multiple_transfers(c, s, w1, w2, w3):
     assert len(transfers) == 2
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(mul, b"1", int(w3.target_message_size + 1), workers=w1.address)
@@ -717,6 +715,7 @@ async def test_share_communication(c, s, w1, w2, w3):
     assert w2.outgoing_transfer_log
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @gen_cluster(client=True)
 async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     x = c.submit(mul, b"1", int(b.target_message_size + 1), workers=a.address)
@@ -730,7 +729,7 @@ async def test_dont_overlap_communications_to_same_worker(c, s, a, b):
     assert l1["stop"] < l2["start"]
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True)
 async def test_log_exception_on_failed_task(c, s, a, b):
     with tmpfile() as fn:
@@ -754,6 +753,7 @@ async def test_log_exception_on_failed_task(c, s, a, b):
             logger.removeHandler(fh)
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_clean_up_dependencies(c, s, a, b):
     x = delayed(inc)(1)
@@ -773,6 +773,7 @@ async def test_clean_up_dependencies(c, s, a, b):
     assert set(a.data) | set(b.data) == {zz.key}
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_hold_onto_dependents(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
@@ -1078,6 +1079,7 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -1141,11 +1143,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1304,6 +1302,7 @@ async def test_scheduler_address_config(c, s):
     await worker.close()
 
 
+@pytest.mark.xfail(reason="very high flakiness")
 @pytest.mark.slow
 @gen_cluster(client=True)
 async def test_wait_for_outgoing(c, s, a, b):
@@ -1635,7 +1634,7 @@ async def test_pip_install(c, s, a, b):
 
             args = p2.call_args[0][0]
             assert "python" in args[0]
-            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
+            assert args[1:] == ["-m", "pip", "install", "--upgrade", "requests"]
 
 
 @gen_cluster(client=True)
@@ -1677,20 +1676,21 @@ async def test_update_latency(cleanup):
                 assert w.digests["latency"].size() > 0
 
 
+@pytest.mark.skipif(MACOS, reason="frequently hangs")
 @pytest.mark.asyncio
-async def test_heartbeat_executing(cleanup):
+async def test_workerstate_executing(cleanup):
     async with await Scheduler() as s:
         async with await Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
                 ws = s.workers[w.address]
                 # Initially there are no active tasks
-                assert not ws.metrics["executing"]
-                # Submit a task and ensure the worker's heartbeat includes the task
-                # in it's executing
+                assert not ws.executing
+                # Submit a task and ensure the WorkerState is updated with the task
+                # it's executing
                 f = c.submit(slowinc, 1, delay=1)
-                while not ws.metrics["executing"]:
-                    await w.heartbeat()
-                assert f.key in ws.metrics["executing"]
+                while not ws.executing:
+                    await asyncio.sleep(0.01)
+                assert s.tasks[f.key] in ws.executing
                 await f
 
 
@@ -1723,13 +1723,12 @@ async def test_bad_local_directory(cleanup):
         try:
             async with Worker(s.address, local_directory="/not/a/valid-directory"):
                 pass
-        except PermissionError:
+        except OSError:
+            # On Linux: [Errno 13] Permission denied: '/not'
+            # On MacOSX: [Errno 30] Read-only file system: '/not'
             pass
         else:
-            if WINDOWS:
-                pass
-            else:
-                assert False
+            assert WINDOWS
 
         assert not any("error" in log for log in s.get_logs())
 
@@ -1752,3 +1751,75 @@ async def test_taskstate_metadata(cleanup):
 
                 # Check that Scheduler TaskState.metadata was also updated
                 assert s.tasks[f.key].metadata == ts.metadata
+
+
+@pytest.mark.asyncio
+async def test_executor_offload(cleanup, monkeypatch):
+    class SameThreadClass:
+        def __getstate__(self):
+            return ()
+
+        def __setstate__(self, state):
+            self._thread_ident = threading.get_ident()
+            return self
+
+    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+
+    async with Scheduler() as s:
+        async with Worker(s.address, executor="offload") as w:
+            from distributed.utils import _offload_executor
+
+            assert w.executor is _offload_executor
+
+            async with Client(s.address, asynchronous=True) as c:
+                x = SameThreadClass()
+
+                def f(x):
+                    return threading.get_ident() == x._thread_ident
+
+                assert await c.submit(f, x)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_story(c, s, w):
+    future = c.submit(inc, 1)
+    await future
+    ts = w.tasks[future.key]
+    assert ts.state in str(w.story(ts))
+    assert w.story(ts) == w.story(ts.key)
+
+
+@gen_cluster(client=True)
+async def test_story_with_deps(c, s, a, b):
+    """
+    Assert that the structure of the story does not change unintentionally and
+    expected subfields are actually filled
+    """
+    futures = c.map(inc, range(10), workers=[a.address])
+    res = c.submit(sum, futures, workers=[b.address])
+    await res
+    key = res.key
+
+    story = a.story(key)
+    assert story == []
+    story = b.story(key)
+
+    expected_story = [
+        (key, "new"),
+        (key, "new", "waiting"),
+        (
+            "gather-dependencies",
+            key,
+            {fut.key for fut in futures},
+        ),
+        (key, "waiting", "ready"),
+        (key, "ready", "executing"),
+        (key, "put-in-memory"),
+        (key, "executing", "memory"),
+    ]
+    assert story == expected_story
+
+
+def test_weight_deprecated():
+    with pytest.warns(DeprecationWarning):
+        weight("foo", "bar")

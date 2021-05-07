@@ -12,10 +12,11 @@ import pytest
 from tornado import gen
 from tornado.locks import Event
 
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.process import AsyncProcess
 from distributed.utils import mp_context
-from distributed.utils_test import gen_test, pristine_loop, nodebug
+from distributed.utils_test import gen_test, nodebug, pristine_loop
 
 
 def feed(in_q, out_q):
@@ -48,7 +49,7 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@pytest.mark.xfail(reason="Intermittent failure")
+@pytest.mark.xfail()
 @nodebug
 @gen_test()
 async def test_simple():
@@ -92,7 +93,7 @@ async def test_simple():
 
     # child should be stopping now
     t1 = time()
-    await proc.join(timeout=10)
+    await proc.join(timeout=30)
     dt = time() - t1
     assert dt <= 1.0
     assert not proc.is_alive()
@@ -154,12 +155,12 @@ async def test_exitcode():
     assert proc.exitcode is None
 
     q.put(5)
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
     assert not proc.is_alive()
     assert proc.exitcode == 5
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX only")
+@pytest.mark.skipif(WINDOWS, reason="POSIX only")
 @gen_test()
 async def test_signal():
     proc = AsyncProcess(target=exit_with_signal, args=(signal.SIGINT,))
@@ -168,7 +169,7 @@ async def test_signal():
     assert proc.exitcode is None
 
     await proc.start()
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
 
     assert not proc.is_alive()
     # Can be 255 with forkserver, see https://bugs.python.org/issue30589
@@ -177,7 +178,7 @@ async def test_signal():
     proc = AsyncProcess(target=wait)
     await proc.start()
     os.kill(proc.pid, signal.SIGTERM)
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
 
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
@@ -190,7 +191,7 @@ async def test_terminate():
     await proc.start()
     await proc.terminate()
 
-    await proc.join(timeout=3.0)
+    await proc.join(timeout=30)
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
 

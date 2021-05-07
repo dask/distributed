@@ -1,19 +1,19 @@
 import logging
+import os
 import subprocess
 import sys
 import tempfile
-import os
-import yaml
 
 import pytest
+import yaml
 
+from distributed.config import initialize_logging
 from distributed.utils_test import (
     captured_handler,
     captured_logger,
     new_config,
     new_config_file,
 )
-from distributed.config import initialize_logging
 
 
 def dump_logger_list():

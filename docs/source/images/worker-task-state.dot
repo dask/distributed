@@ -3,6 +3,7 @@ digraph{
         bgcolor="#FFFFFFF00",
         rankdir=LR,
         ];
+    new -> waiting;
     waiting -> ready;
     ready -> executing;
     executing -> "long-running";

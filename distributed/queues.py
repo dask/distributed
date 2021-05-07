@@ -1,12 +1,13 @@
 import asyncio
-from collections import defaultdict
 import logging
 import uuid
+from collections import defaultdict
 
-from .client import Future, Client
-from .utils import tokey, sync, thread_state
-from .worker import get_client
-from .utils import parse_timedelta
+from dask.utils import stringify
+
+from .client import Client, Future
+from .utils import parse_timedelta, sync, thread_state
+from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,8 @@ class Queue:
         Name used by other clients and the scheduler to identify the queue. If
         not given, a random name will be generated.
     client: Client (optional)
-        Client used for communication with the scheduler. Defaults to the
-        value of ``Client.current()``.
+        Client used for communication with the scheduler.
+        If not given, the default global client will be used.
     maxsize: int (optional)
         Number of items allowed in the queue. If 0 (the default), the queue
         size is unbounded.
@@ -168,7 +169,11 @@ class Queue:
     """
 
     def __init__(self, name=None, client=None, maxsize=0):
-        self.client = client or Client.current()
+        try:
+            self.client = client or Client.current()
+        except ValueError:
+            # Initialise new client
+            self.client = get_worker().client
         self.name = name or "queue-" + uuid.uuid4().hex
         self._event_started = asyncio.Event()
         if self.client.asynchronous or getattr(
@@ -201,7 +206,7 @@ class Queue:
     async def _put(self, value, timeout=None):
         if isinstance(value, Future):
             await self.client.scheduler.queue_put(
-                key=tokey(value.key), timeout=timeout, name=self.name
+                key=stringify(value.key), timeout=timeout, name=self.name
             )
         else:
             await self.client.scheduler.queue_put(
@@ -213,7 +218,7 @@ class Queue:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
@@ -226,11 +231,11 @@ class Queue:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".
-        batch: boolean, int (optional)
+        batch : boolean, int (optional)
             If True then return all elements currently waiting in the queue.
             If an integer than return that many elements from the queue
             If False (default) then return one item at a time

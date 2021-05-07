@@ -1,17 +1,15 @@
 import asyncio
 import random
-from unittest import mock
 
 import pytest
 from tlz import assoc
 
 from distributed.batched import BatchedSend
-from distributed.core import listen, connect, CommClosedError
+from distributed.core import CommClosedError, connect, listen
 from distributed.metrics import time
-from distributed.utils import All, TimeoutError
-from distributed.utils_test import captured_logger
 from distributed.protocol import to_serialize
-from distributed.compatibility import WINDOWS, TORNADO6
+from distributed.utils import All
+from distributed.utils_test import captured_logger
 
 
 class EchoServer:
@@ -250,58 +248,4 @@ async def test_serializers():
         assert "type" in value
         assert "function" in value
 
-        msg = await comm.read()
-        assert list(msg) == [{"x": 123}, {"x": "hello"}]
-
-        with pytest.raises(TimeoutError):
-            msg = await asyncio.wait_for(comm.read(), 0.1)
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(WINDOWS and not TORNADO6, reason="failing on windows, tornado 5.")
-async def test_handles_exceptions():
-    # Ensure that we properly handle exceptions in BatchedSend.
-    # https://github.com/pangeo-data/pangeo/issues/788
-    # mentioned in https://github.com/dask/distributed/issues/4080, but
-    # possibly distinct.
-    #
-    # The reported issues (https://github.com/tornadoweb/tornado/pull/2008)
-    # claim that the BufferError *should* only happen when the application
-    # is incorrectly using threads. I haven't been able to construct an
-    # actual example, so we mock IOStream.write to raise and ensure that
-    # BufferedSend handles things correctly. We don't (yet) test that
-    # any *users* of BatchedSend correctly handle BatchedSend dropping
-    # messages.
-    async with EchoServer() as e:
-        comm = await connect(e.address)
-        b = BatchedSend(interval=10)
-        b.start(comm)
-        await asyncio.sleep(0.020)
-        orig = comm.stream.write
-
-        n = 0
-
-        def raise_buffererror(*args, **kwargs):
-            nonlocal n
-            n += 1
-
-            if n == 1:
-                raise BufferError("bad!")
-            elif n == 2:
-                orig(*args, **kwargs)
-            else:
-                raise CommClosedError
-
-        with mock.patch.object(comm.stream, "write", wraps=raise_buffererror):
-            b.send("hello")
-            b.send("hello")
-            b.send("world")
-            await asyncio.sleep(0.020)
-            result = await comm.read()
-            assert result == ("hello", "hello", "world")
-
-            b.send("raises when flushed")
-            await asyncio.sleep(0.020)  # CommClosedError hit in callback
-
-            with pytest.raises(CommClosedError):
-                b.send("raises when sent")
+        assert comm.closed()

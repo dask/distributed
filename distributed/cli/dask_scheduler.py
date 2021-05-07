@@ -1,20 +1,17 @@
 import atexit
-import logging
 import gc
+import logging
 import os
 import re
 import sys
 import warnings
 
 import click
-import dask
-
 from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
-from distributed.preloading import validate_preload_argv
 from distributed.cli.utils import check_python_3, install_signal_handlers
-from distributed.utils import deserialize_for_cli
+from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
@@ -166,11 +163,6 @@ def main(
         ]
         if v is not None
     }
-
-    if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
-        config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
-        # Update the global config given priority to the existing global config
-        dask.config.update(dask.config.global_config, config, priority="old")
 
     if not host and (tls_ca_file or tls_cert or tls_key):
         host = "tls://"

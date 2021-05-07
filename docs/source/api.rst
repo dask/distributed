@@ -9,42 +9,9 @@ API
 
 .. autosummary::
    Client
-   Client.call_stack
-   Client.cancel
-   Client.close
-   Client.compute
-   Client.gather
-   Client.get
-   Client.get_dataset
-   Client.get_executor
-   Client.get_metadata
-   Client.get_scheduler_logs
-   Client.get_worker_logs
-   Client.get_task_stream
-   Client.has_what
-   Client.list_datasets
-   Client.map
-   Client.nthreads
-   Client.persist
-   Client.publish_dataset
-   Client.profile
-   Client.rebalance
-   Client.replicate
-   Client.restart
-   Client.retry
-   Client.run
-   Client.run_on_scheduler
-   Client.scatter
-   Client.scheduler_info
-   Client.write_scheduler_file
-   Client.set_metadata
-   Client.start_ipython_workers
-   Client.start_ipython_scheduler
-   Client.submit
-   Client.unpublish_dataset
-   Client.upload_file
-   Client.wait_for_workers
-   Client.who_has
+
+.. autoautosummary:: distributed.Client
+   :methods:
 
 .. currentmodule:: distributed
 
@@ -69,14 +36,9 @@ API
 
 .. autosummary::
    Future
-   Future.add_done_callback
-   Future.cancel
-   Future.cancelled
-   Future.done
-   Future.exception
-   Future.result
-   Future.retry
-   Future.traceback
+
+.. autoautosummary:: distributed.Future
+   :methods:
 
 **Client Coordination**
 
@@ -85,6 +47,7 @@ API
 .. autosummary::
    Event
    Lock
+   MultiLock
    Queue
    Variable
 
@@ -199,6 +162,8 @@ Other
 .. autoclass:: Event
    :members:
 .. autoclass:: Lock
+   :members:
+.. autoclass:: MultiLock
    :members:
 .. autoclass:: Semaphore
    :members:

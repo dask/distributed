@@ -5,11 +5,18 @@ import pytest
 from tlz import frequencies
 
 from distributed import get_task_stream
-from distributed.utils_test import gen_cluster, div, inc, slowinc
-from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
 from distributed.client import wait
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster_fixture,
+    div,
+    gen_cluster,
+    inc,
+    loop,
+    slowinc,
+)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

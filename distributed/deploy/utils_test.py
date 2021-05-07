@@ -1,6 +1,6 @@
-from ..client import Client
-
 import pytest
+
+from ..client import Client
 
 
 class ClusterTest:

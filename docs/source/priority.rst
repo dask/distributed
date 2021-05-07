@@ -8,7 +8,7 @@ their needs.
 
 Dask uses the following priorities, in order:
 
-1.  **User priorities**: A user defined priority, provided by the ``priority=`` keyword argument
+1.  **User priorities**: A user defined priority is provided by the ``priority=`` keyword argument
     to functions like ``compute()``, ``persist()``, ``submit()``, or ``map()``.
     Tasks with higher priorities run before tasks with lower priorities with
     the default priority being zero.
@@ -19,6 +19,19 @@ Dask uses the following priorities, in order:
        future = client.submit(func, *args, priority=-10)  # low priority task
 
        df = df.persist(priority=10)  # high priority computation
+
+    Priorities can also be specified using the dask annotations machinery:
+
+    .. code-block:: python
+
+       with dask.annotate(priority=10):
+           future = client.submit(func, *args)  # high priority task
+       with dask.annotate(priority=-10):
+           future = client.submit(func, *args)  # low priority task
+
+       with dask.annotate(priority=10):
+           df = df.persist()  # high priority computation
+
 
 2.  **First in first out chronologically**: Dask prefers computations that were
     submitted early.  Because users can submit computations asynchronously it
@@ -56,4 +69,8 @@ Dask uses the following priorities, in order:
 3.  **Graph Structure**: Within any given computation (a compute or persist
     call) Dask orders tasks in such a way as to minimize the memory-footprint
     of the computation.  This is discussed in more depth in the
-    `task ordering documentation <https://github.com/dask/dask/blob/master/dask/order.py>`_.
+    `task ordering documentation <https://github.com/dask/dask/blob/main/dask/order.py>`_.
+
+If multiple tasks each have exactly the same priorities outlined above, then
+the order in which tasks arrive at a worker, in a last in first out manner,
+is used to determine the order in which tasks run.

@@ -1,50 +1,50 @@
 import asyncio
-from collections import defaultdict, deque
-from contextlib import suppress
-from enum import Enum
-from functools import partial
 import inspect
 import logging
+import sys
 import threading
 import traceback
 import uuid
-import weakref
 import warnings
+import weakref
+from collections import defaultdict
+from contextlib import suppress
+from enum import Enum
+from functools import partial
 
-import dask
 import tblib
 from tlz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+import dask
+
+from . import profile, protocol
 from .comm import (
-    connect,
-    listen,
     CommClosedError,
+    connect,
+    get_address_host_port,
+    listen,
     normalize_address,
     unparse_host_port,
-    get_address_host_port,
 )
 from .metrics import time
-from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
-    is_coroutine_function,
-    get_traceback,
-    truncate_exception,
-    shutting_down,
-    parse_timedelta,
-    has_keyword,
     CancelledError,
     TimeoutError,
+    get_traceback,
+    has_keyword,
+    is_coroutine_function,
+    parse_timedelta,
+    truncate_exception,
 )
-from . import protocol
 
 
 class Status(Enum):
     """
-    This Enum contains the various states a worker, scheduler and nanny can be
-    in. Some of the status can only be observed in one of nanny, scheduler or
+    This Enum contains the various states a cluster, worker, scheduler and nanny can be
+    in. Some of the status can only be observed in one of cluster, nanny, scheduler or
     worker but we put them in the same Enum as they are compared with each
     other.
     """
@@ -52,6 +52,7 @@ class Status(Enum):
     closed = "closed"
     closing = "closing"
     closing_gracefully = "closing-gracefully"
+    failed = "failed"
     init = "init"
     created = "created"
     running = "running"
@@ -60,32 +61,6 @@ class Status(Enum):
     stopping = "stopping"
     undefined = None
     dont_reply = "dont-reply"
-
-    def __eq__(self, other):
-        """
-        Implement equality checking with backward compatibility.
-
-        If other object instance is string, we compare with the values, but we
-        actually want to make sure the value compared with is in the list of
-        possible Status, this avoid comparison with non-existing status.
-        """
-        if isinstance(other, type(self)):
-            return self.value == other.value
-        elif isinstance(other, str) or (other is None):
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please compare with `Status.{other}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            assert other in [
-                s.value for s in type(self)
-            ], f"comparison with non-existing states {other}"
-            return other == self.value
-        raise TypeError(
-            f"'==' not supported between instances of"
-            f" {type(self).__module__+'.'+type(self).__qualname__!r} and"
-            f" {type(other).__module__+'.'+type(other).__qualname__!r}"
-        )
 
 
 class RPCClosed(IOError):
@@ -161,6 +136,7 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
+        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -184,8 +160,6 @@ class Server:
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
-        self.events = None
-        self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
         self._event_finished = asyncio.Event()
 
@@ -224,12 +198,16 @@ class Server:
         from .counter import Counter
 
         self.counters = defaultdict(partial(Counter, loop=self.io_loop))
-        self.events = defaultdict(lambda: deque(maxlen=10000))
-        self.event_counts = defaultdict(lambda: 0)
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(
+            self.monitor.update,
+            parse_timedelta(
+                dask.config.get("distributed.admin.system-monitor.interval")
+            )
+            * 1000,
+        )
         self.periodic_callbacks["monitor"] = pc
 
         self._last_tick = time()
@@ -259,6 +237,8 @@ class Server:
         )
 
         self.__stopped = False
+
+        super().__init__(**kwargs)
 
     @property
     def status(self):
@@ -369,16 +349,6 @@ class Server:
         if self.digests is not None:
             self.digests["tick-duration"].add(diff)
 
-    def log_event(self, name, msg):
-        msg["time"] = time()
-        if isinstance(name, list):
-            for n in name:
-                self.events[n].append(msg)
-                self.event_counts[n] += 1
-        else:
-            self.events[name].append(msg)
-            self.event_counts[name] += 1
-
     @property
     def address(self):
         """
@@ -436,7 +406,7 @@ class Server:
         )
         self.listeners.append(listener)
 
-    async def handle_comm(self, comm, shutting_down=shutting_down):
+    async def handle_comm(self, comm):
         """Dispatch new communications to coroutine-handlers
 
         Handlers is a dictionary mapping operation names to functions or
@@ -462,7 +432,7 @@ class Server:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
                 except EnvironmentError as e:
-                    if not shutting_down():
+                    if not sys.is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
                             " Last operation: %s",
@@ -472,9 +442,12 @@ class Server:
                         )
                     break
                 except Exception as e:
-                    logger.exception(e)
-                    await comm.write(error_message(e, status="uncaught-error"))
-                    continue
+                    logger.exception("Exception while reading from %s", address)
+                    if comm.closed():
+                        raise
+                    else:
+                        await comm.write(error_message(e, status="uncaught-error"))
+                        continue
                 if not isinstance(msg, dict):
                     raise TypeError(
                         "Bad message type.  Expected dict, got\n  " + str(msg)
@@ -531,8 +504,11 @@ class Server:
                             logger.info("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
-                        logger.exception(e)
-                        result = error_message(e, status="uncaught-error")
+                        logger.exception("Exception while handling op %s", op)
+                        if comm.closed():
+                            raise
+                        else:
+                            result = error_message(e, status="uncaught-error")
 
                 # result is not type stable:
                 # when LHS is not Status then RHS must not be Status or it raises.
@@ -560,7 +536,7 @@ class Server:
 
         finally:
             del self._comms[comm]
-            if not shutting_down() and not comm.closed():
+            if not sys.is_finalizing() and not comm.closed():
                 try:
                     comm.abort()
                 except Exception as e:
@@ -600,7 +576,10 @@ class Server:
                     await asyncio.sleep(0)
 
                 for func in every_cycle:
-                    func()
+                    if is_coroutine_function(func):
+                        self.loop.add_callback(func)
+                    else:
+                        func()
 
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
@@ -620,7 +599,7 @@ class Server:
         for pc in self.periodic_callbacks.values():
             pc.stop()
         for listener in self.listeners:
-            future = self.listener.stop()
+            future = listener.stop()
             if inspect.isawaitable(future):
                 yield future
         for i in range(20):  # let comms close naturally for a second
@@ -632,7 +611,7 @@ class Server:
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
-            if all(cb.cancelled() for c in self._ongoing_coroutines):
+            if all(c.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
                 yield asyncio.sleep(0.01)
@@ -1141,7 +1120,7 @@ def error_message(e, status="error"):
 
     See Also
     --------
-    clean_exception: deserialize and unpack message into exception/traceback
+    clean_exception : deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tblib.pickling_support.install(e, *collect_causes(e))
@@ -1155,6 +1134,7 @@ def error_message(e, status="error"):
     e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb, protocol=4)
+        protocol.pickle.loads(tb2)
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
@@ -1171,7 +1151,7 @@ def clean_exception(exception, traceback, **kwargs):
 
     See Also
     --------
-    error_message: create and serialize errors into message
+    error_message : create and serialize errors into message
     """
     if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:

@@ -1,17 +1,17 @@
 import logging
 import sys
-from typing import List, Union
 import warnings
 import weakref
+from typing import List, Union
 
 import dask
+import dask.config
 
-from .spec import SpecCluster, ProcessInterface
 from ..core import Status
-from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
+from ..utils import cli_keywords
 from ..worker import Worker as _Worker
-from ..utils import serialize_for_cli
+from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +95,13 @@ class Worker(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -176,13 +176,13 @@ class Scheduler(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -265,22 +265,22 @@ def SSHCluster(
 
     Parameters
     ----------
-    hosts: List[str]
+    hosts : List[str]
         List of hostnames or addresses on which to launch our cluster.
         The first will be used for the scheduler and the rest for workers.
-    connect_options: dict or list of dict, optional
+    connect_options : dict or list of dict, optional
         Keywords to pass through to :func:`asyncssh.connect`.
         This could include things such as ``port``, ``username``, ``password``
         or ``known_hosts``. See docs for :func:`asyncssh.connect` and
         :class:`asyncssh.SSHClientConnectionOptions` for full information.
         If a list it must have the same length as ``hosts``.
-    worker_options: dict, optional
+    worker_options : dict, optional
         Keywords to pass on to workers.
-    scheduler_options: dict, optional
+    scheduler_options : dict, optional
         Keywords to pass on to scheduler.
-    worker_module: str, optional
+    worker_module : str, optional
         Python module to call to start the worker.
-    remote_python: str or list of str, optional
+    remote_python : str or list of str, optional
         Path to Python on remote nodes.
 
     Examples

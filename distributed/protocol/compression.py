@@ -3,13 +3,14 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
-from contextlib import suppress
-from functools import partial
 import logging
 import random
+from contextlib import suppress
+from functools import partial
+
+from tlz import identity
 
 import dask
-from tlz import identity
 
 try:
     import blosc
@@ -21,7 +22,6 @@ except ImportError:
     blosc = False
 
 from ..utils import ensure_bytes
-
 
 compressions = {None: {"compress": identity, "decompress": identity}}
 
@@ -147,10 +147,10 @@ def byte_sample(b, size, n):
 
     Parameters
     ----------
-    b: bytes or memoryview
-    size: int
+    b : bytes or memoryview
+    size : int
         size of each sample to collect
-    n: int
+    n : int
         number of samples to collect
     """
     starts = [random.randint(0, len(b) - size) for j in range(n)]

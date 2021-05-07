@@ -1,7 +1,11 @@
 import logging
+import os
 import socket
 import subprocess
 import sys
+import uuid
+
+from dask.utils import funcname
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +70,13 @@ class SchedulerPlugin:
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of released, waiting, processing, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        *args, **kwargs: More options passed when transitioning
+        *args, **kwargs : More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
 
@@ -143,13 +147,13 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key: string
-        start: string
+        key : string
+        start : string
             Start state of the transition.
             One of waiting, ready, executing, long-running, memory, error.
-        finish: string
+        finish : string
             Final state of the transition.
-        kwargs: More options passed when transitioning
+        kwargs : More options passed when transitioning
         """
 
     def release_key(self, key, state, cause, reason, report):
@@ -158,31 +162,26 @@ class WorkerPlugin:
 
         Parameters
         ----------
-        key: string
-        state: string
+        key : string
+        state : string
             State of the released task.
             One of waiting, ready, executing, long-running, memory, error.
-        cause: string or None
+        cause : string or None
             Additional information on what triggered the release of the task.
-        reason: None
+        reason : None
             Not used.
-        report: bool
+        report : bool
             Whether the worker should report the released task to the scheduler.
         """
 
-    def release_dep(self, dep, state, report):
-        """
-        Called when the worker releases a dependency.
 
-        Parameters
-        ----------
-        dep: string
-        state: string
-            State of the released dependency.
-            One of waiting, flight, memory.
-        report: bool
-            Whether the worker should report the released dependency to the scheduler.
-        """
+def _get_worker_plugin_name(plugin) -> str:
+    """Returns the worker plugin name. If plugin has no name attribute
+    a random name is used."""
+    if hasattr(plugin, "name"):
+        return plugin.name
+    else:
+        return funcname(plugin) + "-" + str(uuid.uuid4())
 
 
 class PipInstall(WorkerPlugin):
@@ -236,9 +235,8 @@ class PipInstall(WorkerPlugin):
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pip"]
+                [sys.executable, "-m", "pip", "install"]
                 + self.pip_options
-                + ["install"]
                 + self.packages,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -258,3 +256,36 @@ class PipInstall(WorkerPlugin):
                     worker.loop.add_callback(
                         worker.close_gracefully, restart=True
                     )  # restart
+
+
+# Adapted from https://github.com/dask/distributed/issues/3560#issuecomment-596138522
+class UploadFile(WorkerPlugin):
+    """A WorkerPlugin to upload a local file to workers.
+
+    Parameters
+    ----------
+    filepath: str
+        A path to the file (.py, egg, or zip) to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadFile
+
+    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    """
+
+    name = "upload_file"
+
+    def __init__(self, filepath):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        self.filename = os.path.basename(filepath)
+        with open(filepath, "rb") as f:
+            self.data = f.read()
+
+    async def setup(self, worker):
+        response = await worker.upload_file(
+            comm=None, filename=self.filename, data=self.data, load=True
+        )
+        assert len(self.data) == response["nbytes"]

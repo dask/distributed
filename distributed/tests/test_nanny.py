@@ -1,32 +1,27 @@
 import asyncio
-from contextlib import suppress
 import gc
 import logging
+import multiprocessing as mp
 import os
 import random
 import sys
-import multiprocessing as mp
-
-import numpy as np
+from contextlib import suppress
 
 import pytest
-from tlz import valmap, first
+from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
-from distributed.diagnostics import SchedulerPlugin
-from distributed import Nanny, rpc, Scheduler, Worker, Client, wait, worker
+
+from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
+from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
+from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import tmpfile, TimeoutError, parse_ports
-from distributed.utils_test import (  # noqa: F401
-    gen_cluster,
-    gen_test,
-    inc,
-    captured_logger,
-    cleanup,
-)
+from distributed.utils import TimeoutError, parse_ports, tmpfile
+from distributed.utils_test import cleanup  # noqa: F401
+from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
 # FIXME why does this leave behind unclosed Comm objects?
@@ -77,7 +72,7 @@ async def test_str(s, a, b):
     assert str(a.nthreads) in repr(a)
 
 
-@gen_cluster(nthreads=[], timeout=20, client=True)
+@gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
     first_dir = n.worker_dir
@@ -201,6 +196,7 @@ async def test_random_seed(c, s, a, b):
         assert x != y
 
     await check_func(lambda a, b: random.randint(a, b))
+    np = pytest.importorskip("numpy")
     await check_func(lambda a, b: np.random.randint(a, b))
 
 
@@ -409,6 +405,7 @@ async def test_local_directory(s):
             w = await Nanny(s.address)
             assert w.local_directory.startswith(fn)
             assert "dask-worker-space" in w.local_directory
+            assert w.process.worker_dir.count("dask-worker-space") == 1
             await w.close()
 
 
@@ -568,6 +565,7 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:

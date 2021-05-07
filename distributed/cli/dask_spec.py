@@ -1,7 +1,8 @@
 import asyncio
-import click
 import json
 import sys
+
+import click
 import yaml
 
 from distributed.deploy.spec import run_spec
@@ -13,6 +14,7 @@ from distributed.deploy.spec import run_spec
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
 def main(args, spec: str, spec_file: str):
+
     if spec and spec_file or not spec and not spec_file:
         print("Must specify exactly one of --spec and --spec-file")
         sys.exit(1)

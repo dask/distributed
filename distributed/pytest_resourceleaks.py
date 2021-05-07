@@ -4,10 +4,10 @@ A pytest plugin to trace resource leaks.
 """
 import collections
 import gc
-import time
 import os
 import sys
 import threading
+import time
 
 import pytest
 
@@ -30,7 +30,7 @@ Can be 'all' or a comma-separated list of resource names
     group.addoption(
         "--leaks-timeout",
         action="store",
-        type="float",
+        type=float,
         dest="leaks_timeout",
         default=0.5,
         help="""\

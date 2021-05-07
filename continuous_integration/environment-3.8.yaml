@@ -3,32 +3,40 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - zstandard
-  - bokeh!=2.0.0
+  - python=3.8
+  - pip
+  - asyncssh
+  - bokeh
   - click
   - cloudpickle
-  - dask
-  - lz4
+  - dask  # overridden by git tip below
+  - filesystem-spec
+  - h5py
   - ipykernel
   - ipywidgets
   - joblib
   - jupyter_client
-  - msgpack-python>=0.6.0
+  - msgpack-python
+  - netcdf4
+  - paramiko
   - prometheus_client
   - psutil
   - pytest
   - pytest-asyncio<0.14.0
-  - pytest-repeat
-  - pytest-timeout
   - pytest-faulthandler
+  - pytest-repeat
+  - pytest-rerunfailures
+  - pytest-timeout
   - requests
+  - s3fs
+  - scikit-learn
+  - scipy
   - sortedcollections
-  - toolz
   - tblib
+  - toolz
+  - tornado=6
   - zict
-  - fsspec
-  - pip
+  - zstandard
   - pip:
       - git+https://github.com/dask/dask
-      - git+https://github.com/joblib/joblib.git
-      - git+https://github.com/dask/zict
+      - keras

@@ -6,9 +6,14 @@ import types
 import warnings
 from functools import partial
 
-import distributed
 import pkg_resources
 import pytest
+from tornado import ioloop
+from tornado.concurrent import Future
+
+import dask
+
+import distributed
 from distributed.comm import (
     CommClosedError,
     connect,
@@ -24,6 +29,7 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
@@ -35,8 +41,6 @@ from distributed.utils_test import (
     has_ipv6,
     requires_ipv6,
 )
-from tornado import ioloop
-from tornado.concurrent import Future
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
@@ -199,6 +203,28 @@ def test_get_local_address_for():
 #
 # Test concrete transport APIs
 #
+
+
+@pytest.mark.asyncio
+async def test_tcp_listener_does_not_call_handler_on_handshake_error():
+    handle_comm_called = False
+
+    async def handle_comm(comm):
+        nonlocal handle_comm_called
+        handle_comm_called = True
+
+    with dask.config.set({"distributed.comm.timeouts.connect": 0.01}):
+        listener = await tcp.TCPListener("127.0.0.1", handle_comm)
+        host, port = listener.get_host_port()
+        # connect without handshake:
+        reader, writer = await asyncio.open_connection(host=host, port=port)
+        # wait a bit to let the listener side hit the timeout on the handshake:
+        await asyncio.sleep(0.02)
+
+    assert not handle_comm_called
+
+    writer.close()
+    await writer.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -790,6 +816,25 @@ async def test_inproc_comm_closed_explicit_2():
     await comm.close()
 
 
+@pytest.mark.asyncio
+async def test_comm_closed_on_buffer_error():
+    # Internal errors from comm.stream.write, such as
+    # BufferError should lead to the stream being closed
+    # and not re-used. See GitHub #4133
+    reader, writer = await get_tcp_comm_pair()
+
+    def _write(data):
+        raise BufferError
+
+    writer.stream.write = _write
+    with pytest.raises(BufferError):
+        await writer.write("x")
+    assert writer.stream is None
+
+    await reader.close()
+    await writer.close()
+
+
 #
 # Various stress tests
 #
@@ -992,7 +1037,7 @@ async def check_deserialize(addr):
         assert isinstance(ser, Serialized)
         assert deserialize(ser.header, ser.frames) == 456
 
-        assert isinstance(to_ser, list)
+        assert isinstance(to_ser, (tuple, list)) and len(to_ser) == 1
         (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
         # or not (it's a transport-specific optimization)
@@ -1006,6 +1051,8 @@ async def check_deserialize(addr):
         expected_msg = msg.copy()
         expected_msg["ser"] = 456
         expected_msg["to_ser"] = [123]
+        # Notice, we allow "to_ser" to be a tuple or a list
+        assert list(out_value.pop("to_ser")) == expected_msg.pop("to_ser")
         assert out_value == expected_msg
 
     await check_listener_deserialize(addr, False, msg, check_out_false)
@@ -1016,13 +1063,14 @@ async def check_deserialize(addr):
 
     # Test with long bytestrings, large enough to be transferred
     # as a separate payload
+    # TODO: currently bytestrings are not transferred as a separate payload
 
     _uncompressible = os.urandom(1024 ** 2) * 4  # end size: 8 MB
 
     msg = {
         "op": "update",
         "x": _uncompressible,
-        "to_ser": [to_serialize(_uncompressible)],
+        "to_ser": (to_serialize(_uncompressible),),
         "ser": Serialized(*serialize(_uncompressible)),
     }
     msg_orig = msg.copy()
@@ -1044,7 +1092,7 @@ async def check_deserialize(addr):
         else:
             assert isinstance(ser, Serialized)
             assert deserialize(ser.header, ser.frames) == _uncompressible
-            assert isinstance(to_ser, list)
+            assert isinstance(to_ser, tuple) and len(to_ser) == 1
             (to_ser,) = to_ser
             # The to_serialize() value could have been actually serialized
             # or not (it's a transport-specific optimization)
@@ -1060,7 +1108,7 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.xfail(reason="intermittent failure on windows")
+@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @pytest.mark.asyncio
 async def test_tcp_deserialize():
     await check_deserialize("tcp://")

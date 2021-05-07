@@ -1,14 +1,13 @@
 import asyncio
-from collections import defaultdict, deque
-from contextlib import suppress
 import logging
 import threading
 import weakref
+from collections import defaultdict, deque
 
 from .core import CommClosedError
 from .metrics import time
-from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
+from .utils import TimeoutError, parse_timedelta, sync
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +283,7 @@ class Pub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed import get_worker, get_client
+            from distributed import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -364,7 +363,7 @@ class Sub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed.worker import get_worker, get_client
+            from distributed.worker import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -421,8 +420,7 @@ class Sub:
             try:
                 await asyncio.wait_for(_(), timeout2)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 fails here sometimes
-                    self.condition.release()
+                self.condition.release()
 
         return self.buffer.popleft()
 
@@ -433,7 +431,7 @@ class Sub:
 
         Parameters
         ----------
-        timeout: number or string or timedelta, optional
+        timeout : number or string or timedelta, optional
             Time in seconds to wait before timing out.
             Instead of number of seconds, it is also possible to specify
             a timedelta in string format, e.g. "200ms".

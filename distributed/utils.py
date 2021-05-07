@@ -1,69 +1,76 @@
 import asyncio
-from asyncio import TimeoutError
-import atexit
-import click
-from collections import deque, OrderedDict, UserDict
-from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
-from contextlib import contextmanager, suppress
 import functools
-from hashlib import md5
 import html
+import importlib
+import inspect
 import json
 import logging
 import multiprocessing
 import os
+import pkgutil
 import re
 import shutil
 import socket
-from time import sleep
-import importlib
-from importlib.util import cache_from_source
-import inspect
 import sys
 import tempfile
 import threading
 import warnings
 import weakref
-import pkgutil
-import base64
-import tblib.pickling_support
 import xml.etree.ElementTree
+from asyncio import TimeoutError
+from collections import OrderedDict, UserDict, deque
+from concurrent.futures import CancelledError, ThreadPoolExecutor  # noqa: F401
+from contextlib import contextmanager, suppress
+from hashlib import md5
+from importlib.util import cache_from_source
+from time import sleep
+
+import click
+import tblib.pickling_support
 
 try:
     import resource
 except ImportError:
     resource = None
 
-import dask
-from dask import istask
-from dask.optimization import SubgraphCallable
-
-# provide format_bytes here for backwards compatibility
-from dask.utils import (  # noqa
-    format_bytes,
-    funcname,
-    format_time,
-    parse_bytes,
-    parse_timedelta,
-)
-
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
+
+import dask
+from dask import istask
+
+# Import config serialization functions here for backward compatibility
+from dask.config import deserialize as deserialize_for_cli  # noqa
+from dask.config import serialize as serialize_for_cli  # noqa
+
+# provide format_bytes here for backwards compatibility
+from dask.utils import (  # noqa: F401
+    format_bytes,
+    format_time,
+    funcname,
+    parse_bytes,
+    parse_timedelta,
+)
 
 try:
     from tornado.ioloop import PollIOLoop
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS, get_running_loop
+from .compatibility import PYPY, WINDOWS
 from .metrics import time
-
 
 try:
     from dask.context import thread_state
 except ImportError:
     thread_state = threading.local()
+
+# For some reason this is required in python >= 3.9
+if WINDOWS:
+    import multiprocessing.popen_spawn_win32
+else:
+    import multiprocessing.popen_spawn_posix
 
 logger = _logger = logging.getLogger(__name__)
 
@@ -82,7 +89,7 @@ def _initialize_mp_context():
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
 
-        from .versions import required_packages, optional_packages
+        from .versions import optional_packages, required_packages
 
         for pkg, _ in required_packages + optional_packages:
             try:
@@ -294,6 +301,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
+    callback_timeout = parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -313,11 +321,15 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
 
     @gen.coroutine
     def f():
+        # We flag the thread state asynchronous, which will make sync() call
+        # within `func` use async semantic. In order to support concurrent
+        # calls to sync(), `asynchronous` is used as a ref counter.
+        thread_state.asynchronous = getattr(thread_state, "asynchronous", 0)
+        thread_state.asynchronous += 1
         try:
             if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
@@ -325,7 +337,8 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         except Exception as exc:
             error[0] = sys.exc_info()
         finally:
-            thread_state.asynchronous = False
+            assert thread_state.asynchronous > 0
+            thread_state.asynchronous -= 1
             e.set()
 
     loop.add_callback(f)
@@ -627,7 +640,9 @@ def key_split_group(x):
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
     >>> key_split_group('x')
+    'x'
     >>> key_split_group('x-1')
+    'x'
     """
     typ = type(x)
     if typ is tuple:
@@ -739,26 +754,6 @@ def truncate_exception(e, n=10000):
         return e
 
 
-def tokey(o):
-    """Convert an object to a string.
-
-    Examples
-    --------
-
-    >>> tokey(b'x')
-    b'x'
-    >>> tokey('x')
-    'x'
-    >>> tokey(1)
-    '1'
-    """
-    typ = type(o)
-    if typ is str or typ is bytes:
-        return o
-    else:
-        return str(o)
-
-
 def validate_key(k):
     """Validate a key as received on a stream."""
     typ = type(k)
@@ -775,39 +770,6 @@ def _maybe_complex(task):
         or type(task) is dict
         and any(map(_maybe_complex, task.values()))
     )
-
-
-def convert(task, dsk, extra_values):
-    typ = type(task)
-    if typ is tuple and task:
-        if type(task[0]) is SubgraphCallable:
-            sc = task[0]
-            return (
-                SubgraphCallable(
-                    convert(sc.dsk, dsk, extra_values),
-                    sc.outkey,
-                    convert(sc.inkeys, dsk, extra_values),
-                    sc.name,
-                ),
-            ) + tuple(convert(x, dsk, extra_values) for x in task[1:])
-        elif callable(task[0]):
-            return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
-    if typ is list:
-        return [convert(v, dsk, extra_values) for v in task]
-    if typ is dict:
-        return {k: convert(v, dsk, extra_values) for k, v in task.items()}
-    try:
-        if task in dsk or task in extra_values:
-            return tokey(task)
-    except TypeError:
-        pass
-    if typ is tuple:  # If the tuple itself isn't a key, check its elements
-        return tuple(convert(v, dsk, extra_values) for v in task)
-    return task
-
-
-def str_graph(dsk, extra_values=()):
-    return {tokey(k): convert(v, dsk, extra_values) for k, v in dsk.items()}
 
 
 def seek_delimiter(file, delimiter, blocksize):
@@ -937,7 +899,6 @@ def ensure_bytes(s):
 
     Examples
     --------
-
     >>> ensure_bytes('123')
     b'123'
     >>> ensure_bytes(b'123')
@@ -958,7 +919,6 @@ def ensure_bytes(s):
 
 def divide_n_among_bins(n, bins):
     """
-
     >>> divide_n_among_bins(12, [1, 1])
     [6, 6]
     >>> divide_n_among_bins(12, [1, 2])
@@ -983,32 +943,6 @@ def divide_n_among_bins(n, bins):
 def mean(seq):
     seq = list(seq)
     return sum(seq) / len(seq)
-
-
-if hasattr(sys, "is_finalizing"):
-
-    def shutting_down(is_finalizing=sys.is_finalizing):
-        return is_finalizing()
-
-
-else:
-    _shutting_down = [False]
-
-    def _at_shutdown(l=_shutting_down):
-        l[0] = True
-
-    def shutting_down(l=_shutting_down):
-        return l[0]
-
-    atexit.register(_at_shutdown)
-
-
-shutting_down.__doc__ = """
-    Whether the interpreter is currently shutting down.
-    For use in finalizers, __del__ methods, and similar; it is advised
-    to early bind this function rather than look it up when calling it,
-    since at shutdown module globals may be cleared.
-    """
 
 
 def open_port(host=""):
@@ -1141,6 +1075,34 @@ def time_warn(duration, text):
         print("TIME WARNING", text, end - start)
 
 
+def deprecated(*, version_removed: str = None):
+    """Decorator to mark a function as deprecated
+
+    Parameters
+    ----------
+    version_removed : str, optional
+        If specified, include the version in which the deprecated function
+        will be removed. Defaults to "a future release".
+    """
+
+    def decorator(func):
+        nonlocal version_removed
+        msg = f"{funcname(func)} is deprecated and will be removed in"
+        if version_removed is not None:
+            msg += f" version {version_removed}"
+        else:
+            msg += " a future release"
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            warnings.warn(msg, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def json_load_robust(fn, load=json.load):
     """ Reads a JSON file from disk that may be being written as we read """
     while not os.path.exists(fn):
@@ -1209,7 +1171,7 @@ if not is_server_extension:
 
     if is_kernel():
         try:
-            get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             is_kernel_and_no_running_loop = True
 
@@ -1299,6 +1261,7 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
+@functools.lru_cache(None)
 def iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
 
@@ -1358,24 +1321,24 @@ def parse_ports(port):
     A single port can be specified using an integer:
 
     >>> parse_ports(8787)
-    >>> [8787]
+    [8787]
 
     or a string:
 
     >>> parse_ports("8787")
-    >>> [8787]
+    [8787]
 
     A sequential range of ports can be specified by a string which indicates
     the first and last ports which should be included in the sequence of ports:
 
     >>> parse_ports("8787:8790")
-    >>> [8787, 8788, 8789, 8790]
+    [8787, 8788, 8789, 8790]
 
     An input of ``None`` is also valid and can be used to indicate that no port
     has been specified:
 
     >>> parse_ports(None)
-    >>> [None]
+    [None]
 
     """
     if isinstance(port, str) and ":" not in port:
@@ -1396,8 +1359,7 @@ def parse_ports(port):
     return ports
 
 
-def is_coroutine_function(f):
-    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+is_coroutine_function = iscoroutinefunction
 
 
 class Log(str):
@@ -1428,11 +1390,11 @@ def cli_keywords(d: dict, cls=None, cmd=None):
 
     Parameters
     ----------
-    d: dict
+    d : dict
         The keywords to convert
-    cls: callable
+    cls : callable
         The callable that consumes these terms to check them for validity
-    cmd: string or object
+    cmd : string or object
         A string with the name of a module, or the module containing a
         click-generated command with a "main" function, or the function itself.
         It may be used to parse a module's custom arguments (i.e., arguments that
@@ -1482,13 +1444,7 @@ def is_valid_xml(text):
     return xml.etree.ElementTree.fromstring(text) is not None
 
 
-try:
-    _offload_executor = ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="Dask-Offload"
-    )
-except TypeError:
-    _offload_executor = ThreadPoolExecutor(max_workers=1)
-
+_offload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="Dask-Offload")
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
@@ -1497,7 +1453,7 @@ def import_term(name: str):
 
     Examples
     --------
-    >>> import_term("math.sin")
+    >>> import_term("math.sin") # doctest: +SKIP
     <function math.sin(x, /)>
     """
     try:
@@ -1512,36 +1468,6 @@ def import_term(name: str):
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
-
-
-def serialize_for_cli(data):
-    """Serialize data into a string that can be passthrough cli
-
-    Parameters
-    ----------
-    data: json-serializable object
-        The data to serialize
-    Returns
-    -------
-    serialized_data: str
-        The serialized data as a string
-    """
-    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
-
-
-def deserialize_for_cli(data):
-    """De-serialize data into the original object
-
-    Parameters
-    ----------
-    data: str
-        String serialied by serialize_for_cli()
-    Returns
-    -------
-    deserialized_data: obj
-        The de-serialized data
-    """
-    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
 
 
 class EmptyContext:
@@ -1582,7 +1508,6 @@ class LRU(UserDict):
 
 def clean_dashboard_address(addr, default_listen_ip=""):
     """
-
     Examples
     --------
     >>> clean_dashboard_address(8787)

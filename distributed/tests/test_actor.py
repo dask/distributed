@@ -5,10 +5,16 @@ from time import sleep
 import pytest
 
 import dask
-from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+
+from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 
 class Counter:
@@ -21,9 +27,23 @@ class Counter:
         self.n += 1
         return self.n
 
+    async def ainc(self):
+        self.n += 1
+        return self.n
+
     def add(self, x):
         self.n += x
         return self.n
+
+
+class UsesCounter:
+    # An actor whose method argument is another actor
+
+    def do_inc(self, ac):
+        return ac.increment().result()
+
+    async def ado_inc(self, ac):
+        return await ac.ainc()
 
 
 class List:
@@ -411,8 +431,8 @@ async def test_load_balance_map(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 async def bench_param_server(c, s, *workers):
+    np = pytest.importorskip("numpy")
     import dask.array as da
-    import numpy as np
 
     x = da.random.random((500000, 1000), chunks=(1000, 1000))
     x = x.persist()
@@ -451,7 +471,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.xfail(reason="unknown")
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
@@ -474,7 +494,7 @@ async def test_compute(c, s, a, b):
     start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert time() < start + 30
 
 
 def test_compute_sync(client):
@@ -501,7 +521,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 2
+        assert time() < start + 30
 
 
 @gen_cluster(
@@ -550,3 +570,20 @@ async def test_waiter(c, s, a, b):
     await waiter.set()
 
     await c.gather(futures)
+
+
+def test_one_thread_deadlock():
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Counter, actor=True).result()
+        ac2 = client.submit(UsesCounter, actor=True, workers=[ac._address]).result()
+
+        assert ac2.do_inc(ac).result() == 1
+
+
+@gen_cluster(client=True)
+async def test_async_deadlock(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
+
+    assert (await ac2.ado_inc(ac)) == 1

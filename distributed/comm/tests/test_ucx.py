@@ -1,16 +1,15 @@
 import asyncio
+
 import pytest
 
 ucp = pytest.importorskip("ucp")
 
-from distributed import Client, Worker, Scheduler, wait
-from distributed.comm import ucx, listen, connect
+from distributed import Client, Scheduler, Worker, wait
+from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
-from distributed.comm import ucx, parse_address
-from distributed.protocol import to_serialize
 from distributed.deploy.local import LocalCluster
-from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
-
+from distributed.protocol import to_serialize
+from distributed.utils_test import cleanup, gen_test, inc, loop, popen  # noqa: 401
 
 try:
     HOST = ucp.get_address()

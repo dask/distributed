@@ -1,19 +1,19 @@
-from datetime import datetime
 import json
 import logging
 import os
 import os.path
+from datetime import datetime
+
+from tlz import first, merge
+from tornado import escape
+from tornado.websocket import WebSocketHandler
 
 from dask.utils import format_bytes
 
-from tornado import escape
-from tornado.websocket import WebSocketHandler
-from tlz import first, merge
-
-from ..utils import RequestHandler, redirect
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time
-from ...utils import log_errors, format_time
+from ...utils import format_time, log_errors
+from ..utils import RequestHandler, redirect
 
 ns = {
     func.__name__: func
@@ -33,7 +33,13 @@ class Workers(RequestHandler):
                 "workers.html",
                 title="Workers",
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -49,7 +55,13 @@ class Worker(RequestHandler):
                 title="Worker: " + worker,
                 scheduler=self.server,
                 Worker=worker,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 
@@ -65,7 +77,13 @@ class Task(RequestHandler):
                 title="Task: " + task,
                 Task=task,
                 scheduler=self.server,
-                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(
+                    self.server.__dict__,
+                    self.server.__pdict__,
+                    ns,
+                    self.extra,
+                    rel_path_statics,
+                ),
             )
 
 

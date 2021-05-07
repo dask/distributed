@@ -1,21 +1,29 @@
 import asyncio
+
 import pytest
 from click.testing import CliRunner
 
 pytest.importorskip("requests")
 
-import requests
-import sys
 import os
-from time import sleep
+import sys
 from multiprocessing import cpu_count
+from time import sleep
+
+import requests
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
+from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import sync, tmpfile, parse_ports
-from distributed.utils_test import popen, terminate_process, wait_for_port
-from distributed.utils_test import loop, cleanup  # noqa: F401
+from distributed.utils import parse_ports, sync, tmpfile
+from distributed.utils_test import (  # noqa: F401
+    cleanup,
+    loop,
+    popen,
+    terminate_process,
+    wait_for_port,
+)
 
 
 def test_nanny_worker_ports(loop):
@@ -40,7 +48,7 @@ def test_nanny_worker_ports(loop):
                     if d["workers"]:
                         break
                     else:
-                        assert time() - start < 5
+                        assert time() - start < 60
                         sleep(0.1)
                 assert (
                     d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
@@ -72,7 +80,7 @@ def test_nanny_worker_port_range(loop):
                 start = time()
                 while len(c.scheduler_info()["workers"]) < nprocs:
                     sleep(0.1)
-                    assert time() - start < 5
+                    assert time() - start < 60
 
                 def get_port(dask_worker):
                     return dask_worker.port
@@ -244,6 +252,14 @@ def test_nprocs_negative(loop):
         with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=-1"]) as worker:
             with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                 c.wait_for_workers(cpu_count(), timeout="10 seconds")
+
+
+def test_nprocs_auto(loop):
+    with popen(["dask-scheduler", "--no-dashboard"]) as sched:
+        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs=auto"]) as worker:
+            with Client("tcp://127.0.0.1:8786", loop=loop) as c:
+                procs, _ = nprocesses_nthreads()
+                c.wait_for_workers(procs, timeout="10 seconds")
 
 
 def test_nprocs_expands_name(loop):

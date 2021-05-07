@@ -55,9 +55,9 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = u"Dask.distributed"
-copyright = u"2016, Anaconda, Inc."
-author = u"Anaconda, Inc."
+project = "Dask.distributed"
+copyright = "2016, Anaconda, Inc."
+author = "Anaconda, Inc."
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -234,8 +234,8 @@ latex_documents = [
     (
         master_doc,
         "distributed.tex",
-        u"Dask.distributed Documentation",
-        u"Matthew Rocklin",
+        "Dask.distributed Documentation",
+        "Matthew Rocklin",
         "manual",
     )
 ]
@@ -266,7 +266,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, "Dask.distributed", u"Dask.distributed Documentation", [author], 1)
+    (master_doc, "Dask.distributed", "Dask.distributed Documentation", [author], 1)
 ]
 
 # If true, show URL addresses after external links.
@@ -282,7 +282,7 @@ texinfo_documents = [
     (
         master_doc,
         "Dask.distributed",
-        u"Dask.distributed Documentation",
+        "Dask.distributed Documentation",
         author,
         "Dask.distributed",
         "One line description of project.",
@@ -425,5 +425,66 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
+from docutils.parsers.rst import directives
+
+# -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
+# Fixes issues/3693
+# See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+from sphinx.ext.autosummary import Autosummary, get_documenter
+from sphinx.util.inspect import safe_getattr
+
+
+class AutoAutoSummary(Autosummary):
+    """Create a summary for methods and attributes (autosummary).
+
+    See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
+    """
+
+    option_spec = {
+        "methods": directives.unchanged,
+        "attributes": directives.unchanged,
+    }
+
+    required_arguments = 1
+
+    @staticmethod
+    def get_members(app, obj, typ, include_public=None):
+        if not include_public:
+            include_public = []
+        items = []
+        for name in sorted(obj.__dict__.keys()):
+            try:
+                documenter = get_documenter(app, safe_getattr(obj, name), obj)
+            except AttributeError:
+                continue
+            if documenter.objtype in typ:
+                items.append(name)
+        public = [x for x in items if x in include_public or not x.startswith("_")]
+        return public, items
+
+    def run(self):
+        clazz = str(self.arguments[0])
+        (module_name, class_name) = clazz.rsplit(".", 1)
+        m = __import__(module_name, globals(), locals(), [class_name])
+        c = getattr(m, class_name)
+        app = self.state.document.settings.env.app
+        if "methods" in self.options:
+            _, methods = self.get_members(app, c, ["method"], ["__init__"])
+            self.content = [
+                "%s.%s" % (class_name, method)
+                for method in methods
+                if not method.startswith("_")
+            ]
+        if "attributes" in self.options:
+            _, attribs = self.get_members(app, c, ["attribute", "property"])
+            self.content = [
+                "~%s.%s" % (clazz, attrib)
+                for attrib in attribs
+                if not attrib.startswith("_")
+            ]
+        return super().run()
+
+
 def setup(app):
+    app.add_directive("autoautosummary", AutoAutoSummary)
     app.connect("build-finished", copy_legacy_redirects)

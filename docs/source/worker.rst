@@ -81,41 +81,26 @@ code then this topic probably doesn't apply.
 Command Line tool
 -----------------
 
-Use the ``dask-worker`` command line tool to start an individual worker.  Here
-are the available options::
-
-   $ dask-worker --help
-   Usage: dask-worker [OPTIONS] SCHEDULER
-
-   Options:
-     --worker-port INTEGER  Serving worker port, defaults to randomly assigned
-     --http-port INTEGER    Serving http port, defaults to randomly assigned
-     --nanny-port INTEGER   Serving nanny port, defaults to randomly assigned
-     --port INTEGER         Deprecated, see --nanny-port
-     --host TEXT            Serving host. Defaults to an ip address that can
-                            hopefully be visible from the scheduler network.
-     --nthreads INTEGER     Number of threads per process. Defaults to number of
-                            cores
-     --nprocs INTEGER       Number of worker processes to launch.  Defaults to one.
-     --name TEXT            Alias
-     --memory-limit TEXT    Maximum bytes of memory that this worker should use.
-                            Use 0 for unlimited, or 'auto' for
-                            TOTAL_MEMORY * min(1, nthreads / total_nthreads)
-     --no-nanny
-     --help                 Show this message and exit.
-
+Use the ``dask-worker`` command line tool to start an individual worker. For
+more details on the command line options, please have a look at the
+`command line tools documentation <https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.
 
 Internal Scheduling
 -------------------
 
 Internally tasks that come to the scheduler proceed through the following
-pipeline:
+pipeline as :py:class:`distributed.worker.TaskState` objects.  Tasks which
+follow this path have a :py:attr:`distributed.worker.TaskState.runspec` defined
+which instructs the worker how to execute them.
 
 .. image:: images/worker-task-state.svg
     :alt: Dask worker task states
 
-The worker also tracks data dependencies that are required to run the tasks
-above.  These follow through a simpler pipeline:
+Data dependencies are also represented as
+:py:class:`distributed.worker.TaskState` objects and follow a simpler path
+through the execution pipeline.  These tasks do not have a
+:py:attr:`distributed.worker.TaskState.runspec` defined and instead contain a
+listing of workers to collect their result from.
 
 
 .. image:: images/worker-dep-state.svg
@@ -128,9 +113,12 @@ dependency from that worker.  To improve bandwidth we opportunistically gather
 other dependencies of other tasks that are known to be on that worker, up to a
 maximum of 200MB of data (too little data and bandwidth suffers, too much data
 and responsiveness suffers).  We use a fixed number of connections (around
-10-50) so as to avoid overly-fragmenting our network bandwidth.  After all
-dependencies for a task are in memory we transition the task to the ready state
-and put the task again into a heap of tasks that are ready to run.
+10-50) so as to avoid overly-fragmenting our network bandwidth. In the event
+that the network comms between two workers are saturated, a dependency task may
+cycle between ``fetch`` and ``flight`` until it is successfully collected.
+
+After all dependencies for a task are in memory we transition the task to the
+ready state and put the task again into a heap of tasks that are ready to run.
 
 We collect from this heap and put the task into a thread from a local thread
 pool to execute.
@@ -142,7 +130,17 @@ thread pool.
 A task either errs or its result is put into memory.  In either case a response
 is sent back to the scheduler.
 
-.. _memman::
+Tasks slated for execution and tasks marked for collection from other workers
+must follow their respective transition paths as defined above. The only
+exceptions to this are when:
+
+* A task is `stolen <work-stealing>`_, in which case a task which might have
+  been collected will instead be executed on the thieving worker
+* Scheduler intercession, in which the scheduler reassigns a task that was
+  previously assigned to a separate worker to a new worker.  This most commonly
+  occurs when a `worker dies <killed>`_ during computation.
+
+.. _memman:
 
 Memory Management
 -----------------

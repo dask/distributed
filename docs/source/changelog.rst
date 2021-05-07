@@ -1,6 +1,315 @@
 Changelog
 =========
 
+2021.04.1
+---------
+
+Released on April 23, 2021
+
+- Avoid ``active_threads`` changing size during iteration (:pr:`4729`) `James Bourbeau`_
+- Fix ``UnboundLocalError`` in ``AdaptiveCore.adapt()`` (:pr:`4731`) `Anderson Banihirwe`_
+- Minor formatting updates for HTTP endpoints doc (:pr:`4736`) `James Bourbeau`_
+- Unit test for ``metrics["memory"]=None`` (:pr:`4727`) `crusaderky`_
+- Enable configuration of prometheus metrics namespace (:pr:`4722`) `Jacob Tomlinson`_
+- Reintroduce ``weight`` function (:pr:`4723`) `James Bourbeau`_
+- Add ``ready->memory`` to transitions in worker (:pr:`4728`) `Gil Forsyth`_
+- Fix regressions in :pr:`4651` (:pr:`4719`) `crusaderky`_
+- Add descriptions for UCX config options (:pr:`4683`) `Charles Blackmon-Luca`_
+- Split RAM measure into dask keys/other old/other new (:pr:`4651`) `crusaderky`_
+- Fix ``DeprecationWarning`` on Python 3.9 (:pr:`4717`) `George Sakkis`_
+- ipython causes ``test_profile_nested_sizeof`` crash on windows (:pr:`4713`) `crusaderky`_
+- Add ``iterate_collection`` argument to ``serialize`` (:pr:`4641`) `Richard J Zamora`_
+- When closing ``Server``, close all listeners (:pr:`4704`) `Florian Jetter`_
+- Fix timeout in ``client.restart`` (:pr:`4690`) `Matteo De Wint`_
+- Avoid repeatedly using the same worker on first task with quiet cluster (:pr:`4638`) `Doug Davis`_
+- Grab ``func`` for ``finish`` case only if used (:pr:`4702`) `jakirkham`_
+- Remove hostname check in ``test_dashboard`` (:pr:`4706`) `James Bourbeau`_
+- Faster ``tests_semaphore::test_worker_dies`` (:pr:`4703`) `Florian Jetter`_
+- Clean up ``test_dashboard`` (:pr:`4700`) `crusaderky`_
+- Add timing information to ``TaskGroup`` (:pr:`4671`) `Matthew Rocklin`_
+- Remove ``WSSConnector`` TLS presence check (:pr:`4695`) `Marcos Moyano`_
+- Fix typo and remove unused ``time.time`` import (:pr:`4689`) `Hristo Georgiev`_
+- Don't initialize CUDA context in monitor (:pr:`4688`) `Charles Blackmon-Luca`_
+- Add support for extra conn args for HTTP protocols (:pr:`4682`) `Marcos Moyano`_
+- Adjust timings in ``test_threadpoolworkers`` (:pr:`4681`) `Florian Jetter`_
+- Add GPU metrics to ``SystemMonitor`` (:pr:`4661`) `Charles Blackmon-Luca`_
+- Removing ``dumps_msgpack()`` and ``loads_msgpack()`` (:pr:`4677`) `Mads R. B. Kristensen`_
+- Expose worker ``SystemMonitor`` s to scheduler via RPC (:pr:`4657`) `Charles Blackmon-Luca`_
+
+
+2021.04.0
+---------
+
+Released on April 2, 2021
+
+- Fix un-merged frames (:pr:`4666`) `Matthew Rocklin`_
+- Add informative error message to install uvloop (:pr:`4664`) `Matthew Rocklin`_
+- Remove incorrect comment regarding default ``LocalCluster`` creation (:pr:`4660`) `cameron16`_
+- Treat empty/missing ``writeable`` as a no-op (:pr:`4659`) `jakirkham`_
+- Avoid list mutation in ``pickle_loads`` (:pr:`4653`) `Matthew Rocklin`_
+- Ignore ``OSError`` exception when scaling down (:pr:`4633`) `Gerald`_
+- Add ``isort`` to pre-commit hooks, package resorting (:pr:`4647`) `Charles Blackmon-Luca`_
+- Use powers-of-two when displaying RAM (:pr:`4649`) `crusaderky`_
+- Support Websocket communication protocols (:pr:`4396`) `Marcos Moyano`_
+- ``scheduler.py`` / ``worker.py`` code cleanup (:pr:`4626`) `crusaderky`_
+- Update out-of-date references to ``config.yaml`` (:pr:`4643`) `Hristo Georgiev`_
+- Suppress ``OSError`` on ``SpecCluster`` shutdown (:pr:`4567`) `Jacob Tomlinson`_
+- Replace conda with mamba (:pr:`4585`) `crusaderky`_
+- Expand documentation on pure functions (:pr:`4644`) `James Lamb`_
+
+
+2021.03.1
+---------
+
+Released on March 26, 2021
+
+- Add standalone dashboard page for GPU usage (:pr:`4556`) `Jacob Tomlinson`_
+- Handle ``stream is None`` case in TCP comm finalizer (:pr:`4631`) `James Bourbeau`_
+- Include ``LIST_PICKLE`` in NumPy array serialization (:pr:`4632`) `James Bourbeau`_
+- Rename annotation plugin in ``test_highlevelgraph.py`` (:pr:`4618`) `James Bourbeau`_
+- UCX use ``nbytes`` instead of ``len`` (:pr:`4621`) `Mads R. B. Kristensen`_
+- Skip NumPy and pandas tests if not importable (:pr:`4563`) `Ben Greiner`_
+- Remove ``utils.shutting_down`` in favor of ``sys.is_finalizing`` (:pr:`4624`) `James Bourbeau`_
+- Handle ``async`` clients when closing (:pr:`4623`) `Matthew Rocklin`_
+- Drop ``log`` from ``remove_key_from_stealable`` (:pr:`4609`) `jakirkham`_
+- Introduce events log length config option (:pr:`4615`) `Fabian Gebhart`_
+- Upstream config serialization and inheritance (:pr:`4372`) `Jacob Tomlinson`_
+- Add check to scheduler creation in ``SpecCluster`` (:pr:`4605`) `Jacob Tomlinson`_
+- Make length of events ``deque`` configurable (:pr:`4604`) `Fabian Gebhart`_
+- Add explicit ``fetch`` state to worker ``TaskState`` (:pr:`4470`) `Gil Forsyth`_
+- Update ``develop.rst`` (:pr:`4603`) `Florian Jetter`_
+- ``pickle_loads()``: Handle empty ``memoryview`` (:pr:`4595`) `Mads R. B. Kristensen`_
+- Switch documentation builds for PRs to readthedocs (:pr:`4599`) `James Bourbeau`_
+- Track frame sizes along with frames (:pr:`4593`) `jakirkham`_
+- Add support for a list of keys when using ``batch_size`` in ``client.map`` (:pr:`4592`) `Sultan Orazbayev`_
+- If ``SpecCluster`` fails to start attempt to gracefully close out again (:pr:`4590`) `Jacob Tomlinson`_
+- Multi-lock extension (:pr:`4503`) `Mads R. B. Kristensen`_
+- Update ``PipInstall`` plugin command (:pr:`4584`) `James Bourbeau`_
+- IPython magics: remove deprecated ``ioloop`` workarounds (:pr:`4530`) `Min RK`_
+- Add GitHub actions workflow to cancel duplicate builds (:pr:`4581`) `James Bourbeau`_
+- Remove outdated macOS build badge from ``README`` (:pr:`4576`) `James Bourbeau`_
+- Dask master -> main (:pr:`4569`) `Julia Signell`_
+- Drop support for Python 3.6 (:pr:`4390`) `James Bourbeau`_
+- Add docstring for ``dashboard_link`` property (:pr:`4572`) `Doug Davis`_
+- Change default branch from master to main (:pr:`4495`) `Julia Signell`_
+- Msgpack handles extract serialize (:pr:`4531`) `Mads R. B. Kristensen`_
+
+
+2021.03.0
+---------
+
+Released on March 5, 2021
+
+.. note::
+
+    This is the first release with support for Python 3.9 and the
+    last release with support for Python 3.6
+
+- ``tcp.write()``: cast ``memoryview`` to byte itemsize (:pr:`4555`) `Mads R. B. Kristensen`_
+- Refcount the ``thread_state.asynchronous`` flag (:pr:`4557`) `Mads R. B. Kristensen`_
+- Python 3.9 (:pr:`4460`) `crusaderky`_
+- Better bokeh defaults for dashboard (:pr:`4554`) `Benjamin Zaitlen`_
+- Expose system monitor dashboard as individual plot for lab extension (:pr:`4540`) `Jacob Tomlinson`_
+- Pass on original temp dir from nanny to worker (:pr:`4549`) `Martin Durant`_
+- Serialize and split (:pr:`4541`) `Mads R. B. Kristensen`_
+- Use the new HLG pack/unpack API in Dask (:pr:`4489`) `Mads R. B. Kristensen`_
+- Handle annotations for culled tasks (:pr:`4544`) `Tom Augspurger`_
+- Make sphinx autosummary and autoclass consistent (:pr:`4367`) `Casey Clements`_
+- Move ``_transition*`` to ``SchedulerState`` (:pr:`4545`) `jakirkham`_
+- Migrate from travis to GitHub actions (:pr:`4504`) `crusaderky`_
+- Move ``new_task`` to ``SchedulerState`` (:pr:`4527`) `jakirkham`_
+- Batch more Scheduler sends (:pr:`4526`) `jakirkham`_
+- ``transition_memory_released`` and ``get_nbytes()`` optimizations (:pr:`4516`) `jakirkham`_
+- Pin ``black`` pre-commit (:pr:`4533`) `James Bourbeau`_
+- Read & write all frames in one pass (:pr:`4506`) `jakirkham`_
+- Skip ``stream.write`` call for empty frames (:pr:`4507`) `jakirkham`_
+- Prepend frame metadata header (:pr:`4505`) `jakirkham`_
+- ``transition_processing_memory`` optimizations, etc. (:pr:`4487`) `jakirkham`_
+- Attempt to get client from worker in ``Queue`` and ``Variable`` (:pr:`4490`) `James Bourbeau`_
+- Use ``main`` branch for ``zict`` (:pr:`4499`) `jakirkham`_
+- Use a callback to close TCP Comms, rather than check every time (:pr:`4453`) `Matthew Rocklin`_
+
+
+2021.02.0
+---------
+
+Released on February 5, 2021
+
+- Bump minimum Dask to 2021.02.0 (:pr:`4486`) `James Bourbeau`_
+- Update ``TaskState`` documentation about dependents attribute (:pr:`4440`) `Florian Jetter`_
+- DOC: Autoreformat all functions docstrings (:pr:`4475`) `Matthias Bussonnier`_
+- Use cached version of ``is_coroutine_function`` in stream handling to (:pr:`4481`) `Ian Rose`_
+- Optimize ``transitions`` (:pr:`4451`) `jakirkham`_
+- Create ``PULL_REQUEST_TEMPLATE.md`` (:pr:`4476`) `Ray Bell`_
+- DOC: typo, directives ends with 2 colons ``::`` (:pr:`4472`) `Matthias Bussonnier`_
+- DOC: Proper numpydoc syntax for ``distributed/protocol/*.py`` (:pr:`4473`) `Matthias Bussonnier`_
+- Update ``pytest.skip`` usage in ``test_server_listen`` (:pr:`4467`) `James Bourbeau`_
+- Unify annotations (:pr:`4406`) `Ian Rose`_
+- Added worker resources from config (:pr:`4456`) `Tom Augspurger`_
+- Fix var name in worker validation func (:pr:`4457`) `Gil Forsyth`_
+- Refactor ``task_groups`` & ``task_prefixes`` (:pr:`4452`) `jakirkham`_
+- Use ``parent._tasks`` in ``heartbeat`` (:pr:`4450`) `jakirkham`_
+- Refactor ``SchedulerState`` from ``Scheduler`` (:pr:`4365`) `jakirkham`_
+
+
+2021.01.1
+---------
+
+Released on January 22, 2021
+
+- Make system monitor interval configurable (:pr:`4447`) `Matthew Rocklin`_
+- Add ``uvloop`` config value (:pr:`4448`) `Matthew Rocklin`_
+- Additional optimizations to stealing (:pr:`4445`) `jakirkham`_
+- Give clusters names (:pr:`4426`) `Jacob Tomlinson`_
+- Use worker comm pool in ``Semaphore`` (:pr:`4195`) `Florian Jetter`_
+- Set ``runspec`` on all new tasks to avoid deadlocks (:pr:`4432`) `Florian Jetter`_
+- Support ``TaskState`` objects in story methods (:pr:`4434`) `Matthew Rocklin`_
+- Support missing event loop in ``Client.asynchronous`` (:pr:`4436`) `Matthew Rocklin`_
+- Don't require network to inspect tests (:pr:`4433`) `Matthew Rocklin`_
+
+
+2021.01.0
+---------
+
+Released on January 15, 2021
+
+- Add time started to scheduler info (:pr:`4425`) `Jacob Tomlinson`_
+- Log adaptive error (:pr:`4422`) `Jacob Tomlinson`_
+- Xfail normalization tests (:pr:`4411`) `Jacob Tomlinson`_
+- Use ``dumps_msgpack`` and ``loads_msgpack`` when packing high level graphs (:pr:`4409`) `Mads R. B. Kristensen`_
+- Add ``nprocs`` auto option to ``dask-worker`` CLI (:pr:`4377`) `Jacob Tomlinson`_
+- Type annotation of ``_reevaluate_occupancy_worker`` (:pr:`4398`) `jakirkham`_
+- Type ``TaskGroup`` in ``active_states`` (:pr:`4408`) `jakirkham`_
+- Fix ``test_as_current_is_thread_local`` (:pr:`4402`) `jakirkham`_
+- Use ``list`` comprehensions to bind ``TaskGroup`` type (:pr:`4401`) `jakirkham`_
+- Make tests pass after 2028 (:pr:`4403`) `Bernhard M. Wiedemann`_
+- Fix compilation warnings, ``decide_worker`` now a C func, stealing improvements (:pr:`4375`) `jakirkham`_
+- Drop custom ``__eq__`` from ``Status`` (:pr:`4270`) `jakirkham`_
+- ``test_performance_report``: skip without bokeh (:pr:`4388`) `Bruno Pagani`_
+- ``Nanny`` now respects dask settings from ctx mgr (:pr:`4378`) `Florian Jetter`_
+- Better task duration estimates for outliers (:pr:`4213`) `selshowk`_
+- Dask internal inherit config (:pr:`4364`) `Jacob Tomlinson`_
+- Provide ``setup.py`` option to profile Cython code (:pr:`4362`) `jakirkham`_
+- Optimizations of ``*State`` and ``Task*`` objects and stealing (:pr:`4358`) `jakirkham`_
+- Cast ``SortedDict`` s to ``dict`` s in a few key places & other minor changes (:pr:`4355`) `jakirkham`_
+- Use task annotation priorities for user-level priorities (:pr:`4354`) `James Bourbeau`_
+- Added docs to highlevelgraph pack/unpack (:pr:`4352`) `Mads R. B. Kristensen`_
+- Optimizations in notable functions used by transitions (:pr:`4351`) `jakirkham`_
+- Silence exception when releasing futures on process shutdown (:pr:`4309`) `Benjamin Zaitlen`_
+
+
+2020.12.0
+---------
+
+Released on December 10, 2020
+
+Highlights
+^^^^^^^^^^
+
+- Switched to `CalVer <https://calver.org/>`_ for versioning scheme.
+- The scheduler can now receives Dask ``HighLevelGraph`` s instead of raw dictionary task graphs.
+  This allows for a much more efficient communication of task graphs from the client to the scheduler.
+- Added support for using custom ``Layer``-level annotations like ``priority``, ``retries``,
+  etc. with the ``dask.annotations`` context manager.
+- Updated minimum supported version of Dask to 2020.12.0.
+- Added many type annotations and updates to allow for gradually Cythonizing the scheduler.
+
+All changes
+^^^^^^^^^^^
+
+- Some common optimizations across transitions (:pr:`4348`) `jakirkham`_
+- Drop serialize extension (:pr:`4344`) `jakirkham`_
+- Log duplciate workers in scheduler (:pr:`4338`) `Matthew Rocklin`_
+- Annotation of some comm related methods in the ``Scheduler`` (:pr:`4341`) `jakirkham`_
+- Optimize ``assert`` in ``validate_waiting`` (:pr:`4342`) `jakirkham`_
+- Optimize ``decide_worker`` (:pr:`4332`) `jakirkham`_
+- Store occupancy in ``_reevaluate_occupancy_worker`` (:pr:`4337`) `jakirkham`_
+- Handle ``WorkerState`` ``memory_limit`` of ``None`` (:pr:`4335`) `jakirkham`_
+- Use ``bint`` to annotate boolean attributes (:pr:`4334`) `jakirkham`_
+- Optionally use offload executor in worker (:pr:`4307`) `Matthew Rocklin`_
+- Optimize ``send_task_to_worker`` (:pr:`4331`) `jakirkham`_
+- Optimize ``valid_workers`` (:pr:`4329`) `jakirkham`_
+- Store occupancy in ``transition_waiting_processing`` (:pr:`4330`) `jakirkham`_
+- Optimize ``get_comm_cost`` (:pr:`4328`) `jakirkham`_
+- Use ``.pop(...)`` to remove ``key`` (:pr:`4327`) `jakirkham`_
+- Use ``operator.attrgetter`` on ``WorkerState.address`` (:pr:`4324`) `jakirkham`_
+- Annotate ``Task*`` objects for Cythonization (:pr:`4302`) `jakirkham`_
+- Ensure ``retire_workers`` always ``return`` a ``dict`` (:pr:`4323`) `jakirkham`_
+- Some Cython fixes for ``WorkerState`` (:pr:`4321`) `jakirkham`_
+- Optimize ``WorkerState.__eq__`` (:pr:`4320`) `jakirkham`_
+- Swap order of ``TaskGroup`` and ``TaskPrefix`` (:pr:`4319`) `jakirkham`_
+- Check traceback object can be unpickled (:pr:`4299`) `jakirkham`_
+- Move ``TaskGroup`` & ``TaskPrefix`` before `TaskState` (:pr:`4318`) `jakirkham`_
+- Remove empty ``test_highgraph.py`` file (:pr:`4313`) `James Bourbeau`_
+- Ensure that ``retire_workers`` returns a ``dict`` (:pr:`4315`) `Matthew Rocklin`_
+- Annotate ``WorkerState`` for Cythonization (:pr:`4294`) `jakirkham`_
+- Close ``comm`` on low-level errors (:pr:`4239`) `jochen-ott-by`_
+- Coerce new ``TaskState.nbytes`` value to ``int`` (:pr:`4311`) `jakirkham`_
+- Remove offload ``try``/``except`` for ``thread_name_prefix`` keyword (:pr:`4308`) `James Bourbeau`_
+- Fix ``pip`` install issue on CI (:pr:`4310`) `jakirkham`_
+- Transmit ``Layer`` annotations to scheduler (:pr:`4279`) `Simon Perkins`_
+- Ignores any compiled files generated by Cython (:pr:`4301`) `jakirkham`_
+- Protect against missing key in ``get_metrics`` (:pr:`4300`) `Matthew Rocklin`_
+- Provide option to build Distributed with Cython (:pr:`4292`) `jakirkham`_
+- Set ``WorkerState.processing`` w/``dict`` in ``clean`` (:pr:`4295`) `jakirkham`_
+- Annotate ``ClientState`` for Cythonization (:pr:`4290`) `jakirkham`_
+- Annotate ``check_idle_saturated`` for Cythonization (:pr:`4289`) `jakirkham`_
+- Avoid flicker in ``TaskStream`` with "Scheduler is empty" message (:pr:`4284`) `Matthew Rocklin`_
+- Make ``gather_dep`` robust to missing tasks (:pr:`4285`) `Matthew Rocklin`_
+- Annotate ``extract_serialize`` (for Cythonization) (:pr:`4283`) `jakirkham`_
+- Move ``nbytes`` from Worker's state to ``TaskState`` (:pr:`4274`) `Gil Forsyth`_
+- Drop extra type check in ``_extract_serialize`` (:pr:`4281`) `jakirkham`_
+- Move Status to top-level import (:pr:`4280`) `Matthew Rocklin`_
+- Add ``__hash__`` and ``__eq__`` for ``TaskState`` (:pr:`4278`) `jakirkham`_
+- Add ``__hash__`` and ``__eq__`` for ``ClientState`` (:pr:`4276`) `jakirkham`_
+- Collect ``report``'s ``client_key``s in a ``list`` (:pr:`4275`) `jakirkham`_
+- Precompute ``hash`` for ``WorkerState`` (:pr:`4271`) `jakirkham`_
+- Use ``Status`` ``Enum`` in ``remove_worker`` (:pr:`4269`) `jakirkham`_
+- Add aggregated topic logs and ``log_event`` method (:pr:`4230`) `James Bourbeau`_
+- Find the set of workers instead of their frequency (:pr:`4267`) `jakirkham`_
+- Use ``set.update`` to include other ``comms`` (:pr:`4268`) `jakirkham`_
+- Support string timeouts in ``sync`` (:pr:`4266`) `James Bourbeau`_
+- Use ``dask.utils.stringify()`` instead of ``distributed.utils.tokey()`` (:pr:`4255`) `Mads R. B. Kristensen`_
+- Use ``.items()`` to walk through keys and values (:pr:`4261`) `jakirkham`_
+- Simplify frame length packing in TCP write (:pr:`4257`) `jakirkham`_
+- Comm/tcp listener: do not pass comm with failed handshake to ``comm_handler`` (:pr:`4240`) `jochen-ott-by`_
+- Fuse steps in ``extract_serialize`` (:pr:`4254`) `jakirkham`_
+- Drop ``test_sklearn`` (:pr:`4253`) `jakirkham`_
+- Document task priority tie breaking (:pr:`4252`) `James Bourbeau`_
+- ``__dask_distributed_pack__()``: client argument (:pr:`4248`) `Mads R. B. Kristensen`_
+- Configurable timeouts for ``worker_client`` and ``get_client`` (:pr:`4146`) `GeethanjaliEswaran`_
+- Add dask/distributed versions to ``performance_report`` (:pr:`4249`) `Matthew Rocklin`_
+- Update miniconda GitHub action (:pr:`4250`) `James Bourbeau`_
+- UCX closing ignore error (:pr:`4236`) `Mads R. B. Kristensen`_
+- Redirect to ``dask-worker`` cli documentation (:pr:`4247`) `Timost`_
+- Upload file worker plugin (:pr:`4238`) `Ian Rose`_
+- Create dependency ``TaskState`` as needed in ``gather_dep`` (:pr:`4241`) `Gil Forsyth`_
+- Instantiate plugin if needed in ``register_worker_plugin`` (:pr:`4198`) `Julia Signell`_
+- Allow actors to call actors on the same worker (:pr:`4225`) `Martin Durant`_
+- Special case profile thread in leaked thread check (:pr:`4229`) `James Bourbeau`_
+- Use ``intersection()`` on a set instead of ``dict_keys`` in ``update_graph`` (:pr:`4227`) `Mads R. B. Kristensen`_
+- Communicate ``HighLevelGraphs`` directly to the ``Scheduler`` (:pr:`4140`) `Mads R. B. Kristensen`_
+- Add ``get_task_metadata`` context manager (:pr:`4216`) `James Bourbeau`_
+- Task state logs and data fix (:pr:`4206`) `Gil Forsyth`_
+- Send active task durations from worker to scheduler (:pr:`4192`) `James Bourbeau`_
+- Fix state check in ``test_close_gracefully`` (:pr:`4203`) `Gil Forsyth`_
+- Avoid materializing layers in ``Client.compute()`` (:pr:`4196`) `Mads R. B. Kristensen`_
+- Add ``TaskState`` metadata (:pr:`4191`) `James Bourbeau`_
+- Fix regression in task stealing for already released keys (:pr:`4182`) `Florian Jetter`_
+- Fix ``_graph_to_futures`` bug for futures-based dependencies (:pr:`4178`) `Richard J Zamora`_
+- High level graph ``dumps``/``loads`` support (:pr:`4174`) `Mads R. B. Kristensen`_
+- Implement pass HighLevelGraphs through ``_graph_to_futures`` (:pr:`4139`) `Mads R. B. Kristensen`_
+- Support ``async`` preload click commands (:pr:`4170`) `James Bourbeau`_
+- ``dask-worker`` cli memory limit option doc fix (:pr:`4172`) `marwan116`_
+- Add ``TaskState`` to ``worker.py`` (:pr:`4107`) `Gil Forsyth`_
+- Increase robustness of ``Semaphore.release`` (:pr:`4151`) `Lucas Rademaker`_
+- Skip batched comm test win / tornado5 (:pr:`4166`) `Tom Augspurger`_
+- Set Zict buffer target to maxsize when ``memory_target_fraction`` is ``False`` (:pr:`4156`) `Krishan Bhasin`_
+- Add ``PipInstall`` ``WorkerPlugin`` (:pr:`3216`) `Matthew Rocklin`_
+- Log ``KilledWorker`` events in the scheduler (:pr:`4157`) `Matthew Rocklin`_
+- Fix ``test_gpu_metrics`` failure (:pr:`4154`) `jakirkham`_
+
+
 2.30.1 - 2020-11-03
 -------------------
 
@@ -2003,3 +2312,25 @@ significantly without many new features.
 .. _`Poruri Sai Rahul`: https://github.com/rahulporuri
 .. _`jennalc`: https://github.com/jennalc
 .. _`Sergey Kozlov`: https://github.com/skozlovf
+.. _`jochen-ott-by`: https://github.com/jochen-ott-by
+.. _`Simon Perkins`: https://github.com/sjperkins
+.. _`GeethanjaliEswaran`: https://github.com/geethanjalieswaran
+.. _`Timost`: https://github.com/Timost
+.. _`Ian Rose`: https://github.com/ian-r-rose
+.. _`marwan116`: https://github.com/marwan116
+.. _`Bernhard M. Wiedemann`: https://github.com/bmwiedemann
+.. _`Bruno Pagani`: https://github.com/ArchangeGabriel
+.. _`selshowk`: https://github.com/selshowk
+.. _`Ray Bell`: https://github.com/raybellwaves
+.. _`Casey Clements`: https://github.com/caseyclements
+.. _`Ben Greiner`: https://github.com/bnavigator
+.. _`Fabian Gebhart`: https://github.com/fgebhart
+.. _`Sultan Orazbayev`: https://github.com/SultanOrazbayev
+.. _`Doug Davis`: https://github.com/douglasdavis
+.. _`cameron16`: https://github.com/cameron16
+.. _`Gerald`: https://github.com/gerald732
+.. _`Charles Blackmon-Luca`: https://github.com/charlesbluca
+.. _`Marcos Moyano`: https://github.com/marcosmoyano
+.. _`James Lamb`: https://github.com/jameslamb
+.. _`Hristo Georgiev`: https://github.com/hristog
+.. _`Matteo De Wint`: https://github.com/mdwint
