@@ -2333,7 +2333,7 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
 # This test is heavily influenced by hard-to-control factors such as memory management
 # by the Python interpreter and the OS, so it occasionally glitches
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
-# ~33s runtime, or distributed.memory.recent_to_old_time + 3s
+# ~33s runtime, or distributed.memory.recent-to-old-time + 3s
 @pytest.mark.slow
 def test_memory():
     pytest.importorskip("zict")
@@ -2384,7 +2384,7 @@ def test_memory():
             sleep(2)
         assert_memory(s, "managed_spilled", 1, 999)
         # Wait for the spilling to finish. Note that this does not make the test take
-        # longer as we're waiting for recent_to_old_time anyway.
+        # longer as we're waiting for recent-to-old-time anyway.
         sleep(10)
 
         # Delete spilled keys

@@ -168,22 +168,22 @@ UNKNOWN_TASK_DURATION = declare(
 )
 MEMORY_RECENT_TO_OLD_TIME = declare(
     double,
-    parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
+    parse_timedelta(dask.config.get("distributed.worker.memory.recent-to-old-time")),
 )
 MEMORY_REBALANCE_MEASURE = declare(
     str, dask.config.get("distributed.worker.memory.rebalance.measure")
 )
 MEMORY_REBALANCE_SENDER_MIN = declare(
     double,
-    dask.config.get("distributed.worker.memory.rebalance.sender_min"),
+    dask.config.get("distributed.worker.memory.rebalance.sender-min"),
 )
 MEMORY_REBALANCE_RECIPIENT_MAX = declare(
     double,
-    dask.config.get("distributed.worker.memory.rebalance.recipient_max"),
+    dask.config.get("distributed.worker.memory.rebalance.recipient-max"),
 )
 MEMORY_REBALANCE_HALF_GAP = declare(
     double,
-    dask.config.get("distributed.worker.memory.rebalance.sender_recipient_gap") / 2.0,
+    dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap") / 2.0,
 )
 
 
@@ -309,7 +309,7 @@ class MemoryState:
 
     unmanaged_old
         Minimum of the 'unmanaged' measures over the last
-        ``distributed.memory.recent_to_old_time`` seconds
+        ``distributed.memory.recent-to-old-time`` seconds
     unmanaged_recent
         unmanaged - unmanaged_old; in other words process memory that has been recently
         allocated but is not accounted for by dask; hopefully it's mostly a temporary
@@ -496,6 +496,8 @@ class WorkerState:
     _bandwidth: double
     _executing: dict
     _extra: dict
+    # _has_what is a dict with all values set to None as we rely on the property of
+    # Python >=3.7 dicts to be insertion-sorted.
     _has_what: dict
     _hash: Py_hash_t
     _last_seen: double
@@ -5511,17 +5513,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         #. Find the mean occupancy of the cluster, defined as data managed by dask +
            unmanaged process memory that has been there for at least 30 seconds
-           (``distributed.worker.memory.recent_to_old_time``).
+           (``distributed.worker.memory.recent-to-old-time``).
            This lets us ignore temporary spikes caused by task heap usage.
         #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
-           (``distributed.worker.memory.rebalance.sender_recipient_gap`` / 2).
+           (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
            This helps avoid data from bouncing around the cluster repeatedly.
         #. Workers above the mean are senders; those below are recipients.
         #. Discard senders whose absolute occupancy is below 40%
-           (``distributed.worker.memory.rebalance.sender_min``). In other words, no data
+           (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
            is moved regardless of imbalancing as long as all workers are below 40%.
         #. Discard recipients whose absolute occupancy is above 60%
-           (``distributed.worker.memory.rebalance.recipient_max``).
+           (``distributed.worker.memory.rebalance.recipient-max``).
            Note that this threshold by default is the same as
            ``distributed.worker.memory.target`` to prevent workers from accepting data
            and immediately spilling it out to disk.
@@ -5572,8 +5574,7 @@ class Scheduler(SchedulerState, ServerNode):
                     keys = set(keys)  # unless already a set-like
                 if not keys:
                     return {"status": "OK"}
-                tasks = [self._tasks[k] for k in keys]
-                missing_data = [ts._key for ts in tasks if not ts._who_has]
+                missing_data = [k for k in keys if not self._tasks[k]._who_has]
                 if missing_data:
                     return {"status": "missing-data", "keys": missing_data}
 
@@ -5636,7 +5637,7 @@ class Scheduler(SchedulerState, ServerNode):
         msgs: "list[tuple[WorkerState, WorkerState, TaskState]]" = []
 
         # optimistic memory = RSS - unmanaged memory that appeared over the last 30
-        # seconds (distributed.worker.memory.recent_to_old_time).
+        # seconds (distributed.worker.memory.recent-to-old-time).
         # This lets us ignore temporary spikes caused by task heap usage.
         memory_by_worker = [
             (ws, getattr(ws.memory, MEMORY_REBALANCE_MEASURE)) for ws in workers
@@ -5660,12 +5661,17 @@ class Scheduler(SchedulerState, ServerNode):
             ):
                 # This may send the worker below sender_min (by design)
                 nbytes = mean_memory - ws_memory  # negative
+                # See definition of senders above
+                # Note that the iterator of keys will typically *not* be exhausted.
+                # It will only be exhausted if moving away from the worker all keys that
+                # can be moved is insufficient to drop nbytes + half_gap above 0.
                 senders.append(
                     (nbytes, nbytes + half_gap, id(ws), ws, iter(ws._has_what))
                 )
             elif ws_memory < mean_memory - half_gap and ws_memory < recipient_max:
                 # This may send the worker above recipient_max (by design)
                 nbytes = ws_memory - mean_memory  # negative
+                # See definition of recipients above
                 recipients.append((nbytes, nbytes + half_gap, id(ws), ws))
 
         # Fast exit in case no transfers are necessary or possible
@@ -5734,6 +5740,7 @@ class Scheduler(SchedulerState, ServerNode):
                 rec_nbytes_max += nbytes
                 rec_nbytes_min += nbytes
                 if snd_nbytes_min < 0:
+                    # See definition of senders above
                     heapq.heapreplace(
                         senders,
                         (snd_nbytes_max, snd_nbytes_min, id(snd_ws), snd_ws, ts_iter),
@@ -5742,6 +5749,7 @@ class Scheduler(SchedulerState, ServerNode):
                     heapq.heappop(senders)
 
                 if rec_nbytes_min < 0:
+                    # See definition of recipients above
                     heapq.heapreplace(
                         recipients,
                         (rec_nbytes_max, rec_nbytes_min, id(rec_ws), rec_ws),

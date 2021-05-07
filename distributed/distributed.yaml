@@ -88,7 +88,7 @@ distributed:
       # system) that is not accounted for by the dask keys stored on the worker, ignore
       # it for this long before considering it in non-critical memory measures.
       # This should be set to be longer than the duration of most dask tasks.
-      recent_to_old_time: 30s
+      recent-to-old-time: 30s
 
       rebalance:
         # Memory measure to rebalance upon. Possible choices are:
@@ -96,7 +96,7 @@ distributed:
         #     Total process memory, as measured by the OS.
         # optimistic
         #     Managed by dask (instantaneous) + unmanaged (without any increases
-        #     happened in the last <distributed.worker.memory.recent_to_old_time>).
+        #     happened in the last <distributed.worker.memory.recent-to-old-time>).
         #     Recommended for use on CPython with large (2MiB+) numpy-based data chunks.
         # managed_in_memory
         #     Only consider the data allocated by dask in RAM. Recommended if RAM is not
@@ -108,17 +108,17 @@ distributed:
         measure: optimistic
         # Fraction of worker process memory at which we start potentially sending
         # data to other workers. Ignored when max_memory is not set.
-        sender_min: 0.30
+        sender-min: 0.30
         # Fraction of worker process memory at which we stop potentially accepting
         # data from other workers. Ignored when max_memory is not set.
-        recipient_max: 0.60
+        recipient-max: 0.60
         # Fraction of worker process memory, around the cluster mean, where a worker is
-        # neither a sender nor a recipient of data during a rebalance operation. E.g.
-        # if the mean cluster occupation is 50%, no_rebalance_gap=0.10 means that only
+        # neither a sender nor a recipient of data during a rebalance operation. E.g. if
+        # the mean cluster occupation is 50%, sender-recipient-gap=0.10 means that only
         # nodes above 55% will donate data and only nodes below 45% will receive them.
-        # This helps avoid data from bouncing around the cluster repeatedly.#
+        # This helps avoid data from bouncing around the cluster repeatedly.
         # Ignored when max_memory is not set.
-        sender_recipient_gap: 0.10
+        sender-recipient-gap: 0.10
 
       # Fractions of worker process memory at which we take action to avoid memory
       # blowup. Set any of the values to False to turn off the behavior entirely.
