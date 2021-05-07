@@ -24,6 +24,7 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from typing import Any, Dict, List
 
 import click
 import tblib.pickling_support
@@ -1506,42 +1507,54 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addr, default_listen_ip=""):
+def clean_dashboard_address(addrs: Any, default_listen_ip: str = "") -> List[Dict]:
     """
     Examples
     --------
     >>> clean_dashboard_address(8787)
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address(":8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("foo:8787")
-    {'address': 'foo', 'port': 8787}
+    [{'address': 'foo', 'port': 8787}]
+    >>> clean_dashboard_address([8787, 8887])
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
+    >>> clean_dashboard_address(":8787,:8887")
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     """
 
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6
 
-    try:
-        addr = int(addr)
-    except (TypeError, ValueError):
-        pass
+    if isinstance(addrs, str):
+        addrs = addrs.split(",")
+    if not isinstance(addrs, list):
+        addrs = [addrs]
 
-    if isinstance(addr, str):
-        addr = addr.split(":")
+    addresses = []
+    for addr in addrs:
+        try:
+            addr = int(addr)
+        except (TypeError, ValueError):
+            pass
 
-    if isinstance(addr, (tuple, list)):
-        if len(addr) == 2:
-            host, port = (addr[0], int(addr[1]))
-        elif len(addr) == 1:
-            [host], port = addr, 0
-        else:
-            raise ValueError(addr)
-    elif isinstance(addr, int):
-        host = default_listen_ip
-        port = addr
+        if isinstance(addr, str):
+            addr = addr.split(":")
 
-    return {"address": host, "port": port}
+        if isinstance(addr, (tuple, list)):
+            if len(addr) == 2:
+                host, port = (addr[0], int(addr[1]))
+            elif len(addr) == 1:
+                [host], port = addr, 0
+            else:
+                raise ValueError(addr)
+        elif isinstance(addr, int):
+            host = default_listen_ip
+            port = addr
+
+        addresses.append({"address": host, "port": port})
+    return addresses

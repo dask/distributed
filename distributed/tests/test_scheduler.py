@@ -1728,6 +1728,18 @@ async def test_dashboard_address():
     assert s.services["dashboard"].port
     await s.close()
 
+    s = await Scheduler(dashboard_address="127.0.0.1:8901,127.0.0.1:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=":8901,:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=[8901, 8902], port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
 
 @gen_cluster(client=True)
 async def test_adaptive_target(c, s, a, b):
