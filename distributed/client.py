@@ -3994,7 +3994,7 @@ class Client:
         that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        ``release_key``, and ``release_dep``.  See the
+        and ``release_key``.  See the
         ``dask.distributed.WorkerPlugin`` class or the examples below for the
         interface and docstrings.  It must be serializable with the pickle or
         cloudpickle modules.
@@ -4030,8 +4030,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4096,8 +4094,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
