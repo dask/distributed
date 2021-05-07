@@ -6,11 +6,12 @@ from operator import add
 
 import pytest
 
+from distributed.compatibility import PY_VERSION
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL, dumps, loads
 from distributed.protocol.serialize import pickle_dumps
 
-if sys.version_info < (3, 8):
+if PY_VERSION < "3.8":
     try:
         import pickle5 as pickle
     except ImportError:
@@ -79,7 +80,8 @@ def test_pickle_empty():
     header["writeable"] = [False] * len(frames)
     y = deserialize(header, frames)
     assert memoryview(y).nbytes == 0
-    assert memoryview(y).readonly
+    if HIGHEST_PROTOCOL >= 5:
+        assert memoryview(y).readonly
 
 
 def test_pickle_numpy():
