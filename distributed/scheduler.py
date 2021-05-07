@@ -742,7 +742,7 @@ class WorkerState:
 
     def _repr_html_(self):
         text = (
-            f"<b>WorkerState: {html.escape(self._address)}</b> "
+            f"<b>WorkerState: </b> {html.escape(self._address)} "
             f'<font color="gray">name: </font>{self.name} '
             f'<font color="gray">memory: </font>{len(self._has_what)} '
             f'<font color="gray">processing: </font>{len(self._processing)}'
@@ -1563,13 +1563,10 @@ class TaskState:
 
     def _repr_html_(self):
         color = "red" if self._state == "erred" else "black"
-        text = (
-            f"<b>TaskState: {html.escape(self._key)}</b> "
-            '<font color="gray">state: </font>'
-            f'<font color="{color}">{self._state} </font>'
-        )
+        text = f'<b>TaskState: </b> <font color="{color}">{self._state} </font>'
         if self._state == "memory":
-            text += f'<font color="gray">nbytes: </font>{format_bytes(self._nbytes)}'
+            text += f'<font color="gray">nbytes: </font>{format_bytes(self._nbytes)} '
+        text += f'<font color="gray">key: </font>{html.escape(self._key)}'
         return text
 
     @ccall
@@ -3610,7 +3607,7 @@ class Scheduler(SchedulerState, ServerNode):
     def _repr_html_(self):
         parent: SchedulerState = cast(SchedulerState, self)
         text = (
-            f"<b>Scheduler: {html.escape(self.address)}</b> "
+            f"<b>Scheduler: </b>{html.escape(self.address)} "
             f'<font color="gray">workers: </font>{len(parent._workers)} '
             f'<font color="gray">cores: </font>{parent._total_nthreads} '
             f'<font color="gray">tasks: </font>{len(parent._tasks)}'
