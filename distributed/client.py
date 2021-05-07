@@ -3997,7 +3997,7 @@ class Client:
         that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        ``release_key``, and ``release_dep``.  See the
+        and ``release_key``.  See the
         ``dask.distributed.WorkerPlugin`` class or the examples below for the
         interface and docstrings.  It must be serializable with the pickle or
         cloudpickle modules.
@@ -4033,8 +4033,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4099,8 +4097,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4673,17 +4669,29 @@ class performance_report:
     browser.  Locally we recommend using ``python -m http.server`` or hosting
     the file live online.
 
+    Parameters
+    ----------
+    filename: str (optional)
+        The filename to save the performance report locally
+
+    stacklevel: int (optional)
+        The code execution frame utilized for populating the Calling Code section
+        of the report. Defaults to `1` which is the frame calling ``performance_report``
+
+
     Examples
     --------
-    >>> with performance_report(filename="myfile.html"):
+    >>> with performance_report(filename="myfile.html", stacklevel=1):
     ...     x.compute()
 
     $ python -m http.server
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html"):
+    def __init__(self, filename="dask-report.html", stacklevel=1):
         self.filename = filename
+        # stacklevel 0 or less - shows dask internals which likely isn't helpful
+        self._stacklevel = stacklevel if stacklevel > 0 else 1
 
     async def __aenter__(self):
         self.start = time()
@@ -4692,7 +4700,7 @@ class performance_report:
     async def __aexit__(self, typ, value, traceback, code=None):
         if not code:
             try:
-                frame = inspect.currentframe().f_back
+                frame = sys._getframe(self._stacklevel)
                 code = inspect.getsource(frame)
             except Exception:
                 code = ""
@@ -4707,7 +4715,7 @@ class performance_report:
 
     def __exit__(self, typ, value, traceback):
         try:
-            frame = inspect.currentframe().f_back
+            frame = sys._getframe(self._stacklevel)
             code = inspect.getsource(frame)
         except Exception:
             code = ""

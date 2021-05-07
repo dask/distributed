@@ -2008,7 +2008,8 @@ class Worker(ServerNode):
 
                     deps = [dep for dep in deps if dep not in missing_deps]
 
-                self.log.append(("gather-dependencies", key, deps))
+                log_keys = {d.key for d in deps}
+                self.log.append(("gather-dependencies", key, log_keys))
 
                 in_flight = False
 
