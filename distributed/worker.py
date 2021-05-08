@@ -3217,7 +3217,7 @@ class Worker(ServerNode):
             if (
                 client.scheduler
                 and client.scheduler.address == self.scheduler.address
-                or client._start_arg == self.scheduler.address
+                or client._start_arg.scheduler_address == self.scheduler.address
             ):
                 self._client = client
 
