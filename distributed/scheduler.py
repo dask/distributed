@@ -743,9 +743,9 @@ class WorkerState:
     def _repr_html_(self):
         text = (
             f"<b>WorkerState: </b> {html.escape(self._address)} "
-            f'<font color="gray">name: </font>{self.name} '
-            f'<font color="gray">memory: </font>{len(self._has_what)} '
-            f'<font color="gray">processing: </font>{len(self._processing)}'
+            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
         )
         return text
 
@@ -1562,11 +1562,15 @@ class TaskState:
         return "<TaskState %r %s>" % (self._key, self._state)
 
     def _repr_html_(self):
-        color = "red" if self._state == "erred" else "black"
-        text = f'<b>TaskState: </b> <font color="{color}">{self._state} </font>'
+        color = (
+            "var(--jp-error-color0, red)"
+            if self._state == "erred"
+            else "var(--jp-ui-font-color0, black)"
+        )
+        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
         if self._state == "memory":
-            text += f'<font color="gray">nbytes: </font>{format_bytes(self._nbytes)} '
-        text += f'<font color="gray">key: </font>{html.escape(self._key)}'
+            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
+        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
         return text
 
     @ccall
