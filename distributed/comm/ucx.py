@@ -47,6 +47,10 @@ def init_once():
 
     # remove/process dask.ucx flags for valid ucx options
     ucx_config = _scrub_ucx_config()
+
+    # We ensure the CUDA context is created before initializing UCX. This can't
+    # be safely handled externally because communications in Dask start before
+    # preload scripts run.
     if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
         try:
             import numba.cuda

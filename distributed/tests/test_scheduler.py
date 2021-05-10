@@ -1728,6 +1728,18 @@ async def test_dashboard_address():
     assert s.services["dashboard"].port
     await s.close()
 
+    s = await Scheduler(dashboard_address="127.0.0.1:8901,127.0.0.1:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=":8901,:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=[8901, 8902], port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
 
 @gen_cluster(client=True)
 async def test_adaptive_target(c, s, a, b):
@@ -2043,7 +2055,6 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
 async def test_gather_allow_worker_reconnect(c, s, a, b):
     """
@@ -2062,9 +2073,10 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     def inc_slow(x):
         # Once the graph below is rescheduled this computation runs again. We
         # need to sleep for at least 0.5 seconds to give the worker a chance to
-        # reconnect (Heartbeat timing)
+        # reconnect (Heartbeat timing). In slow CI situations, the actual
+        # reconnect might take a bit longer, therefore wait more
         if x in already_calculated:
-            time.sleep(1)
+            time.sleep(2)
         already_calculated.append(x)
         return x + 1
 
@@ -2076,18 +2088,16 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     z = c.submit(reducer, x, y)
 
-    s.rpc = await FlakyConnectionPool(failing_connections=4)
+    s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    with dask.config.set(
-        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3}
-    ):
+    # This behaviour is independent of retries. Remove them to reduce complexity
+    # of this setup
+    with dask.config.set({"distributed.comm.retry.count": 0}):
         with captured_logger(
             logging.getLogger("distributed.scheduler")
         ) as sched_logger, captured_logger(
             logging.getLogger("distributed.client")
-        ) as client_logger, captured_logger(
-            logging.getLogger("distributed.utils_comm")
-        ) as utils_comm_logger:
+        ) as client_logger:
             # Gather using the client (as an ordinary user would)
             # Upon a missing key, the client will reschedule the computations
             res = await c.gather(z)
@@ -2096,13 +2106,10 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     sched_logger = sched_logger.getvalue()
     client_logger = client_logger.getvalue()
-    utils_comm_logger = utils_comm_logger.getvalue()
 
     # Ensure that the communication was done via the scheduler, i.e. we actually hit a
     # bad connection
     assert s.rpc.cnn_count > 0
-
-    assert "Retrying get_data_from_worker after exception" in utils_comm_logger
 
     # The reducer task was actually not found upon first collection. The client will
     # reschedule the graph
@@ -2122,7 +2129,6 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     ]
     assert len(transitions_to_processing) == 1
 
-    starts = []
     finish_processing_transitions = 0
     for transition in s.transition_log:
         key, start, finish, recommendations, timestamp = transition

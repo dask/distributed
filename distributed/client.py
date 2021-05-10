@@ -399,19 +399,27 @@ class Future(WrappedKey):
     def _repr_html_(self):
         text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
         text += (
-            '<font color="gray">status: </font>'
-            '<font color="%(color)s">%(status)s</font>, '
+            '<font style="color: var(--jp-ui-font-color2, gray)">status: </font>'
+            '<font style="color: %(color)s">%(status)s</font>, '
         ) % {
             "status": self.status,
-            "color": "red" if self.status == "error" else "black",
+            "color": "var(--jp-error-color0, red)"
+            if self.status == "error"
+            else "var(--jp-ui-font-color0, black)",
         }
         if self.type:
             try:
                 typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            text += '<font color="gray">type: </font>%s, ' % typ
-        text += '<font color="gray">key: </font>%s' % html.escape(str(self.key))
+            text += (
+                '<font style="color: var(--jp-ui-font-color2, gray)">type: </font>%s, '
+                % typ
+            )
+        text += (
+            '<font style="color: var(--jp-ui-font-color2, gray)">key: </font>%s'
+            % html.escape(str(self.key))
+        )
         return text
 
     def __await__(self):
@@ -3994,7 +4002,7 @@ class Client:
         that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        ``release_key``, and ``release_dep``.  See the
+        and ``release_key``.  See the
         ``dask.distributed.WorkerPlugin`` class or the examples below for the
         interface and docstrings.  It must be serializable with the pickle or
         cloudpickle modules.
@@ -4030,8 +4038,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4096,8 +4102,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
