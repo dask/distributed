@@ -9,6 +9,7 @@ import warnings
 import weakref
 from contextlib import suppress
 from multiprocessing.queues import Empty
+from time import sleep as sync_sleep
 
 import psutil
 from tornado import gen
@@ -362,7 +363,6 @@ class Nanny(ServerNode):
                 config=self.config,
             )
 
-        self.auto_restart = True
         if self.death_timeout:
             try:
                 result = await asyncio.wait_for(
@@ -524,6 +524,9 @@ class Nanny(ServerNode):
 
 
 class WorkerProcess:
+    # The interval how often to check the msg queue for init
+    _init_msg_interval = 0.05
+
     def __init__(
         self,
         worker_kwargs,
@@ -589,9 +592,14 @@ class WorkerProcess:
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
             self.process.terminate()
-            return
-
-        msg = await self._wait_until_connected(uid)
+            self.status = Status.failed
+            return self.status
+        try:
+            msg = await self._wait_until_connected(uid)
+        except Exception:
+            self.status = Status.failed
+            self.process.terminate()
+            raise
         if not msg:
             return self.status
         self.worker_address = msg["address"]
@@ -688,14 +696,15 @@ class WorkerProcess:
                 logger.error("Failed to kill worker process: %s", e)
 
     async def _wait_until_connected(self, uid):
-        delay = 0.05
         while True:
             if self.status != Status.starting:
                 return
+            # This is a multiprocessing queue and we'd block the event loop if
+            # we simply called get
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(self._init_msg_interval)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues
@@ -705,7 +714,6 @@ class WorkerProcess:
                 logger.error(
                     "Failed while trying to start worker process: %s", msg["exception"]
                 )
-                await self.process.join()
                 raise msg["exception"]
             else:
                 return msg
@@ -783,6 +791,14 @@ class WorkerProcess:
                     logger.exception("Failed to start worker")
                     init_result_q.put({"uid": uid, "exception": e})
                     init_result_q.close()
+                    # If we hit an exception here we need to wait for a least
+                    # one interval for the outside to pick up this message.
+                    # Otherwise we arrive in a race condition where the process
+                    # cleanup wipes the queue before the exception can be
+                    # properly handled. See also
+                    # WorkerProcess._wait_until_connected (the 2 is for good
+                    # measure)
+                    sync_sleep(cls._init_msg_interval * 2)
                 else:
                     try:
                         assert worker.address
@@ -804,6 +820,12 @@ class WorkerProcess:
             logger.exception("Failed to initialize Worker")
             init_result_q.put({"uid": uid, "exception": e})
             init_result_q.close()
+            # If we hit an exception here we need to wait for a least one
+            # interval for the outside to pick up this message. Otherwise we
+            # arrive in a race condition where the process cleanup wipes the
+            # queue before the exception can be properly handled. See also
+            # WorkerProcess._wait_until_connected (the 2 is for good measure)
+            sync_sleep(cls._init_msg_interval * 2)
         else:
             try:
                 loop.run_sync(run)
