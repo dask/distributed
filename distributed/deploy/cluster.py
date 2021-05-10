@@ -388,8 +388,9 @@ class Cluster:
         else:
             dashboard = "Not Available"
         return (
-            "<div style='background-color: #f2f2f2; display: inline-block; "
-            "padding: 10px; border: 1px solid #999999;'>\n"
+            "<div style='color: var(--jp-ui-font-color0, #000000); "
+            "background-color: var(--jp-layout-color2, #f2f2f2); display: inline-block; "
+            "padding: 10px; border: 1px solid var(--jp-border-color0, #999999);'>\n"
             "  <h3>{cls}</h3>\n"
             "  <ul>\n"
             "    <li><b>Dashboard: </b>{dashboard}\n"
