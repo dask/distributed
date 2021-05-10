@@ -6602,3 +6602,26 @@ async def test_workers_collection_restriction(c, s, a, b):
     future = c.compute(da.arange(10), workers=a.address)
     await future
     assert a.data and not b.data
+
+
+@pytest.mark.slow
+@gen_cluster(client=True)
+async def test_get_client_functions_spawn_clusters(c, s, a, b):
+    # see gh4565
+    scheduler_addr = c.scheduler.address
+
+    def f(x):
+        with LocalCluster(
+            n_workers=1, processes=False, dashboard_address=False
+        ) as cluster2:
+            with Client(cluster2) as c1:
+                nonlocal scheduler_addr
+                c2 = get_client()
+                # Sometimes the default is closed and we get None for the
+                # scheduler attribute. Prefer robust test case over rigor
+                if c2.status != "closed":
+                    assert c1.scheduler.address != c2.scheduler.address
+                    assert c2.scheduler.address == scheduler_addr
+                    c2.close()
+
+    await c.gather(c.map(f, range(10)))

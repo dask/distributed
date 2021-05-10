@@ -3259,10 +3259,21 @@ class Worker(ServerNode):
         except ValueError:  # no clients found, need to make a new one
             pass
         else:
+            # must be lazy import otherwise cyclic import
+            from distributed.deploy.cluster import Cluster
+
             if (
                 client.scheduler
                 and client.scheduler.address == self.scheduler.address
-                or client._start_arg == self.scheduler.address
+                # The below conditions should only happen in case a second
+                # cluster is alive, e.g. if a submitted task spawned its onwn
+                # LocalCluster, see gh4565
+                or (
+                    isinstance(client._start_arg, str)
+                    and client._start_arg == self.scheduler.address
+                    or isinstance(client._start_arg, Cluster)
+                    and client._start_arg.scheduler_address == self.scheduler.address
+                )
             ):
                 self._client = client
 
