@@ -37,9 +37,6 @@ class MyPlugin(WorkerPlugin):
     def release_key(self, key, state, cause, reason, report):
         self.observed_notifications.append({"key": key, "state": state})
 
-    def release_dep(self, dep, state, report):
-        self.observed_notifications.append({"dep": dep, "state": state})
-
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client(c, s):
@@ -51,6 +48,40 @@ async def test_create_with_client(c, s):
 
     await worker.close()
     assert worker._my_plugin_status == "teardown"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+    await c.register_worker_plugin(MyPlugin(546), name="bar")
+
+    worker = await Worker(s.address, loop=s.loop)
+    # remove the 'foo' plugin
+    await c.unregister_worker_plugin("foo")
+    assert worker._my_plugin_status == "teardown"
+
+    # check that on the scheduler registered worker plugins we only have 'bar'
+    assert len(s.worker_plugins) == 1
+    assert "bar" in s.worker_plugins
+
+    # check on the worker plugins that we only have 'bar'
+    assert len(worker.plugins) == 1
+    assert "bar" in worker.plugins
+
+    # let's remove 'bar' and we should have none worker plugins
+    await c.unregister_worker_plugin("bar")
+    assert worker._my_plugin_status == "teardown"
+    assert not s.worker_plugins
+    assert not worker.plugins
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client_raises(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+
+    worker = await Worker(s.address, loop=s.loop)
+    with pytest.raises(ValueError, match="bar"):
+        await c.unregister_worker_plugin("bar")
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -130,7 +161,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_release_dep_called(c, s, w):
+async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [

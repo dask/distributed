@@ -24,6 +24,7 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from typing import Any, Dict, List
 
 import click
 import tblib.pickling_support
@@ -640,7 +641,9 @@ def key_split_group(x):
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
     >>> key_split_group('x')
+    'x'
     >>> key_split_group('x-1')
+    'x'
     """
     typ = type(x)
     if typ is tuple:
@@ -1073,6 +1076,34 @@ def time_warn(duration, text):
         print("TIME WARNING", text, end - start)
 
 
+def deprecated(*, version_removed: str = None):
+    """Decorator to mark a function as deprecated
+
+    Parameters
+    ----------
+    version_removed : str, optional
+        If specified, include the version in which the deprecated function
+        will be removed. Defaults to "a future release".
+    """
+
+    def decorator(func):
+        nonlocal version_removed
+        msg = f"{funcname(func)} is deprecated and will be removed in"
+        if version_removed is not None:
+            msg += f" version {version_removed}"
+        else:
+            msg += " a future release"
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            warnings.warn(msg, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def json_load_robust(fn, load=json.load):
     """ Reads a JSON file from disk that may be being written as we read """
     while not os.path.exists(fn):
@@ -1291,24 +1322,24 @@ def parse_ports(port):
     A single port can be specified using an integer:
 
     >>> parse_ports(8787)
-    >>> [8787]
+    [8787]
 
     or a string:
 
     >>> parse_ports("8787")
-    >>> [8787]
+    [8787]
 
     A sequential range of ports can be specified by a string which indicates
     the first and last ports which should be included in the sequence of ports:
 
     >>> parse_ports("8787:8790")
-    >>> [8787, 8788, 8789, 8790]
+    [8787, 8788, 8789, 8790]
 
     An input of ``None`` is also valid and can be used to indicate that no port
     has been specified:
 
     >>> parse_ports(None)
-    >>> [None]
+    [None]
 
     """
     if isinstance(port, str) and ":" not in port:
@@ -1423,7 +1454,7 @@ def import_term(name: str):
 
     Examples
     --------
-    >>> import_term("math.sin")
+    >>> import_term("math.sin") # doctest: +SKIP
     <function math.sin(x, /)>
     """
     try:
@@ -1476,42 +1507,54 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addr, default_listen_ip=""):
+def clean_dashboard_address(addrs: Any, default_listen_ip: str = "") -> List[Dict]:
     """
     Examples
     --------
     >>> clean_dashboard_address(8787)
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address(":8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("foo:8787")
-    {'address': 'foo', 'port': 8787}
+    [{'address': 'foo', 'port': 8787}]
+    >>> clean_dashboard_address([8787, 8887])
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
+    >>> clean_dashboard_address(":8787,:8887")
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     """
 
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6
 
-    try:
-        addr = int(addr)
-    except (TypeError, ValueError):
-        pass
+    if isinstance(addrs, str):
+        addrs = addrs.split(",")
+    if not isinstance(addrs, list):
+        addrs = [addrs]
 
-    if isinstance(addr, str):
-        addr = addr.split(":")
+    addresses = []
+    for addr in addrs:
+        try:
+            addr = int(addr)
+        except (TypeError, ValueError):
+            pass
 
-    if isinstance(addr, (tuple, list)):
-        if len(addr) == 2:
-            host, port = (addr[0], int(addr[1]))
-        elif len(addr) == 1:
-            [host], port = addr, 0
-        else:
-            raise ValueError(addr)
-    elif isinstance(addr, int):
-        host = default_listen_ip
-        port = addr
+        if isinstance(addr, str):
+            addr = addr.split(":")
 
-    return {"address": host, "port": port}
+        if isinstance(addr, (tuple, list)):
+            if len(addr) == 2:
+                host, port = (addr[0], int(addr[1]))
+            elif len(addr) == 1:
+                [host], port = addr, 0
+            else:
+                raise ValueError(addr)
+        elif isinstance(addr, int):
+            host = default_listen_ip
+            port = addr
+
+        addresses.append({"address": host, "port": port})
+    return addresses

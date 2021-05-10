@@ -3,6 +3,9 @@ import os
 import socket
 import subprocess
 import sys
+import uuid
+
+from dask.utils import funcname
 
 logger = logging.getLogger(__name__)
 
@@ -171,19 +174,14 @@ class WorkerPlugin:
             Whether the worker should report the released task to the scheduler.
         """
 
-    def release_dep(self, dep, state, report):
-        """
-        Called when the worker releases a dependency.
 
-        Parameters
-        ----------
-        dep : string
-        state : string
-            State of the released dependency.
-            One of waiting, flight, memory.
-        report : bool
-            Whether the worker should report the released dependency to the scheduler.
-        """
+def _get_worker_plugin_name(plugin) -> str:
+    """Returns the worker plugin name. If plugin has no name attribute
+    a random name is used."""
+    if hasattr(plugin, "name"):
+        return plugin.name
+    else:
+        return funcname(plugin) + "-" + str(uuid.uuid4())
 
 
 class PipInstall(WorkerPlugin):

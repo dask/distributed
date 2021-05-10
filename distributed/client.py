@@ -51,7 +51,7 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -399,19 +399,27 @@ class Future(WrappedKey):
     def _repr_html_(self):
         text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
         text += (
-            '<font color="gray">status: </font>'
-            '<font color="%(color)s">%(status)s</font>, '
+            '<font style="color: var(--jp-ui-font-color2, gray)">status: </font>'
+            '<font style="color: %(color)s">%(status)s</font>, '
         ) % {
             "status": self.status,
-            "color": "red" if self.status == "error" else "black",
+            "color": "var(--jp-error-color0, red)"
+            if self.status == "error"
+            else "var(--jp-ui-font-color0, black)",
         }
         if self.type:
             try:
                 typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            text += '<font color="gray">type: </font>%s, ' % typ
-        text += '<font color="gray">key: </font>%s' % html.escape(str(self.key))
+            text += (
+                '<font style="color: var(--jp-ui-font-color2, gray)">type: </font>%s, '
+                % typ
+            )
+        text += (
+            '<font style="color: var(--jp-ui-font-color2, gray)">key: </font>%s'
+            % html.escape(str(self.key))
+        )
         return text
 
     def __await__(self):
@@ -2978,15 +2986,16 @@ class Client:
     async def _restart(self, timeout=no_default):
         if timeout == no_default:
             timeout = self._timeout * 2
+        if timeout is not None:
+            timeout = parse_timedelta(timeout, "s")
+
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = asyncio.Event()
         try:
-            await asyncio.wait_for(
-                self._restart_event.wait(), self.loop.time() + timeout
-            )
+            await asyncio.wait_for(self._restart_event.wait(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out after %f seconds", timeout)
-            pass
+            logger.error("Restart timed out after %.2f seconds", timeout)
+
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
@@ -3993,7 +4002,7 @@ class Client:
         that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        ``release_key``, and ``release_dep``.  See the
+        and ``release_key``.  See the
         ``dask.distributed.WorkerPlugin`` class or the examples below for the
         interface and docstrings.  It must be serializable with the pickle or
         cloudpickle modules.
@@ -4012,6 +4021,7 @@ class Client:
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+            If plugin has no name attribute a random name is used.
         **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
@@ -4028,8 +4038,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4048,11 +4056,63 @@ class Client:
         See Also
         --------
         distributed.WorkerPlugin
+        unregister_worker_plugin
         """
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
 
+        if name is None:
+            name = _get_worker_plugin_name(plugin)
+
+        assert name
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+
+    async def _unregister_worker_plugin(self, name):
+        responses = await self.scheduler.unregister_worker_plugin(name=name)
+
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                tb = response["traceback"]
+                raise exc.with_traceback(tb)
+        return responses
+
+    def unregister_worker_plugin(self, name):
+        """Unregisters a lifecycle worker plugin
+
+        This unregisters an existing worker plugin. As part of the unregistration process
+        the plugin's ``teardown`` method will be called.
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to unregister. See the :meth:`Client.register_worker_plugin`
+            docstring for more information.
+
+        Examples
+        --------
+        >>> class MyPlugin(WorkerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     def setup(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...         pass
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_worker_plugin(plugin, name='foo')
+        >>> client.unregister_worker_plugin(name='foo')
+
+        See Also
+        --------
+        register_worker_plugin
+        """
+        return self.sync(self._unregister_worker_plugin, name=name)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
@@ -4614,17 +4674,29 @@ class performance_report:
     browser.  Locally we recommend using ``python -m http.server`` or hosting
     the file live online.
 
+    Parameters
+    ----------
+    filename: str (optional)
+        The filename to save the performance report locally
+
+    stacklevel: int (optional)
+        The code execution frame utilized for populating the Calling Code section
+        of the report. Defaults to `1` which is the frame calling ``performance_report``
+
+
     Examples
     --------
-    >>> with performance_report(filename="myfile.html"):
+    >>> with performance_report(filename="myfile.html", stacklevel=1):
     ...     x.compute()
 
     $ python -m http.server
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html"):
+    def __init__(self, filename="dask-report.html", stacklevel=1):
         self.filename = filename
+        # stacklevel 0 or less - shows dask internals which likely isn't helpful
+        self._stacklevel = stacklevel if stacklevel > 0 else 1
 
     async def __aenter__(self):
         self.start = time()
@@ -4636,7 +4708,7 @@ class performance_report:
     async def __aexit__(self, typ, value, traceback, code=None):
         if not code:
             try:
-                frame = inspect.currentframe().f_back
+                frame = sys._getframe(self._stacklevel)
                 code = inspect.getsource(frame)
             except Exception:
                 code = ""
@@ -4651,7 +4723,7 @@ class performance_report:
 
     def __exit__(self, typ, value, traceback):
         try:
-            frame = inspect.currentframe().f_back
+            frame = sys._getframe(self._stacklevel)
             code = inspect.getsource(frame)
         except Exception:
             code = ""
