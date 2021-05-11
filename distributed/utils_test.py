@@ -1545,7 +1545,7 @@ def check_dangling_tasks(loop=None):
     end = asyncio.all_tasks()
     end_loop = asyncio.all_tasks(asyncio_loop)
     assert end == end_loop
-    assert end == start
+    assert end.issubset(start), end - start
 
 
 @contextmanager

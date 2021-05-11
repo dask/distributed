@@ -4,7 +4,7 @@ from distributed.deploy.cluster import Cluster
 
 
 @pytest.mark.asyncio
-async def test_eq():
+async def test_eq(cleanup):
     clusterA = Cluster(asynchronous=True, name="A")
     clusterA2 = Cluster(asynchronous=True, name="A2")
     clusterB = Cluster(asynchronous=True, name="B")
@@ -19,7 +19,7 @@ async def test_eq():
 
 
 @pytest.mark.asyncio
-async def test_repr():
+async def test_repr(cleanup):
     cluster = Cluster(asynchronous=True, name="A")
     assert cluster.scheduler_address == "<Not Connected>"
     res = repr(cluster)
