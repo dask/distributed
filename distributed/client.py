@@ -3972,6 +3972,7 @@ class Client:
 
     def register_scheduler_plugin(self, plugin=None, idempotent=None, **kwargs):
         """TODO docstring"""
+
         async def f(dask_scheduler=None, plugin=None, idempotent=None, **kwargs):
             if isinstance(plugin, type):
                 plugin = plugin(**kwargs)
