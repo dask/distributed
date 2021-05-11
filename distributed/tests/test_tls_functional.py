@@ -6,11 +6,9 @@ import asyncio
 
 import pytest
 
-from distributed import Client, Nanny, Queue, Scheduler, Worker, worker_client
-from distributed.client import wait
+from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.nanny import Nanny
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     double,
@@ -101,16 +99,34 @@ async def test_nanny(c, s, a, b):
     assert result == 11
 
 
-@gen_tls_cluster(client=True)
+@gen_tls_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "2GiB"})
 async def test_rebalance(c, s, a, b):
-    x, y = await c._scatter([1, 2], workers=[a.address])
-    assert len(a.data) == 2
-    assert len(b.data) == 0
+    # We used nannies to have separate processes for each worker
+    a_addr, _ = s.workers
+    assert a_addr.startswith("tls://")
 
-    await c._rebalance()
+    # Generate 10 buffers worth 1 GiB total on worker a. This sends its memory
+    # utilisation slightly above 50% (after counting unmanaged) which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = [
+        c.submit(lambda: "x" * (2 ** 30 // 10), workers=[a_addr], pure=False)
+        for _ in range(10)
+    ]
+    await wait(futures)
 
-    assert len(a.data) == 1
-    assert len(b.data) == 1
+    # Wait for heartbeats
+    while s.memory.process < 2 ** 30:
+        await asyncio.sleep(0.1)
+
+    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
+    assert set(ndata.values()) == {10, 0}
+
+    await c.rebalance()
+
+    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
+    # Allow for some uncertainty as the unmanaged memory is not stable
+    assert sum(ndata.values()) == 10
+    assert 3 < next(iter(ndata.values())) < 7
 
 
 @gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
