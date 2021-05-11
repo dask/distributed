@@ -407,7 +407,7 @@ properties:
               rebalance:
                 type: object
                 description: >-
-                  Settings for data rebalance operations
+                  Settings for memory rebalance operations
                 properties:
                   measure:
                     enum:

@@ -497,8 +497,8 @@ class WorkerState:
     _bandwidth: double
     _executing: dict
     _extra: dict
-    # _has_what is a dict with all values set to None as we rely on the property of
-    # Python >=3.7 dicts to be insertion-sorted.
+    # _has_what is a dict with all values set to None as rebalance() relies on the
+    # property of Python >=3.7 dicts to be insertion-sorted.
     _has_what: dict
     _hash: Py_hash_t
     _last_seen: double
@@ -5645,15 +5645,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         Returns list of tuples to feed into _rebalance_move_data:
 
-            - sender worker
-            - recipient worker
-            - task to be transferred
+        - sender worker
+        - recipient worker
+        - task to be transferred
         """
         ts: TaskState
         ws: WorkerState
 
-        # Heaps of workers that need to send/receive data, with how many bytes each
-        # needs to send/receive.
+        # Heaps of workers, managed by the heapq module, that need to send/receive data,
+        # with how many bytes each needs to send/receive.
         #
         # Each element of the heap is a tuple constructed as follows:
         # - snd_bytes_max/rec_bytes_max: maximum number of bytes to send or receive.
@@ -5665,18 +5665,20 @@ class Scheduler(SchedulerState, ServerNode):
         #   are never used for sorting in the unlikely event that two processes have
         #   exactly the same number of bytes allocated.
         # - WorkerState
-        # - iterator of all tasks in memory on the worker (senders only).
-        #   Note that this iterator of keys will typically *not* be exhausted. It will
-        #   only be exhausted if, after moving away from the worker all keys that can be
-        #   moved, is insufficient to drop snd_bytes_min above 0.
+        # - iterator of all tasks in memory on the worker (senders only), insertion
+        #   sorted (least recently inserted first).
+        #   Note that this iterator will typically *not* be exhausted. It will only be
+        #   exhausted if, after moving away from the worker all keys that can be moved,
+        #   is insufficient to drop snd_bytes_min above 0.
         senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = []
         recipients: "list[tuple[int, int, int, WorkerState]]" = []
 
         # Output: [(sender, recipient, task), ...]
         msgs: "list[tuple[WorkerState, WorkerState, TaskState]]" = []
 
-        # optimistic memory = RSS - unmanaged memory that appeared over the last 30
-        # seconds (distributed.worker.memory.recent-to-old-time).
+        # By default, this is the optimistic memory, meaning total process memory minus
+        # unmanaged memory that appeared over the last 30 seconds
+        # (distributed.worker.memory.recent-to-old-time).
         # This lets us ignore temporary spikes caused by task heap usage.
         memory_by_worker = [
             (ws, getattr(ws.memory, MEMORY_REBALANCE_MEASURE)) for ws in workers
@@ -5737,17 +5739,16 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 nbytes = ts.nbytes
                 if nbytes + snd_bytes_max > 0:
-                    # Moving this task would cause the sender to go below mean
-                    # and potentially risk becoming a recipient, which would
-                    # cause tasks to bounce around. Move on to the next task
-                    # of the same sender.
+                    # Moving this task would cause the sender to go below mean and
+                    # potentially risk becoming a recipient, which would cause tasks to
+                    # bounce around. Move on to the next task of the same sender.
                     continue
 
                 # Find the recipient, farthest from the mean, which
-                # 1. has enough available RAM for this task
-                # 2. don't hold a copy already
-                # There may not be any that satisfies these conditions; in this
-                # case this task won't be moved.
+                # 1. has enough available RAM for this task, and
+                # 2. doesn't hold a copy of this task already
+                # There may not be any that satisfies these conditions; in this case
+                # this task won't be moved.
                 skipped_recipients = []
                 use_recipient = False
                 while recipients and not use_recipient:
@@ -5764,34 +5765,33 @@ class Scheduler(SchedulerState, ServerNode):
                     heapq.heappush(recipients, recipient)
 
                 if not use_recipient:
-                    # This task has no recipients available. Leave it on the
-                    # sender and move on to the next task of the same sender
+                    # This task has no recipients available. Leave it on the sender and
+                    # move on to the next task of the same sender.
                     continue
 
-                # Stop iterating on the tasks of this sender for now and, if it
-                # still has bytes to lose, push it back into the senders heap.
-                # It may or may not come back on top again.
+                # Schedule task for transfer from sender to receiver
                 msgs.append((snd_ws, rec_ws, ts))
+
                 # *_bytes_max/min are all negative for heap sorting
                 snd_bytes_max += nbytes
                 snd_bytes_min += nbytes
                 rec_bytes_max += nbytes
                 rec_bytes_min += nbytes
+
+                # Stop iterating on the tasks of this sender for now and, if it still
+                # has bytes to lose, push it back into the senders heap; it may or may
+                # not come back on top again.
                 if snd_bytes_min < 0:
                     # See definition of senders above
                     heapq.heapreplace(
                         senders,
-                        (
-                            snd_bytes_max,
-                            snd_bytes_min,
-                            id(snd_ws),
-                            snd_ws,
-                            ts_iter,
-                        ),
+                        (snd_bytes_max, snd_bytes_min, id(snd_ws), snd_ws, ts_iter),
                     )
                 else:
                     heapq.heappop(senders)
 
+                # If receiver still has bytes to gain, push it back into the receivers
+                # heap; it may or may not come back on top again.
                 if rec_bytes_min < 0:
                     # See definition of recipients above
                     heapq.heapreplace(
@@ -5804,9 +5804,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # Move to next sender with the most data to lose.
                 # It may or may not be the same sender again.
                 break
-            else:
+
+            else:  # for ts in ts_iter
                 # Exhausted tasks on this sender
                 heapq.heappop(senders)
+
         return msgs
 
     async def _rebalance_move_data(
