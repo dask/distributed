@@ -3970,6 +3970,19 @@ class Client:
         else:
             return msgs
 
+    def register_scheduler_plugin(self, plugin=None, idempotent=None, **kwargs):
+        """TODO docstring"""
+        async def f(dask_scheduler=None, plugin=None, idempotent=None, **kwargs):
+            if isinstance(plugin, type):
+                plugin = plugin(**kwargs)
+            await plugin.start()
+            dask_scheduler.add_plugin(plugin=plugin, idempotent=idempotent, **kwargs)
+
+        self.run_on_scheduler(f, plugin=plugin, idempotent=idempotent, **kwargs)
+
+    def unregister_scheduler_plugin(self, plugin=None):
+        pass
+
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
