@@ -2,43 +2,44 @@ import asyncio
 import os
 import socket
 import threading
-import weakref
 import warnings
+import weakref
 
 import pytest
 
 import dask
+
 from distributed.core import (
-    pingpong,
+    ConnectionPool,
     Server,
     Status,
-    rpc,
-    connect,
-    send_recv,
     coerce_to_address,
-    ConnectionPool,
+    connect,
+    pingpong,
+    rpc,
+    send_recv,
 )
-from distributed.protocol.compression import compressions
-
 from distributed.metrics import time
 from distributed.protocol import to_serialize
+from distributed.protocol.compression import compressions
 from distributed.utils import get_ip, get_ipv6
+from distributed.utils_test import loop  # noqa F401
 from distributed.utils_test import (
-    gen_cluster,
-    has_ipv6,
     assert_can_connect,
-    assert_cannot_connect,
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_from_everywhere_6,
     assert_can_connect_locally_4,
     assert_can_connect_locally_6,
-    tls_security,
+    assert_cannot_connect,
+    async_wait_for,
     captured_logger,
+    gen_cluster,
+    has_ipv6,
     inc,
     throws,
+    tls_security,
 )
-from distributed.utils_test import loop  # noqa F401
 
 
 def echo(comm, x):
@@ -831,3 +832,51 @@ async def test_connection_pool_detects_remote_close():
     # while creating conn2:
     p._validate()
     await p.close()
+
+
+@pytest.mark.asyncio
+async def test_close_properly():
+    """
+    If the server is closed we should cancel all still ongoing coros and close
+    all listeners.
+    GH4704
+    """
+
+    async def sleep(comm=None):
+        # We want to ensure this is actually canceled therefore don't give it a
+        # chance to actually complete
+        await asyncio.sleep(2000000)
+
+    server = await Server({"sleep": sleep})
+    assert server.status == Status.running
+    ports = [8881, 8882, 8883]
+
+    # Previously we close *one* listener, therefore ensure we always use more
+    # than one for this test
+    assert len(ports) > 1
+    for port in ports:
+        await server.listen(port)
+    # We use TCP here for simplicity. If they are closed we should expect other
+    # backends to close properly as well
+    ip = get_ip()
+    rpc_addr = f"tcp://{ip}:{ports[-1]}"
+    async with rpc(rpc_addr) as remote:
+
+        comm = await remote.live_comm()
+        await comm.write({"op": "sleep"})
+
+        await async_wait_for(lambda: not server._ongoing_coroutines, 10)
+
+        listeners = server.listeners
+        assert len(listeners) == len(ports)
+
+        for port in ports:
+            await assert_can_connect(f"tcp://{ip}:{port}")
+
+        await server.close()
+
+        for port in ports:
+            await assert_cannot_connect(f"tcp://{ip}:{port}")
+
+        # weakref set/dict should be cleaned up
+        assert not len(server._ongoing_coroutines)

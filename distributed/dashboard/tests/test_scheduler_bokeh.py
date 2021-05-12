@@ -15,32 +15,35 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 import dask
 from dask.core import flatten
 from dask.utils import stringify
+
 from distributed.client import wait
 from distributed.compatibility import MACOS
-from distributed.metrics import time
-from distributed.utils import format_dashboard_link
-from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
-from distributed.dashboard.components.worker import Counters
-from distributed.dashboard.scheduler import applications
+from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
-    SystemMonitor,
-    Occupancy,
-    StealingTimeSeries,
-    StealingEvents,
-    Events,
-    TaskStream,
-    TaskProgress,
-    CurrentLoad,
-    ProcessingHistogram,
-    NBytesHistogram,
-    WorkerTable,
-    TaskGraph,
-    ProfileServer,
-    MemoryByKey,
     AggregateAction,
     ComputePerKey,
+    CurrentLoad,
+    Events,
+    MemoryByKey,
+    NBytes,
+    NBytesCluster,
+    NBytesHistogram,
+    Occupancy,
+    ProcessingHistogram,
+    ProfileServer,
+    StealingEvents,
+    StealingTimeSeries,
+    SystemMonitor,
+    TaskGraph,
+    TaskProgress,
+    TaskStream,
+    WorkerTable,
 )
-from distributed.dashboard import scheduler
+from distributed.dashboard.components.worker import Counters
+from distributed.dashboard.scheduler import applications
+from distributed.metrics import time
+from distributed.utils import format_dashboard_link
+from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
 scheduler.PROFILING = False
 
@@ -254,9 +257,7 @@ async def test_CurrentLoad(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
 
-    assert all(len(L) == 2 for L in d.values())
-    assert all(d["nbytes"])
-
+    assert all(len(l) == 2 for l in d.values())
     assert cl.cpu_figure.x_range.end == 200
 
 
@@ -272,6 +273,41 @@ async def test_ProcessingHistogram(c, s, a, b):
 
     ph.update()
     assert ph.source.data["right"][-1] > 2
+
+
+@gen_cluster(client=True)
+async def test_NBytes(c, s, a, b):
+    cl = NBytes(s)
+
+    futures = c.map(slowinc, range(10), delay=0.001)
+    await wait(futures)
+
+    cl.update()
+    d = dict(cl.source.data)
+    llens = {len(l) for l in d.values()}
+    # There are 2 workers. There is definitely going to be managed_in_memory and
+    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    # Empty rects are removed.
+    assert llens in ({4}, {5}, {6})
+    assert all(d["width"])
+
+
+@gen_cluster(client=True)
+async def test_NBytesCluster(c, s, a, b):
+    cl = NBytesCluster(s)
+
+    futures = c.map(slowinc, range(10), delay=0.001)
+    await wait(futures)
+
+    cl.update()
+    d = dict(cl.source.data)
+    llens = {len(l) for l in d.values()}
+    # Unlike NBytes, empty rects here aren't pruned away.
+    assert llens == {4}
+    # There is definitely going to be managed_in_memory and
+    # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
+    assert any(d["width"])
+    assert not all(d["width"])
 
 
 @gen_cluster(client=True)

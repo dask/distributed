@@ -18,6 +18,7 @@ distributed:
     events-cleanup-delay: 1h
     idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
     transition-log-length: 100000
+    events-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     work-stealing-interval: 100ms  # Callback time for work stealing
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
@@ -82,9 +83,15 @@ distributed:
       low-level: False      # Whether or not to include low-level functions
                             # Requires https://github.com/numba/stacktrace
 
-    # Fractions of worker memory at which we take action to avoid memory blowup
-    # Set any of the lower three values to False to turn off the behavior entirely
     memory:
+      # When there is an increase in process memory (as observed by the operating
+      # system) that is not accounted for by the dask keys stored on the worker, ignore
+      # it for this long before considering it in non-critical memory measures.
+      # This should be set to be longer than the duration of most dask tasks.
+      recent_to_old_time: 30s
+
+      # Fractions of worker process memory at which we take action to avoid memory
+      # blowup. Set any of the values to False to turn off the behavior entirely.
       target: 0.60  # target fraction to stay below
       spill: 0.70  # fraction at which we spill to disk
       pause: 0.80  # fraction at which we pause worker threads
@@ -161,6 +168,8 @@ distributed:
     link: "{scheme}://{host}:{port}/status"
     export-tool: False
     graph-max-items: 5000  # maximum number of tasks to try to plot in graph view
+    prometheus:
+      namespace: "dask"
 
   ##################
   # Administrative #
@@ -181,10 +190,10 @@ distributed:
 rmm:
   pool-size: null
 ucx:
-  tcp: null  # enable tcp
-  nvlink: null  # enable cuda_ipc
-  infiniband: null # enable Infiniband
-  rdmacm: null # enable RDMACM
-  cuda_copy: null  # enable cuda-copy
-  net-devices: null  # define which Infiniband device to use
+  cuda_copy: False  # enable cuda-copy
+  tcp: False  # enable tcp
+  nvlink: False  # enable cuda_ipc
+  infiniband: False # enable Infiniband
+  rdmacm: False # enable RDMACM
+  net-devices: null  # define what interface to use for UCX comm
   reuse-endpoints: True  # enable endpoint reuse

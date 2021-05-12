@@ -1,13 +1,12 @@
 """ utilities for package version introspection """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import absolute_import, division, print_function
 
+import importlib
+import os
 import platform
 import struct
-import os
 import sys
-import importlib
-
 
 required_packages = [
     ("dask", lambda p: p.__version__),

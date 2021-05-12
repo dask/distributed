@@ -1,13 +1,12 @@
 import random
 import time
-
 from concurrent.futures import (
-    TimeoutError,
-    Future,
-    wait,
-    as_completed,
     FIRST_COMPLETED,
     FIRST_EXCEPTION,
+    Future,
+    TimeoutError,
+    as_completed,
+    wait,
 )
 
 import pytest
@@ -15,16 +14,21 @@ from tlz import take
 
 from distributed import Client
 from distributed.utils import CancelledError
-from distributed.utils_test import (
-    slowinc,
+from distributed.utils_test import (  # noqa: F401
+    a,
+    b,
+    client,
+    cluster,
+    cluster_fixture,
+    inc,
+    loop,
+    s,
     slowadd,
     slowdec,
-    inc,
+    slowinc,
     throws,
     varying,
-    cluster,
 )
-from distributed.utils_test import client, cluster_fixture, loop, s, a, b  # noqa: F401
 
 
 def number_of_processing_tasks(client):
@@ -206,26 +210,24 @@ def test_unsupported_arguments(client, s, a, b):
 def test_retries(client):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 42]
 
-    with client.get_executor(retries=3, pure=False) as e:
+    with client.get_executor(retries=5, pure=False) as e:
         future = e.submit(varying(args))
         assert future.result() == 42
 
-    with client.get_executor(retries=2) as e:
+    with client.get_executor(retries=4) as e:
         future = e.submit(varying(args))
         result = future.result()
         assert result == 42
 
-    with client.get_executor(retries=1) as e:
+    with client.get_executor(retries=2) as e:
         future = e.submit(varying(args))
-        with pytest.raises(ZeroDivisionError) as exc_info:
+        with pytest.raises(ZeroDivisionError, match="two"):
             res = future.result()
-        exc_info.match("two")
 
     with client.get_executor(retries=0) as e:
         future = e.submit(varying(args))
-        with pytest.raises(ZeroDivisionError) as exc_info:
+        with pytest.raises(ZeroDivisionError, match="one"):
             res = future.result()
-        exc_info.match("one")
 
 
 def test_shutdown(loop):

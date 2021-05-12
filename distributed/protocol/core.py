@@ -1,17 +1,17 @@
 import logging
+
 import msgpack
 
-from .compression import compressions, maybe_compress, decompress
+from .compression import decompress, maybe_compress
 from .serialize import (
     Serialize,
     Serialized,
+    merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
-    merge_and_deserialize,
     serialize_and_split,
 )
 from .utils import msgpack_opts
-
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +48,15 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
         def _encode_default(obj):
             typ = type(obj)
             if typ is Serialize or typ is Serialized:
-                if typ is Serialize:
-                    obj = obj.data
                 offset = len(frames)
-                sub_header, sub_frames = serialize_and_split(
-                    obj, serializers=serializers, on_error=on_error, context=context
-                )
+                if typ is Serialized:
+                    sub_header, sub_frames = obj.header, obj.frames
+                else:
+                    sub_header, sub_frames = serialize_and_split(
+                        obj, serializers=serializers, on_error=on_error, context=context
+                    )
+                    _inplace_compress_frames(sub_header, sub_frames)
                 sub_header["num-sub-frames"] = len(sub_frames)
-                _inplace_compress_frames(sub_header, sub_frames)
                 frames.append(
                     msgpack.dumps(
                         sub_header, default=msgpack_encode_default, use_bin_type=True
@@ -108,55 +109,3 @@ def loads(frames, deserialize=True, deserializers=None):
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)
         raise
-
-
-def dumps_msgpack(msg, compression=None):
-    """Dump msg into header and payload, both bytestrings
-
-    All of the message must be msgpack encodable
-
-    See Also:
-        loads_msgpack
-    """
-    header = {}
-    payload = msgpack.dumps(msg, default=msgpack_encode_default, use_bin_type=True)
-
-    fmt, payload = maybe_compress(payload, compression=compression)
-    if fmt:
-        header["compression"] = fmt
-
-    if header:
-        header_bytes = msgpack.dumps(header, use_bin_type=True)
-    else:
-        header_bytes = b""
-
-    return [header_bytes, payload]
-
-
-def loads_msgpack(header, payload):
-    """Read msgpack header and payload back to Python object
-
-    See Also:
-        dumps_msgpack
-    """
-    header = bytes(header)
-    if header:
-        header = msgpack.loads(
-            header, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
-        )
-    else:
-        header = {}
-
-    if header.get("compression"):
-        try:
-            decompress = compressions[header["compression"]]["decompress"]
-            payload = decompress(payload)
-        except KeyError:
-            raise ValueError(
-                "Data is compressed as %s but we don't have this"
-                " installed" % str(header["compression"])
-            )
-
-    return msgpack.loads(
-        payload, object_hook=msgpack_decode_default, use_list=False, **msgpack_opts
-    )

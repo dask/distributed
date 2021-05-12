@@ -5,10 +5,16 @@ from time import sleep
 import pytest
 
 import dask
-from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.utils_test import cluster, gen_cluster
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+
+from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
+from distributed.utils_test import (  # noqa: F401
+    client,
+    cluster,
+    cluster_fixture,
+    gen_cluster,
+    loop,
+)
 
 
 class Counter:
@@ -425,8 +431,8 @@ async def test_load_balance_map(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4, Worker=Nanny)
 async def bench_param_server(c, s, *workers):
+    np = pytest.importorskip("numpy")
     import dask.array as da
-    import numpy as np
 
     x = da.random.random((500000, 1000), chunks=(1000, 1000))
     x = x.persist()

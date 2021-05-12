@@ -1,10 +1,8 @@
 import asyncio
 import collections
-import gc
-from contextlib import contextmanager, suppress
 import copy
 import functools
-from glob import glob
+import gc
 import io
 import itertools
 import logging
@@ -19,10 +17,12 @@ import subprocess
 import sys
 import tempfile
 import threading
-from time import sleep
 import uuid
 import warnings
 import weakref
+from contextlib import contextmanager, nullcontext, suppress
+from glob import glob
+from time import sleep
 
 try:
     import ssl
@@ -30,38 +30,38 @@ except ImportError:
     ssl = None
 
 import pytest
-
-import dask
-from tlz import merge, memoize, assoc
+from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 
+import dask
+
 from . import system
-from .client import default_client, _global_clients, Client
-from .compatibility import WINDOWS
+from .client import Client, _global_clients, default_client
 from .comm import Comm
+from .compatibility import WINDOWS
 from .config import initialize_logging
-from .core import connect, rpc, CommClosedError, Status
+from .core import CommClosedError, Status, connect, rpc
 from .deploy import SpecCluster
+from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
+from .nanny import Nanny
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
-    log_errors,
-    mp_context,
+    DequeHandler,
+    TimeoutError,
+    _offload_executor,
     get_ip,
     get_ipv6,
-    DequeHandler,
+    iscoroutinefunction,
+    log_errors,
+    mp_context,
     reset_logger_locks,
     sync,
-    iscoroutinefunction,
     thread_state,
-    _offload_executor,
-    TimeoutError,
 )
 from .worker import Worker
-from .nanny import Nanny
-from .diagnostics.plugin import WorkerPlugin
 
 try:
     import dask.array  # register config
@@ -190,6 +190,7 @@ def pristine_loop():
 @contextmanager
 def mock_ipython():
     from unittest import mock
+
     from distributed._ipython_utils import remote_magic
 
     ip = mock.Mock()
@@ -434,39 +435,21 @@ async def readone(comm):
         return msg
 
 
-def run_scheduler(q, nputs, port=0, **kwargs):
-    from distributed import Scheduler
+def run_scheduler(q, nputs, config, port=0, **kwargs):
+    with dask.config.set(config):
+        from distributed import Scheduler
 
-    # On Python 2.7 and Unix, fork() is used to spawn child processes,
-    # so avoid inheriting the parent's IO loop.
-    with pristine_loop() as loop:
-
-        async def _():
-            scheduler = await Scheduler(
-                validate=True, host="127.0.0.1", port=port, **kwargs
-            )
-            for i in range(nputs):
-                q.put(scheduler.address)
-            await scheduler.finished()
-
-        try:
-            loop.run_sync(_)
-        finally:
-            loop.close(all_fds=True)
-
-
-def run_worker(q, scheduler_q, **kwargs):
-    from distributed import Worker
-
-    reset_logger_locks()
-    with log_errors():
+        # On Python 2.7 and Unix, fork() is used to spawn child processes,
+        # so avoid inheriting the parent's IO loop.
         with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
 
             async def _():
-                worker = await Worker(scheduler_addr, validate=True, **kwargs)
-                q.put(worker.address)
-                await worker.finished()
+                scheduler = await Scheduler(
+                    validate=True, host="127.0.0.1", port=port, **kwargs
+                )
+                for i in range(nputs):
+                    q.put(scheduler.address)
+                await scheduler.finished()
 
             try:
                 loop.run_sync(_)
@@ -474,20 +457,41 @@ def run_worker(q, scheduler_q, **kwargs):
                 loop.close(all_fds=True)
 
 
-def run_nanny(q, scheduler_q, **kwargs):
-    with log_errors():
-        with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
+def run_worker(q, scheduler_q, config, **kwargs):
+    with dask.config.set(config):
+        from distributed import Worker
 
-            async def _():
-                worker = await Nanny(scheduler_addr, validate=True, **kwargs)
-                q.put(worker.address)
-                await worker.finished()
+        reset_logger_locks()
+        with log_errors():
+            with pristine_loop() as loop:
+                scheduler_addr = scheduler_q.get()
 
-            try:
-                loop.run_sync(_)
-            finally:
-                loop.close(all_fds=True)
+                async def _():
+                    worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                    q.put(worker.address)
+                    await worker.finished()
+
+                try:
+                    loop.run_sync(_)
+                finally:
+                    loop.close(all_fds=True)
+
+
+def run_nanny(q, scheduler_q, config, **kwargs):
+    with dask.config.set(config):
+        with log_errors():
+            with pristine_loop() as loop:
+                scheduler_addr = scheduler_q.get()
+
+                async def _():
+                    worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                    q.put(worker.address)
+                    await worker.finished()
+
+                try:
+                    loop.run_sync(_)
+                finally:
+                    loop.close(all_fds=True)
 
 
 @contextmanager
@@ -594,6 +598,7 @@ def cluster(
     active_rpc_timeout=10,
     disconnect_timeout=20,
     scheduler_kwargs={},
+    config={},
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -611,7 +616,7 @@ def cluster(
         scheduler = mp_context.Process(
             name="Dask cluster test: Scheduler",
             target=run_scheduler,
-            args=(scheduler_q, nworkers + 1),
+            args=(scheduler_q, nworkers + 1, config),
             kwargs=scheduler_kwargs,
         )
         ws.add(scheduler)
@@ -634,7 +639,7 @@ def cluster(
             proc = mp_context.Process(
                 name="Dask cluster test: Worker",
                 target=_run_worker,
-                args=(q, scheduler_q),
+                args=(q, scheduler_q, config),
                 kwargs=kwargs,
             )
             ws.add(proc)
@@ -729,9 +734,14 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
     async def do_disconnect():
-        with suppress(EnvironmentError, CommClosedError):
-            with rpc(addr, **rpc_kwargs) as w:
-                await w.terminate(close=True)
+        with rpc(addr, **rpc_kwargs) as w:
+            # If the worker was killed hard (e.g. sigterm) during test runtime,
+            # we do not know at this point and may not be able to connect
+            with suppress(EnvironmentError, CommClosedError):
+                # Do not request a reply since comms will be closed by the
+                # worker before a reply can be made and we will always trigger
+                # the timeout
+                await w.terminate(reply=False)
 
     await asyncio.wait_for(do_disconnect(), timeout=timeout)
 
@@ -1412,34 +1422,35 @@ def save_sys_modules():
 
 @contextmanager
 def check_thread_leak():
-    active_threads_start = set(threading._active)
+    """ Context manager to ensure we haven't leaked any threads """
+    active_threads_start = threading.enumerate()
 
     yield
 
     start = time()
     while True:
-        bad = [
-            t
-            for t, v in threading._active.items()
-            if t not in active_threads_start
-            and "Threaded" not in v.name
-            and "watch message" not in v.name
-            and "TCP-Executor" not in v.name
+        bad_threads = [
+            thread
+            for thread in threading.enumerate()
+            if thread not in active_threads_start
+            and "Threaded" not in thread.name
+            and "watch message" not in thread.name
+            and "TCP-Executor" not in thread.name
             # TODO: Make sure profile thread is cleaned up
             # and remove the line below
-            and "Profile" not in v.name
+            and "Profile" not in thread.name
         ]
-        if not bad:
+        if not bad_threads:
             break
         else:
             sleep(0.01)
         if time() > start + 5:
+            # Raise an error with information about leaked threads
             from distributed import profile
 
-            tid = bad[0]
-            thread = threading._active[tid]
-            call_stacks = profile.call_stack(sys._current_frames()[tid])
-            assert False, (thread, call_stacks)
+            bad_thread = bad_threads[0]
+            call_stacks = profile.call_stack(sys._current_frames()[bad_thread.ident])
+            assert False, (bad_thread, call_stacks)
 
 
 @contextmanager
@@ -1518,14 +1529,10 @@ def check_instances():
 
 @contextmanager
 def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
-    @contextmanager
-    def null():
-        yield
-
-    with check_thread_leak() if threads else null():
+    with check_thread_leak() if threads else nullcontext():
         with pristine_loop() as loop:
             with check_process_leak(check=processes):
-                with check_instances() if instances else null():
+                with check_instances() if instances else nullcontext():
                     with check_active_rpc(loop, timeout):
                         reset_config()
 

@@ -5,9 +5,9 @@ from time import sleep
 import pytest
 import tlz as toolz
 
-from distributed import Pub, Sub, wait, get_worker, TimeoutError
-from distributed.utils_test import gen_cluster
+from distributed import Pub, Sub, TimeoutError, get_worker, wait
 from distributed.metrics import time
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, timeout=None)
@@ -37,7 +37,7 @@ async def test_speed(c, s, a, b):
             #     print(a, b, i)
         return n
 
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     x = np.random.random(1000)
 

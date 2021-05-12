@@ -1,76 +1,86 @@
 import asyncio
 import bisect
-
+import errno
+import heapq
+import logging
+import os
+import random
+import sys
+import threading
+import warnings
+import weakref
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from contextlib import suppress
 from datetime import timedelta
-import errno
 from functools import partial
-import heapq
 from inspect import isawaitable
-import logging
-import os
 from pickle import PicklingError
-import random
-import threading
-import sys
-import uuid
-import warnings
-import weakref
 
-import dask
-from dask.core import istask
-from dask.compatibility import apply
-from dask.utils import format_bytes, funcname
-from dask.system import CPU_COUNT
-
-from tlz import pluck, merge, first, keymap
+from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
-from . import profile, comm, system
+import dask
+from dask.compatibility import apply
+from dask.core import istask
+from dask.system import CPU_COUNT
+from dask.utils import format_bytes, funcname
+
+from . import comm, preloading, profile, system
 from .batched import BatchedSend
-from .comm import get_address_host, connect
+from .comm import connect, get_address_host
 from .comm.addressing import address_from_user_args
 from .comm.utils import OFFLOAD_THRESHOLD
-from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
+from .core import (
+    CommClosedError,
+    Status,
+    coerce_to_address,
+    error_message,
+    pingpong,
+    send_recv,
+)
+from .diagnostics.plugin import _get_worker_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
-from . import preloading
 from .proctitle import setproctitle
-from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
+from .protocol import pickle, to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
-from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
+from .threadpoolexecutor import ThreadPoolExecutor
+from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
-    get_ip,
-    typename,
-    has_arg,
-    _maybe_complex,
-    log_errors,
-    import_file,
-    silence_logging,
-    thread_state,
-    json_load_robust,
-    key_split,
-    offload,
-    parse_bytes,
-    parse_timedelta,
-    parse_ports,
-    iscoroutinefunction,
-    warn_on_duration,
     LRU,
     TimeoutError,
+    _maybe_complex,
+    deprecated,
+    get_ip,
+    has_arg,
+    import_file,
+    iscoroutinefunction,
+    json_load_robust,
+    key_split,
+    log_errors,
+    offload,
+    parse_bytes,
+    parse_ports,
+    parse_timedelta,
+    silence_logging,
+    thread_state,
+    typename,
+    warn_on_duration,
 )
-from .utils_comm import pack_data, gather_from_workers, retry_operation
-from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
+from .utils_comm import gather_from_workers, pack_data, retry_operation
+from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
 
-from .core import Status
+try:
+    from .diagnostics import nvml
+except Exception:
+    nvml = None
 
 logger = logging.getLogger(__name__)
 
@@ -457,6 +467,8 @@ class Worker(ServerNode):
             ("executing", "memory"): self.transition_executing_done,
             ("flight", "memory"): self.transition_flight_memory,
             ("flight", "fetch"): self.transition_flight_fetch,
+            # Shouldn't be a valid transition but happens nonetheless
+            ("ready", "memory"): self.transition_ready_memory,
             # Scheduler intercession (re-assignment)
             ("fetch", "waiting"): self.transition_fetch_waiting,
             ("flight", "waiting"): self.transition_flight_waiting,
@@ -600,25 +612,16 @@ class Worker(ServerNode):
         elif self.memory_limit and (
             self.memory_target_fraction or self.memory_spill_fraction
         ):
-            try:
-                from zict import Buffer, File, Func
-            except ImportError:
-                raise ImportError(
-                    "Please `python -m pip install zict` for spill-to-disk workers"
+            from .spill import SpillBuffer
+
+            self.data = SpillBuffer(
+                os.path.join(self.local_directory, "storage"),
+                target=int(
+                    self.memory_limit
+                    * (self.memory_target_fraction or self.memory_spill_fraction)
                 )
-            path = os.path.join(self.local_directory, "storage")
-            storage = Func(
-                partial(serialize_bytelist, on_error="raise"),
-                deserialize_bytes,
-                File(path),
+                or sys.maxsize,
             )
-            target = (
-                int(float(self.memory_limit) * self.memory_target_fraction)
-                or sys.maxsize
-            )
-            self.data = Buffer({}, storage, target, weight)
-            self.data.memory = self.data.fast
-            self.data.disk = self.data.slow
         else:
             self.data = dict()
 
@@ -677,6 +680,8 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "plugin-remove": self.plugin_remove,
+            "get_monitor_info": self.get_monitor_info,
         }
 
         stream_handlers = {
@@ -806,8 +811,7 @@ class Worker(ServerNode):
         return self.local_directory
 
     async def get_metrics(self):
-        now = time()
-        core = dict(
+        out = dict(
             executing=self.executing_count,
             in_memory=len(self.data),
             ready=len(self.ready),
@@ -817,18 +821,21 @@ class Worker(ServerNode):
                 "workers": dict(self.bandwidth_workers),
                 "types": keymap(typename, self.bandwidth_types),
             },
+            spilled_nbytes=getattr(self.data, "spilled_total", 0),
         )
-        custom = {}
+        out.update(self.monitor.recent())
+
         for k, metric in self.metrics.items():
             try:
                 result = metric(self)
                 if isawaitable(result):
                     result = await result
-                custom[k] = result
+                # In case of collision, prefer core metrics
+                out.setdefault(k, result)
             except Exception:  # TODO: log error once
                 pass
 
-        return merge(custom, self.monitor.recent(), core)
+        return out
 
     async def get_startup_information(self):
         result = {}
@@ -915,8 +922,8 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(**plugin_kwargs)
-                    for plugin_kwargs in response["worker-plugins"]
+                    self.plugin_add(name=name, plugin=plugin)
+                    for name, plugin in response["worker-plugins"].items()
                 ]
             )
 
@@ -934,56 +941,59 @@ class Worker(ServerNode):
             self.digests["latency"].add(latency)
 
     async def heartbeat(self):
-        if not self.heartbeat_active:
-            self.heartbeat_active = True
-            logger.debug("Heartbeat: %s" % self.address)
-            try:
-                start = time()
-                response = await retry_operation(
-                    self.scheduler.heartbeat_worker,
-                    address=self.contact_address,
-                    now=time(),
-                    metrics=await self.get_metrics(),
-                    executing={
-                        key: start - self.tasks[key].start_time
-                        for key in self.active_threads.values()
-                        if key in self.tasks
-                    },
-                )
-                end = time()
-                middle = (start + end) / 2
-
-                self._update_latency(end - start)
-
-                if response["status"] == "missing":
-                    for i in range(10):
-                        if self.status != Status.running:
-                            break
-                        else:
-                            await asyncio.sleep(0.05)
-                    else:
-                        await self._register_with_scheduler()
-                    return
-                self.scheduler_delay = response["time"] - middle
-                self.periodic_callbacks["heartbeat"].callback_time = (
-                    response["heartbeat-interval"] * 1000
-                )
-                self.bandwidth_workers.clear()
-                self.bandwidth_types.clear()
-            except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
-                if not self.reconnect:
-                    await self.close(report=False)
-            except IOError as e:
-                # Scheduler is gone. Respect distributed.comm.timeouts.connect
-                if "Timed out trying to connect" in str(e):
-                    await self.close(report=False)
-                else:
-                    raise e
-            finally:
-                self.heartbeat_active = False
-        else:
+        if self.heartbeat_active:
             logger.debug("Heartbeat skipped: channel busy")
+            return
+
+        self.heartbeat_active = True
+        logger.debug("Heartbeat: %s", self.address)
+        try:
+            start = time()
+            with self.active_threads_lock:
+                active_keys = list(self.active_threads.values())
+            response = await retry_operation(
+                self.scheduler.heartbeat_worker,
+                address=self.contact_address,
+                now=start,
+                metrics=await self.get_metrics(),
+                executing={
+                    key: start - self.tasks[key].start_time
+                    for key in active_keys
+                    if key in self.tasks
+                },
+            )
+            end = time()
+            middle = (start + end) / 2
+
+            self._update_latency(end - start)
+
+            if response["status"] == "missing":
+                for i in range(10):
+                    if self.status != Status.running:
+                        break
+                    else:
+                        await asyncio.sleep(0.05)
+                else:
+                    await self._register_with_scheduler()
+                return
+            self.scheduler_delay = response["time"] - middle
+            self.periodic_callbacks["heartbeat"].callback_time = (
+                response["heartbeat-interval"] * 1000
+            )
+            self.bandwidth_workers.clear()
+            self.bandwidth_types.clear()
+        except CommClosedError:
+            logger.warning("Heartbeat to scheduler failed")
+            if not self.reconnect:
+                await self.close(report=False)
+        except IOError as e:
+            # Scheduler is gone. Respect distributed.comm.timeouts.connect
+            if "Timed out trying to connect" in str(e):
+                await self.close(report=False)
+            else:
+                raise e
+        finally:
+            self.heartbeat_active = False
 
     async def handle_scheduler(self, comm):
         try:
@@ -1062,6 +1072,21 @@ class Worker(ServerNode):
         else:
             self.update_data(data=result, report=False)
             return {"status": "OK"}
+
+    def get_monitor_info(self, comm=None, recent=False, start=0):
+        result = dict(
+            range_query=(
+                self.monitor.recent()
+                if recent
+                else self.monitor.range_query(start=start)
+            ),
+            count=self.monitor.count,
+            last_time=self.monitor.last_time,
+        )
+        if nvml is not None:
+            result["gpu_name"] = self.monitor.gpu_name
+            result["gpu_memory_total"] = self.monitor.gpu_memory_total
+        return result
 
     #############
     # Lifecycle #
@@ -1818,8 +1843,8 @@ class Worker(ServerNode):
             assert ts.traceback is not None
         self.send_task_state_to_scheduler(ts)
 
-    def transition_ready_memory(self, ts, value=None):
-        if value:
+    def transition_ready_memory(self, ts, value=no_value):
+        if value is not no_value:
             self.put_key_in_memory(ts, value=value)
         self.send_task_state_to_scheduler(ts)
 
@@ -1983,7 +2008,8 @@ class Worker(ServerNode):
 
                     deps = [dep for dep in deps if dep not in missing_deps]
 
-                self.log.append(("gather-dependencies", key, deps))
+                log_keys = {d.key for d in deps}
+                self.log.append(("gather-dependencies", key, log_keys))
 
                 in_flight = False
 
@@ -2527,11 +2553,9 @@ class Worker(ServerNode):
         with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
-            if not name:
-                if hasattr(plugin, "name"):
-                    name = plugin.name
-                else:
-                    name = funcname(plugin) + "-" + str(uuid.uuid4())
+
+            if name is None:
+                name = _get_worker_plugin_name(plugin)
 
             assert name
 
@@ -2551,6 +2575,21 @@ class Worker(ServerNode):
                         return msg
 
                 return {"status": "OK"}
+
+    async def plugin_remove(self, comm=None, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Worker plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(worker=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
 
     async def actor_execute(
         self, comm=None, actor=None, function=None, args=(), kwargs={}
@@ -2759,26 +2798,25 @@ class Worker(ServerNode):
                 self.transition(ts, "memory", value=value)
                 if self.digests is not None:
                     self.digests["task-duration"].add(result["stop"] - result["start"])
+            elif isinstance(result.pop("actual-exception"), Reschedule):
+                self.batched_stream.send({"op": "reschedule", "key": ts.key})
+                self.transition(ts, "rescheduled", report=False)
+                self.release_key(ts.key, report=False)
             else:
-                if isinstance(result.pop("actual-exception"), Reschedule):
-                    self.batched_stream.send({"op": "reschedule", "key": ts.key})
-                    self.transition(ts, "rescheduled", report=False)
-                    self.release_key(ts.key, report=False)
-                else:
-                    ts.exception = result["exception"]
-                    ts.traceback = result["traceback"]
-                    logger.warning(
-                        " Compute Failed\n"
-                        "Function:  %s\n"
-                        "args:      %s\n"
-                        "kwargs:    %s\n"
-                        "Exception: %s\n",
-                        str(funcname(function))[:1000],
-                        convert_args_to_str(args2, max_len=1000),
-                        convert_kwargs_to_str(kwargs2, max_len=1000),
-                        repr(result["exception"].data),
-                    )
-                    self.transition(ts, "error")
+                ts.exception = result["exception"]
+                ts.traceback = result["traceback"]
+                logger.warning(
+                    "Compute Failed\n"
+                    "Function:  %s\n"
+                    "args:      %s\n"
+                    "kwargs:    %s\n"
+                    "Exception: %r\n",
+                    str(funcname(function))[:1000],
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000),
+                    result["exception"].data,
+                )
+                self.transition(ts, "error")
 
             logger.debug("Send compute response to scheduler: %s, %s", ts.key, result)
 
@@ -2853,8 +2891,8 @@ class Worker(ServerNode):
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
-                "Worker is at %d%% memory usage. Start spilling data to disk.",
-                int(frac * 100),
+                "Worker is at %.0f%% memory usage. Start spilling data to disk.",
+                frac * 100,
             )
             start = time()
             target = self.memory_limit * self.memory_target_fraction
@@ -3365,8 +3403,6 @@ class Reschedule(Exception):
     the task.
     """
 
-    pass
-
 
 def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
     if memory_limit is None:
@@ -3461,9 +3497,9 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
         function = loads_function(function)
-    if args:
+    if args and isinstance(args, bytes):
         args = pickle.loads(args)
-    if kwargs:
+    if kwargs and isinstance(kwargs, bytes):
         kwargs = pickle.loads(kwargs)
 
     if task is not no_value:
@@ -3702,6 +3738,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
+@deprecated(version_removed="2021.06.0")
 def weight(k, v):
     return sizeof(v)
 

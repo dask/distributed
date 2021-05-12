@@ -1,28 +1,27 @@
 import asyncio
 import datetime
-from contextlib import suppress
 import logging
 import threading
-import warnings
 import uuid
+import warnings
+from contextlib import suppress
+
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.utils import format_bytes
 
-from .adaptive import Adaptive
-
 from ..core import Status
 from ..utils import (
-    log_errors,
-    sync,
     Log,
     Logs,
-    thread_state,
     format_dashboard_link,
+    log_errors,
     parse_timedelta,
+    sync,
+    thread_state,
 )
-
+from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +309,7 @@ class Cluster:
             pass
 
         try:
-            from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+            from ipywidgets import HTML, Accordion, Button, HBox, IntText, Layout, VBox
         except ImportError:
             self._cached_widget = None
             return None
@@ -389,8 +388,9 @@ class Cluster:
         else:
             dashboard = "Not Available"
         return (
-            "<div style='background-color: #f2f2f2; display: inline-block; "
-            "padding: 10px; border: 1px solid #999999;'>\n"
+            "<div style='color: var(--jp-ui-font-color0, #000000); "
+            "background-color: var(--jp-layout-color2, #f2f2f2); display: inline-block; "
+            "padding: 10px; border: 1px solid var(--jp-border-color0, #999999);'>\n"
             "  <h3>{cls}</h3>\n"
             "  <ul>\n"
             "    <li><b>Dashboard: </b>{dashboard}\n"

@@ -1,41 +1,41 @@
 import asyncio
-from contextlib import suppress
 import errno
 import logging
-from multiprocessing.queues import Empty
 import os
-import psutil
 import shutil
 import threading
 import uuid
 import warnings
 import weakref
+from contextlib import suppress
+from multiprocessing.queues import Empty
+
+import psutil
+from tornado import gen
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.system import CPU_COUNT
-from tornado.ioloop import IOLoop, PeriodicCallback
-from tornado import gen
 
+from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
-from .core import RPCClosed, CommClosedError, coerce_to_address, Status
+from .core import CommClosedError, RPCClosed, Status, coerce_to_address
 from .metrics import time
 from .node import ServerNode
-from . import preloading
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
-    get_ip,
-    mp_context,
-    silence_logging,
-    json_load_robust,
-    parse_timedelta,
-    parse_ports,
     TimeoutError,
+    get_ip,
+    json_load_robust,
+    mp_context,
+    parse_ports,
+    parse_timedelta,
+    silence_logging,
 )
-from .worker import run, parse_memory_limit, Worker
-
+from .worker import Worker, parse_memory_limit, run
 
 logger = logging.getLogger(__name__)
 
@@ -441,30 +441,35 @@ class Nanny(ServerNode):
         self.loop.add_callback(self._on_exit, exitcode)
 
     async def _on_exit(self, exitcode):
-        if self.status not in (Status.init, Status.closing, Status.closed):
+        if self.status not in (
+            Status.init,
+            Status.closing,
+            Status.closed,
+            Status.closing_gracefully,
+        ):
             try:
-                await self.scheduler.unregister(address=self.worker_address)
+                await self._unregister()
             except (EnvironmentError, CommClosedError):
                 if not self.reconnect:
                     await self.close()
                     return
 
-            try:
-                if self.status not in (
-                    Status.closing,
-                    Status.closed,
-                    Status.closing_gracefully,
-                ):
-                    if self.auto_restart:
-                        logger.warning("Restarting worker")
-                        await self.instantiate()
-                elif self.status == Status.closing_gracefully:
-                    await self.close()
+        try:
+            if self.status not in (
+                Status.closing,
+                Status.closed,
+                Status.closing_gracefully,
+            ):
+                if self.auto_restart:
+                    logger.warning("Restarting worker")
+                    await self.instantiate()
+            elif self.status == Status.closing_gracefully:
+                await self.close()
 
-            except Exception:
-                logger.error(
-                    "Failed to restart worker after its process exited", exc_info=True
-                )
+        except Exception:
+            logger.error(
+                "Failed to restart worker after its process exited", exc_info=True
+            )
 
     @property
     def pid(self):
@@ -733,8 +738,9 @@ class WorkerProcess:
         async def do_stop(timeout=5, executor_wait=True):
             try:
                 await worker.close(
-                    report=False,
+                    report=True,
                     nanny=False,
+                    safe=True,  # TODO: Graceful or not?
                     executor_wait=executor_wait,
                     timeout=timeout,
                 )

@@ -1,9 +1,9 @@
 import itertools
+
 import dask
 
-from . import registry
 from ..utils import get_ip_interface
-
+from . import registry
 
 DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
 

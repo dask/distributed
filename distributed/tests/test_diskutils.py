@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 
 import dask
+
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
