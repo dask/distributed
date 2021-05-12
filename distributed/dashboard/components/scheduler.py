@@ -2032,12 +2032,6 @@ class WorkerTable(DashboardComponent):
                         if self.source.data[name]
                         else data[name[4:]][-1]
                     )
-                elif name.startswith("min"):
-                    data[name].append(
-                        min(self.source.data[name][i + 1], data[name[4:]][-1])
-                        if self.source.data[name]
-                        else data[name[4:]][-1]
-                    )
                 elif name.startswith("mean"):
                     data[name].append(
                         (
@@ -2062,8 +2056,6 @@ class WorkerTable(DashboardComponent):
                     total_data = None
                 elif name.startswith("max"):
                     total_data = max(data[name])
-                elif name.startswith("min"):
-                    total_data = min(data[name])
                 elif name.startswith("mean"):
                     total_data = mean(data[name])
                 elif name == "memory_percent":
