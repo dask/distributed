@@ -2072,6 +2072,7 @@ class WorkerTable(DashboardComponent):
             reorderable=True,
             sortable=True,
             width=width,
+            index_position=None,
         )
 
         column_choice = CheckboxButtonGroup(
