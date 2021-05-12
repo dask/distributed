@@ -99,23 +99,23 @@ async def test_nanny(c, s, a, b):
     assert result == 11
 
 
-@gen_tls_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "2GiB"})
+@gen_tls_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
 async def test_rebalance(c, s, a, b):
     # We used nannies to have separate processes for each worker
     a_addr, _ = s.workers
     assert a_addr.startswith("tls://")
 
-    # Generate 10 buffers worth 1 GiB total on worker a. This sends its memory
+    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
     futures = [
-        c.submit(lambda: "x" * (2 ** 30 // 10), workers=[a_addr], pure=False)
+        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a_addr], pure=False)
         for _ in range(10)
     ]
     await wait(futures)
 
     # Wait for heartbeats
-    while s.memory.process < 2 ** 30:
+    while s.memory.process < 2 ** 29:
         await asyncio.sleep(0.1)
 
     ndata = await c.run(lambda dask_worker: len(dask_worker.data))
