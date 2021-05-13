@@ -58,7 +58,7 @@ from .proctitle import setproctitle
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
-from .recreate_exceptions import ReplayExceptionScheduler
+from .recreate_tasks import ReplayTaskScheduler
 from .security import Security
 from .semaphore import SemaphoreExtension
 from .stealing import WorkStealing
@@ -173,7 +173,7 @@ DEFAULT_EXTENSIONS = [
     LockExtension,
     MultiLockExtension,
     PublishExtension,
-    ReplayExceptionScheduler,
+    ReplayTaskScheduler,
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,

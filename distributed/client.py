@@ -744,9 +744,9 @@ class Client:
         self.start(timeout=timeout)
         Client._instances.add(self)
 
-        from distributed.recreate_exceptions import ReplayExceptionClient
+        from distributed.recreate_tasks import ReplayTaskClient
 
-        ReplayExceptionClient(self)
+        ReplayTaskClient(self)
 
     @contextmanager
     def as_current(self):
