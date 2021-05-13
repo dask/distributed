@@ -2527,10 +2527,7 @@ async def test_rebalance(c, s, *_):
     # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = [
-        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
@@ -2553,10 +2550,7 @@ async def test_rebalance(c, s, *_):
 )
 async def test_rebalance_workers_and_keys(client, s, *_):
     a, b, c = s.workers
-    futures = [
-        client.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
@@ -2580,16 +2574,39 @@ async def test_rebalance_workers_and_keys(client, s, *_):
     s.validate_state()
 
 
-@gen_cluster(client=True)
-async def test_rebalance_missing_data(c, s, a, b):
+@gen_cluster()
+async def test_rebalance_missing_data1(s, a, b):
+    """key never existed"""
     out = await s.rebalance(keys=["notexist"])
     assert out == {"status": "missing-data", "keys": ["notexist"]}
+    s.validate_state()
 
+
+@gen_cluster(client=True)
+async def test_rebalance_missing_data2(c, s, a, b):
+    """keys exist but belong to unfinished futures"""
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
     out = await s.rebalance(keys=[f.key for f in futures])
     assert out["status"] == "missing-data"
     assert 8 <= len(out["keys"]) <= 10
+    s.validate_state()
+
+
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+async def test_rebalance_raises_missing_data3(c, s, *_):
+    """keys exist when the sync part of rebalance runs, but are gone by the time the
+    actual data movement runs
+    """
+    a, _ = s.workers
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+    del futures
+    out = await s.rebalance()
+    assert out["status"] == "missing-data"
+    assert 1 <= len(out["keys"]) <= 10
     s.validate_state()
 
 

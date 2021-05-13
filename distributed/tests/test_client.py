@@ -2911,10 +2911,7 @@ async def test_rebalance(c, s, *_):
     # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = [
-        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     while s.memory.process < 2 ** 29:
@@ -2942,10 +2939,7 @@ async def test_rebalance_workers_and_keys(client, s, *_):
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
     """
     a, b, c = s.workers
-    futures = [
-        client.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     while s.memory.process < 2 ** 29:
@@ -2974,10 +2968,7 @@ async def test_rebalance_workers_and_keys(client, s, *_):
 
 def test_rebalance_sync(c):
     a, b = c.run(lambda dask_worker: dask_worker.address).values()
-    futures = [
-        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     # Wait for heartbeat
     while (
         c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.memory.process)
@@ -3003,10 +2994,21 @@ async def test_rebalance_unprepared(c, s, a, b):
     s.validate_state()
 
 
-@gen_cluster(client=True)
-async def test_rebalance_raises_missing_data(c, s, a, b):
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+async def test_rebalance_raises_missing_data(c, s, *_):
+    a, b = s.workers
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    while s.memory.process < 2 ** 29:
+        await asyncio.sleep(0.1)
+
+    # Descoping the futures enqueues a coroutine to release the data on the server
+    del futures
     with pytest.raises(KeyError, match="keys were found to be missing"):
-        await c.rebalance(["notexist"])
+        # During the synchronous part of rebalance, the futures still exist, but they
+        # will be (partially) gone by the time the actual transferring happens.
+        await c.rebalance()
 
 
 @gen_cluster(client=True)

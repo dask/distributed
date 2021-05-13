@@ -108,10 +108,7 @@ async def test_rebalance(c, s, *_):
     # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = [
-        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
-        for _ in range(10)
-    ]
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
 
     # Wait for heartbeats
