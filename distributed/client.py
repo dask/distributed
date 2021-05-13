@@ -3970,8 +3970,19 @@ class Client:
         else:
             return msgs
 
-    def register_scheduler_plugin(self, plugin=None, idempotent=None, **kwargs):
-        """TODO docstring"""
+    def register_scheduler_plugin(self, plugin=None, idempotent=False, **kwargs):
+        """Register a scheduler plugin.
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html
+
+        Parameters
+        ----------
+        plugin : SchedulerPlugin
+            Plugin object to pass to the scheduler.
+        idempotent : bool
+            If multiple registrations of the plugin induce no changes.
+
+        """
 
         async def f(dask_scheduler=None, plugin=None, idempotent=None, **kwargs):
             if isinstance(plugin, type):
