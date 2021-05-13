@@ -2972,15 +2972,17 @@ async def test_rebalance_workers_and_keys(client, s, *_):
         await client.rebalance(workers=["notexist"])
 
 
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-def test_rebalance_sync(c, s, a, b):
-    a, b = s.workers
+def test_rebalance_sync(c):
+    a, b = c.run(lambda dask_worker: dask_worker.address).values()
     futures = [
         c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
         for _ in range(10)
     ]
     # Wait for heartbeat
-    while s.memory.process < 2 ** 29:
+    while (
+        c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.memory.process)
+        < 2 ** 29
+    ):
         sleep(0.1)
 
     assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
@@ -2988,8 +2990,8 @@ def test_rebalance_sync(c, s, a, b):
     ndata = c.run(lambda dask_worker: len(dask_worker.data))
     # Allow for some uncertainty as the unmanaged memory is not stable
     assert sum(ndata.values()) == 10
-    assert 5 <= ndata[a] <= 6
-    assert 4 <= ndata[b] <= 5
+    assert 3 <= ndata[a] <= 7
+    assert 3 <= ndata[b] <= 7
 
 
 @gen_cluster(client=True)
