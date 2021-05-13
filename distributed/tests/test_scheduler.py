@@ -2496,3 +2496,104 @@ async def test_close_scheduler__close_workers_Nanny(s, a, b):
             await asyncio.sleep(0.05)
     log = log.getvalue()
     assert "retry" not in log
+
+
+async def assert_ndata(client, by_addr, total=None):
+    """Test that the number of elements in Worker.data is as expected.
+    To be used when the worker is wrapped by a nanny.
+
+    by_addr: dict of either exact numbers or (min, max) tuples
+    total: optional exact match on the total number of keys (with duplicates) across all
+    workers
+    """
+    out = await client.run(lambda dask_worker: len(dask_worker.data))
+    try:
+        for k, v in by_addr.items():
+            if isinstance(v, tuple):
+                assert v[0] <= out[k] <= v[1]
+            else:
+                assert out[k] == v
+        if total is not None:
+            assert sum(out.values()) == total
+    except AssertionError:
+        raise AssertionError(f"Expected {by_addr}, total={total}; got {out}")
+
+
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+async def test_rebalance(c, s, *_):
+    # We used nannies to have separate processes for each worker
+    a, b = s.workers
+
+    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
+    # utilisation slightly above 50% (after counting unmanaged) which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = [
+        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
+        for _ in range(10)
+    ]
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+    await assert_ndata(c, {a: 10, b: 0})
+    await s.rebalance()
+    # Allow for some uncertainty as the unmanaged memory is not stable
+    await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
+
+    # rebalance() when there is nothing to do
+    await s.rebalance()
+    await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
+    s.validate_state()
+
+
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)] * 3,
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+)
+async def test_rebalance_workers_and_keys(client, s, *_):
+    a, b, c = s.workers
+    futures = [
+        client.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
+        for _ in range(10)
+    ]
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+
+    # Passing empty iterables is not the same as omitting the arguments
+    await s.rebalance(keys=[])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+    await s.rebalance(workers=[])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+    # Limit operation to workers that have nothing to do
+    await s.rebalance(workers=[b, c])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+
+    # Limit rebalancing to two arbitrary keys and two arbitrary workers
+    await s.rebalance(keys=[futures[3].key, futures[7].key], workers=[a, b])
+    await assert_ndata(client, {a: 8, b: 2, c: 0}, total=10)
+
+    with pytest.raises(KeyError):
+        await s.rebalance(workers=["notexist"])
+
+    s.validate_state()
+
+
+@gen_cluster(client=True)
+async def test_rebalance_missing_data(c, s, a, b):
+    out = await s.rebalance(keys=["notexist"])
+    assert out == {"status": "missing-data", "keys": ["notexist"]}
+
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await asyncio.sleep(0.1)
+    out = await s.rebalance(keys=[f.key for f in futures])
+    assert out["status"] == "missing-data"
+    assert 8 <= len(out["keys"]) <= 10
+    s.validate_state()
+
+
+@gen_cluster(nthreads=[])
+async def test_rebalance_no_workers(s):
+    await s.rebalance()
+    s.validate_state()

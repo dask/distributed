@@ -3066,7 +3066,7 @@ class Client:
             keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
-            raise ValueError(
+            raise KeyError(
                 f"During rebalance {len(result['keys'])} keys were found to be missing"
             )
         assert result["status"] == "OK"

@@ -5607,7 +5607,11 @@ class Scheduler(SchedulerState, ServerNode):
                     keys = set(keys)  # unless already a set-like
                 if not keys:
                     return {"status": "OK"}
-                missing_data = [k for k in keys if not self._tasks[k]._who_has]
+                missing_data = [
+                    k
+                    for k in keys
+                    if k not in self._tasks or not self._tasks[k]._who_has
+                ]
                 if missing_data:
                     return {"status": "missing-data", "keys": missing_data}
 

@@ -100,16 +100,16 @@ async def test_nanny(c, s, a, b):
 
 
 @gen_tls_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance(c, s, a, b):
+async def test_rebalance(c, s, *_):
     # We used nannies to have separate processes for each worker
-    a_addr, _ = s.workers
-    assert a_addr.startswith("tls://")
+    a, b = s.workers
+    assert a.startswith("tls://")
 
     # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
     # utilisation slightly above 50% (after counting unmanaged) which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
     futures = [
-        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a_addr], pure=False)
+        c.submit(lambda: "x" * (2 ** 29 // 10), workers=[a], pure=False)
         for _ in range(10)
     ]
     await wait(futures)
@@ -118,15 +118,15 @@ async def test_rebalance(c, s, a, b):
     while s.memory.process < 2 ** 29:
         await asyncio.sleep(0.1)
 
-    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
-    assert set(ndata.values()) == {10, 0}
+    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
 
     await c.rebalance()
 
     ndata = await c.run(lambda dask_worker: len(dask_worker.data))
     # Allow for some uncertainty as the unmanaged memory is not stable
     assert sum(ndata.values()) == 10
-    assert 3 < next(iter(ndata.values())) < 7
+    assert 3 <= ndata[a] <= 7
+    assert 3 <= ndata[b] <= 7
 
 
 @gen_tls_cluster(client=True, nthreads=[("tls://127.0.0.1", 2)] * 2)
