@@ -5594,11 +5594,13 @@ class Scheduler(SchedulerState, ServerNode):
             All other workers will be ignored. The mean cluster occupancy will be
             calculated only using the whitelisted workers.
         """
+        parent: SchedulerState = self
+
         with log_errors():
             if workers is not None:
-                workers = [self._workers_dv[w] for w in workers]
+                workers = [parent._workers_dv[w] for w in workers]
             else:
-                workers = self._workers_dv.values()
+                workers = parent._workers_dv.values()
             if not workers:
                 return {"status": "OK"}
 
@@ -5610,7 +5612,7 @@ class Scheduler(SchedulerState, ServerNode):
                 missing_data = [
                     k
                     for k in keys
-                    if k not in self._tasks or not self._tasks[k]._who_has
+                    if k not in parent._tasks or not parent._tasks[k].who_has
                 ]
                 if missing_data:
                     return {"status": "missing-data", "keys": missing_data}
@@ -5734,6 +5736,9 @@ class Scheduler(SchedulerState, ServerNode):
         heapq.heapify(senders)
         heapq.heapify(recipients)
 
+        snd_ws: WorkerState
+        rec_ws: WorkerState
+
         while senders and recipients:
             snd_bytes_max, snd_bytes_min, _, snd_ws, ts_iter = senders[0]
 
@@ -5824,7 +5829,8 @@ class Scheduler(SchedulerState, ServerNode):
         FIXME this method is not robust when the cluster is not idle.
         """
         ts: TaskState
-        ws: WorkerState
+        snd_ws: WorkerState
+        rec_ws: WorkerState
 
         to_recipients = defaultdict(lambda: defaultdict(list))
         to_senders = defaultdict(list)
@@ -5863,19 +5869,13 @@ class Scheduler(SchedulerState, ServerNode):
                 ),
             }
 
-        for sender, recipient, ts in msgs:
+        for snd_ws, rec_ws, ts in msgs:
             assert ts._state == "memory"
-            ts._who_has.add(recipient)
-            recipient._has_what[ts] = None
-            recipient.nbytes += ts.get_nbytes()
+            ts._who_has.add(rec_ws)
+            rec_ws._has_what[ts] = None
+            rec_ws.nbytes += ts.get_nbytes()
             self.log.append(
-                (
-                    "rebalance",
-                    ts._key,
-                    time(),
-                    sender.address,
-                    recipient.address,
-                )
+                ("rebalance", ts._key, time(), snd_ws.address, rec_ws.address)
             )
 
         await asyncio.gather(
@@ -6212,7 +6212,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = {k for w in workers for k in w._has_what}
+                keys = {k for w in workers for k in w.has_what}
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
                 if keys:
@@ -6431,14 +6431,14 @@ class Scheduler(SchedulerState, ServerNode):
         if workers is not None:
             workers = map(self.coerce_address, workers)
             return {
-                w: [ts._key for ts in parent._workers_dv[w]._has_what]
+                w: [ts._key for ts in parent._workers_dv[w].has_what]
                 if w in parent._workers_dv
                 else []
                 for w in workers
             }
         else:
             return {
-                w: [ts._key for ts in ws._has_what]
+                w: [ts._key for ts in ws.has_what]
                 for w, ws in parent._workers_dv.items()
             }
 

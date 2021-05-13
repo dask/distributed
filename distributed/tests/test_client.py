@@ -2891,13 +2891,8 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         raise BadlySerializedException("hello world")
 
     x = c.submit(f)
-
-    try:
-        result = await x
-    except Exception as e:
-        assert "hello world" in str(e)
-    else:
-        assert False
+    with pytest.raises(Exception, match="hello world"):
+        await x
 
 
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
