@@ -2966,23 +2966,23 @@ async def test_rebalance_workers_and_keys(client, s, *_):
         await client.rebalance(workers=["notexist"])
 
 
-def test_rebalance_sync(c):
-    a, b = c.run(lambda dask_worker: dask_worker.address).values()
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    # Wait for heartbeat
-    while (
-        c.run_on_scheduler(lambda dask_scheduler: dask_scheduler.memory.process)
-        < 2 ** 29
-    ):
-        sleep(0.1)
+def test_rebalance_sync():
+    # can't use the 'c' fixture because we need workers to run in a separate process
+    with Client(n_workers=2, memory_limit="1 GiB") as c:
+        s = c.cluster.scheduler
+        a, b = [ws.address for ws in s.workers.values()]
+        futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+        # Wait for heartbeat
+        while s.memory.process < 2 ** 29:
+            sleep(0.1)
 
-    assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
-    c.rebalance()
-    ndata = c.run(lambda dask_worker: len(dask_worker.data))
-    # Allow for some uncertainty as the unmanaged memory is not stable
-    assert sum(ndata.values()) == 10
-    assert 3 <= ndata[a] <= 7
-    assert 3 <= ndata[b] <= 7
+        assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
+        c.rebalance()
+        ndata = c.run(lambda dask_worker: len(dask_worker.data))
+        # Allow for some uncertainty as the unmanaged memory is not stable
+        assert sum(ndata.values()) == 10
+        assert 3 <= ndata[a] <= 7
+        assert 3 <= ndata[b] <= 7
 
 
 @gen_cluster(client=True)
