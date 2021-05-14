@@ -312,7 +312,7 @@ async def test_adapt_down():
                 assert time() < start + 60
 
 
-@gen_test(timeout=30)
+@gen_test()
 async def test_no_more_workers_than_tasks():
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1000}}
