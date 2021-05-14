@@ -78,7 +78,7 @@ logging_levels = {
     if isinstance(logger, logging.Logger)
 }
 
-
+_TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
@@ -750,7 +750,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
 
 
-def gen_test(timeout=30):
+def gen_test(timeout=_TEST_TIMEOUT):
     """Coroutine test
 
     @gen_test(timeout=5)
@@ -839,7 +839,7 @@ def gen_cluster(
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
     ncores=None,
     scheduler="127.0.0.1",
-    timeout=30,
+    timeout=_TEST_TIMEOUT,
     security=None,
     Worker=Worker,
     client=False,
