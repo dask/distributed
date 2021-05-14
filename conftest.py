@@ -29,6 +29,8 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "slow" in item.keywords:
             item.add_marker(skip_slow)
+        if "distributed_cleanup" not in item.keywords:
+            item.fixturenames.append("cleanup")
 
 
 pytest_plugins = ["distributed.pytest_resourceleaks"]
