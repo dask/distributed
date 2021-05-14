@@ -750,7 +750,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
 
 
-def gen_test(timeout=10):
+def gen_test(timeout=30):
     """Coroutine test
 
     @gen_test(timeout=5)
