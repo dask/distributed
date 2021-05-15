@@ -1,4 +1,5 @@
 import asyncio
+import html
 import inspect
 import itertools
 import json
@@ -185,6 +186,8 @@ ALL_TASK_STATES = declare(
     set, {"released", "waiting", "no-worker", "processing", "erred", "memory"}
 )
 globals()["ALL_TASK_STATES"] = ALL_TASK_STATES
+COMPILED = declare(bint, compiled)
+globals()["COMPILED"] = COMPILED
 
 
 @final
@@ -300,12 +303,12 @@ class MemoryState:
         temporary spike
     """
 
-    __slots__ = ("process", "managed_in_memory", "managed_spilled", "unmanaged_old")
+    __slots__ = ("_process", "_managed_in_memory", "_managed_spilled", "_unmanaged_old")
 
-    process: Py_ssize_t
-    managed_in_memory: Py_ssize_t
-    managed_spilled: Py_ssize_t
-    unmanaged_old: Py_ssize_t
+    _process: Py_ssize_t
+    _managed_in_memory: Py_ssize_t
+    _managed_spilled: Py_ssize_t
+    _unmanaged_old: Py_ssize_t
 
     def __init__(
         self,
@@ -319,57 +322,65 @@ class MemoryState:
         # tasks progress. Also, sizeof() is not guaranteed to return correct results.
         # This can cause glitches where a partial measure is larger than the whole, so
         # we need to force all numbers to add up exactly by definition.
-        self.process = process
-        self.managed_spilled = min(managed_spilled, managed)
+        self._process = process
+        self._managed_spilled = min(managed_spilled, managed)
         # Subtractions between unsigned ints guaranteed by construction to be >= 0
-        self.managed_in_memory = min(managed - self.managed_spilled, process)
-        self.unmanaged_old = min(unmanaged_old, process - self.managed_in_memory)
+        self._managed_in_memory = min(managed - self._managed_spilled, process)
+        self._unmanaged_old = min(unmanaged_old, process - self._managed_in_memory)
+
+    @property
+    def process(self) -> Py_ssize_t:
+        return self._process
+
+    @property
+    def managed_in_memory(self) -> Py_ssize_t:
+        return self._managed_in_memory
+
+    @property
+    def managed_spilled(self) -> Py_ssize_t:
+        return self._managed_spilled
+
+    @property
+    def unmanaged_old(self) -> Py_ssize_t:
+        return self._unmanaged_old
 
     @classmethod
     def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = object.__new__(cls)
-        for k in cls.__slots__:
-            setattr(out, k, sum(getattr(i, k) for i in infos))
+        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
+        ms: MemoryState
+        for ms in infos:
+            out._process += ms._process
+            out._managed_spilled += ms._managed_spilled
+            out._managed_in_memory += ms._managed_in_memory
+            out._unmanaged_old += ms._unmanaged_old
         return out
 
     @property
-    @ccall
-    @inline
-    @nogil
     def managed(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.managed_spilled
+        return self._managed_in_memory + self._managed_spilled
 
     @property
-    @ccall
-    @inline
-    @nogil
     def unmanaged(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory
+        return self._process - self._managed_in_memory
 
     @property
-    @ccall
-    @inline
-    @nogil
     def unmanaged_recent(self) -> Py_ssize_t:
         # This is never negative thanks to __init__
-        return self.process - self.managed_in_memory - self.unmanaged_old
+        return self._process - self._managed_in_memory - self._unmanaged_old
 
     @property
-    @ccall
-    @inline
-    @nogil
     def optimistic(self) -> Py_ssize_t:
-        return self.managed_in_memory + self.unmanaged_old
+        return self._managed_in_memory + self._unmanaged_old
 
     def __repr__(self) -> str:
         return (
             f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self.managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self.managed_spilled)}\n"
-            f"Process memory (RSS)  : {format_bytes(self.process)}\n"
-            f"  - managed by Dask   : {format_bytes(self.managed_in_memory)}\n"
-            f"  - unmanaged (old)   : {format_bytes(self.unmanaged_old)}\n"
+            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
+            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
+            f"Process memory (RSS)  : {format_bytes(self._process)}\n"
+            f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
+            f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
         )
 
@@ -722,12 +733,21 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<Worker %r, name: %s, memory: %d, processing: %d>" % (
+        return "<WorkerState %r, name: %s, memory: %d, processing: %d>" % (
             self._address,
             self._name,
             len(self._has_what),
             len(self._processing),
         )
+
+    def _repr_html_(self):
+        text = (
+            f"<b>WorkerState: </b> {html.escape(self._address)} "
+            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        )
+        return text
 
     @ccall
     @exceptval(check=False)
@@ -1539,7 +1559,19 @@ class TaskState:
         self._nbytes = nbytes
 
     def __repr__(self):
-        return "<Task %r %s>" % (self._key, self._state)
+        return "<TaskState %r %s>" % (self._key, self._state)
+
+    def _repr_html_(self):
+        color = (
+            "var(--jp-error-color0, red)"
+            if self._state == "erred"
+            else "var(--jp-ui-font-color0, black)"
+        )
+        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
+        if self._state == "memory":
+            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
+        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
+        return text
 
     @ccall
     def validate(self):
@@ -2707,10 +2739,9 @@ class SchedulerState:
 
             dts: TaskState
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                if ts in s:
-                    s.discard(ts)
-                    if not s and not dts._who_wants:
+                if ts in dts._waiters:
+                    dts._waiters.discard(ts)
+                    if not dts._waiters and not dts._who_wants:
                         recommendations[dts._key] = "released"
             ts._waiting_on.clear()
 
@@ -2760,9 +2791,8 @@ class SchedulerState:
             if recommendations.get(key) != "waiting":
                 for dts in ts._dependencies:
                     if dts._state != "released":
-                        s: set = dts._waiters
-                        s.discard(ts)
-                        if not s and not dts._who_wants:
+                        dts._waiters.discard(ts)
+                        if not dts._waiters and not dts._who_wants:
                             recommendations[dts._key] = "released"
                 ts._waiters.clear()
 
@@ -2817,9 +2847,8 @@ class SchedulerState:
                 recommendations[dts._key] = "erred"
 
             for dts in ts._dependencies:
-                s: set = dts._waiters
-                s.discard(ts)
-                if not s and not dts._who_wants:
+                dts._waiters.discard(ts)
+                if not dts._waiters and not dts._who_wants:
                     recommendations[dts._key] = "released"
 
             ts._waiters.clear()  # do anything with this?
@@ -3446,12 +3475,12 @@ class Scheduler(SchedulerState, ServerNode):
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
         self.events = defaultdict(
-            lambda: deque(
-                maxlen=dask.config.get("distributed.scheduler.events-log-length")
+            partial(
+                deque, maxlen=dask.config.get("distributed.scheduler.events-log-length")
             )
         )
         self.event_counts = defaultdict(int)
-        self.worker_plugins = []
+        self.worker_plugins = dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3518,6 +3547,7 @@ class Scheduler(SchedulerState, ServerNode):
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
+            "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -3571,11 +3601,22 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        return '<Scheduler: "%s" processes: %d cores: %d>' % (
+        return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
             self.address,
             len(parent._workers),
             parent._total_nthreads,
+            len(parent._tasks),
         )
+
+    def _repr_html_(self):
+        parent: SchedulerState = cast(SchedulerState, self)
+        text = (
+            f"<b>Scheduler: </b>{html.escape(self.address)} "
+            f'<font color="gray">workers: </font>{len(parent._workers)} '
+            f'<font color="gray">cores: </font>{parent._total_nthreads} '
+            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        )
+        return text
 
     def identity(self, comm=None):
         """ Basic information about ourselves and our cluster """
@@ -4046,9 +4087,8 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
-        annotations=None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
         annotations = unpacked_graph["annotations"]
@@ -4288,6 +4328,9 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 ts._host_restrictions = set()
                 ts._worker_restrictions = set()
+                # Make sure `v` is a collection and not a single worker name / address
+                if not isinstance(v, (list, tuple, set)):
+                    v = [v]
                 for w in v:
                     try:
                         w = self.coerce_address(w)
@@ -6050,7 +6093,11 @@ class Scheduler(SchedulerState, ServerNode):
             assert False, (key, ts)
             return
 
-        report_msg: dict = _task_to_report_msg(parent, ts)
+        report_msg: dict
+        if ts is None:
+            report_msg = {"op": "cancelled-key", "key": key}
+        else:
+            report_msg = _task_to_report_msg(parent, ts)
         if report_msg is not None:
             self.report(report_msg, ts=ts, client=client)
 
@@ -6297,11 +6344,21 @@ class Scheduler(SchedulerState, ServerNode):
 
     async def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
-        self.worker_plugins.append({"plugin": plugin, "name": name})
+        self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
             msg=dict(op="plugin-add", plugin=plugin, name=name)
         )
+        return responses
+
+    async def unregister_worker_plugin(self, comm, name):
+        """ Unregisters a worker plugin"""
+        try:
+            worker_plugins = self.worker_plugins.pop(name)
+        except KeyError:
+            raise ValueError(f"The worker plugin {name} does not exists")
+
+        responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):
@@ -6975,8 +7032,7 @@ def _propagate_forgotten(
 
     for dts in ts._dependencies:
         dts._dependents.remove(ts)
-        s: set = dts._waiters
-        s.discard(ts)
+        dts._waiters.discard(ts)
         if not dts._dependents and not dts._who_wants:
             # Task not needed anymore
             assert dts is not ts
@@ -7010,9 +7066,8 @@ def _client_releases_keys(
         ts = state._tasks.get(key)
         if ts is not None and ts in cs._wants_what:
             cs._wants_what.remove(ts)
-            s: set = ts._who_wants
-            s.remove(cs)
-            if not s:
+            ts._who_wants.remove(cs)
+            if not ts._who_wants:
                 if not ts._dependents:
                     # No live dependents, can forget
                     recommendations[ts._key] = "forgotten"
@@ -7063,9 +7118,7 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
 @cfunc
 @exceptval(check=False)
 def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
-    if ts is None:
-        return {"op": "cancelled-key", "key": ts._key}
-    elif ts._state == "forgotten":
+    if ts._state == "forgotten":
         return {"op": "cancelled-key", "key": ts._key}
     elif ts._state == "memory":
         return {"op": "key-in-memory", "key": ts._key}
@@ -7084,16 +7137,12 @@ def _task_to_report_msg(state: SchedulerState, ts: TaskState) -> dict:
 @cfunc
 @exceptval(check=False)
 def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
-    report_msg: dict = _task_to_report_msg(state, ts)
-    client_msgs: dict
-    if ts is None:
-        # Notify all clients
-        client_msgs = {k: [report_msg] for k in state._clients}
-    else:
-        # Notify clients interested in key
-        cs: ClientState
-        client_msgs = {cs._client_key: [report_msg] for cs in ts._who_wants}
-    return client_msgs
+    if ts._who_wants:
+        report_msg: dict = _task_to_report_msg(state, ts)
+        if report_msg is not None:
+            cs: ClientState
+            return {cs._client_key: [report_msg] for cs in ts._who_wants}
+    return {}
 
 
 @cfunc
