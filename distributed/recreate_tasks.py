@@ -2,7 +2,7 @@ import logging
 
 from dask.utils import stringify
 
-from .client import futures_of, wait
+from .client import futures_of, wait, Future
 from .utils import sync
 from .utils_comm import pack_data
 from .worker import _deserialize
@@ -21,56 +21,31 @@ class ReplayTaskScheduler:
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.scheduler.handlers["cause_of_failure"] = self.cause_of_failure
         self.scheduler.handlers["get_runspec"] = self.get_runspec
-        self.scheduler.extensions["exceptions"] = self
+        self.scheduler.handlers["get_error_cause"] = self.get_error_cause
+        self.scheduler.handlers["_process_key"] = self._process_key
+        self.scheduler.extensions["replay-tasks"] = self
 
-    def cause_of_failure(self, *args, keys=(), **kwargs):
-        """
-        Return details of first failed task required by set of keys
+    def _process_key(self, key):
+        if isinstance(key, list):
+            key = tuple(key)  # ensure not a list from msgpack
+        key = stringify(key)
+        return key
 
-        Parameters
-        ----------
-        keys : list of keys known to the scheduler
-
-        Returns
-        -------
-        Dictionary with:
-        cause: the key that failed
-        task: the definition of that key
-        deps: keys that the task depends on
-        """
-        def error_details_extractor(ts):
-            if ts is not None and ts.exception_blame is not None:
-                cause = ts.exception_blame
-                # NOTE: cannot serialize sets
-                return {
-                    "deps": [dts.key for dts in cause.dependencies],
-                    "cause": cause.key,
-                    "task": cause.run_spec,
-                }
-        return self.get_runspec(keys=keys, details_extractor=error_details_extractor, *args, **kwargs)
-
-
-    def get_runspec(self, *args, keys=(), details_extractor=None, **kwargs):
-        def default_details_extractor(ts):
-            return {
-                "task": ts.run_spec,
-                "deps": [dts.key for dts in ts.dependencies]
-            }
-
-        if details_extractor is None:
-            details_extractor = default_details_extractor
-
-
+    def get_error_cause(self, *args, keys=(), **kwargs):
         for key in keys:
-            if isinstance(key, list):
-                key = tuple(key)  # ensure not a list from msgpack
-            key = stringify(key)
+            key = self._process_key(key)
             ts = self.scheduler.tasks.get(key)
-            details = details_extractor(ts)
-            if details is not None:
-                return details
+            if ts is not None and ts.exception_blame is not None:
+                return ts.exception_blame.key
+
+    def get_runspec(self, *args, key=None, **kwargs):
+        key = self._process_key(key)
+        ts = self.scheduler.tasks.get(key)
+        return {
+            "task": ts.run_spec,
+            "deps": [dts.key for dts in ts.dependencies]
+        }
 
 
 class ReplayTaskClient:
@@ -88,31 +63,27 @@ class ReplayTaskClient:
 
     def __init__(self, client):
         self.client = client
-        self.client.extensions["exceptions"] = self
+        self.client.extensions["replay-tasks"] = self
         # monkey patch
-        self.client.recreate_error_locally = self.recreate_error_locally
-        self.client._recreate_error_locally = self._recreate_error_locally
-        self.client._get_futures_error = self._get_futures_error
-        self.client.get_futures_error = self.get_futures_error
-
+        self.client._get_raw_components_from_future = self._get_raw_components_from_future
+        self.client._prepare_raw_components = self._prepare_raw_components
+        self.client._get_components_from_future = self._get_components_from_future
+        self.client._get_errored_future = self._get_errored_future
         self.client.recreate_task_locally = self.recreate_task_locally
-        self.client._recreate_task_locally = self._recreate_task_locally
-        self.client._get_futures_components = self._get_futures_components
-        self.client.get_futures_components = self.get_futures_components
+        self.client.recreate_error_locally = self.recreate_error_locally
+        self.client._execute_task_components = self._execute_task_components
 
     @property
     def scheduler(self):
         return self.client.scheduler
 
-    async def _get_futures_components(self, futures, runspec_getter=None):
-        if runspec_getter is None:
-            runspec_getter = self.scheduler.get_runspec
-
-        if not isinstance(futures, list):  # TODO: other iterables types?
-            futures = [futures]
-
-        out = await runspec_getter(keys=[f.key for f in futures])
-        deps, task = out["deps"], out["task"]
+    async def _get_raw_components_from_future(self, future):
+        await wait(future)
+        # one reason not to pass spec into this function is in case we want to
+        # expose a method to get all the components/deps in the future. This
+        # way it will be easier to do.
+        spec = await self.scheduler.get_runspec(key=future.key)
+        deps, task = spec["deps"], spec["task"]
         if isinstance(task, dict):
             function, args, kwargs = _deserialize(**task)
             return (function, args, kwargs, deps)
@@ -120,73 +91,39 @@ class ReplayTaskClient:
             function, args, kwargs = _deserialize(task=task)
             return (function, args, kwargs, deps)
 
-    async def _get_futures_error(self, future):
-        # only get errors for futures that errored.
-        futures = [f for f in futures_of(future) if f.status == "error"]
-        if not futures:
-            raise ValueError("No errored futures passed")
-        
-        return await self._get_futures_components(futures, self.scheduler.cause_of_failure)
-
-    def get_futures_components(self, future):
-        return self.client.sync(self._get_futures_components, future)
-
-    def get_futures_error(self, future):
-        """
-        Ask the scheduler details of the sub-task of the given failed future
-
-        When a future evaluates to a status of "error", i.e., an exception
-        was raised in a task within its graph, we an get information from
-        the scheduler. This function gets the details of the specific task
-        that raised the exception and led to the error, but does not fetch
-        data from the cluster or execute the function.
-
-        Parameters
-        ----------
-        future : future that failed, having ``status=="error"``, typically
-            after an attempt to ``gather()`` shows a stack-stace.
-
-        Returns
-        -------
-        Tuple:
-        - the function that raised an exception
-        - argument list (a tuple), may include values and keys
-        - keyword arguments (a dictionary), may include values and keys
-        - list of keys that the function requires to be fetched to run
-
-        See Also
-        --------
-        ReplayTaskClient.recreate_error_locally
-        """
-        return self.client.sync(self._get_futures_error, future)
-
-    
-    async def _recreate_task_locally(self, future, component_getter=None):
-        if component_getter is None:
-            component_getter = self._get_futures_components
-
-        await wait(future)
-        out = await component_getter(future)
-        function, args, kwargs, deps = out
+    async def _prepare_raw_components(self, raw_components):
+        function, args, kwargs, deps = raw_components
         futures = self.client._graph_to_futures({}, deps)
         data = await self.client._gather(futures)
         args = pack_data(args, data)
         kwargs = pack_data(kwargs, data)
         return (function, args, kwargs)
 
-    async def _recreate_error_locally(self, future):
-        return await self._recreate_task_locally(
-            future,
-            component_getter=self._get_futures_error
-        )
+    async def _get_components_from_future(self, future):
+        raw_components = await self._get_raw_components_from_future(future)
+        return await self._prepare_raw_components(raw_components)
 
-    def recreate_task_locally(self, future):
+    def _execute_task_components(self, func, args, kwargs, run=True):
+        if run:
+            func(*args, **kwargs)
+        else:
+            return func, args, kwargs
+
+    def recreate_task_locally(self, future, run=True):
         func, args, kwargs = sync(
-            self.client.loop, self._recreate_task_locally, future
+            self.client.loop, self._get_components_from_future, future
         )
-        func(*args, **kwargs)
+        return self._execute_task_components(func, args, kwargs, run=run)
 
-    def recreate_error_locally(self, future):
+    async def _get_errored_future(self, future):
+        await wait(future)
+        futures = [f.key for f in futures_of(future) if f.status == "error"]
+        if not futures:
+            raise ValueError("No errored futures passed")
+        cause = await self.scheduler.get_error_cause(keys=futures)
+        return Future(cause)
+
+    def recreate_error_locally(self, future, run=True):
         """
         For a failed calculation, perform the blamed task locally for debugging.
 
@@ -229,7 +166,7 @@ class ReplayTaskClient:
         Nothing; the function runs and should raise an exception, allowing
         the debugger to run.
         """
-        func, args, kwargs = sync(
-            self.client.loop, self._recreate_error_locally, future
+        errored_future = sync(
+            self.client.loop, self._get_errored_future, future
         )
-        func(*args, **kwargs)
+        return self.recreate_task_locally(errored_future, run=run)
