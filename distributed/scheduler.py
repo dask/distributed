@@ -4107,9 +4107,8 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
-        annotations=None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
         annotations = unpacked_graph["annotations"]
@@ -4349,6 +4348,9 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 ts._host_restrictions = set()
                 ts._worker_restrictions = set()
+                # Make sure `v` is a collection and not a single worker name / address
+                if not isinstance(v, (list, tuple, set)):
+                    v = [v]
                 for w in v:
                     try:
                         w = self.coerce_address(w)
