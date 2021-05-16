@@ -39,6 +39,7 @@ from distributed.utils_test import (  # noqa: F401
     inc,
     loop,
     nodebug,
+    set_config_and_reload,
     slowadd,
     slowdec,
     slowinc,
@@ -2539,6 +2540,26 @@ async def test_rebalance(c, s, *_):
     # rebalance() when there is nothing to do
     await s.rebalance()
     await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
+    s.validate_state()
+
+
+@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
+@gen_cluster(client=True, worker_kwargs={"memory_limit": "250 MiB"})
+async def test_rebalance_managed_memory(c, s, a, b):
+    # Generate 100 buffers worth 100 MiB total on worker a. This sends its memory
+    # utilisation to exactly 40%, ignoring unmanaged, which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[a.address])
+    await wait(futures)
+    # Even if we're just using managed memory, which is instantaneously accounted for as
+    # soon as the tasks finish, MemoryState.managed is still capped by the process
+    # memory, so we need to wait for the heartbeat.
+    await assert_memory(s, "managed", 100, 101)
+    await assert_ndata(c, {a.address: 100, b.address: 0})
+    await s.rebalance()
+    # We can expect an exact, stable result because we are completely bypassing the
+    # unpredictability of unmanaged memory.
+    await assert_ndata(c, {a.address: 62, b.address: 38})
     s.validate_state()
 
 
