@@ -5768,7 +5768,7 @@ class Scheduler(SchedulerState, ServerNode):
                         # recipients are sorted by rec_bytes_max.
                         # The next ones will be worse; no reason to continue iterating
                         break
-                    use_recipient = ts.key not in rec_ws._has_what
+                    use_recipient = ts not in rec_ws._has_what
                     if not use_recipient:
                         skipped_recipients.append(heapq.heappop(recipients))
 
