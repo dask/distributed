@@ -2618,17 +2618,17 @@ async def test_rebalance_no_workers(s):
 
 
 @set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, worker_kwargs={"memory_limit": "500 MiB"})
+@gen_cluster(client=True, worker_kwargs={"memory_limit": "1000 MiB"})
 async def test_rebalance_managed_memory(c, s, a, b):
-    # Generate 100 buffers worth 200 MiB total on worker a. This sends its memory
+    # Generate 100 buffers worth 400 MiB total on worker a. This sends its memory
     # utilisation to exactly 40%, ignoring unmanaged, which is above the
     # distributed.worker.memory.rebalance.sender-min threshold.
-    futures = c.map(lambda _: "x" * (2 ** 21), range(100), workers=[a.address])
+    futures = c.map(lambda _: "x" * (2 ** 22), range(100), workers=[a.address])
     await wait(futures)
     # Even if we're just using managed memory, which is instantaneously accounted for as
     # soon as the tasks finish, MemoryState.managed is still capped by the process
     # memory, so we need to wait for the heartbeat.
-    await assert_memory(s, "managed", 200, 201)
+    await assert_memory(s, "managed", 400, 401)
     await assert_ndata(c, {a.address: 100, b.address: 0})
     await s.rebalance()
     # We can expect an exact, stable result because we are completely bypassing the
@@ -2658,20 +2658,20 @@ async def test_rebalance_no_limit(c, s, a, b):
         "distributed.worker.memory.rebalance.recipient-max": 0.4,
     }
 )
-@gen_cluster(client=True, worker_kwargs={"memory_limit": "500 MiB"})
+@gen_cluster(client=True, worker_kwargs={"memory_limit": "1000 MiB"})
 async def test_rebalance_no_recipients(c, s, a, b):
     """There are sender workers, but no recipient workers"""
     futures = [
-        c.submit(lambda: "x" * (200 * 2 ** 20), pure=False, workers=[a.address]),  # 40%
-        c.submit(lambda: "x" * (200 * 2 ** 20), pure=False, workers=[b.address]),  # 40%
+        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[a.address]),  # 40%
+        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[b.address]),  # 40%
     ] + c.map(
-        lambda _: "x" * (2 ** 21), range(50), workers=[a.address]
+        lambda _: "x" * (2 ** 21), range(100), workers=[a.address]
     )  # 20%
     await wait(futures)
-    await assert_memory(s, "managed", 500, 501)
-    await assert_ndata(c, {a.address: 51, b.address: 1})
+    await assert_memory(s, "managed", 1000, 1001)
+    await assert_ndata(c, {a.address: 101, b.address: 1})
     await s.rebalance()
-    await assert_ndata(c, {a.address: 51, b.address: 1})
+    await assert_ndata(c, {a.address: 101, b.address: 1})
     s.validate_state()
 
 
@@ -2705,21 +2705,21 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
 
 
 @set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, worker_kwargs={"memory_limit": "500 MiB"})
+@gen_cluster(client=True, worker_kwargs={"memory_limit": "1000 MiB"})
 async def test_rebalance_sender_below_mean(c, s, a, b):
     """A task remains on the sender because moving it would send it below the mean"""
-    f1 = c.submit(lambda: "x" * (200 * 2 ** 20), workers=[a.address])
+    f1 = c.submit(lambda: "x" * (400 * 2 ** 20), workers=[a.address])
     await wait([f1])
     f2 = c.submit(lambda: "x" * (10 * 2 ** 20), workers=[a.address])
     await wait([f2])
-    await assert_memory(s, "managed", 210, 211)
+    await assert_memory(s, "managed", 410, 411)
     await assert_ndata(c, {a.address: 2, b.address: 0})
     await s.rebalance()
     assert await c.has_what() == {a.address: (f1.key,), b.address: (f2.key,)}
 
 
 @set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, worker_kwargs={"memory_limit": "500 MiB"})
+@gen_cluster(client=True, worker_kwargs={"memory_limit": "1000 MiB"})
 async def test_rebalance_least_recently_inserted_sender_min(c, s, a, b):
     """
     1. keys are picked using a least recently inserted policy
@@ -2730,9 +2730,10 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, a, b):
     await assert_ndata(c, {a.address: 10, b.address: 0})
     await s.rebalance()
     await assert_ndata(c, {a.address: 10, b.address: 0})
-    large_future = c.submit(lambda: "x" * (150 * 2 ** 20), workers=[a.address])
+
+    large_future = c.submit(lambda: "x" * (300 * 2 ** 20), workers=[a.address])
     await wait([large_future])
-    await assert_memory(s, "managed", 150, 151)
+    await assert_memory(s, "managed", 300, 301)
     await assert_ndata(c, {a.address: 11, b.address: 0})
     await s.rebalance()
     await assert_ndata(c, {a.address: 1, b.address: 10})
