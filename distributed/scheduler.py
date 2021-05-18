@@ -1,4 +1,5 @@
 import asyncio
+import html
 import inspect
 import itertools
 import json
@@ -732,12 +733,21 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<Worker %r, name: %s, memory: %d, processing: %d>" % (
+        return "<WorkerState %r, name: %s, memory: %d, processing: %d>" % (
             self._address,
             self._name,
             len(self._has_what),
             len(self._processing),
         )
+
+    def _repr_html_(self):
+        text = (
+            f"<b>WorkerState: </b> {html.escape(self._address)} "
+            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        )
+        return text
 
     @ccall
     @exceptval(check=False)
@@ -1549,7 +1559,19 @@ class TaskState:
         self._nbytes = nbytes
 
     def __repr__(self):
-        return "<Task %r %s>" % (self._key, self._state)
+        return "<TaskState %r %s>" % (self._key, self._state)
+
+    def _repr_html_(self):
+        color = (
+            "var(--jp-error-color0, red)"
+            if self._state == "erred"
+            else "var(--jp-ui-font-color0, black)"
+        )
+        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
+        if self._state == "memory":
+            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
+        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
+        return text
 
     @ccall
     def validate(self):
@@ -3579,11 +3601,22 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        return '<Scheduler: "%s" processes: %d cores: %d>' % (
+        return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
             self.address,
             len(parent._workers),
             parent._total_nthreads,
+            len(parent._tasks),
         )
+
+    def _repr_html_(self):
+        parent: SchedulerState = cast(SchedulerState, self)
+        text = (
+            f"<b>Scheduler: </b>{html.escape(self.address)} "
+            f'<font color="gray">workers: </font>{len(parent._workers)} '
+            f'<font color="gray">cores: </font>{parent._total_nthreads} '
+            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        )
+        return text
 
     def identity(self, comm=None):
         """ Basic information about ourselves and our cluster """
@@ -4054,9 +4087,8 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
-        annotations=None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
         annotations = unpacked_graph["annotations"]
@@ -4296,6 +4328,9 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 ts._host_restrictions = set()
                 ts._worker_restrictions = set()
+                # Make sure `v` is a collection and not a single worker name / address
+                if not isinstance(v, (list, tuple, set)):
+                    v = [v]
                 for w in v:
                     try:
                         w = self.coerce_address(w)
