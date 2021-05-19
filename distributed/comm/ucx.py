@@ -306,7 +306,11 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except (ucp.exceptions.UCXError, ucp.exceptions.UCXCloseError):
+            except (
+                ucp.exceptions.UCXError,
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
                 # If the other end is in the process of closing,
                 # UCX will sometimes raise a `Input/output` error,
                 # which we can ignore.
