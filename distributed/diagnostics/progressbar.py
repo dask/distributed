@@ -334,7 +334,7 @@ class MultiProgressWidget(MultiProgressBar):
         }
 
         def keyfunc(kv):
-            """ Order keys by most numerous, then by string name """
+            """Order keys by most numerous, then by string name"""
             return kv[::-1]
 
         key_order = [k for k, v in sorted(all.items(), key=keyfunc, reverse=True)]

@@ -261,7 +261,7 @@ class Server:
             raise TypeError(f"expected Status or str, got {new_status}")
 
     async def finished(self):
-        """ Wait until the server has finished """
+        """Wait until the server has finished"""
         await self._event_finished.wait()
 
     def __await__(self):
@@ -969,7 +969,7 @@ class ConnectionPool:
         )
 
     def __call__(self, addr=None, ip=None, port=None):
-        """ Cached rpc objects """
+        """Cached rpc objects"""
         addr = addr_from_args(addr=addr, ip=ip, port=port)
         return PooledRPCCall(
             addr, self, serializers=self.serializers, deserializers=self.deserializers

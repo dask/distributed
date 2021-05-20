@@ -114,7 +114,7 @@ class Cluster:
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
+        """Listen to scheduler for updates on adding and removing workers"""
         while True:
             try:
                 msgs = await comm.read()
@@ -302,7 +302,7 @@ class Cluster:
         return text
 
     def _widget(self):
-        """ Create IPython widget for display within a notebook """
+        """Create IPython widget for display within a notebook"""
         try:
             return self._cached_widget
         except AttributeError:

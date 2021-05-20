@@ -201,7 +201,7 @@ class Future(WrappedKey):
         return self._state.status
 
     def done(self):
-        """ Is the computation complete? """
+        """Is the computation complete?"""
         return self._state.done()
 
     def result(self, timeout=None):
@@ -309,7 +309,7 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """ Returns True if the future has been cancelled """
+        """Returns True if the future has been cancelled"""
         return self._state.status == "cancelled"
 
     async def _traceback(self):
@@ -491,7 +491,7 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """ Coroutine that waits on future, then calls callback """
+    """Coroutine that waits on future, then calls callback"""
     while future.status == "pending":
         await future._state.wait()
     callback(future)
@@ -953,7 +953,7 @@ class Client:
             return text
 
     def start(self, **kwargs):
-        """ Start scheduler running in separate thread """
+        """Start scheduler running in separate thread"""
         if self.status != "newly-created":
             return
 
@@ -1221,7 +1221,7 @@ class Client:
                 self._release_key(key)
 
     def _release_key(self, key):
-        """ Release key from distributed memory """
+        """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
         if st is not None:
@@ -1232,7 +1232,7 @@ class Client:
             )
 
     async def _handle_report(self):
-        """ Listen to scheduler """
+        """Listen to scheduler"""
         with log_errors():
             try:
                 while True:
@@ -1325,7 +1325,7 @@ class Client:
         logger.exception(exception)
 
     async def _close(self, fast=False):
-        """ Send close signal and wait until scheduler completes """
+        """Send close signal and wait until scheduler completes"""
         if self.status == "closed":
             return
 
@@ -1815,7 +1815,7 @@ class Client:
                     direct = True
 
         async def wait(k):
-            """ Want to stop the All(...) early if we find an error """
+            """Want to stop the All(...) early if we find an error"""
             st = self.futures[k]
             await st.wait()
             if st.status != "finished" and errors == "raise":
@@ -4116,7 +4116,7 @@ class Client:
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
-    """ This is used to support older setup functions as callbacks """
+    """This is used to support older setup functions as callbacks"""
 
     def __init__(self, setup):
         self._setup = setup
@@ -4129,7 +4129,7 @@ class _WorkerSetupPlugin(WorkerPlugin):
 
 
 class Executor(Client):
-    """ Deprecated: see Client """
+    """Deprecated: see Client"""
 
     def __init__(self, *args, **kwargs):
         warnings.warn("Executor has been renamed to Client")
@@ -4463,7 +4463,7 @@ class as_completed:
                 return
 
     def clear(self):
-        """ Clear out all submitted futures """
+        """Clear out all submitted futures"""
         with self.lock:
             self.futures.clear()
             while not self.queue.empty():
@@ -4475,7 +4475,7 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started """
+    """Return a client if one has started"""
     c = c or _get_global_client()
     if c:
         return c

@@ -99,7 +99,7 @@ class ServerNode(Server):
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None
     ):
-        """ This creates an HTTP Server running on this node """
+        """This creates an HTTP Server running on this node"""
 
         self.http_application = RoutingApplication(routes)
 
