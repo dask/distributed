@@ -82,6 +82,17 @@ def test_close_twice():
         assert not log
 
 
+def test_adapt_coros():
+    import time
+
+    with LocalCluster(n_workers=0, threads_per_worker=1) as cluster:
+        cluster.adapt(minimum=1, maximum=4)
+        with Client(cluster) as client:
+            client.submit(lambda: time.sleep(1)).result()
+    pending = [t for t in asyncio.tasks._all_tasks if not t.done()]
+    assert not pending
+
+
 def test_procs():
     with LocalCluster(
         n_workers=2,
