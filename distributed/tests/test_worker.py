@@ -87,7 +87,7 @@ async def test_identity(cleanup):
 @gen_cluster(client=True)
 async def test_worker_bad_args(c, s, a, b):
     class NoReprObj:
-        """ This object cannot be properly represented as a string. """
+        """This object cannot be properly represented as a string."""
 
         def __str__(self):
             raise ValueError("I have no str representation.")

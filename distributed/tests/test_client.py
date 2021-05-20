@@ -236,7 +236,7 @@ async def test_map_batch_size(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_custom_key_with_batches(c, s, a, b):
-    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+    """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
         lambda x: x ** 2,

@@ -209,7 +209,7 @@ class MultiLock:
         return result
 
     def release(self):
-        """ Release the lock if already acquired """
+        """Release the lock if already acquired"""
         if not self.locked():
             raise ValueError("Lock is not yet acquired")
         ret = self.client.sync(self.client.scheduler.multi_lock_release, id=self.id)

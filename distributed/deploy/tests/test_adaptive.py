@@ -288,7 +288,7 @@ async def test_adapt_quickly():
 
 @gen_test(timeout=None)
 async def test_adapt_down():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(
         0,
         asynchronous=True,
@@ -348,7 +348,7 @@ def test_basic_no_loop(loop):
 
 @pytest.mark.asyncio
 async def test_target_duration():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
     ):
@@ -376,7 +376,7 @@ async def test_target_duration():
 
 @pytest.mark.asyncio
 async def test_worker_keys(cleanup):
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
         workers={
             "a-1": {"cls": Worker},
