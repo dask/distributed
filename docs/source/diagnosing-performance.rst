@@ -121,7 +121,8 @@ Performance Reports
 Often when benchmarking and/or profiling, users may want to record a
 particular computation or even a full workflow.  Dask can save the bokeh
 dashboards as static HTML plots including the task stream, worker profiles,
-bandwidths, etc. This is done wrapping a computation with the ``performance_report`` context manager:
+bandwidths, etc. This is done wrapping a computation with the
+:class:`distributed.performance_report` context manager:
 
 .. code-block:: python
 
