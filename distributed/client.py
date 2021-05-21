@@ -889,9 +889,15 @@ class Client:
                 nworkers,
                 nthreads,
             )
-            memory = [w["memory_limit"] for w in workers.values()]
-            if all(memory):
-                text += ", memory=" + format_bytes(sum(memory))
+
+            if self.cluster is not None:
+                memory = self.cluster.memory_limit
+            else:
+                memory = [w["memory_limit"] for w in workers.values()]
+                memory = sum(memory) if all(memory) else 0
+            if memory:
+                text += ", memory=" + format_bytes(memory)
+
             text += ">"
             return text
 
@@ -926,11 +932,13 @@ class Client:
         if info:
             workers = list(info["workers"].values())
             cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
+
+            if self.cluster is not None:
+                memory = self.cluster.memory_limit
             else:
-                memory = ""
+                memory = [w["memory_limit"] for w in workers]
+                memory = sum(memory) if all(memory) else 0
+            memory = format_bytes(memory) if memory else ""
 
             text2 = (
                 '<h3 style="text-align: left;">Cluster</h3>\n'

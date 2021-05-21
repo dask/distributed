@@ -259,6 +259,11 @@ class Cluster:
             host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
+    @property
+    def memory_limit(self):
+        memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
+        return sum(memory) if all(memory) else 0
+
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
@@ -271,8 +276,7 @@ class Cluster:
         else:
             requested = workers
         cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
-        memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
-        memory = format_bytes(memory)
+        memory = format_bytes(self.memory_limit)
         text = """
 <div>
   <style scoped>
@@ -438,9 +442,9 @@ class Cluster:
             sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
         )
 
-        memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
-        if all(memory):
-            text += ", memory=" + format_bytes(sum(memory))
+        memory = self.memory_limit
+        if memory:
+            text += ", memory=" + format_bytes(memory)
 
         text += ")"
         return text

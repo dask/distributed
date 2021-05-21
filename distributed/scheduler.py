@@ -344,17 +344,6 @@ class MemoryState:
     def unmanaged_old(self) -> Py_ssize_t:
         return self._unmanaged_old
 
-    @classmethod
-    def sum(cls, *infos: "MemoryState") -> "MemoryState":
-        out = MemoryState(process=0, unmanaged_old=0, managed=0, managed_spilled=0)
-        ms: MemoryState
-        for ms in infos:
-            out._process += ms._process
-            out._managed_spilled += ms._managed_spilled
-            out._managed_in_memory += ms._managed_in_memory
-            out._unmanaged_old += ms._unmanaged_old
-        return out
-
     @property
     def managed(self) -> Py_ssize_t:
         return self._managed_in_memory + self._managed_spilled
@@ -1942,7 +1931,50 @@ class SchedulerState:
 
     @property
     def memory(self) -> MemoryState:
-        return MemoryState.sum(*(w.memory for w in self.workers.values()))
+        # Do not double-count unmanaged memory for workers sharing the same process
+        # (note: not the same thing as workers with multiple threads).
+        # Note that the unmanaged_old of two workers sharing the same PID is not
+        # necessarily the same; here we're arbitrarily picking that of the first worker.
+        # Doing it right would require us to go through the history which is overkill
+        # for this edge case.
+        process: Py_ssize_t = 0
+        unmanaged_old: Py_ssize_t = 0
+        managed: Py_ssize_t = 0
+        managed_spilled: Py_ssize_t = 0
+        seen = set()
+        ws: WorkerState
+        for ws in self.workers.values():
+            ms: MemoryState = ws.memory
+            managed += ms.managed
+            managed_spilled += ms.managed_spilled
+            k = ws.host, ws.pid
+            if k not in seen:
+                seen.add(k)
+                process += ms.process
+                unmanaged_old += ms.unmanaged_old
+
+        return MemoryState(
+            process=process,
+            unmanaged_old=unmanaged_old,
+            managed=managed,
+            managed_spilled=managed_spilled,
+        )
+
+    @property
+    def memory_limit(self) -> Py_ssize_t:
+        # Do not double-count workers sharing the same process
+        # (note: not the same thing as workers with multiple threads).
+        seen = set()
+        out: Py_ssize_t = 0
+        ws: WorkerState
+        for ws in self.workers.values():
+            k = ws.host, ws.pid
+            if k not in seen:
+                seen.add(k)
+                if not ws.memory_limit:
+                    return 0
+                out += ws.memory_limit
+        return out
 
     @property
     def __pdict__(self):

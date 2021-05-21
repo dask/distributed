@@ -146,6 +146,9 @@ class LocalCluster(SpecCluster):
                 "and `worker_dashboard_address` for the worker (less common)."
             )
 
+        if worker_class is None:
+            worker_class = Worker if not processes else Nanny
+
         self.status = None
         self.processes = processes
 
@@ -187,7 +190,11 @@ class LocalCluster(SpecCluster):
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
         if n_workers and "memory_limit" not in worker_kwargs:
-            worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
+            # All workers share the same process vs. one worker per process
+            memory_limit_split = 1 if worker_class is Worker else n_workers
+            worker_kwargs["memory_limit"] = parse_memory_limit(
+                "auto", 1, memory_limit_split
+            )
 
         worker_kwargs.update(
             {
@@ -221,11 +228,7 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        worker = {
-            "cls": worker_class or (Worker if not processes else Nanny),
-            "options": worker_kwargs,
-        }
-
+        worker = {"cls": worker_class, "options": worker_kwargs}
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
@@ -244,6 +247,14 @@ class LocalCluster(SpecCluster):
             "The `cluster.start_worker` function has been removed. "
             "Please see the `cluster.scale` method instead."
         )
+
+    @property
+    def memory_limit(self):
+        """Override Cluster.memory_limit to deal with multiple workers sharing the
+        same process (not the same as a worker with multiple threads), when the
+        cluster is initialised with ``LocalCluster(worker_class=Worker)``.
+        """
+        return self.scheduler.memory_limit
 
 
 clusters_to_close = weakref.WeakSet()
