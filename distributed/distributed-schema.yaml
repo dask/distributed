@@ -855,6 +855,6 @@ properties:
           and compiled with hwloc support. Unexpected errors can occur when using
           ``"auto"`` if any interfaces are disconnected or improperly configured.
       reuse-endpoints:
-        type: boolean
-        description: | 
+        type: [boolean, 'null']
+        description: |
           Whether to reuse endpoints or not.

@@ -120,12 +120,15 @@ def init_once():
         ucx_create_endpoint = ucp.create_endpoint
         ucx_create_listener = ucp.create_listener
     else:
-        if dask.config.get("ucx.reuse-endpoints"):
-            ucx_create_endpoint = EndpointReuse.create_endpoint
-            ucx_create_listener = EndpointReuse.create_listener
-        else:
+        reuse_endpoints = dask.config.get("ucx.reuse-endpoints")
+        if (
+            reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
+        ) or reuse_endpoints is False:
             ucx_create_endpoint = ucp.create_endpoint
             ucx_create_listener = ucp.create_listener
+        else:
+            ucx_create_endpoint = EndpointReuse.create_endpoint
+            ucx_create_listener = EndpointReuse.create_listener
 
 
 class UCX(Comm):
