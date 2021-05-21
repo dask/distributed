@@ -3603,7 +3603,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
             self.address,
-            len(parent._workers),
+            len(parent._workers_dv),
             parent._total_nthreads,
             len(parent._tasks),
         )
@@ -3612,7 +3612,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         text = (
             f"<b>Scheduler: </b>{html.escape(self.address)} "
-            f'<font color="gray">workers: </font>{len(parent._workers)} '
+            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
             f'<font color="gray">cores: </font>{parent._total_nthreads} '
             f'<font color="gray">tasks: </font>{len(parent._tasks)}'
         )
@@ -3628,7 +3628,8 @@ class Scheduler(SchedulerState, ServerNode):
             "services": {key: v.port for (key, v) in self.services.items()},
             "started": self.time_started,
             "workers": {
-                worker.address: worker.identity() for worker in parent._workers.values()
+                worker.address: worker.identity()
+                for worker in parent._workers_dv.values()
             },
         }
         return d
@@ -3648,7 +3649,7 @@ class Scheduler(SchedulerState, ServerNode):
             or just a (host, port) pair
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         port = ws._services.get(service_name)
         if port is None:
             return None
@@ -3743,10 +3744,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
-            for worker in parent._workers:
+            for worker in parent._workers_dv:
                 self.worker_send(worker, {"op": "close"})
             for i in range(20):  # wait a second for send signals to clear
-                if parent._workers:
+                if parent._workers_dv:
                     await asyncio.sleep(0.05)
                 else:
                     break
@@ -3798,7 +3799,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            ws: WorkerState = parent._workers[worker]
+            ws: WorkerState = parent._workers_dv[worker]
             nanny_addr = ws._nanny
             address = nanny_addr or worker
 
@@ -3824,7 +3825,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        ws: WorkerState = parent._workers.get(address)
+        ws: WorkerState = parent._workers_dv.get(address)
         if ws is None:
             return {"status": "missing"}
 
@@ -3835,7 +3836,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh: dict = parent._host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
-        frac = 1 / len(parent._workers)
+        frac = 1 / len(parent._workers_dv)
         parent._bandwidth = (
             parent._bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
         )
@@ -3907,7 +3908,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {
             "status": "OK",
             "time": local_now,
-            "heartbeat-interval": heartbeat_interval(len(parent._workers)),
+            "heartbeat-interval": heartbeat_interval(len(parent._workers_dv)),
         }
 
     async def add_worker(
@@ -3939,7 +3940,7 @@ class Scheduler(SchedulerState, ServerNode):
             address = normalize_address(address)
             host = get_address_host(address)
 
-            ws: WorkerState = parent._workers.get(address)
+            ws: WorkerState = parent._workers_dv.get(address)
             if ws is not None:
                 raise ValueError("Worker already exists %s" % ws)
 
@@ -4048,7 +4049,7 @@ class Scheduler(SchedulerState, ServerNode):
             msg = {
                 "status": "OK",
                 "time": time(),
-                "heartbeat-interval": heartbeat_interval(len(parent._workers)),
+                "heartbeat-interval": heartbeat_interval(len(parent._workers_dv)),
                 "worker-plugins": self.worker_plugins,
             }
 
@@ -4056,7 +4057,7 @@ class Scheduler(SchedulerState, ServerNode):
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
-                    {w: ws._versions for w, ws in parent._workers.items()},
+                    {w: ws._versions for w, ws in parent._workers_dv.items()},
                     {
                         c: cs._versions
                         for c, cs in parent._clients.items()
