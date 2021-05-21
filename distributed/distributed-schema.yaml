@@ -860,5 +860,5 @@ properties:
           Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
           UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
           introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-          can cause establishing endpoints to be very slow, particularly noticeable in
+          can cause establishing endpoints to be very slow, this is particularly noticeable in
           clusters of more than a few dozen workers.
