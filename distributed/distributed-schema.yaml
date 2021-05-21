@@ -855,11 +855,10 @@ properties:
           and compiled with hwloc support. Unexpected errors can occur when using
           ``"auto"`` if any interfaces are disconnected or improperly configured.
       reuse-endpoints:
+        type: [boolean, 'null']
+        description: |
           Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
           UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
           introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
           can cause establishing endpoints to be very slow, particularly noticeable in
           clusters of more than a few dozen workers.
-        type: [boolean, 'null']
-        description: |
-          Whether to reuse endpoints or not.
