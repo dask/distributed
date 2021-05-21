@@ -253,12 +253,12 @@ class Nanny(ServerNode):
 
     @property
     def local_dir(self):
-        """ For API compatibility with Nanny """
+        """For API compatibility with Nanny"""
         warnings.warn("The local_dir attribute has moved to local_directory")
         return self.local_directory
 
     async def start(self):
-        """ Start nanny, start local process, start watching """
+        """Start nanny, start local process, start watching"""
 
         await super().start()
 
@@ -411,7 +411,7 @@ class Nanny(ServerNode):
         return self._psutil_process_obj
 
     def memory_monitor(self):
-        """ Track worker's memory.  Restart if it goes above terminate fraction """
+        """Track worker's memory.  Restart if it goes above terminate fraction"""
         if self.status != Status.running:
             return
         process = self.process.process

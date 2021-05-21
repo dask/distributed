@@ -264,7 +264,7 @@ def address_from_user_args(
     security=None,
     default_port=0,
 ) -> str:
-    """ Get an address to listen on from common user provided arguments """
+    """Get an address to listen on from common user provided arguments"""
 
     if security and security.require_encryption and not protocol:
         protocol = "tls"

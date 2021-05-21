@@ -50,7 +50,7 @@ template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
 
 
 class StateTable(DashboardComponent):
-    """ Currently running tasks """
+    """Currently running tasks"""
 
     def __init__(self, worker):
         self.worker = worker

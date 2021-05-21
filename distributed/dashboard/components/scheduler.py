@@ -92,7 +92,7 @@ XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
 class Occupancy(DashboardComponent):
-    """ Occupancy (in time) per worker """
+    """Occupancy (in time) per worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -176,7 +176,7 @@ class Occupancy(DashboardComponent):
 
 
 class ProcessingHistogram(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -499,7 +499,7 @@ class NBytesHistogram(DashboardComponent):
 
 
 class BandwidthTypes(DashboardComponent):
-    """ Bar chart showing bandwidth per type """
+    """Bar chart showing bandwidth per type"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -565,7 +565,7 @@ class BandwidthTypes(DashboardComponent):
 
 
 class BandwidthWorkers(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -670,7 +670,7 @@ class BandwidthWorkers(DashboardComponent):
 
 
 class ComputePerKey(DashboardComponent):
-    """ Bar chart showing time spend in action by key prefix"""
+    """Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -838,7 +838,7 @@ class ComputePerKey(DashboardComponent):
 
 
 class AggregateAction(DashboardComponent):
-    """ Bar chart showing time spend in action by key prefix"""
+    """Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -940,7 +940,7 @@ class AggregateAction(DashboardComponent):
 
 
 class MemoryByKey(DashboardComponent):
-    """ Bar chart showing memory use by key prefix"""
+    """Bar chart showing memory use by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -1232,7 +1232,7 @@ class StealingEvents(DashboardComponent):
         )
 
     def convert(self, msgs):
-        """ Convert a log message to a glyph """
+        """Convert a log message to a glyph"""
         total_duration = 0
         for msg in msgs:
             time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
@@ -1721,7 +1721,7 @@ class TaskGraph(DashboardComponent):
 
 
 class TaskProgress(DashboardComponent):
-    """ Progress bars per task type """
+    """Progress bars per task type"""
 
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler

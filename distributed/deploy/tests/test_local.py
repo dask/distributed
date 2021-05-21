@@ -627,7 +627,7 @@ def test_no_ipywidgets(loop, monkeypatch):
 
 
 def test_scale(loop):
-    """ Directly calling scale both up and down works as expected """
+    """Directly calling scale both up and down works as expected"""
     with LocalCluster(
         scheduler_port=0,
         silence_logs=False,
@@ -686,7 +686,7 @@ def test_adapt(loop):
 
 
 def test_adapt_then_manual(loop):
-    """ We can revert from adaptive, back to manual """
+    """We can revert from adaptive, back to manual"""
     with LocalCluster(
         scheduler_port=0,
         silence_logs=False,

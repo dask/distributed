@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class EventStream(SchedulerPlugin):
-    """ Maintain a copy of worker events """
+    """Maintain a copy of worker events"""
 
     def __init__(self, scheduler=None):
         self.buffer = []

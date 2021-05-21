@@ -442,7 +442,7 @@ async def test_rpc_with_many_connections_inproc():
 
 
 async def check_large_packets(listen_arg):
-    """ tornado has a 100MB cap by default """
+    """tornado has a 100MB cap by default"""
     server = Server({"echo": echo})
     await server.listen(listen_arg)
 

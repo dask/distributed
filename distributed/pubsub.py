@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class PubSubSchedulerExtension:
-    """ Extend Dask's scheduler with routes to handle PubSub machinery """
+    """Extend Dask's scheduler with routes to handle PubSub machinery"""
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
@@ -116,7 +116,7 @@ class PubSubSchedulerExtension:
 
 
 class PubSubWorkerExtension:
-    """ Extend Dask's Worker with routes to handle PubSub machinery """
+    """Extend Dask's Worker with routes to handle PubSub machinery"""
 
     def __init__(self, worker):
         self.worker = worker
@@ -169,7 +169,7 @@ class PubSubWorkerExtension:
 
 
 class PubSubClientExtension:
-    """ Extend Dask's Client with handlers to handle PubSub machinery """
+    """Extend Dask's Client with handlers to handle PubSub machinery"""
 
     def __init__(self, client):
         self.client = client
@@ -344,7 +344,7 @@ class Pub:
             self.client.scheduler_comm.send(data)
 
     def put(self, msg):
-        """ Publish a message to all subscribers of this topic """
+        """Publish a message to all subscribers of this topic"""
         self.loop.add_callback(self._put, msg)
 
     def __repr__(self):
