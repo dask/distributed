@@ -15,15 +15,14 @@ class ReplayTaskScheduler:
 
     This adds the following routes to the scheduler
 
-    *  cause_of_failure
     *  get_runspec
+    *  get_error_cause
     """
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.scheduler.handlers["get_runspec"] = self.get_runspec
         self.scheduler.handlers["get_error_cause"] = self.get_error_cause
-        self.scheduler.handlers["_process_key"] = self._process_key
         self.scheduler.extensions["replay-tasks"] = self
 
     def _process_key(self, key):
@@ -52,13 +51,10 @@ class ReplayTaskClient:
     """
     A plugin for the client allowing replay of remote tasks locally
 
-    Adds the following methods (and their async variants)to the given client:
+    Adds the following methods to the given client:
 
     - ``recreate_error_locally``: main user method for replaying failed tasks
     - ``recreate_task_locally``: main user method for replaying any task
-    - ``get_futures_error``: gets the task, its details and dependencies,
-        responsible for failure of the given future.
-    - ``get_futures_components``: gets the task, its details and dependencies.
     """
 
     def __init__(self, client):
@@ -71,17 +67,17 @@ class ReplayTaskClient:
         self.client._get_errored_future = self._get_errored_future
         self.client.recreate_task_locally = self.recreate_task_locally
         self.client.recreate_error_locally = self.recreate_error_locally
-        self.client._execute_task_components = self._execute_task_components
 
     @property
     def scheduler(self):
         return self.client.scheduler
 
     async def _get_raw_components_from_future(self, future):
+        """
+        For a given future return the func, args and kwargs and future
+        deps that would be executed remotely.
+        """
         await wait(future)
-        # one reason not to pass spec into this function is in case we want to
-        # expose a method to get all the components/deps in the future. This
-        # way it will be easier to do.
         spec = await self.scheduler.get_runspec(key=future.key)
         deps, task = spec["deps"], spec["task"]
         if isinstance(task, dict):
@@ -92,6 +88,9 @@ class ReplayTaskClient:
             return (function, args, kwargs, deps)
 
     async def _prepare_raw_components(self, raw_components):
+        """
+        Take raw components and resolve future dependencies.
+        """
         function, args, kwargs, deps = raw_components
         futures = self.client._graph_to_futures({}, deps)
         data = await self.client._gather(futures)
@@ -100,22 +99,53 @@ class ReplayTaskClient:
         return (function, args, kwargs)
 
     async def _get_components_from_future(self, future):
+        """
+        For a given future return the func, args and kwargs that would be
+        executed remotely. Any args/kwargs that are themselves futures will
+        be resolved to the return value of those futures.
+        """
         raw_components = await self._get_raw_components_from_future(future)
         return await self._prepare_raw_components(raw_components)
 
-    def _execute_task_components(self, func, args, kwargs, run=True):
-        if run:
-            func(*args, **kwargs)
-        else:
-            return func, args, kwargs
+    def recreate_task_locally(self, future):
+        """
+        For any calculation, whether it succeeded or failed, perform the task
+        locally for debugging.
 
-    def recreate_task_locally(self, future, run=True):
+        This operation should be performed after a future (result of ``gather``,
+        ``compute``, etc) comes back with a status other than "pending". Cases
+        where you might want to debug a successfully completed future could
+        include a calculation that returns an unexpected results. A common
+        debugging process might include running the task locally in debug mode,
+        with `pdb.runcall`.
+
+        Examples
+        --------
+        >>> import pdb                                    # doctest: +SKIP
+        >>> future = c.submit(div, 1, 1)                  # doctest: +SKIP
+        >>> future.status                                 # doctest: +SKIP
+        'finished'
+        >>> pdb.runcall(c.recreate_task_locally, future)  # doctest: +SKIP
+
+        Parameters
+        ----------
+        future : future
+            The same thing as was given to ``gather``.
+
+        Returns
+        -------
+        Any; will return the result of the task future.
+        """
         func, args, kwargs = sync(
             self.client.loop, self._get_components_from_future, future
         )
-        return self._execute_task_components(func, args, kwargs, run=run)
+        return func(*args, **kwargs)
 
     async def _get_errored_future(self, future):
+        """
+        For a given future collection, return the first future that raised
+        an error.
+        """
         await wait(future)
         futures = [f.key for f in futures_of(future) if f.status == "error"]
         if not futures:
@@ -123,7 +153,7 @@ class ReplayTaskClient:
         cause = await self.scheduler.get_error_cause(keys=futures)
         return Future(cause)
 
-    def recreate_error_locally(self, future, run=True):
+    def recreate_error_locally(self, future):
         """
         For a failed calculation, perform the blamed task locally for debugging.
 
@@ -169,4 +199,4 @@ class ReplayTaskClient:
         errored_future = sync(
             self.client.loop, self._get_errored_future, future
         )
-        return self.recreate_task_locally(errored_future, run=run)
+        return self.recreate_task_locally(errored_future)
