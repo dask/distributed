@@ -6278,6 +6278,13 @@ class Scheduler(SchedulerState, ServerNode):
         """
         from .worker import run
 
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot run function as the scheduler has been explicitly disallowed from "
+                "deserializing arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
