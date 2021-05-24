@@ -103,7 +103,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     type=str,
     multiple=True,
     is_eager=True,
-    default="",
     help="Module that should be loaded by the scheduler process  "
     'like "foo.bar" or "/path/to/foo.py".',
 )

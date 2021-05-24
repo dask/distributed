@@ -1728,6 +1728,18 @@ async def test_dashboard_address():
     assert s.services["dashboard"].port
     await s.close()
 
+    s = await Scheduler(dashboard_address="127.0.0.1:8901,127.0.0.1:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=":8901,:8902", port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
+    s = await Scheduler(dashboard_address=[8901, 8902], port=0)
+    assert s.services["dashboard"].port == 8901
+    await s.close()
+
 
 @gen_cluster(client=True)
 async def test_adaptive_target(c, s, a, b):
@@ -2043,7 +2055,6 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
 async def test_gather_allow_worker_reconnect(c, s, a, b):
     """
@@ -2062,9 +2073,10 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     def inc_slow(x):
         # Once the graph below is rescheduled this computation runs again. We
         # need to sleep for at least 0.5 seconds to give the worker a chance to
-        # reconnect (Heartbeat timing)
+        # reconnect (Heartbeat timing). In slow CI situations, the actual
+        # reconnect might take a bit longer, therefore wait more
         if x in already_calculated:
-            time.sleep(1)
+            time.sleep(2)
         already_calculated.append(x)
         return x + 1
 
@@ -2076,18 +2088,16 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     z = c.submit(reducer, x, y)
 
-    s.rpc = await FlakyConnectionPool(failing_connections=4)
+    s.rpc = await FlakyConnectionPool(failing_connections=1)
 
-    with dask.config.set(
-        {"distributed.comm.retry.delay_min": 0.5, "distributed.comm.retry.count": 3}
-    ):
+    # This behaviour is independent of retries. Remove them to reduce complexity
+    # of this setup
+    with dask.config.set({"distributed.comm.retry.count": 0}):
         with captured_logger(
             logging.getLogger("distributed.scheduler")
         ) as sched_logger, captured_logger(
             logging.getLogger("distributed.client")
-        ) as client_logger, captured_logger(
-            logging.getLogger("distributed.utils_comm")
-        ) as utils_comm_logger:
+        ) as client_logger:
             # Gather using the client (as an ordinary user would)
             # Upon a missing key, the client will reschedule the computations
             res = await c.gather(z)
@@ -2096,13 +2106,10 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
 
     sched_logger = sched_logger.getvalue()
     client_logger = client_logger.getvalue()
-    utils_comm_logger = utils_comm_logger.getvalue()
 
     # Ensure that the communication was done via the scheduler, i.e. we actually hit a
     # bad connection
     assert s.rpc.cnn_count > 0
-
-    assert "Retrying get_data_from_worker after exception" in utils_comm_logger
 
     # The reducer task was actually not found upon first collection. The client will
     # reschedule the graph
@@ -2122,7 +2129,6 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     ]
     assert len(transitions_to_processing) == 1
 
-    starts = []
     finish_processing_transitions = 0
     for transition in s.transition_log:
         key, start, finish, recommendations, timestamp = transition
@@ -2322,7 +2328,7 @@ def clear_leak():
     gc.collect()
 
 
-def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
+async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
@@ -2333,7 +2339,7 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
             raise TimeoutError(
                 f"Expected {min_} MiB <= {attr} <= {max_} MiB; got:\n{minfo!r}"
             )
-        sleep(0.1)
+        await asyncio.sleep(0.1)
 
 
 # This test is heavily influenced by hard-to-control factors such as memory management
@@ -2341,93 +2347,95 @@ def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout=10):
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
 # ~33s runtime, or distributed.memory.recent_to_old_time + 3s
 @pytest.mark.slow
-def test_memory():
+@gen_cluster(
+    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60
+)
+async def test_memory(c, s, *_):
     pytest.importorskip("zict")
 
-    with Client(n_workers=2, threads_per_worker=1, memory_limit=500 * 2 ** 20) as c:
-        c.wait_for_workers(2)
-        s = c.cluster.scheduler
-        a, b = s.workers.values()
+    # WorkerState objects, as opposed to the Nanny objects passed by gen_cluster
+    a, b = s.workers.values()
 
-        s_m0 = s.memory
-        assert s_m0.process == a.memory.process + b.memory.process
-        assert s_m0.managed == 0
-        assert a.memory.managed == 0
-        assert b.memory.managed == 0
-        # When a worker first goes online, its RAM is immediately counted as
-        # unmanaged_old
-        assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
-        assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
-        assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
+    s_m0 = s.memory
+    assert s_m0.process == a.memory.process + b.memory.process
+    assert s_m0.managed == 0
+    assert a.memory.managed == 0
+    assert b.memory.managed == 0
+    # When a worker first goes online, its RAM is immediately counted as
+    # unmanaged_old
+    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
+    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
+    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
-        f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
-        f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
-        assert_memory(s, "unmanaged_recent", 300, 380)
-        assert_memory(a, "unmanaged_recent", 150, 190)
-        assert_memory(b, "unmanaged_recent", 150, 190)
-        c.gather([f1, f2])
+    f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
+    f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
+    await assert_memory(s, "unmanaged_recent", 300, 380)
+    await assert_memory(a, "unmanaged_recent", 150, 190)
+    await assert_memory(b, "unmanaged_recent", 150, 190)
+    await wait([f1, f2])
 
-        # On each worker, we now have 100 MiB managed + 50 MiB fresh leak
-        assert_memory(s, "managed_in_memory", 200, 201)
-        assert_memory(a, "managed_in_memory", 100, 101)
-        assert_memory(b, "managed_in_memory", 100, 101)
-        assert_memory(s, "unmanaged_recent", 100, 180)
-        assert_memory(a, "unmanaged_recent", 50, 90)
-        assert_memory(b, "unmanaged_recent", 50, 90)
+    # On each worker, we now have 100 MiB managed + 50 MiB fresh leak
+    await assert_memory(s, "managed_in_memory", 200, 201)
+    await assert_memory(a, "managed_in_memory", 100, 101)
+    await assert_memory(b, "managed_in_memory", 100, 101)
+    await assert_memory(s, "unmanaged_recent", 100, 180)
+    await assert_memory(a, "unmanaged_recent", 50, 90)
+    await assert_memory(b, "unmanaged_recent", 50, 90)
 
-        # Force the output of f1 and f2 to spill to disk.
-        # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
-        # process memory per worker, or roughly after 3~7 rounds of the below depending
-        # on how much RAM the interpreter is using.
-        more_futs = []
-        for _ in range(8):
-            if s.memory.managed_spilled > 0:
-                break
-            more_futs += [
-                c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
-                c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
-            ]
-            sleep(2)
-        assert_memory(s, "managed_spilled", 1, 999)
-        # Wait for the spilling to finish. Note that this does not make the test take
-        # longer as we're waiting for recent_to_old_time anyway.
-        sleep(10)
+    # Force the output of f1 and f2 to spill to disk.
+    # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
+    # process memory per worker, or roughly after 3~7 rounds of the below depending
+    # on how much RAM the interpreter is using.
+    more_futs = []
+    for _ in range(8):
+        if s.memory.managed_spilled > 0:
+            break
+        more_futs += [
+            c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
+            c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
+        ]
+        await asyncio.sleep(2)
+    await assert_memory(s, "managed_spilled", 1, 999)
 
-        # Delete spilled keys
-        prev = s.memory
-        del f1
-        del f2
-        assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 19)
+    # Wait for the spilling to finish. Note that this does not make the test take
+    # longer as we're waiting for recent_to_old_time anyway.
+    await asyncio.sleep(10)
 
-        # Empty the cluster, with the exception of leaked memory
-        del more_futs
-        assert_memory(s, "managed", 0, 0)
+    # Delete spilled keys
+    prev = s.memory
+    del f1
+    del f2
+    await assert_memory(s, "managed_spilled", 0, prev.managed_spilled / 2 ** 20 - 19)
 
-        orig_unmanaged = s_m0.unmanaged / 2 ** 20
-        orig_old = s_m0.unmanaged_old / 2 ** 20
+    # Empty the cluster, with the exception of leaked memory
+    del more_futs
+    await assert_memory(s, "managed", 0, 0)
 
-        # Wait until 30s have passed since the spill to observe unmanaged_recent
-        # transition into unmanaged_old
-        c.run(gc.collect)
-        assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
-        assert_memory(
-            s,
-            "unmanaged_old",
-            orig_old + 90,
-            # On MacOS, the process memory of the Python interpreter does not shrink as
-            # fast as on Linux/Windows
-            9999 if MACOS else orig_old + 190,
-            timeout=40,
-        )
+    orig_unmanaged = s_m0.unmanaged / 2 ** 20
+    orig_old = s_m0.unmanaged_old / 2 ** 20
 
-        # When the leaked memory is cleared, unmanaged and unmanaged_old drop
-        # On MacOS, the process memory of the Python interpreter does not shrink as fast
-        # as on Linux/Windows
-        if not MACOS:
-            c.run(clear_leak)
-            assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
-            assert_memory(s, "unmanaged_old", 0, orig_old + 95)
-            assert_memory(s, "unmanaged_recent", 0, 90)
+    # Wait until 30s have passed since the spill to observe unmanaged_recent
+    # transition into unmanaged_old
+    await c.run(gc.collect)
+    await assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
+    await assert_memory(
+        s,
+        "unmanaged_old",
+        orig_old + 90,
+        # On MacOS, the process memory of the Python interpreter does not shrink as
+        # fast as on Linux/Windows
+        9999 if MACOS else orig_old + 190,
+        timeout=40,
+    )
+
+    # When the leaked memory is cleared, unmanaged and unmanaged_old drop
+    # On MacOS, the process memory of the Python interpreter does not shrink as fast
+    # as on Linux/Windows
+    if not MACOS:
+        await c.run(clear_leak)
+        await assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
+        await assert_memory(s, "unmanaged_old", 0, orig_old + 95)
+        await assert_memory(s, "unmanaged_recent", 0, 90)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})

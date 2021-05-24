@@ -367,7 +367,7 @@ async def test_scheduler_address_config(c, s):
 
 
 @pytest.mark.slow
-@gen_test(timeout=20)
+@gen_test()
 async def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")

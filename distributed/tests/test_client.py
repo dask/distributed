@@ -236,7 +236,7 @@ async def test_map_batch_size(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_custom_key_with_batches(c, s, a, b):
-    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+    """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
         lambda x: x ** 2,
@@ -4143,6 +4143,26 @@ async def test_persist_workers_annotate(e, s, a, b, c):
     assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
 
 
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+async def test_persist_workers_annotate2(e, s, a, b, c):
+    def key_to_worker(key):
+        return a.address
+
+    L1 = [delayed(inc)(i) for i in range(4)]
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
+
+    with dask.annotate(workers=key_to_worker):
+        out = e.persist(L1, optimize_graph=False)
+        await wait(out)
+
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
+
+    for v in L1:
+        assert s.worker_restrictions[v.key] == {a.address}
+
+
 @nodebug  # test timing is fragile
 @gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
 async def test_persist_workers(e, s, a, b, c):
@@ -6178,7 +6198,7 @@ async def test_performance_report(c, s, a, b):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
-    async def f():
+    async def f(stacklevel):
         """
         We wrap this in a function so that the assertions aren't in the
         performanace report itself
@@ -6187,14 +6207,15 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
-            async with performance_report(filename=fn):
+            async with performance_report(filename=fn, stacklevel=stacklevel):
                 await c.compute((x + x.T).sum())
 
             with open(fn) as f:
                 data = f.read()
         return data
 
-    data = await f()
+    # Ensure default kwarg maintains backward compatability
+    data = await f(stacklevel=1)
 
     assert "Also, we want this comment to appear" in data
     assert "bokeh" in data
@@ -6203,6 +6224,18 @@ async def test_performance_report(c, s, a, b):
     assert "x = da.random" in data
     assert "Threads: 4" in data
     assert dask.__version__ in data
+
+    # Stacklevel two captures code two frames back -- which in this case
+    # is the testing function
+    data = await f(stacklevel=2)
+    assert "async def test_performance_report(c, s, a, b):" in data
+    assert "Dask Performance Report" in data
+
+    # Stacklevel zero or lower is overridden to stacklevel=1 so we don't see
+    # distributed internals
+    data = await f(stacklevel=0)
+    assert "Also, we want this comment to appear" in data
+    assert "Dask Performance Report" in data
 
 
 @pytest.mark.asyncio

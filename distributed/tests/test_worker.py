@@ -87,7 +87,7 @@ async def test_identity(cleanup):
 @gen_cluster(client=True)
 async def test_worker_bad_args(c, s, a, b):
     class NoReprObj:
-        """ This object cannot be properly represented as a string. """
+        """This object cannot be properly represented as a string."""
 
         def __str__(self):
             raise ValueError("I have no str representation.")
@@ -1787,6 +1787,37 @@ async def test_story(c, s, w):
     ts = w.tasks[future.key]
     assert ts.state in str(w.story(ts))
     assert w.story(ts) == w.story(ts.key)
+
+
+@gen_cluster(client=True)
+async def test_story_with_deps(c, s, a, b):
+    """
+    Assert that the structure of the story does not change unintentionally and
+    expected subfields are actually filled
+    """
+    futures = c.map(inc, range(10), workers=[a.address])
+    res = c.submit(sum, futures, workers=[b.address])
+    await res
+    key = res.key
+
+    story = a.story(key)
+    assert story == []
+    story = b.story(key)
+
+    expected_story = [
+        (key, "new"),
+        (key, "new", "waiting"),
+        (
+            "gather-dependencies",
+            key,
+            {fut.key for fut in futures},
+        ),
+        (key, "waiting", "ready"),
+        (key, "ready", "executing"),
+        (key, "put-in-memory"),
+        (key, "executing", "memory"),
+    ]
+    assert story == expected_story
 
 
 def test_weight_deprecated():

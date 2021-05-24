@@ -799,12 +799,12 @@ class Worker(ServerNode):
 
     @property
     def worker_address(self):
-        """ For API compatibility with Nanny """
+        """For API compatibility with Nanny"""
         return self.address
 
     @property
     def local_dir(self):
-        """ For API compatibility with Nanny """
+        """For API compatibility with Nanny"""
         warnings.warn(
             "The local_dir attribute has moved to local_directory", stacklevel=2
         )
@@ -2008,7 +2008,8 @@ class Worker(ServerNode):
 
                     deps = [dep for dep in deps if dep not in missing_deps]
 
-                self.log.append(("gather-dependencies", key, deps))
+                log_keys = {d.key for d in deps}
+                self.log.append(("gather-dependencies", key, log_keys))
 
                 in_flight = False
 
@@ -3487,7 +3488,7 @@ cache_loads = LRU(maxsize=100)
 
 
 def loads_function(bytes_object):
-    """ Load a function from bytes, cache bytes """
+    """Load a function from bytes, cache bytes"""
     if len(bytes_object) < 100000:
         try:
             result = cache_loads[bytes_object]
@@ -3499,7 +3500,7 @@ def loads_function(bytes_object):
 
 
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
-    """ Deserialize task inputs and regularize to func, args, kwargs """
+    """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
         function = loads_function(function)
     if args and isinstance(args, bytes):
@@ -3539,7 +3540,7 @@ _cache_lock = threading.Lock()
 
 
 def dumps_function(func):
-    """ Dump a function to bytes, cache functions """
+    """Dump a function to bytes, cache functions"""
     try:
         with _cache_lock:
             result = cache_dumps[func]
@@ -3588,7 +3589,7 @@ _warn_dumps_warned = [False]
 
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """ Dump an object to bytes, warn if those bytes are large """
+    """Dump an object to bytes, warn if those bytes are large"""
     b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True

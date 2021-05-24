@@ -114,7 +114,7 @@ class Cluster:
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
+        """Listen to scheduler for updates on adding and removing workers"""
         while True:
             try:
                 msgs = await comm.read()
@@ -302,7 +302,7 @@ class Cluster:
         return text
 
     def _widget(self):
-        """ Create IPython widget for display within a notebook """
+        """Create IPython widget for display within a notebook"""
         try:
             return self._cached_widget
         except AttributeError:
@@ -388,8 +388,9 @@ class Cluster:
         else:
             dashboard = "Not Available"
         return (
-            "<div style='background-color: #f2f2f2; display: inline-block; "
-            "padding: 10px; border: 1px solid #999999;'>\n"
+            "<div style='color: var(--jp-ui-font-color0, #000000); "
+            "background-color: var(--jp-layout-color2, #f2f2f2); display: inline-block; "
+            "padding: 10px; border: 1px solid var(--jp-border-color0, #999999);'>\n"
             "  <h3>{cls}</h3>\n"
             "  <ul>\n"
             "    <li><b>Dashboard: </b>{dashboard}\n"
