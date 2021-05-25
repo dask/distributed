@@ -645,7 +645,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except EnvironmentError:
+    except (EnvironmentError, CommClosedError):
         # On communication errors, we should simply close the communication
         force_close = True
         raise
