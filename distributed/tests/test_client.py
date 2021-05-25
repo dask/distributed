@@ -236,7 +236,7 @@ async def test_map_batch_size(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_custom_key_with_batches(c, s, a, b):
-    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+    """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
         lambda x: x ** 2,
@@ -4141,6 +4141,26 @@ async def test_persist_workers_annotate(e, s, a, b, c):
     assert total.key in b.data
 
     assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 3, client=True)
+async def test_persist_workers_annotate2(e, s, a, b, c):
+    def key_to_worker(key):
+        return a.address
+
+    L1 = [delayed(inc)(i) for i in range(4)]
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
+
+    with dask.annotate(workers=key_to_worker):
+        out = e.persist(L1, optimize_graph=False)
+        await wait(out)
+
+    for x in L1:
+        assert all(layer.annotations is None for layer in x.dask.layers.values())
+
+    for v in L1:
+        assert s.worker_restrictions[v.key] == {a.address}
 
 
 @nodebug  # test timing is fragile

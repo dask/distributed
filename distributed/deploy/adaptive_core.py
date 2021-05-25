@@ -113,7 +113,7 @@ class AdaptiveCore:
             self.periodic_callback = None
 
     async def target(self) -> int:
-        """ The target number of workers that should exist """
+        """The target number of workers that should exist"""
         raise NotImplementedError()
 
     async def workers_to_close(self, target: int) -> list:
@@ -124,7 +124,7 @@ class AdaptiveCore:
         return list(self.observed)[target:]
 
     async def safe_target(self) -> int:
-        """ Used internally, like target, but respects minimum/maximum """
+        """Used internally, like target, but respects minimum/maximum"""
         n = await self.target()
         if n > self.maximum:
             n = self.maximum

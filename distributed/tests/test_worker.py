@@ -87,7 +87,7 @@ async def test_identity(cleanup):
 @gen_cluster(client=True)
 async def test_worker_bad_args(c, s, a, b):
     class NoReprObj:
-        """ This object cannot be properly represented as a string. """
+        """This object cannot be properly represented as a string."""
 
         def __str__(self):
             raise ValueError("I have no str representation.")
@@ -1807,9 +1807,21 @@ async def test_story_with_deps(c, s, a, b):
     expected_story = [
         (key, "new"),
         (key, "new", "waiting"),
+        # First log is what needs to be fetched in total as determined in
+        # ensure_communicating
         (
             "gather-dependencies",
             key,
+            {fut.key for fut in futures},
+        ),
+        # Second log may just be a subset of the above, see also
+        # Worker.select_keys_for_gather
+        # This case, it's all because Worker.target_message_size is sufficiently
+        # large
+        (
+            "request-dep",
+            key,
+            a.address,
             {fut.key for fut in futures},
         ),
         (key, "waiting", "ready"),
@@ -1823,3 +1835,65 @@ async def test_story_with_deps(c, s, a, b):
 def test_weight_deprecated():
     with pytest.warns(DeprecationWarning):
         weight("foo", "bar")
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_one_worker_always_busy(c, s, a, b):
+    # Ensure that both dependencies for H are on another worker than H itself.
+    # The worker where the dependencies are on is then later blocked such that
+    # the data cannot be fetched
+    # In the past it was important that there is more than one key on the
+    # worker. This should be kept to avoid any edge case specific to one
+    f = c.submit(inc, 1, workers=[a.address])
+    g = c.submit(
+        inc,
+        2,
+        workers=[a.address],
+    )
+
+    await f
+    await g
+    # We will block A for any outgoing communication. This simulates an
+    # overloaded worker which will always return "busy" for get_data requests,
+    # effectively blocking H indefinitely
+    a.outgoing_current_count = 10000000
+    assert f.key in a.tasks
+    assert g.key in a.tasks
+    # Ensure there are actually two distinct tasks and not some pure=True
+    # caching
+    assert f.key != g.key
+    h = c.submit(add, f, g, workers=[b.address])
+
+    fut = asyncio.wait_for(h, 0.1)
+
+    while h.key not in b.tasks:
+        await asyncio.sleep(0.01)
+
+    ts_h = b.tasks[h.key]
+    ts_f = b.tasks[f.key]
+    ts_g = b.tasks[g.key]
+
+    with pytest.raises(asyncio.TimeoutError):
+        assert ts_h.state == "waiting"
+        assert ts_f.state in ["flight", "fetch"]
+        assert ts_g.state in ["flight", "fetch"]
+        await fut
+
+    # Ensure B wasn't lazy but tried at least once
+    assert b.repetitively_busy
+
+    x = await Worker(s.address, name="x")
+    # We "scatter" the data to another worker which is able to serve this data.
+    # In reality this could be another worker which fetched this dependency and
+    # got through to A or another worker executed the task using work stealing
+    # or any other. To avoid cross effects, we'll just put the data onto the
+    # worker ourselves
+    x.update_data(data={key: a.data[key] for key in [f.key, g.key]})
+
+    assert await h == 5
+
+    # Since we put the data onto the worker ourselves, the gather_dep might
+    # still be mid execution and we'll get a dangling task. Let it finish
+    # naturally
+    while any(["Worker.gather_dep" in str(t) for t in asyncio.all_tasks()]):
+        await asyncio.sleep(0.05)

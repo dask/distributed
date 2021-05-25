@@ -288,7 +288,7 @@ async def test_adapt_quickly():
 
 @gen_test(timeout=None)
 async def test_adapt_down():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(
         0,
         asynchronous=True,
@@ -312,7 +312,7 @@ async def test_adapt_down():
                 assert time() < start + 60
 
 
-@gen_test(timeout=30)
+@gen_test()
 async def test_no_more_workers_than_tasks():
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1000}}
@@ -348,7 +348,7 @@ def test_basic_no_loop(loop):
 
 @pytest.mark.asyncio
 async def test_target_duration():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
     ):
@@ -376,7 +376,7 @@ async def test_target_duration():
 
 @pytest.mark.asyncio
 async def test_worker_keys(cleanup):
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
         workers={
             "a-1": {"cls": Worker},
@@ -460,3 +460,22 @@ async def test_update_adaptive(cleanup):
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
+
+
+@pytest.mark.asyncio
+async def test_adaptive_no_memory_limit(cleanup):
+    """Make sure that adapt() does not keep creating workers when no memory limit is set."""
+    async with LocalCluster(
+        n_workers=0, threads_per_worker=1, memory_limit=0, asynchronous=True
+    ) as cluster:
+        cluster.adapt(minimum=1, maximum=10, interval="1 ms")
+        async with Client(cluster, asynchronous=True) as client:
+            await client.gather(client.map(slowinc, range(5), delay=0.35))
+        assert (
+            sum(
+                state[1]["n"]
+                for state in cluster._adaptive.log
+                if state[1]["status"] == "up"
+            )
+            <= 5
+        )

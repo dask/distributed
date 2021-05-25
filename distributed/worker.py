@@ -16,6 +16,7 @@ from datetime import timedelta
 from functools import partial
 from inspect import isawaitable
 from pickle import PicklingError
+from typing import Iterable
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
@@ -799,12 +800,12 @@ class Worker(ServerNode):
 
     @property
     def worker_address(self):
-        """ For API compatibility with Nanny """
+        """For API compatibility with Nanny"""
         return self.address
 
     @property
     def local_dir(self):
-        """ For API compatibility with Nanny """
+        """For API compatibility with Nanny"""
         warnings.warn(
             "The local_dir attribute has moved to local_directory", stacklevel=2
         )
@@ -1988,42 +1989,50 @@ class Worker(ServerNode):
                     changed = True
                     continue
 
-                deps = ts.dependencies
+                dependencies = ts.dependencies
                 if self.validate:
-                    assert all(dep.key in self.tasks for dep in deps)
+                    assert all(dep.key in self.tasks for dep in dependencies)
 
-                deps = {dep for dep in deps if dep.state == "fetch"}
+                dependencies_fetch = set()
+                dependencies_missing = set()
+                for dependency_ts in dependencies:
+                    if dependency_ts.state == "fetch":
+                        if not dependency_ts.who_has:
+                            dependencies_missing.add(dependency_ts)
+                        else:
+                            dependencies_fetch.add(dependency_ts)
 
-                missing_deps = {dep for dep in deps if not dep.who_has}
-                if missing_deps:
+                del dependencies
+
+                if dependencies_missing:
                     logger.info("Can't find dependencies for key %s", key)
                     missing_deps2 = {
                         dep
-                        for dep in missing_deps
+                        for dep in dependencies_missing
                         if dep.key not in self._missing_dep_flight
                     }
                     for dep in missing_deps2:
                         self._missing_dep_flight.add(dep.key)
                     self.loop.add_callback(self.handle_missing_dep, *missing_deps2)
 
-                    deps = [dep for dep in deps if dep not in missing_deps]
+                    dependencies_fetch -= dependencies_missing
 
-                log_keys = {d.key for d in deps}
-                self.log.append(("gather-dependencies", key, log_keys))
+                self.log.append(
+                    ("gather-dependencies", key, {d.key for d in dependencies_fetch})
+                )
 
                 in_flight = False
 
-                while deps and (
+                while dependencies_fetch and (
                     len(self.in_flight_workers) < self.total_out_connections
                     or self.comm_nbytes < self.total_comm_nbytes
                 ):
-                    dep = deps.pop()
-                    if dep.state != "fetch":
-                        continue
-                    if not dep.who_has:
-                        continue
+                    to_gather_ts = dependencies_fetch.pop()
+
                     workers = [
-                        w for w in dep.who_has if w not in self.in_flight_workers
+                        w
+                        for w in to_gather_ts.who_has
+                        if w not in self.in_flight_workers
                     ]
                     if not workers:
                         in_flight = True
@@ -2035,18 +2044,23 @@ class Worker(ServerNode):
                     else:
                         worker = random.choice(list(workers))
                     to_gather, total_nbytes = self.select_keys_for_gather(
-                        worker, dep.key
+                        worker, to_gather_ts.key
                     )
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
+                        dependencies_fetch.discard(self.tasks.get(d))
                         self.transition(self.tasks[d], "flight", worker=worker)
                     self.loop.add_callback(
-                        self.gather_dep, worker, dep, to_gather, total_nbytes, cause=key
+                        self.gather_dep,
+                        worker=worker,
+                        to_gather=to_gather,
+                        total_nbytes=total_nbytes,
+                        cause=ts,
                     )
                     changed = True
 
-                if not deps and not in_flight:
+                if not dependencies_fetch and not in_flight:
                     self.data_needed.popleft()
 
         except Exception as e:
@@ -2154,60 +2168,67 @@ class Worker(ServerNode):
 
         return deps, total_bytes
 
-    async def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
+    async def gather_dep(
+        self,
+        worker: str,
+        to_gather: Iterable[str],
+        total_nbytes: int,
+        cause: TaskState,
+    ):
         """Gather dependencies for a task from a worker who has them
 
         Parameters
         ----------
         worker : str
-            address of worker to gather dependency from
-        dep : TaskState
-            task we want to gather dependencies for
-        deps : list
-            keys of dependencies to gather from worker -- this is not
+            Address of worker to gather dependencies from
+        to_gather : list
+            Keys of dependencies to gather from worker -- this is not
             necessarily equivalent to the full list of dependencies of ``dep``
             as some dependencies may already be present on this worker.
+        total_nbytes : int
+            Total number of bytes for all the dependencies in to_gather combined
+        cause : TaskState
+            Task we want to gather dependencies for
         """
         if self.status != Status.running:
             return
         with log_errors():
             response = {}
+            to_gather_keys = set()
             try:
                 if self.validate:
                     self.validate_state()
+                for dependency_key in to_gather:
+                    dependency_ts = self.tasks.get(dependency_key)
+                    if dependency_ts and dependency_ts.state == "flight":
+                        to_gather_keys.add(dependency_key)
+                del to_gather
 
-                # dep states may have changed before gather_dep runs
-                # if a dep is no longer in-flight then don't fetch it
-                deps_ts = [self.tasks.get(key, None) or TaskState(key) for key in deps]
-                deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
-                deps = [d.key for d in deps_ts]
-
-                self.log.append(("request-dep", dep.key, worker, deps))
-                logger.debug("Request %d keys", len(deps))
+                self.log.append(("request-dep", cause.key, worker, to_gather_keys))
+                logger.debug("Request %d keys for task %s", len(to_gather_keys), cause)
 
                 start = time()
                 response = await get_data_from_worker(
-                    self.rpc, deps, worker, who=self.address
+                    self.rpc, to_gather_keys, worker, who=self.address
                 )
                 stop = time()
 
                 if response["status"] == "busy":
-                    self.log.append(("busy-gather", worker, deps))
-                    for ts in deps_ts:
-                        if ts.state == "flight":
+                    self.log.append(("busy-gather", worker, to_gather_keys))
+                    for key in to_gather_keys:
+                        ts = self.tasks.get(key)
+                        if ts and ts.state == "flight":
                             self.transition(ts, "fetch")
                     return
 
-                if cause:
-                    cause_ts = self.tasks.get(cause, TaskState(key=cause))
-                    cause_ts.startstops.append(
-                        {
-                            "action": "transfer",
-                            "start": start + self.scheduler_delay,
-                            "stop": stop + self.scheduler_delay,
-                            "source": worker,
-                        }
-                    )
+                cause.startstops.append(
+                    {
+                        "action": "transfer",
+                        "start": start + self.scheduler_delay,
+                        "stop": stop + self.scheduler_delay,
+                        "source": worker,
+                    }
+                )
 
                 total_bytes = sum(
                     self.tasks[key].get_nbytes()
@@ -2299,7 +2320,7 @@ class Worker(ServerNode):
                     self.repetitively_busy += 1
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
-                    await self.query_who_has(dep.key)
+                    await self.query_who_has(*to_gather_keys)
                     self.ensure_communicating()
 
     def bad_dep(self, dep):
@@ -3482,7 +3503,7 @@ cache_loads = LRU(maxsize=100)
 
 
 def loads_function(bytes_object):
-    """ Load a function from bytes, cache bytes """
+    """Load a function from bytes, cache bytes"""
     if len(bytes_object) < 100000:
         try:
             result = cache_loads[bytes_object]
@@ -3494,7 +3515,7 @@ def loads_function(bytes_object):
 
 
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
-    """ Deserialize task inputs and regularize to func, args, kwargs """
+    """Deserialize task inputs and regularize to func, args, kwargs"""
     if function is not None:
         function = loads_function(function)
     if args and isinstance(args, bytes):
@@ -3534,7 +3555,7 @@ _cache_lock = threading.Lock()
 
 
 def dumps_function(func):
-    """ Dump a function to bytes, cache functions """
+    """Dump a function to bytes, cache functions"""
     try:
         with _cache_lock:
             result = cache_dumps[func]
@@ -3583,7 +3604,7 @@ _warn_dumps_warned = [False]
 
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """ Dump an object to bytes, warn if those bytes are large """
+    """Dump an object to bytes, warn if those bytes are large"""
     b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
