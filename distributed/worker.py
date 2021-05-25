@@ -1604,7 +1604,7 @@ class Worker(ServerNode):
 
                     # transition from new -> fetch handles adding dependency
                     # to waiting_for_data
-                    self.transition(dep_ts, state)
+                    self.transition(dep_ts, state, who_has=workers)
 
                     self.log.append(
                         (dependency, "new-dep", dep_ts.state, f"requested by {ts.key}")
@@ -1621,13 +1621,8 @@ class Worker(ServerNode):
                 if dep_ts.state in ("fetch", "flight"):
                     # if we _need_ to grab data or are in the process
                     ts.waiting_for_data.add(dep_ts.key)
-                    # Ensure we know which workers to grab data from
-                    dep_ts.who_has.update(workers)
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep_ts.key)
-                        self.pending_data_per_worker[worker].append(dep_ts.key)
-
+            self.update_who_has(who_has=who_has)
             if nbytes is not None:
                 for key, value in nbytes.items():
                     self.tasks[key].nbytes = value
@@ -1682,14 +1677,20 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_new_fetch(self, ts):
+    def transition_new_fetch(self, ts, who_has):
         try:
             if self.validate:
                 assert ts.state == "new"
                 assert ts.runspec is None
+                assert who_has
 
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
+
+            ts.who_has.update(who_has)
+            for w in who_has:
+                self.has_what[w].add(ts.key)
+                self.pending_data_per_worker[w].append(ts.key)
 
         except Exception as e:
             logger.exception(e)
@@ -1778,19 +1779,21 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def transition_flight_fetch(self, ts, worker=None, runspec=None):
+    def transition_flight_fetch(self, ts):
         try:
             if self.validate:
                 assert ts.state == "flight"
 
             self.in_flight_tasks -= 1
             ts.coming_from = None
-            ts.runspec = runspec or ts.runspec
+            ts.runspec = None
 
             if not ts.who_has:
                 if ts.key not in self._missing_dep_flight:
                     self._missing_dep_flight.add(ts.key)
                     self.loop.add_callback(self.handle_missing_dep, ts)
+            for w in ts.who_has:
+                self.pending_data_per_worker[w].append(ts.key)
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
                 if dependent.state == "waiting":
@@ -2249,6 +2252,9 @@ class Worker(ServerNode):
         cause : TaskState
             Task we want to gather dependencies for
         """
+
+        if self.validate:
+            self.validate_state()
         if self.status != Status.running:
             return
         with log_errors():
@@ -3211,6 +3217,11 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.runspec is None
         assert ts.key not in self.data
+        assert ts.who_has
+        assert ts.dependents
+
+        for w in ts.who_has:
+            assert ts.key in self.has_what[w]
 
     def validate_task(self, ts):
         try:
@@ -3273,6 +3284,7 @@ class Worker(ServerNode):
                 self.validate_task(ts)
 
         except Exception as e:
+            self.loop.add_callback(self.close)
             logger.exception(e)
             if LOG_PDB:
                 import pdb
