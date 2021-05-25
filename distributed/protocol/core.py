@@ -1,3 +1,4 @@
+import gc
 import logging
 
 import msgpack
@@ -78,6 +79,11 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
 def loads(frames, deserialize=True, deserializers=None):
     """Transform bytestream back into Python value"""
 
+    # CPython's GC starts when growing allocated object. This means unpacking
+    # may cause useless GC. You can use gc.disable() when unpacking large message.
+    # See <https://github.com/msgpack/msgpack-python#performance-tips>
+    gc.disable()
+
     try:
 
         def _decode_default(obj):
@@ -109,3 +115,5 @@ def loads(frames, deserialize=True, deserializers=None):
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)
         raise
+    finally:
+        gc.enable()
