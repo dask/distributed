@@ -1989,6 +1989,18 @@ class WorkerTable(DashboardComponent):
             "num_fds": "# fds",
             "read_bytes": "read",
             "write_bytes": "write",
+            "max_cpu": "max(cpu)",
+            "mean_cpu": "mean(cpu)",
+            "max_memory": "max(memory)",
+            "mean_memory": "mean(memory)",
+            "max_memory_percent": "max(memory %)",
+            "mean_memory_percent": "mean(memory %)",
+            "max_num_fds": "max(# fds)",
+            "mean_num_fds": "mean(# fds)",
+            "max_read_bytes": "max(read)",
+            "mean_read_bytes": "mean(read)",
+            "max_write_bytes": "max(write)",
+            "mean_write_bytes": "mean(write)",
         }
 
         self.source = ColumnDataSource(
@@ -2047,7 +2059,7 @@ class WorkerTable(DashboardComponent):
         stat_columns = {
             name: TableColumn(
                 field=name,
-                title=name.replace("_percent", " %"),
+                title=column_title_renames.get(name, name),
             )
             for name in stat_names
         }
