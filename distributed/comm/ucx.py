@@ -512,11 +512,9 @@ def _scrub_ucx_config():
             options["NET_DEVICES"] = net_devices
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
-    valid_ucx_keys = list(get_config().keys())
-    for k, v in dask.config.get("ucx").items():
-        if k in valid_ucx_keys:
-            options[k] = v
-        else:
+    valid_ucx_vars = list(get_config().keys())
+    for k, v in options.items():
+        if k not in valid_ucx_vars:
             logger.debug(
                 "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
             )
