@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from distributed import SchedulerPlugin
-from dask.core import reverse_dict, get_dependencies
+from dask.core import reverse_dict
 from dask.base import tokenize
 from dask.order import graph_metrics, ndependencies
 
@@ -121,13 +121,16 @@ class AutoRestrictor(SchedulerPlugin):
                 hash_map[k] = \
                     set().union(*[hash_map[kk] for kk in shared_roots.keys()])
 
-        for k, deps in terminal_dependencies.items():
+        for k in terminal_dependencies.keys():
+
+            tdp = terminal_dependencies[k]
+            tdn = terminal_dependents[k] if terminal_dependents[k] else set()
 
             # TODO: This can likely be improved.
             group = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
 
             # Set restrictions on a terminal node and its dependencies.
-            for tn in [k, *deps]:
+            for tn in [k, *tdp, *tdn]:
                 try:
                     task = tasks[tn]
                 except KeyError:  # Keys may not have an assosciated task.
