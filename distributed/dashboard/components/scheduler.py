@@ -2091,21 +2091,23 @@ class WorkerTable(DashboardComponent):
             labels=[
                 "cpu",
                 "memory",
-                "memory_percent",
-                "num_fds",
-                "read_bytes",
-                "write_bytes",
+                "memory %",
+                "# fds",
+                "read",
+                "write",
             ],
             active=[0, 1],
         )
         column_choice.js_on_click(
             CustomJS(
-                args=dict(table=stat_table, columns=stat_columns),
+                args=dict(
+                    table=stat_table, columns=stat_columns, names=self.stat_names
+                ),
                 code="""
                     var visible_columns = [columns["name"], columns["address"]]
                     for (var i = 0; i < this.active.length; i++) {
-                        visible_columns.push(columns["max_" + this.labels[this.active[i]]]);
-                        visible_columns.push(columns["mean_" + this.labels[this.active[i]]]);
+                        visible_columns.push(columns[names[this.active[i] * 2]])
+                        visible_columns.push(columns[names[(this.active[i] * 2) + 1]])
                     }
                     table.columns = visible_columns;
                 """,
