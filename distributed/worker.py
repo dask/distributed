@@ -363,6 +363,7 @@ class Worker(ServerNode):
     """
 
     _instances = weakref.WeakSet()
+    _initialized_clients = weakref.WeakSet()
 
     def __init__(
         self,
@@ -1236,6 +1237,29 @@ class Worker(ServerNode):
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
+
+            if self._client:
+                # If this worker is the last one alive, clean up the worker
+                # initialized clients
+                if not any(
+                    w
+                    for w in Worker._instances
+                    if w != self and w.status == Status.running
+                ):
+                    for c in Worker._initialized_clients:
+                        # Regardless of what the client was initialized with
+                        # we'll require the result as a future. This is
+                        # necessary since the heursitics of asynchronous are not
+                        # reliable and we might deadlock here
+                        c._asynchronous = True
+                        if c.asynchronous:
+                            await c.close()
+                        else:
+                            # There is still the chance that even with us
+                            # telling the client to be async, itself will decide
+                            # otherwise
+                            c.close()
+
             with suppress(EnvironmentError, TimeoutError):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
@@ -3256,6 +3280,7 @@ class Worker(ServerNode):
                 name="worker",
                 timeout=timeout,
             )
+            Worker._initialized_clients.add(self._client)
             if not asynchronous:
                 assert self._client.status == "running"
 

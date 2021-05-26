@@ -1897,3 +1897,102 @@ async def test_gather_dep_one_worker_always_busy(c, s, a, b):
     # naturally
     while any(["Worker.gather_dep" in str(t) for t in asyncio.all_tasks()]):
         await asyncio.sleep(0.05)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
+async def test_worker_client_uses_default_no_close(c, s, a):
+    """
+    If a default client is available in the process, the worker will pick this
+    one and will not close it if it is closed
+    """
+    assert default_client() is c
+    existing_client = c.id
+
+    def get_worker_client_id():
+        def_client = get_client()
+        return def_client.id
+
+    worker_client = await c.submit(get_worker_client_id)
+    assert worker_client == existing_client
+
+    assert not Worker._initialized_clients
+
+    await a.close()
+
+    assert len(Client._instances) == 1
+    assert c.status == "running"
+    c_def = default_client()
+    assert c is c_def
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 0)])
+async def test_worker_client_closes_if_created_on_worker_one_worker(s, a):
+    async with Client(s.address, set_as_default=False, asynchronous=True) as c:
+
+        with pytest.raises(ValueError):
+            default_client()
+
+        def get_worker_client_id():
+            def_client = get_client()
+            return def_client.id
+
+        new_client_id = await c.submit(get_worker_client_id)
+        default_client_id = await c.submit(get_worker_client_id)
+        assert new_client_id != c.id
+        assert new_client_id == default_client_id
+
+        new_client = default_client()
+        assert new_client_id == new_client.id
+        assert new_client.status == "running"
+
+        # If a worker closes, all clients created on it should close as well
+        await a.close()
+        assert new_client.status == "closed"
+
+        assert len(Client._instances) == 2
+
+        assert c.status == "running"
+
+        with pytest.raises(ValueError):
+            default_client()
+
+
+@gen_cluster(timeout=3600)
+async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a, b):
+    async with Client(s.address, set_as_default=False, asynchronous=True) as c:
+
+        with pytest.raises(ValueError):
+            default_client()
+
+        def get_worker_client_id():
+            def_client = get_client()
+            return def_client.id
+
+        new_client_id = await c.submit(get_worker_client_id, workers=[a.address])
+        default_client_id = await c.submit(get_worker_client_id, workers=[a.address])
+
+        default_client_id_b = await c.submit(get_worker_client_id, workers=[b.address])
+        assert not b._comms
+        assert new_client_id != c.id
+        assert new_client_id == default_client_id
+        assert new_client_id == default_client_id_b
+
+        new_client = default_client()
+        assert new_client_id == new_client.id
+        assert new_client.status == "running"
+
+        # We'll close A. This should *not* close the client since the client is also used by B
+        await a.close()
+        assert new_client.status == "running"
+
+        client_id_b_after = await c.submit(get_worker_client_id, workers=[b.address])
+        assert client_id_b_after == default_client_id_b
+
+        assert len(Client._instances) == 2
+        await b.close()
+        assert new_client.status == "closed"
+
+        assert c.status == "running"
+
+        with pytest.raises(ValueError):
+            default_client()

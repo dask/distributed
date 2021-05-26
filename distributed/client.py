@@ -715,6 +715,7 @@ class Client:
         )
 
         self._start_arg = address
+        self._set_as_default = set_as_default
         if set_as_default:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
@@ -958,8 +959,8 @@ class Client:
             return
 
         self._loop_runner.start()
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "connecting"
 
         if self.asynchronous:
@@ -1150,8 +1151,8 @@ class Client:
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "running"
 
         for msg in self._pending_msg_buffer:
