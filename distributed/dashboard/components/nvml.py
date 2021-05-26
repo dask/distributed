@@ -29,7 +29,7 @@ except Exception:
 
 
 class GPUCurrentLoad(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
