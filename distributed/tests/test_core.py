@@ -880,3 +880,9 @@ async def test_close_properly():
 
         # weakref set/dict should be cleaned up
         assert not len(server._ongoing_coroutines)
+
+
+@pytest.mark.asyncio
+async def test_server_redundant_kwarg():
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await Server({}, typo_kwarg="foo")
