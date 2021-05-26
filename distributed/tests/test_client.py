@@ -4783,7 +4783,6 @@ async def test_recreate_task_collection(c, s, a, b):
 @gen_cluster(client=True)
 async def test_recreate_task_array(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    pytest.importorskip("scipy")
     z = (da.zeros((10, 10), chunks=10) + 1).sum()
     f = c.compute(z)
     function, args, kwargs = await c._get_components_from_future(f)
