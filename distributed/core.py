@@ -525,6 +525,8 @@ class Server:
                             e,
                         )
                         break
+
+                self._comms[comm] = None
                 msg = result = None
                 if close_desired:
                     await comm.close()
@@ -595,15 +597,18 @@ class Server:
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
+        self.__stopped = True
         for listener in self.listeners:
             future = listener.stop()
             if inspect.isawaitable(future):
                 yield future
-        for i in range(20):  # let comms close naturally for a second
-            if not self._comms:
-                break
-            else:
+        for i in range(20):
+            # If there are still handlers running at this point, give them a
+            # second to finish gracefully themselves, otherwise...
+            if any(self._comms.values()):
                 yield asyncio.sleep(0.05)
+            else:
+                break
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
