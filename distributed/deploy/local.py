@@ -29,7 +29,8 @@ class LocalCluster(SpecCluster):
     n_workers: int
         Number of workers to start
     processes: bool
-        Whether to use processes (True) or threads (False).  Defaults to True
+        Whether to use processes (True) or threads (False).  Defaults to True, unless
+        worker_class=Worker, in which case it defaults to False.
     threads_per_worker: int
         Number of threads per each worker
     scheduler_port: int
@@ -71,7 +72,8 @@ class LocalCluster(SpecCluster):
     interface: str (optional)
         Network interface to use.  Defaults to lo/localhost
     worker_class: Worker
-        Worker class used to instantiate workers from.
+        Worker class used to instantiate workers from. Defaults to Worker if
+        processes=False and Nanny if processes=True or omitted.
     **worker_kwargs:
         Extra worker arguments. Any additional keyword arguments will be passed
         to the ``Worker`` class constructor.
@@ -98,7 +100,7 @@ class LocalCluster(SpecCluster):
         name=None,
         n_workers=None,
         threads_per_worker=None,
-        processes=True,
+        processes=None,
         loop=None,
         start=None,
         host=None,
@@ -146,6 +148,11 @@ class LocalCluster(SpecCluster):
                 "and `worker_dashboard_address` for the worker (less common)."
             )
 
+        if processes is None:
+            processes = worker_class is None or issubclass(worker_class, Nanny)
+        if worker_class is None:
+            worker_class = Nanny if processes else Worker
+
         self.status = None
         self.processes = processes
 
@@ -182,7 +189,7 @@ class LocalCluster(SpecCluster):
                 n_workers = 1
                 threads_per_worker = CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, CPU_COUNT // threads_per_worker)
+            n_workers = max(1, CPU_COUNT // threads_per_worker) if processes else 1
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
@@ -221,11 +228,7 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        worker = {
-            "cls": worker_class or (Worker if not processes else Nanny),
-            "options": worker_kwargs,
-        }
-
+        worker = {"cls": worker_class, "options": worker_kwargs}
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
