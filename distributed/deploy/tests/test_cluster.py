@@ -1,6 +1,7 @@
 import pytest
 
 from distributed.deploy.cluster import Cluster
+from distributed.utils_test import cleanup  # noqa: F401
 
 
 @pytest.mark.asyncio

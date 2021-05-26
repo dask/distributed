@@ -6605,32 +6605,32 @@ async def test_workers_collection_restriction(c, s, a, b):
     assert a.data and not b.data
 
 
-@pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 0)])
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
 
-    # FIXME: There are dangling tasks, see
-    # https://github.com/dask/distributed/pull/3921
-    # with check_dangling_tasks():
+    with check_dangling_tasks():
 
-    scheduler_addr = c.scheduler.address
+        scheduler_addr = c.scheduler.address
 
-    def f(x):
-        ref = None
-        with LocalCluster(
-            n_workers=1, processes=False, dashboard_address=False
-        ) as cluster2:
-            with Client(cluster2) as c1:
-                c2 = get_client()
+        def f(x):
+            ref = None
+            with LocalCluster(
+                n_workers=1,
+                processes=False,
+                dashboard_address=False,
+                worker_dashboard_address=False,
+            ) as cluster2:
+                with Client(cluster2) as c1:
+                    c2 = get_client()
 
-                c1_scheduler = c1.scheduler.address
-                c2_scheduler = c2.scheduler.address
-                assert c1_scheduler != c2_scheduler
-                assert c2_scheduler == scheduler_addr
+                    c1_scheduler = c1.scheduler.address
+                    c2_scheduler = c2.scheduler.address
+                    assert c1_scheduler != c2_scheduler
+                    assert c2_scheduler == scheduler_addr
 
-    await c.gather(c.map(f, range(2)))
-    # FIXME: There are still worker clients around although they should be
-    # closed, see https://github.com/dask/distributed/pull/3921
-    # c2 = default_client()
-    # assert c is c2
+        await c.gather(c.map(f, range(2)))
+        await a.close()
+
+        c_default = default_client()
+        assert c is c_default
