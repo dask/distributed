@@ -579,7 +579,7 @@ class Client:
 
     Extra keywords will be passed directly to LocalCluster
 
-    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
 
     See Also
     --------
@@ -926,11 +926,8 @@ class Client:
         if info:
             workers = list(info["workers"].values())
             cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
-            else:
-                memory = ""
+            memory = [w["memory_limit"] for w in workers]
+            memory = format_bytes(sum(memory)) if all(memory) else ""
 
             text2 = (
                 '<h3 style="text-align: left;">Cluster</h3>\n'
