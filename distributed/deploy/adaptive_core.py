@@ -1,6 +1,7 @@
 import collections
 import logging
 import math
+from typing import Iterable
 
 import tlz as toolz
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -107,7 +108,6 @@ class AdaptiveCore:
 
     def stop(self):
         logger.info("Adaptive stop")
-        assert not self._adapting
 
         if self.periodic_callback:
             self.periodic_callback.stop()
@@ -134,6 +134,12 @@ class AdaptiveCore:
             n = self.minimum
 
         return n
+
+    async def scale_down(self, n: int):
+        raise NotImplementedError()
+
+    async def scale_up(self, workers: Iterable):
+        raise NotImplementedError()
 
     async def recommendations(self, target: int) -> dict:
         """

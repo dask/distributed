@@ -93,7 +93,7 @@ async def test_interval():
 
 
 @pytest.mark.asyncio
-async def test_adapt_oserror():
+async def test_adapt_oserror_safe_target():
     class BadAdaptive(MyAdaptive):
         """AdaptiveCore subclass which raises an OSError when attempting to adapt
 
@@ -111,3 +111,38 @@ async def test_adapt_oserror():
     assert "Adaptive stop" in text
     assert not adapt._adapting
     assert not adapt.periodic_callback
+
+
+@pytest.mark.asyncio
+async def test_adapt_oserror_scale():
+    """
+    FIXME:
+    If we encounter an OSError during scale down, we continue as before. It is
+    not entirely clear if this is the correct behaviour but defines the current
+    state.
+    This was probably introduced to protect against comm failures during
+    shutdown but the scale down command should be robust call to the scheduler
+    which is never scaled down.
+    """
+
+    class BadAdaptive(MyAdaptive):
+        _called = 0
+
+        async def scale_down(self, workers=None):
+            self._called += 1
+            raise OSError()
+
+    adapt = BadAdaptive(minimum=1, maximum=4, wait_count=0)
+    adapt._target = 2
+    await adapt.adapt()
+    assert len(adapt.plan) == 2
+    assert len(adapt.requested) == 2
+    adapt._target = 0
+    with captured_logger("distributed.deploy.adaptive_core") as log:
+        await adapt.adapt()
+    text = log.getvalue()
+    assert text == ""
+    assert adapt._called
+    assert not adapt._adapting
+    assert adapt.periodic_callback
+    assert adapt.periodic_callback.is_running()
