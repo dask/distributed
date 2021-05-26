@@ -4744,8 +4744,18 @@ async def test_recreate_task_collection(c, s, a, b):
     f = c.compute(b)
 
     function, args, kwargs = await c._get_components_from_future(f)
-    assert function(*args, **kwargs) == [3628800, 1814400, 1209600, 907200, 725760,
-                                         604800, 518400, 453600, 403200, 362880]
+    assert function(*args, **kwargs) == [
+        3628800,
+        1814400,
+        1209600,
+        907200,
+        725760,
+        604800,
+        518400,
+        453600,
+        403200,
+        362880,
+    ]
 
     dd = pytest.importorskip("dask.dataframe")
     import pandas as pd
@@ -4756,7 +4766,7 @@ async def test_recreate_task_collection(c, s, a, b):
     f = c.compute(df2)
 
     function, args, kwargs = await c._get_components_from_future(f)
-    expected = pd.DataFrame({"a": [1, 2, 3, 4, 5]})['a']
+    expected = pd.DataFrame({"a": [1, 2, 3, 4, 5]})["a"]
     assert function(*args, **kwargs).equals(expected)
 
     # with persist

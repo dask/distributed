@@ -2,7 +2,7 @@ import logging
 
 from dask.utils import stringify
 
-from .client import futures_of, wait, Future
+from .client import futures_of, wait
 from .utils import sync
 from .utils_comm import pack_data
 from .worker import _deserialize
@@ -41,10 +41,7 @@ class ReplayTaskScheduler:
     def get_runspec(self, *args, key=None, **kwargs):
         key = self._process_key(key)
         ts = self.scheduler.tasks.get(key)
-        return {
-            "task": ts.run_spec,
-            "deps": [dts.key for dts in ts.dependencies]
-        }
+        return {"task": ts.run_spec, "deps": [dts.key for dts in ts.dependencies]}
 
 
 class ReplayTaskClient:
@@ -61,7 +58,9 @@ class ReplayTaskClient:
         self.client = client
         self.client.extensions["replay-tasks"] = self
         # monkey patch
-        self.client._get_raw_components_from_future = self._get_raw_components_from_future
+        self.client._get_raw_components_from_future = (
+            self._get_raw_components_from_future
+        )
         self.client._prepare_raw_components = self._prepare_raw_components
         self.client._get_components_from_future = self._get_components_from_future
         self.client._get_errored_future = self._get_errored_future
@@ -77,8 +76,12 @@ class ReplayTaskClient:
         For a given future return the func, args and kwargs and future
         deps that would be executed remotely.
         """
-        await wait(future)
-        spec = await self.scheduler.get_runspec(key=future.key)
+        if isinstance(future, str):
+            key = future
+        else:
+            await wait(future)
+            key = future.key
+        spec = await self.scheduler.get_runspec(key=key)
         deps, task = spec["deps"], spec["task"]
         if isinstance(task, dict):
             function, args, kwargs = _deserialize(**task)
@@ -150,8 +153,8 @@ class ReplayTaskClient:
         futures = [f.key for f in futures_of(future) if f.status == "error"]
         if not futures:
             raise ValueError("No errored futures passed")
-        cause = await self.scheduler.get_error_cause(keys=futures)
-        return Future(cause)
+        cause_key = await self.scheduler.get_error_cause(keys=futures)
+        return cause_key
 
     def recreate_error_locally(self, future):
         """
@@ -196,7 +199,5 @@ class ReplayTaskClient:
         Nothing; the function runs and should raise an exception, allowing
         the debugger to run.
         """
-        errored_future = sync(
-            self.client.loop, self._get_errored_future, future
-        )
-        return self.recreate_task_locally(errored_future)
+        errored_future_key = sync(self.client.loop, self._get_errored_future, future)
+        return self.recreate_task_locally(errored_future_key)
