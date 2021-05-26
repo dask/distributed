@@ -12,7 +12,6 @@ from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils import get_ip
 from distributed.utils_test import (  # noqa: F401
-    check_dangling_tasks,
     cleanup,
     cluster,
     gen_cluster,
@@ -231,47 +230,3 @@ def test_tls_cluster(tls_client):
 async def test_tls_scheduler(security, cleanup):
     async with Scheduler(security=security, host="localhost") as s:
         assert s.address.startswith("tls")
-
-
-@pytest.mark.asyncio()
-async def test_check_dangling_tasks(event_loop):
-    # Note: event loop fixture is managed by pytest-asyncio
-
-    from tornado.ioloop import IOLoop
-
-    assert not isinstance(event_loop, IOLoop)
-    tornado_loop = IOLoop.current()
-    assert event_loop is tornado_loop.asyncio_loop
-
-    start = asyncio.all_tasks()
-
-    async def foo():
-        await asyncio.sleep(100000)
-
-    for loop_ in [None, event_loop, tornado_loop]:
-        # Verify that our ctx manager catches all tasks created by plain asyncio
-        with pytest.raises(AssertionError):
-            with check_dangling_tasks(loop_):
-                task = event_loop.create_task(foo())
-
-        task.cancel()
-
-        before = asyncio.all_tasks()
-        # Tornado has slightly different semantics but also uses the asyncio
-        # event loop beneath. Ensure this is also caught
-        with pytest.raises(AssertionError):
-            with check_dangling_tasks(loop_):
-                tornado_loop.add_callback(foo)
-                await asyncio.sleep(0)
-        # We cannot cancel tornado callbacks but should close tasks to avoid
-        # warnings (i.e. this is what this test should cover in the first place)
-        after = asyncio.all_tasks()
-        assert len(after - before) == 1
-        for task in after - before:
-            task.cancel()
-        await asyncio.sleep(0)
-        after = asyncio.all_tasks()
-        assert len(after - before) == 0
-
-    end = asyncio.all_tasks()
-    assert not end - start

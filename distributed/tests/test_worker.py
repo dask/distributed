@@ -1905,6 +1905,7 @@ async def test_worker_client_uses_default_no_close(c, s, a):
     If a default client is available in the process, the worker will pick this
     one and will not close it if it is closed
     """
+    assert not Worker._initialized_clients
     assert default_client() is c
     existing_client = c.id
 

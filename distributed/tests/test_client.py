@@ -73,7 +73,6 @@ from distributed.utils_test import (  # noqa: F401
     asyncinc,
     b,
     captured_logger,
-    check_dangling_tasks,
     cleanup,
 )
 from distributed.utils_test import client as c  # noqa: F401
@@ -6609,28 +6608,26 @@ async def test_workers_collection_restriction(c, s, a, b):
 async def test_get_client_functions_spawn_clusters(c, s, a):
     # see gh4565
 
-    with check_dangling_tasks():
+    scheduler_addr = c.scheduler.address
 
-        scheduler_addr = c.scheduler.address
+    def f(x):
+        ref = None
+        with LocalCluster(
+            n_workers=1,
+            processes=False,
+            dashboard_address=False,
+            worker_dashboard_address=False,
+        ) as cluster2:
+            with Client(cluster2) as c1:
+                c2 = get_client()
 
-        def f(x):
-            ref = None
-            with LocalCluster(
-                n_workers=1,
-                processes=False,
-                dashboard_address=False,
-                worker_dashboard_address=False,
-            ) as cluster2:
-                with Client(cluster2) as c1:
-                    c2 = get_client()
+                c1_scheduler = c1.scheduler.address
+                c2_scheduler = c2.scheduler.address
+                assert c1_scheduler != c2_scheduler
+                assert c2_scheduler == scheduler_addr
 
-                    c1_scheduler = c1.scheduler.address
-                    c2_scheduler = c2.scheduler.address
-                    assert c1_scheduler != c2_scheduler
-                    assert c2_scheduler == scheduler_addr
+    await c.gather(c.map(f, range(2)))
+    await a.close()
 
-        await c.gather(c.map(f, range(2)))
-        await a.close()
-
-        c_default = default_client()
-        assert c is c_default
+    c_default = default_client()
+    assert c is c_default
