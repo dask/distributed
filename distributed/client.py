@@ -4701,6 +4701,9 @@ class performance_report:
 
     async def __aenter__(self):
         self.start = time()
+        self.last_count = await get_client().run_on_scheduler(
+            lambda dask_scheduler: dask_scheduler.monitor.count
+        )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
@@ -4711,7 +4714,7 @@ class performance_report:
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, code=code
+            start=self.start, last_count=self.last_count, code=code
         )
         with open(self.filename, "w") as f:
             f.write(data)
