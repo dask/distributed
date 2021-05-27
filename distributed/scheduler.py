@@ -5629,7 +5629,6 @@ class Scheduler(SchedulerState, ServerNode):
                 for sender, recipient, ts in msgs:
                     assert ts._state == "memory"
                     ts._who_has.add(recipient)
-                    breakpoint()
                     recipient.has_what.add(ts)
                     recipient.nbytes += ts.get_nbytes()
                     self.log.append(
