@@ -53,7 +53,7 @@ from .core import (
 )
 from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
-from .objects import HasWhat, WhoHas
+from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -3449,7 +3449,7 @@ class Client:
         """
         if not self.asynchronous:
             self.sync(self._update_scheduler_info)
-        return self._scheduler_identity
+        return SchedulerInfo(self._scheduler_identity)
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.

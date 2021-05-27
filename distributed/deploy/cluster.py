@@ -12,6 +12,7 @@ import dask.config
 from dask.utils import format_bytes
 
 from ..core import Status
+from ..objects import SchedulerInfo
 from ..utils import (
     Log,
     Logs,
@@ -71,7 +72,7 @@ class Cluster:
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
         await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = await comm.read()
+        self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
