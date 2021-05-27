@@ -60,10 +60,10 @@ class SchedulerPlugin:
         pass
 
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
-        """ Run when a new graph / tasks enter the scheduler """
+        """Run when a new graph / tasks enter the scheduler"""
 
     def restart(self, scheduler, **kwargs):
-        """ Run when the scheduler restarts itself """
+        """Run when the scheduler restarts itself"""
 
     def transition(self, key, start, finish, *args, **kwargs):
         """Run whenever a task changes state
@@ -81,16 +81,16 @@ class SchedulerPlugin:
         """
 
     def add_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a new worker enters the cluster """
+        """Run when a new worker enters the cluster"""
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a worker leaves the cluster """
+        """Run when a worker leaves the cluster"""
 
     def add_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a new client connects """
+        """Run when a new client connects"""
 
     def remove_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a client disconnects """
+        """Run when a client disconnects"""
 
 
 class WorkerPlugin:
@@ -134,7 +134,7 @@ class WorkerPlugin:
         """
 
     def teardown(self, worker):
-        """ Run when the worker to which the plugin is attached to is closed """
+        """Run when the worker to which the plugin is attached to is closed"""
 
     def transition(self, key, start, finish, **kwargs):
         """

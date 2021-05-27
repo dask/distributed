@@ -221,7 +221,7 @@ def maybe_compress(
 
 
 def decompress(header, frames):
-    """ Decompress frames according to information in the header """
+    """Decompress frames according to information in the header"""
     return [
         compressions[c]["decompress"](frame)
         for c, frame in zip(header["compression"], frames)

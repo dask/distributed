@@ -1424,7 +1424,7 @@ def save_sys_modules():
 
 @contextmanager
 def check_thread_leak():
-    """ Context manager to ensure we haven't leaked any threads """
+    """Context manager to ensure we haven't leaked any threads"""
     active_threads_start = threading.enumerate()
 
     yield

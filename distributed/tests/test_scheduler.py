@@ -1101,6 +1101,15 @@ async def test_run_on_scheduler(c, s, a, b):
     assert response == s.address
 
 
+@gen_cluster(client=True, config={"distributed.scheduler.pickle": False})
+async def test_run_on_scheduler_disabled(c, s, a, b):
+    def f(dask_scheduler=None):
+        return dask_scheduler.address
+
+    with pytest.raises(ValueError, match="disallowed from deserializing"):
+        await c._run_on_scheduler(f)
+
+
 @gen_cluster(client=True)
 async def test_close_worker(c, s, a, b):
     assert len(s.workers) == 2

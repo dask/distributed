@@ -76,7 +76,7 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
 
 
 def loads(frames, deserialize=True, deserializers=None):
-    """ Transform bytestream back into Python value """
+    """Transform bytestream back into Python value"""
 
     try:
 

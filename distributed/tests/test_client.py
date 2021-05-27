@@ -236,7 +236,7 @@ async def test_map_batch_size(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_custom_key_with_batches(c, s, a, b):
-    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+    """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
         lambda x: x ** 2,
@@ -3369,6 +3369,32 @@ def test_default_get():
                 assert dask.base.get_scheduler() == c2.get
             assert dask.base.get_scheduler() == c1.get
         assert dask.base.get_scheduler() == pre_get
+
+
+@gen_cluster()
+async def test_set_as_default(s, a, b):
+    with pytest.raises(ValueError):
+        default_client()
+
+    async with Client(s.address, set_as_default=False, asynchronous=True) as c1:
+        with pytest.raises(ValueError):
+            default_client()
+        async with Client(s.address, set_as_default=True, asynchronous=True) as c2:
+            assert default_client() is c2
+            async with Client(s.address, set_as_default=True, asynchronous=True) as c3:
+                assert default_client() is c3
+                async with Client(
+                    s.address, set_as_default=False, asynchronous=True
+                ) as c4:
+                    assert default_client() is c3
+
+                    await c4.scheduler_comm.close()
+                    while c4.status != "running":
+                        await asyncio.sleep(0.01)
+                    assert default_client() is c3
+
+    with pytest.raises(ValueError):
+        default_client()
 
 
 @gen_cluster(client=True)

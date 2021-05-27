@@ -745,7 +745,7 @@ def get_traceback():
 
 
 def truncate_exception(e, n=10000):
-    """ Truncate exception to be about a certain length """
+    """Truncate exception to be about a certain length"""
     if len(str(e)) > n:
         try:
             return type(e)("Long error message", str(e)[:n])
@@ -763,7 +763,7 @@ def validate_key(k):
 
 
 def _maybe_complex(task):
-    """ Possibly contains a nested task """
+    """Possibly contains a nested task"""
     return (
         istask(task)
         or type(task) is list
@@ -962,7 +962,7 @@ def open_port(host=""):
 
 
 def import_file(path):
-    """ Loads modules for a file (.py, .zip, .egg) """
+    """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
     names_to_import = []
@@ -1044,7 +1044,7 @@ def asciitable(columns, rows):
 
 
 def nbytes(frame, _bytes_like=(bytes, bytearray)):
-    """ Number of bytes of a frame or memoryview """
+    """Number of bytes of a frame or memoryview"""
     if isinstance(frame, _bytes_like):
         return len(frame)
     else:
@@ -1105,7 +1105,7 @@ def deprecated(*, version_removed: str = None):
 
 
 def json_load_robust(fn, load=json.load):
-    """ Reads a JSON file from disk that may be being written as we read """
+    """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
         sleep(0.01)
     for i in range(10):
@@ -1120,7 +1120,7 @@ def json_load_robust(fn, load=json.load):
 
 
 class DequeHandler(logging.Handler):
-    """ A logging.Handler that records records into a deque """
+    """A logging.Handler that records records into a deque"""
 
     _instances = weakref.WeakSet()
 
@@ -1364,7 +1364,7 @@ is_coroutine_function = iscoroutinefunction
 
 
 class Log(str):
-    """ A container for logs """
+    """A container for logs"""
 
     def _repr_html_(self):
         return "<pre><code>\n{log}\n</code></pre>".format(
@@ -1373,7 +1373,7 @@ class Log(str):
 
 
 class Logs(dict):
-    """ A container for multiple logs """
+    """A container for multiple logs"""
 
     def _repr_html_(self):
         summaries = [

@@ -232,4 +232,4 @@ ucx:
   infiniband: False # enable Infiniband
   rdmacm: False # enable RDMACM
   net-devices: null  # define what interface to use for UCX comm
-  reuse-endpoints: True  # enable endpoint reuse
+  reuse-endpoints: null  # enable endpoint reuse
