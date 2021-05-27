@@ -126,23 +126,34 @@ async def test_adapt_oserror_scale():
     """
 
     class BadAdaptive(MyAdaptive):
-        _called = 0
-
         async def scale_down(self, workers=None):
-            self._called += 1
             raise OSError()
 
-    adapt = BadAdaptive(minimum=1, maximum=4, wait_count=0)
+    adapt = BadAdaptive(minimum=1, maximum=4, wait_count=0, interval="10ms")
     adapt._target = 2
+    while not adapt.periodic_callback.is_running():
+        await asyncio.sleep(0.01)
     await adapt.adapt()
     assert len(adapt.plan) == 2
     assert len(adapt.requested) == 2
-    adapt._target = 0
     with captured_logger("distributed.deploy.adaptive_core") as log:
+        adapt._target = 0
         await adapt.adapt()
     text = log.getvalue()
-    assert text == ""
-    assert adapt._called
+    assert "Error during adaptive downscaling" in text
     assert not adapt._adapting
     assert adapt.periodic_callback
     assert adapt.periodic_callback.is_running()
+    adapt.stop()
+
+
+@pytest.mark.asyncio
+async def test_adapt_stop_del():
+    adapt = MyAdaptive(interval="100ms")
+    pc = adapt.periodic_callback
+    while not adapt.periodic_callback.is_running():
+        await asyncio.sleep(0.01)
+
+    del adapt
+    while pc.is_running():
+        await asyncio.sleep(0.01)
