@@ -363,12 +363,8 @@ async def test_widget(cleanup):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
-        text = cluster._widget_status()
-        assert "3" in text
-        assert "GB" in text or "GiB" in text
-
         cluster.scale(5)
-        assert "3 / 5" in cluster._widget_status()
+        assert "3 / 5" in cluster._scaling_status()
 
 
 @pytest.mark.asyncio
@@ -449,8 +445,8 @@ async def test_MultiWorker(cleanup):
             while "workers=4" not in repr(cluster):
                 await asyncio.sleep(0.1)
 
-            workers_line = re.search("(Workers.+)", cluster._widget_status()).group(1)
-            assert re.match("Workers.*<td>4</td>", workers_line)
+            workers_line = re.search("(Workers.+)", cluster._repr_html_()).group(1)
+            assert re.match("Workers.*4", workers_line)
 
             cluster.scale(1)
             await cluster

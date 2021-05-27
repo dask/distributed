@@ -62,6 +62,7 @@ class Cluster:
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
+        self._adaptive = None
 
         if name is not None:
             self.name = name
@@ -260,6 +261,30 @@ class Cluster:
             host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
+    def _scaling_status(self):
+        if self._adaptive and self._adaptive.periodic_callback:
+            mode = "Adaptive"
+        else:
+            mode = "Manual"
+        workers = len(self.scheduler_info["workers"])
+        if hasattr(self, "worker_spec"):
+            requested = sum(
+                1 if "group" not in each else len(each["group"])
+                for each in self.worker_spec.values()
+            )
+        elif hasattr(self, "workers"):
+            requested = len(self.workers)
+        else:
+            requested = workers
+
+        worker_count = workers if workers == requested else f"{workers} / {requested}"
+        return f"""
+        <table>
+            <tr><td style="text-align: left;">Scaling mode: {mode}</td></tr>
+            <tr><td style="text-align: left;">Workers: {worker_count}</td></tr>
+        </table>
+        """
+
     def _widget(self):
         """Create IPython widget for display within a notebook"""
         try:
@@ -268,7 +293,16 @@ class Cluster:
             pass
 
         try:
-            from ipywidgets import HTML, Accordion, Button, HBox, IntText, Layout, Tab
+            from ipywidgets import (
+                HTML,
+                Accordion,
+                Button,
+                HBox,
+                IntText,
+                Layout,
+                Tab,
+                VBox,
+            )
         except ImportError:
             self._cached_widget = None
             return None
@@ -311,8 +345,10 @@ class Cluster:
         else:
             accordion = HTML("")
 
+        scale_status = HTML(self._scaling_status())
+
         tab = Tab()
-        tab.children = [status, accordion]
+        tab.children = [status, VBox([scale_status, accordion])]
         tab.set_title(0, "Status")
         tab.set_title(1, "Scaling")
 
@@ -320,6 +356,7 @@ class Cluster:
 
         def update():
             status.value = self._repr_html_()
+            scale_status.value = self._scaling_status()
 
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
@@ -338,9 +375,19 @@ class Cluster:
         cluster_status += f"""
             <tr>
                 <td style="text-align: left;">
-                    <strong>Dashboard link:</strong> <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                    <strong>Dashboard:</strong> <a href="{self.dashboard_link}">{self.dashboard_link}</a>
                 </td>
-                <td style="text-align: left;"></td>
+                <td style="text-align: left;"><strong>Workers:</strong> {len(self.scheduler_info["workers"])}</td>
+            </tr>
+            <tr>
+                <td style="text-align: left;">
+                    <strong>Total threads:</strong>
+                    {sum([w["nthreads"] for w in self.scheduler_info["workers"].values()])}
+                </td>
+                <td style="text-align: left;">
+                    <strong>Total memory:</strong>
+                    {format_bytes(sum([w["memory_limit"] for w in self.scheduler_info["workers"].values()]))}
+                </td>
             </tr>
         """
 
@@ -352,14 +399,17 @@ class Cluster:
                     background-color: #e1e1e1;
                     border: 3px solid #9D9D9D;
                     border-radius: 5px;
-                    position: absolute;">&nbsp;</div>
+                    position: absolute;"> </div>
                 <div style="margin-left: 48px;">
                     <h3 style="margin-bottom: 0px; margin-top: 0px;">{type(self).__name__}</h3>
                     <p style="color: #9D9D9D; margin-bottom: 0px;">{self.name}</p>
                     <table style="width: 100%; text-align: left;">
                     {cluster_status}
                     </table>
+                    <details>
+                    <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
                     {self.scheduler_info._repr_html_()}
+                    </details>
                 </div>
             </div>
         """

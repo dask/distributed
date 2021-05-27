@@ -4,6 +4,8 @@ import datetime
 
 from dask.utils import format_bytes, format_time_ago
 
+from distributed.utils import format_dashboard_link
+
 
 class HasWhat(dict):
     """A dictionary of all workers and which keys that worker has."""
@@ -76,10 +78,11 @@ class SchedulerInfo(dict):
     def _repr_html_(self):
         dashboard_address = None
         if "dashboard" in self["services"]:
-            dashboard_address = self["address"].split(":")
-            dashboard_address[0] = "http"
-            dashboard_address[-1] = str(self["services"]["dashboard"]) + "/status"
-            dashboard_address = ":".join(dashboard_address)
+            _, addr = self["address"].split("://")
+            host, _ = addr.split(":")
+            dashboard_address = format_dashboard_link(
+                host, self["services"]["dashboard"]
+            )
 
         scheduler = f"""
             <div>
@@ -89,7 +92,7 @@ class SchedulerInfo(dict):
                     background-color: #FFF7E5;
                     border: 3px solid #FF6132;
                     border-radius: 5px;
-                    position: absolute;">&nbsp;</div>
+                    position: absolute;"> </div>
                 <div style="margin-left: 48px;">
                     <h3 style="margin-bottom: 0px;">{self["type"]}</h3>
                     <p style="color: #9D9D9D; margin-bottom: 0px;">{self["id"]}</p>
@@ -128,10 +131,11 @@ class SchedulerInfo(dict):
         for worker in sorted(self["workers"].values(), key=lambda k: k["name"]):
             dashboard_address = None
             if "dashboard" in worker["services"]:
-                dashboard_address = worker["comm"].split(":")
-                dashboard_address[0] = "http"
-                dashboard_address[-1] = str(worker["services"]["dashboard"])
-                dashboard_address = ":".join(dashboard_address)
+                _, addr = worker["comm"].split("://")
+                host, _ = addr.split(":")
+                dashboard_address = format_dashboard_link(
+                    host, worker["services"]["dashboard"]
+                )
 
             metrics = ""
 
@@ -163,7 +167,7 @@ class SchedulerInfo(dict):
                 <tr>
                     <td style="text-align: left;">
                         <strong>Memory usage: </strong>
-                        {((worker["metrics"]["memory"] / worker["memory_limit"]) * 100):.1f}%
+                        {format_bytes(worker["metrics"]["memory"])}
                     </td>
                     <td style="text-align: left;">
                         <strong>Spilled bytes: </strong>
@@ -189,7 +193,7 @@ class SchedulerInfo(dict):
                             background-color: #DBF5FF;
                             border: 3px solid #4CC9FF;
                             border-radius: 5px;
-                            position: absolute;">&nbsp;</div>
+                            position: absolute;"> </div>
                 <div style="margin-left: 48px;">
                 <details>
                     <summary>

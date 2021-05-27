@@ -909,9 +909,21 @@ class Client:
         scheduler, info = self._get_scheduler_info()
 
         if scheduler is None:
-            scheduler_repr = """<p>No scheduler connected.</p>"""
+            child_repr = """<p>No scheduler connected.</p>"""
+        elif self.cluster:
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Cluster Info</h3></summary>
+                {self.cluster._repr_html_()}
+                </details>
+                """
         else:
-            scheduler_repr = info._repr_html_()
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
+                {info._repr_html_()}
+                </details>
+                """
 
         client_status = ""
 
@@ -939,6 +951,16 @@ class Client:
                 </tr>
                 """
 
+        client_status += f"""
+            <tr>
+                <td style="text-align: left;">
+                    <strong>Dashboard: </strong>
+                    <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                </td>
+                <td style="text-align: left;"></td>
+            </tr>
+            """
+
         return f"""
             <div>
                 <div style="
@@ -947,14 +969,14 @@ class Client:
                     background-color: #e1e1e1;
                     border: 3px solid #9D9D9D;
                     border-radius: 5px;
-                    position: absolute;">&nbsp;</div>
+                    position: absolute;"> </div>
                 <div style="margin-left: 48px;">
                     <h3 style="margin-bottom: 0px;">Client</h3>
                     <p style="color: #9D9D9D; margin-bottom: 0px;">{self.id}</p>
                     <table style="width: 100%; text-align: left;">
                     {client_status}
                     </table>
-                    {scheduler_repr}
+                    {child_repr}
                 </div>
             </div>
         """
