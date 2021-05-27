@@ -3241,12 +3241,11 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
+        result = self.sync(self.scheduler.has_what, workers=workers, **kwargs)
         if self.asynchronous:
-            return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
+            return result
         else:
-            return HasWhat(
-                self.sync(self.scheduler.has_what, workers=workers, **kwargs)
-            )
+            return HasWhat(result)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker

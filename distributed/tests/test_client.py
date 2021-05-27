@@ -3613,9 +3613,8 @@ async def test_status():
     await s.close()
 
 
-@gen_cluster(client=False, timeout=None)
-async def test_async_whowhat(s, a, b):
-    c = await Client(s.address, asynchronous=True)
+@gen_cluster(client=True)
+async def test_async_whowhat(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
 
     who_has = await c.who_has()
@@ -3623,7 +3622,6 @@ async def test_async_whowhat(s, a, b):
 
     assert who_has == {x.key: (a.address,)}
     assert has_what == {a.address: (x.key,), b.address: ()}
-    await c.close()
 
 
 @gen_cluster(client=True)
