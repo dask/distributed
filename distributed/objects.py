@@ -4,8 +4,6 @@ import datetime
 
 from dask.utils import format_bytes, format_time_ago
 
-from .utils import clean_dashboard_address
-
 
 class HasWhat(dict):
     """A dictionary of all workers and which keys that worker has."""
@@ -85,7 +83,13 @@ class SchedulerInfo(dict):
 
         scheduler = f"""
             <div>
-                <div style="width: 24px; height: 24px; background-color: #FFF7E5; border: 3px solid #FF6132; border-radius: 5px; position: absolute;">&nbsp;</div>
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background-color: #FFF7E5;
+                    border: 3px solid #FF6132;
+                    border-radius: 5px;
+                    position: absolute;">&nbsp;</div>
                 <div style="margin-left: 48px;">
                     <h3 style="margin-bottom: 0px;">{self["type"]}</h3>
                     <p style="color: #9D9D9D; margin-bottom: 0px;">{self["id"]}</p>
@@ -95,12 +99,23 @@ class SchedulerInfo(dict):
                             <td style="text-align: left;"><strong>Workers:</strong> {len(self["workers"])}</td>
                         </tr>
                         <tr>
-                            <td style="text-align: left;"><strong>Dashboard:</strong> <a href="{dashboard_address}">{dashboard_address}</a></td>
-                            <td style="text-align: left;"><strong>Total threads:</strong> {sum([w["nthreads"] for w in self["workers"].values()])}</td>
+                            <td style="text-align: left;">
+                                <strong>Dashboard:</strong> <a href="{dashboard_address}">{dashboard_address}</a>
+                            </td>
+                            <td style="text-align: left;">
+                                <strong>Total threads:</strong>
+                                {sum([w["nthreads"] for w in self["workers"].values()])}
+                            </td>
                         </tr>
                         <tr>
-                            <td style="text-align: left;"><strong>Started:</strong> {format_time_ago(datetime.datetime.fromtimestamp(self["started"]))}</td>
-                            <td style="text-align: left;"><strong>Total memory:</strong> {format_bytes(sum([w["memory_limit"] for w in self["workers"].values()]))}</td>
+                            <td style="text-align: left;">
+                                <strong>Started:</strong>
+                                {format_time_ago(datetime.datetime.fromtimestamp(self["started"]))}
+                            </td>
+                            <td style="text-align: left;">
+                                <strong>Total memory:</strong>
+                                {format_bytes(sum([w["memory_limit"] for w in self["workers"].values()]))}
+                            </td>
                         </tr>
                     </table>
                 </div>
@@ -123,48 +138,87 @@ class SchedulerInfo(dict):
             if "metrics" in worker:
                 metrics = f"""
                 <tr>
-                    <td style="text-align: left;"><strong>Tasks executing:</strong> {worker["metrics"]["executing"]}</td>
-                    <td style="text-align: left;"><strong>Tasks in memory:</strong> {worker["metrics"]["in_memory"]}</td>
+                    <td style="text-align: left;">
+                        <strong>Tasks executing: </strong> {worker["metrics"]["executing"]}
+                    </td>
+                    <td style="text-align: left;">
+                        <strong>Tasks in memory: </strong> {worker["metrics"]["in_memory"]}
+                    </td>
                 </tr>
                 <tr>
-                    <td style="text-align: left;"><strong>Tasks ready:</strong> {worker["metrics"]["ready"]}</td>
-                    <td style="text-align: left;"><strong>Tasks in flight:</strong> {worker["metrics"]["in_flight"]}</td>
+                    <td style="text-align: left;">
+                        <strong>Tasks ready: </strong> {worker["metrics"]["ready"]}
+                    </td>
+                    <td style="text-align: left;">
+                        <strong>Tasks in flight: </strong>{worker["metrics"]["in_flight"]}
+                    </td>
                 </tr>
                 <tr>
                     <td style="text-align: left;"><strong>CPU usage:</strong> {worker["metrics"]["cpu"]}%</td>
-                    <td style="text-align: left;"><strong>Last seen:</strong> {format_time_ago(datetime.datetime.fromtimestamp(worker["last_seen"]))}</td>
+                    <td style="text-align: left;">
+                        <strong>Last seen: </strong>
+                        {format_time_ago(datetime.datetime.fromtimestamp(worker["last_seen"]))}
+                    </td>
                 </tr>
                 <tr>
-                    <td style="text-align: left;"><strong>Memory usage:</strong> {((worker["metrics"]["memory"] / worker["memory_limit"]) * 100):.1f}%</td>
-                    <td style="text-align: left;"><strong>Spilled bytes:</strong> {format_bytes(worker["metrics"]["spilled_nbytes"])}</td>
+                    <td style="text-align: left;">
+                        <strong>Memory usage: </strong>
+                        {((worker["metrics"]["memory"] / worker["memory_limit"]) * 100):.1f}%
+                    </td>
+                    <td style="text-align: left;">
+                        <strong>Spilled bytes: </strong>
+                        {format_bytes(worker["metrics"]["spilled_nbytes"])}
+                    </td>
                 </tr>
                 <tr>
-                    <td style="text-align: left;"><strong>Read bytes:</strong> {format_bytes(worker["metrics"]["read_bytes"])}</td>
-                    <td style="text-align: left;"><strong>Write bytes:</strong> {format_bytes(worker["metrics"]["write_bytes"])}</td>
+                    <td style="text-align: left;">
+                        <strong>Read bytes: </strong>
+                        {format_bytes(worker["metrics"]["read_bytes"])}
+                    </td>
+                    <td style="text-align: left;">
+                        <strong>Write bytes: </strong>
+                        {format_bytes(worker["metrics"]["write_bytes"])}
+                    </td>
                 </tr>
                 """
 
             workers += f"""
             <div style="margin-bottom: 20px;">
-                <div style="width: 24px; height: 24px; background-color: #DBF5FF; border: 3px solid #4CC9FF; border-radius: 5px; position: absolute;">&nbsp;</div>
+                <div style="width: 24px;
+                            height: 24px;
+                            background-color: #DBF5FF;
+                            border: 3px solid #4CC9FF;
+                            border-radius: 5px;
+                            position: absolute;">&nbsp;</div>
                 <div style="margin-left: 48px;">
                 <details>
-                    <summary><h3 style="margin-bottom: 0px; display: inline;">{worker["type"]}: {worker["name"]}</h3></summary>
+                    <summary>
+                        <h3 style="margin-bottom: 0px; display: inline;">{worker["type"]}: {worker["name"]}</h3>
+                    </summary>
                     <table style="width: 100%; text-align: left;">
                         <tr>
-                            <td style="text-align: left;"><strong>Comm:</strong> {worker["comm"]}</td>
-                            <td style="text-align: left;"><strong>Total threads:</strong> {worker["nthreads"]}</td>
+                            <td style="text-align: left;"><strong>Comm: </strong> {worker["comm"]}</td>
+                            <td style="text-align: left;"><strong>Total threads: </strong> {worker["nthreads"]}</td>
                         </tr>
                         <tr>
-                            <td style="text-align: left;"><strong>Dashboard:</strong> <a href="{dashboard_address}">{dashboard_address}</a></td>
-                            <td style="text-align: left;"><strong>Memory:</strong> {format_bytes(worker["memory_limit"])}</td>
+                            <td style="text-align: left;">
+                                <strong>Dashboard: </strong>
+                                <a href="{dashboard_address}">{dashboard_address}</a>
+                            </td>
+                            <td style="text-align: left;">
+                                <strong>Memory: </strong>
+                                {format_bytes(worker["memory_limit"])}
+                            </td>
                         </tr>
                         <tr>
-                            <td style="text-align: left;"><strong>Nanny:</strong> {worker["nanny"]}</td>
+                            <td style="text-align: left;"><strong>Nanny: </strong> {worker["nanny"]}</td>
                             <td style="text-align: left;"></td>
                         </tr>
                         <tr>
-                            <td colspan="2" style="text-align: left;"><strong>Local directory:</strong> {worker["local_directory"]}</td>
+                            <td colspan="2" style="text-align: left;">
+                                <strong>Local directory: </strong>
+                                {worker["local_directory"]}
+                            </td>
                         </tr>
                         {metrics}
                     </table>

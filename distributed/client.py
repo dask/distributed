@@ -875,7 +875,7 @@ class Client:
             info = self._scheduler_identity
             scheduler = self.scheduler
 
-        return scheduler, info
+        return scheduler, SchedulerInfo(info)
 
     def __repr__(self):
         # Note: avoid doing I/O here...
@@ -908,51 +908,56 @@ class Client:
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()
 
-        text = (
-            '<h3 style="text-align: left;">Client</h3>\n'
-            '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
-        )
-        if scheduler is not None:
-            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
+        if scheduler is None:
+            scheduler_repr = """<p>No scheduler connected.</p>"""
         else:
-            text += "  <li><b>Scheduler: not connected</b></li>\n"
+            scheduler_repr = info._repr_html_()
 
-        if info and "dashboard" in info["services"]:
-            text += (
-                "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a></li>\n"
-                % {"web": self.dashboard_link}
-            )
+        client_status = ""
 
-        text += "</ul>\n"
+        if not self.cluster and not self.scheduler_file:
+            client_status += """
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
-        if info:
-            workers = list(info["workers"].values())
-            cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
-            else:
-                memory = ""
+        if self.cluster:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
+                    <td style="text-align: left;"><strong>Cluster type:</strong> {type(self.cluster).__name__}</td>
+                </tr>
+                """
 
-            text2 = (
-                '<h3 style="text-align: left;">Cluster</h3>\n'
-                '<ul style="text-align: left; list-style:none; margin: 0; padding: 0;">\n'
-                "  <li><b>Workers: </b>%d</li>\n"
-                "  <li><b>Cores: </b>%d</li>\n"
-                "  <li><b>Memory: </b>%s</li>\n"
-                "</ul>\n"
-            ) % (len(workers), cores, memory)
+        if self.scheduler_file:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
+                    <td style="text-align: left;"><strong>Scheduler file:</strong> {self.scheduler_file}</td>
+                </tr>
+                """
 
-            return (
-                '<table style="border: 2px solid white;">\n'
-                "<tr>\n"
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                "</tr>\n</table>"
-            ) % (text, text2)
-
-        else:
-            return text
+        return f"""
+            <div>
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background-color: #e1e1e1;
+                    border: 3px solid #9D9D9D;
+                    border-radius: 5px;
+                    position: absolute;">&nbsp;</div>
+                <div style="margin-left: 48px;">
+                    <h3 style="margin-bottom: 0px;">Client</h3>
+                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.id}</p>
+                    <table style="width: 100%; text-align: left;">
+                    {client_status}
+                    </table>
+                    {scheduler_repr}
+                </div>
+            </div>
+        """
 
     def start(self, **kwargs):
         """Start scheduler running in separate thread"""
@@ -1166,7 +1171,7 @@ class Client:
         if self.status not in ("running", "connecting"):
             return
         try:
-            self._scheduler_identity = await self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
         except EnvironmentError:
             logger.debug("Not able to query scheduler for identity")
 
@@ -3449,7 +3454,7 @@ class Client:
         """
         if not self.asynchronous:
             self.sync(self._update_scheduler_info)
-        return SchedulerInfo(self._scheduler_identity)
+        return self._scheduler_identity
 
     def write_scheduler_file(self, scheduler_file):
         """Write the scheduler information to a json file.
