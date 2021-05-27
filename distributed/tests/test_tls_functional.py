@@ -99,7 +99,12 @@ async def test_nanny(c, s, a, b):
     assert result == 11
 
 
-@gen_tls_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+@gen_tls_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+)
 async def test_rebalance(c, s, *_):
     # We used nannies to have separate processes for each worker
     a, b = s.workers

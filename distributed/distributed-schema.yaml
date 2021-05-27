@@ -403,7 +403,6 @@ properties:
                   the worker, ignore it for this long before considering it in
                   non-time-sensitive heuristics. This should be set to be longer than
                   the duration of most dask tasks.
-
               rebalance:
                 type: object
                 description: >-
@@ -423,18 +422,16 @@ properties:
                     minimum: 0
                     maximum: 1
                     description: >-
-                      Fraction of worker process memory at which we stop potentially
-                      receiving data from other workers. Ignored when max_memory is not
-                      set.
-
+                      Fraction of worker process memory at which we start potentially
+                      transferring data to other workers.
                   recipient-max:
                     type: number
                     minimum: 0
                     maximum: 1
                     description: >-
-                      Fraction of worker process memory at which we start potentially
-                      transferring data to other workers.
-
+                      Fraction of worker process memory at which we stop potentially
+                      receiving data from other workers. Ignored when max_memory is not
+                      set.
                   sender-recipient-gap:
                     type: number
                     minimum: 0

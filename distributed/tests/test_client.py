@@ -2895,7 +2895,12 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         await x
 
 
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+)
 async def test_rebalance(c, s, *_):
     """Test Client.rebalance(). These are just to test the Client wrapper around
     Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
@@ -2967,6 +2972,7 @@ def test_rebalance_sync():
         s = c.cluster.scheduler
         a, b = [ws.address for ws in s.workers.values()]
         futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+        wait(futures)
         # Wait for heartbeat
         while s.memory.process < 2 ** 29:
             sleep(0.1)
@@ -2984,7 +2990,10 @@ def test_rebalance_sync():
 async def test_rebalance_unprepared(c, s, a, b):
     """Client.rebalance() internally waits for unfinished futures"""
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    # Let the futures reach the scheduler
     await asyncio.sleep(0.1)
+    # We didn't wait enough for futures to complete. However, Client.rebalance() will
+    # block until all futures are completed before invoking Scheduler.rebalance().
     await c.rebalance(futures)
     s.validate_state()
 

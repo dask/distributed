@@ -2528,7 +2528,12 @@ async def assert_ndata(client, by_addr, total=None):
         raise AssertionError(f"Expected {by_addr}, total={total}; got {out}")
 
 
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+)
 async def test_rebalance(c, s, *_):
     # We used nannies to have separate processes for each worker
     a, b = s.workers
@@ -2593,7 +2598,9 @@ async def test_rebalance_missing_data1(s, a, b):
 
 @gen_cluster(client=True)
 async def test_rebalance_missing_data2(c, s, a, b):
-    """keys exist but belong to unfinished futures"""
+    """keys exist but belong to unfinished futures. Unlike Client.rebalance(),
+    Scheduler.rebalance() does not wait for unfinished futures.
+    """
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
     out = await s.rebalance(keys=[f.key for f in futures])
@@ -2629,7 +2636,10 @@ async def test_rebalance_no_workers(s):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1000 MiB"},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0.3,
+    },
 )
 async def test_rebalance_managed_memory(c, s, *_):
     a, b = s.workers
@@ -2751,7 +2761,10 @@ async def test_rebalance_sender_below_mean(c, s, *_):
     client=True,
     Worker=Nanny,
     worker_kwargs={"memory_limit": "1000 MiB"},
-    config={"distributed.worker.memory.rebalance.measure": "managed"},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0.3,
+    },
 )
 async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     """
