@@ -251,7 +251,7 @@ class LocalCluster(SpecCluster):
     def _repr_html_(self):
         cluster_status = f"""
             <tr>
-                <td style="text-align: left;"><strong>Status:</strong> {self.status}</td>
+                <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
                 <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
             </tr>
         """
