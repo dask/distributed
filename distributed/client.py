@@ -3203,10 +3203,11 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
+        result = self.sync(self.scheduler.who_has, keys=keys, **kwargs)
         if self.asynchronous:
-            return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
+            return result
         else:
-            return WhoHas(self.sync(self.scheduler.who_has, keys=keys, **kwargs))
+            return WhoHas(result)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
