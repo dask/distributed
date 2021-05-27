@@ -55,7 +55,6 @@ from .lock import LockExtension
 from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
-from .objects import HasWhat, WhoHas
 from .proctitle import setproctitle
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
@@ -6177,19 +6176,17 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState
         ts: TaskState
         if keys is not None:
-            res = {
+            return {
                 k: [ws._address for ws in parent._tasks[k].who_has]
                 if k in parent._tasks
                 else []
                 for k in keys
             }
         else:
-            res = {
+            return {
                 key: [ws._address for ws in ts._who_has]
                 for key, ts in parent._tasks.items()
             }
-
-        return WhoHas(res)
 
     def get_has_what(self, comm=None, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -6197,19 +6194,17 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
         if workers is not None:
             workers = map(self.coerce_address, workers)
-            res = {
+            return {
                 w: [ts._key for ts in parent._workers_dv[w].has_what]
                 if w in parent._workers_dv
                 else []
                 for w in workers
             }
         else:
-            res = {
+            return {
                 w: [ts._key for ts in ws._has_what]
                 for w, ws in parent._workers_dv.items()
             }
-
-        return HasWhat(res)
 
     def get_ncores(self, comm=None, workers=None):
         parent: SchedulerState = cast(SchedulerState, self)
