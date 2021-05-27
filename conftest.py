@@ -32,3 +32,30 @@ def pytest_collection_modifyitems(config, items):
 
 
 pytest_plugins = ["distributed.pytest_resourceleaks"]
+
+# The following fixtures are required for pytest-asyncio compatibility
+
+
+@pytest.fixture()
+def event_loop():
+    from distributed.utils_test import pristine_loop
+
+    with pristine_loop() as loop:
+        yield loop.asyncio_loop
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_fixture_post_finalizer(fixturedef, request):
+    """Pytest-asyncio resets the eventloop policy after the above event loop is closed."""
+    import asyncio
+
+    if fixturedef.argname == "event_loop":
+        try:
+            # Tornado > 6.0.3
+            from tornado.platform.asyncio import AnyThreadEventLoopPolicy
+        except ImportError:
+            try:
+                from distributed.utils import AnyThreadEventLoopPolicy
+            except ImportError:
+                return
+        asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
