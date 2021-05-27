@@ -3613,6 +3613,19 @@ async def test_status():
     await s.close()
 
 
+@gen_cluster(client=False, timeout=None)
+async def test_async_whowhat(s, a, b):
+    c = await Client(s.address, asynchronous=True)
+    [x] = await c.scatter([1], workers=a.address)
+
+    who_has = await c.who_has()
+    has_what = await c.has_what()
+
+    assert who_has == {x.key: (a.address,)}
+    assert has_what == {a.address: (x.key,), b.address: ()}
+    await c.close()
+
+
 @gen_cluster(client=True)
 async def test_persist_optimize_graph(c, s, a, b):
     i = 10

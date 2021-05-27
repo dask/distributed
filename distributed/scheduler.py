@@ -55,6 +55,7 @@ from .lock import LockExtension
 from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
+from .objects import HasWhat, WhoHas
 from .proctitle import setproctitle
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
@@ -609,7 +610,10 @@ class WorkerState:
 
     @property
     def has_what(self):
-        return self._has_what
+        try:
+            return HasWhat(self._has_what)
+        except TypeError:
+            return self._has_what
 
     @property
     def host(self):
@@ -1450,7 +1454,10 @@ class TaskState:
 
     @property
     def who_has(self):
-        return self._who_has
+        try:
+            return WhoHas(self._who_has)
+        except TypeError:
+            return self._who_has
 
     @property
     def processing_on(self):
