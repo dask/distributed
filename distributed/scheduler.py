@@ -55,7 +55,6 @@ from .lock import LockExtension
 from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
-from .objects import HasWhat, WhoHas
 from .proctitle import setproctitle
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
@@ -610,10 +609,7 @@ class WorkerState:
 
     @property
     def has_what(self):
-        try:
-            return HasWhat(self._has_what)
-        except TypeError:
-            return self._has_what
+        return self._has_what
 
     @property
     def host(self):
@@ -1454,10 +1450,7 @@ class TaskState:
 
     @property
     def who_has(self):
-        try:
-            return WhoHas(self._who_has)
-        except TypeError:
-            return self._who_has
+        return self._who_has
 
     @property
     def processing_on(self):
@@ -5636,6 +5629,7 @@ class Scheduler(SchedulerState, ServerNode):
                 for sender, recipient, ts in msgs:
                     assert ts._state == "memory"
                     ts._who_has.add(recipient)
+                    breakpoint()
                     recipient.has_what.add(ts)
                     recipient.nbytes += ts.get_nbytes()
                     self.log.append(
