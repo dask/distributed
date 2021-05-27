@@ -163,30 +163,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
-UNKNOWN_TASK_DURATION = declare(
-    double,
-    parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
-)
-MEMORY_RECENT_TO_OLD_TIME = declare(
-    double,
-    parse_timedelta(dask.config.get("distributed.worker.memory.recent-to-old-time")),
-)
-MEMORY_REBALANCE_MEASURE = declare(
-    str, dask.config.get("distributed.worker.memory.rebalance.measure")
-)
-MEMORY_REBALANCE_SENDER_MIN = declare(
-    double,
-    dask.config.get("distributed.worker.memory.rebalance.sender-min"),
-)
-MEMORY_REBALANCE_RECIPIENT_MAX = declare(
-    double,
-    dask.config.get("distributed.worker.memory.rebalance.recipient-max"),
-)
-MEMORY_REBALANCE_HALF_GAP = declare(
-    double,
-    dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap") / 2.0,
-)
-
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -1800,6 +1776,14 @@ class SchedulerState:
     _workers: object
     _workers_dv: dict
 
+    # Variables from dask.config, cached by __init__ for performance
+    UNKNOWN_TASK_DURATION: double
+    MEMORY_RECENT_TO_OLD_TIME: double
+    MEMORY_REBALANCE_MEASURE: str
+    MEMORY_REBALANCE_SENDER_MIN: double
+    MEMORY_REBALANCE_RECIPIENT_MAX: double
+    MEMORY_REBALANCE_HALF_GAP: double
+
     def __init__(
         self,
         aliases: dict = None,
@@ -1874,6 +1858,28 @@ class SchedulerState:
         else:
             self._workers = sortedcontainers.SortedDict()
         self._workers_dv: dict = cast(dict, self._workers)
+
+        # Variables from dask.config, cached by __init__ for performance
+        self.UNKNOWN_TASK_DURATION = parse_timedelta(
+            dask.config.get("distributed.scheduler.unknown-task-duration")
+        )
+        self.MEMORY_RECENT_TO_OLD_TIME = parse_timedelta(
+            dask.config.get("distributed.worker.memory.recent-to-old-time")
+        )
+        self.MEMORY_REBALANCE_MEASURE = dask.config.get(
+            "distributed.worker.memory.rebalance.measure"
+        )
+        self.MEMORY_REBALANCE_SENDER_MIN = dask.config.get(
+            "distributed.worker.memory.rebalance.sender-min"
+        )
+        self.MEMORY_REBALANCE_RECIPIENT_MAX = dask.config.get(
+            "distributed.worker.memory.rebalance.recipient-max"
+        )
+        self.MEMORY_REBALANCE_HALF_GAP = (
+            dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
+            / 2.0
+        )
+
         super().__init__(**kwargs)
 
     @property
@@ -3094,18 +3100,14 @@ class SchedulerState:
         (not including any communication cost).
         """
         duration: double = ts._prefix._duration_average
-        if duration < 0:
-            s: set = self._unknown_durations.get(ts._prefix._name)
-            if s is None:
-                self._unknown_durations[ts._prefix._name] = s = set()
-            s.add(ts)
+        if duration >= 0:
+            return duration
 
-            if default < 0:
-                duration = UNKNOWN_TASK_DURATION
-            else:
-                duration = default
-
-        return duration
+        s: set = self._unknown_durations.get(ts._prefix._name)
+        if s is None:
+            self._unknown_durations[ts._prefix._name] = s = set()
+        s.add(ts)
+        return default if default >= 0 else self.UNKNOWN_TASK_DURATION
 
     @ccall
     @exceptval(check=False)
@@ -3887,7 +3889,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Calculate RSS - dask keys, separating "old" and "new" usage
         # See MemoryState for details
-        max_memory_unmanaged_old_hist_age = local_now - MEMORY_RECENT_TO_OLD_TIME
+        max_memory_unmanaged_old_hist_age = local_now - parent.MEMORY_RECENT_TO_OLD_TIME
         memory_unmanaged_old = ws._memory_unmanaged_old
         while ws._memory_other_history:
             timestamp, size = ws._memory_other_history[0]
@@ -5658,6 +5660,7 @@ class Scheduler(SchedulerState, ServerNode):
         - recipient worker
         - task to be transferred
         """
+        parent: SchedulerState = self
         ts: TaskState
         ws: WorkerState
 
@@ -5690,15 +5693,15 @@ class Scheduler(SchedulerState, ServerNode):
         # (distributed.worker.memory.recent-to-old-time).
         # This lets us ignore temporary spikes caused by task heap usage.
         memory_by_worker = [
-            (ws, getattr(ws.memory, MEMORY_REBALANCE_MEASURE)) for ws in workers
+            (ws, getattr(ws.memory, parent.MEMORY_REBALANCE_MEASURE)) for ws in workers
         ]
         mean_memory = sum(m for _, m in memory_by_worker) // len(memory_by_worker)
 
         for ws, ws_memory in memory_by_worker:
             if ws.memory_limit:
-                half_gap = int(MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
-                sender_min = MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
-                recipient_max = MEMORY_REBALANCE_RECIPIENT_MAX * ws.memory_limit
+                half_gap = int(parent.MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
+                sender_min = parent.MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
+                recipient_max = parent.MEMORY_REBALANCE_RECIPIENT_MAX * ws.memory_limit
             else:
                 half_gap = 0
                 sender_min = 0.0

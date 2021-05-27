@@ -3,7 +3,6 @@ import collections
 import copy
 import functools
 import gc
-import importlib
 import io
 import itertools
 import logging
@@ -22,7 +21,6 @@ import uuid
 import warnings
 import weakref
 from contextlib import contextmanager, nullcontext, suppress
-from functools import wraps
 from glob import glob
 from time import sleep
 
@@ -1569,32 +1567,3 @@ class TaskStateMetadataPlugin(WorkerPlugin):
             ts.metadata["start_time"] = time()
         elif start == "executing" and finish == "memory":
             ts.metadata["stop_time"] = time()
-
-
-def set_config_and_reload(cfg):
-    """Test function decorator that temporarily sets dask.config variables and updates
-    the cached copy in the global variables of the distributed.scheduler module.
-
-    Tests decorated with this function are skipped when Cython is enabled.
-
-    Note: this decorator must be placed *before* @gen_cluster.
-    """
-    from . import scheduler
-
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            try:
-                with dask.config.set(cfg):
-                    importlib.reload(scheduler)
-                    return f(*args, **kwargs)
-            finally:
-                importlib.reload(scheduler)
-
-        if scheduler.COMPILED:
-            return pytest.mark.skip(
-                "Monkey-patching module variables doesn't work with Cython"
-            )(wrapper)
-        return wrapper
-
-    return decorator

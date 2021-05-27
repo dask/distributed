@@ -39,7 +39,6 @@ from distributed.utils_test import (  # noqa: F401
     inc,
     loop,
     nodebug,
-    set_config_and_reload,
     slowadd,
     slowdec,
     slowinc,
@@ -2626,8 +2625,12 @@ async def test_rebalance_no_workers(s):
     s.validate_state()
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1000 MiB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
 async def test_rebalance_managed_memory(c, s, *_):
     a, b = s.workers
     # Generate 100 buffers worth 400 MiB total on worker a. This sends its memory
@@ -2647,8 +2650,11 @@ async def test_rebalance_managed_memory(c, s, *_):
     s.validate_state()
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
 async def test_rebalance_no_limit(c, s, a, b):
     # See notes in test_rebalance_managed_memory
     futures = c.map(lambda _: "x", range(100), workers=[a.address])
@@ -2662,13 +2668,15 @@ async def test_rebalance_no_limit(c, s, a, b):
     s.validate_state()
 
 
-@set_config_and_reload(
-    {
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={
         "distributed.worker.memory.rebalance.measure": "managed",
         "distributed.worker.memory.rebalance.recipient-max": 0.4,
-    }
+    },
 )
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1000 MiB"})
 async def test_rebalance_no_recipients(c, s, *_):
     """There are sender workers, but no recipient workers"""
     a, b = s.workers
@@ -2686,9 +2694,11 @@ async def test_rebalance_no_recipients(c, s, *_):
     s.validate_state()
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1)] * 3, client=True, worker_kwargs={"memory_limit": 0}
+    nthreads=[("127.0.0.1", 1)] * 3,
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
 )
 async def test_rebalance_skip_recipient(client, s, a, b, c):
     """A recipient is skipped because it already holds a copy of the key to be sent"""
@@ -2702,8 +2712,11 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
     s.validate_state()
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
 async def test_rebalance_skip_all_recipients(c, s, a, b):
     """All recipients are skipped because they already hold copies"""
     futures = c.map(lambda _: "x", range(10), workers=[a.address])
@@ -2715,8 +2728,12 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     s.validate_state()
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1000 MiB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
 async def test_rebalance_sender_below_mean(c, s, *_):
     """A task remains on the sender because moving it would send it below the mean"""
     a, b = s.workers
@@ -2730,8 +2747,12 @@ async def test_rebalance_sender_below_mean(c, s, *_):
     assert await c.has_what() == {a: (f1.key,), b: (f2.key,)}
 
 
-@set_config_and_reload({"distributed.worker.memory.rebalance.measure": "managed"})
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1000 MiB"})
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
 async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     """
     1. keys are picked using a least recently inserted policy
