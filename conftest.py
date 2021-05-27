@@ -38,9 +38,9 @@ pytest_plugins = ["distributed.pytest_resourceleaks"]
 
 @pytest.fixture()
 def event_loop():
-    from distributed.utils_test import pristine_loop
+    from distributed.utils_test import clean
 
-    with pristine_loop() as loop:
+    with clean() as loop:
         yield loop.asyncio_loop
 
 
