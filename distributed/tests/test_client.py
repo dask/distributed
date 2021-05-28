@@ -58,6 +58,7 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
+from distributed.objects import HasWhat, WhoHas
 from distributed.scheduler import (
     COMPILED,
     CollectTaskMetaDataPlugin,
@@ -3647,6 +3648,26 @@ async def test_status():
     assert c.status == "closed"
 
     await s.close()
+
+
+@gen_cluster(client=True)
+async def test_async_whowhat(c, s, a, b):
+    [x] = await c.scatter([1], workers=a.address)
+
+    who_has = await c.who_has()
+    has_what = await c.has_what()
+
+    assert who_has == {x.key: (a.address,)}
+    assert has_what == {a.address: (x.key,), b.address: ()}
+
+
+def test_client_repr(c):
+    x = c.submit(inc, 1)
+
+    who_has = c.who_has()
+    has_what = c.has_what()
+    assert type(who_has) is WhoHas
+    assert type(has_what) is HasWhat
 
 
 @gen_cluster(client=True)

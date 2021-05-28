@@ -1196,7 +1196,7 @@ class Client:
         return self
 
     async def __aenter__(self):
-        await self._started
+        await self
         return self
 
     async def __aexit__(self, typ, value, traceback):
@@ -3206,7 +3206,12 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
-        return WhoHas(self.sync(self.scheduler.who_has, keys=keys, **kwargs))
+
+        result = self.sync(self.scheduler.who_has, keys=keys, **kwargs)
+        if self.asynchronous:
+            return result
+
+        return WhoHas(result)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
@@ -3240,7 +3245,12 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
-        return HasWhat(self.sync(self.scheduler.has_what, workers=workers, **kwargs))
+        result = self.sync(self.scheduler.has_what, workers=workers, **kwargs)
+
+        if self.asynchronous:
+            return result
+
+        return HasWhat(result)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker

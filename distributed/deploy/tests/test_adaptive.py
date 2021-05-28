@@ -10,6 +10,7 @@ import dask
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
+    async_wait_for,
     clean,
     cleanup,
     gen_test,
@@ -17,43 +18,6 @@ from distributed.utils_test import (  # noqa: F401
     nodebug,
     slowinc,
 )
-
-
-@pytest.mark.asyncio
-async def test_simultaneous_scale_up_and_down(cleanup):
-    class TestAdaptive(Adaptive):
-        def get_scale_up_kwargs(self):
-            assert False
-
-        def _retire_workers(self):
-            assert False
-
-    class TestCluster(LocalCluster):
-        def scale_up(self, n, **kwargs):
-            assert False
-
-        def scale_down(self, workers):
-            assert False
-
-    with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"a": 4, "b": 4, "c": 1}}
-    ):
-        async with TestCluster(
-            n_workers=4, processes=False, asynchronous=True
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as c:
-                s = cluster.scheduler
-
-                future = c.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
-
-                while len(s.rprocessing) < 3:
-                    await asyncio.sleep(0.001)
-
-                ta = cluster.adapt(
-                    interval="100 ms", scale_factor=2, Adaptive=TestAdaptive
-                )
-
-                await asyncio.sleep(0.3)
 
 
 def test_adaptive_local_cluster(loop):
@@ -479,3 +443,49 @@ async def test_adaptive_no_memory_limit(cleanup):
             )
             <= 5
         )
+
+
+@pytest.mark.asyncio
+async def test_scale_needs_to_be_awaited(cleanup):
+    """
+    This tests that the adaptive class works fine if the scale method uses the
+    `sync` method to schedule its task instead of loop.add_callback
+    """
+
+    class RequiresAwaitCluster(LocalCluster):
+        def scale(self, n):
+            # super invocation in the nested function scope is messy
+            method = super().scale
+
+            async def _():
+                return method(n)
+
+            return self.sync(_)
+
+    async with RequiresAwaitCluster(n_workers=0, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            futures = client.map(slowinc, range(5), delay=0.05)
+            assert len(cluster.workers) == 0
+            cluster.adapt()
+
+            await client.gather(futures)
+
+            del futures
+            await async_wait_for(lambda: not cluster.workers, 10)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_stopped():
+    """
+    We should ensure that the adapt PC is actually stopped once the cluster
+    stops.
+    """
+    async with LocalCluster(n_workers=0, asynchronous=True) as cluster:
+        instance = cluster.adapt(interval="10ms")
+        assert instance.periodic_callback is not None
+
+        await async_wait_for(lambda: instance.periodic_callback.is_running(), timeout=5)
+
+        pc = instance.periodic_callback
+
+    await async_wait_for(lambda: not pc.is_running(), timeout=5)
