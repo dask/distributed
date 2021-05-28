@@ -2364,7 +2364,7 @@ class Worker(ServerNode):
                         self.release_key(d, cause="already executing at gather")
                         continue
                     elif ts.state not in ("ready", "memory"):
-                        self.transition(ts, "fetch", worker=worker)
+                        self.transition(ts, "fetch")
 
                     if not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
