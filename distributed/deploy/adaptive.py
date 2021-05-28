@@ -184,19 +184,23 @@ class Adaptive(AdaptiveCore):
         if not workers:
             return
         with log_errors():
+            logger.info("Retiring workers %s", workers)
             # Ask scheduler to cleanly retire workers
             await self.scheduler.retire_workers(
-                names=workers, remove=True, close_workers=True
+                names=workers,
+                remove=True,
+                close_workers=True,
             )
 
             # close workers more forcefully
-            logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
             if isawaitable(f):
                 await f
 
     async def scale_up(self, n):
-        self.cluster.scale(n)
+        f = self.cluster.scale(n)
+        if isawaitable(f):
+            await f
 
     @property
     def loop(self):
