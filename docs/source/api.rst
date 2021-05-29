@@ -62,6 +62,7 @@ API
    futures_of
    get_task_stream
    get_task_metadata
+   performance_report
 
 
 Asynchronous methods
@@ -158,6 +159,7 @@ Other
 .. autoclass:: distributed.Reschedule
 .. autoclass:: get_task_stream
 .. autoclass:: get_task_metadata
+.. autoclass:: performance_report
 
 .. autoclass:: Event
    :members:

@@ -5,6 +5,7 @@ import threading
 import uuid
 import warnings
 from contextlib import suppress
+from inspect import isawaitable
 
 from tornado.ioloop import PeriodicCallback
 
@@ -82,6 +83,9 @@ class Cluster:
         if self.status == Status.closed:
             return
 
+        with suppress(AttributeError):
+            self._adaptive.stop()
+
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
@@ -114,7 +118,7 @@ class Cluster:
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
+        """Listen to scheduler for updates on adding and removing workers"""
         while True:
             try:
                 msgs = await comm.read()
@@ -302,7 +306,7 @@ class Cluster:
         return text
 
     def _widget(self):
-        """ Create IPython widget for display within a notebook """
+        """Create IPython widget for display within a notebook"""
         try:
             return self._cached_widget
         except AttributeError:
@@ -419,7 +423,9 @@ class Cluster:
         return self
 
     async def __aexit__(self, typ, value, traceback):
-        await self.close()
+        f = self.close()
+        if isawaitable(f):
+            await f
 
     @property
     def scheduler_address(self):

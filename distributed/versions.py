@@ -71,7 +71,7 @@ def get_system_info():
 
 
 def version_of_package(pkg):
-    """ Try a variety of common ways to get the version of a package """
+    """Try a variety of common ways to get the version of a package"""
     from contextlib import suppress
 
     with suppress(AttributeError):
@@ -84,7 +84,7 @@ def version_of_package(pkg):
 
 
 def get_package_info(pkgs):
-    """ get package versions for the passed required & optional packages """
+    """get package versions for the passed required & optional packages"""
 
     pversions = [("python", ".".join(map(str, sys.version_info)))]
     for pkg in pkgs:

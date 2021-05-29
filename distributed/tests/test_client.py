@@ -58,6 +58,7 @@ from distributed.comm import CommClosedError
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
+from distributed.objects import HasWhat, WhoHas
 from distributed.scheduler import (
     COMPILED,
     CollectTaskMetaDataPlugin,
@@ -236,7 +237,7 @@ async def test_map_batch_size(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_custom_key_with_batches(c, s, a, b):
-    """ Test of <https://github.com/dask/distributed/issues/4588>"""
+    """Test of <https://github.com/dask/distributed/issues/4588>"""
 
     futs = c.map(
         lambda x: x ** 2,
@@ -3344,6 +3345,32 @@ def test_default_get():
         assert dask.base.get_scheduler() == pre_get
 
 
+@gen_cluster()
+async def test_set_as_default(s, a, b):
+    with pytest.raises(ValueError):
+        default_client()
+
+    async with Client(s.address, set_as_default=False, asynchronous=True) as c1:
+        with pytest.raises(ValueError):
+            default_client()
+        async with Client(s.address, set_as_default=True, asynchronous=True) as c2:
+            assert default_client() is c2
+            async with Client(s.address, set_as_default=True, asynchronous=True) as c3:
+                assert default_client() is c3
+                async with Client(
+                    s.address, set_as_default=False, asynchronous=True
+                ) as c4:
+                    assert default_client() is c3
+
+                    await c4.scheduler_comm.close()
+                    while c4.status != "running":
+                        await asyncio.sleep(0.01)
+                    assert default_client() is c3
+
+    with pytest.raises(ValueError):
+        default_client()
+
+
 @gen_cluster(client=True)
 async def test_get_processing(c, s, a, b):
     processing = await c.processing()
@@ -3585,6 +3612,27 @@ async def test_status():
     assert c.status == "closed"
 
     await s.close()
+
+
+@gen_cluster(client=True)
+async def test_async_whowhat(c, s, a, b):
+    [x] = await c.scatter([1], workers=a.address)
+
+    who_has = await c.who_has()
+    has_what = await c.has_what()
+
+    assert who_has == {x.key: (a.address,)}
+    assert has_what == {a.address: (x.key,), b.address: ()}
+
+
+@pytest.mark.xfail(reason="Want to fix to use `WhoHas` + `WhatHas`")
+def test_client_repr(c):
+    x = c.submit(inc, 1)
+
+    who_has = c.who_has()
+    has_what = c.has_what()
+    assert type(who_has) is WhoHas
+    assert type(has_what) is HasWhat
 
 
 @gen_cluster(client=True)

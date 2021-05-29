@@ -1,6 +1,60 @@
 Changelog
 =========
 
+2021.05.1
+---------
+
+Released on May 28, 2021
+
+- Drop usage of ``WhoHas`` & ``WhatHas`` from ``Client`` (:pr:`4863`) `jakirkham`_
+- Ensure adaptive scaling is properly awaited and closed (:pr:`4720`) `Florian Jetter`_
+- Fix ``WhoHas``/ ``HasWhat`` ``async`` usage (:pr:`4860`) `Benjamin Zaitlen`_
+- Add HTML reprs for ``Client.who_has`` and ``Client.has_what`` (:pr:`4853`) `Jacob Tomlinson`_
+- Prevent accidentally starting multiple ``Worker`` s in the same process (:pr:`4852`) `crusaderky`_
+- Add system tab to performance reports (:pr:`4561`) `Charles Blackmon-Luca`_
+- Let servers close faster if there are no active handlers (:pr:`4805`) `Florian Jetter`_
+- Fix UCX scrub config logging (:pr:`4850`) `Peter Andreas Entschev`_
+- Ensure worker clients are closed (:pr:`3921`) `Florian Jetter`_
+- Fix warning for attribute error when deleting a client (:pr:`4807`) `Florian Jetter`_
+- Ensure exceptions are raised if workers are incorrectly started (:pr:`4733`) `Florian Jetter`_
+- Update handling of UCX exceptions on endpoint closing (:pr:`4836`) `Peter Andreas Entschev`_
+- Ensure busy workloads properly look up ``who_has`` (:pr:`4793`) `Florian Jetter`_
+- Check ``distributed.scheduler.pickle`` in ``Scheduler.run_function`` (:pr:`4838`) `James Bourbeau`_
+- Add performance_report to API docs (:pr:`4840`) `James Bourbeau`_
+- Use ``dict`` ``_workers_dv`` in unordered use cases (:pr:`4826`) `jakirkham`_
+- Bump ``pre-commit`` hook versions (:pr:`4835`) `James Bourbeau`_
+- Do not mindlessly spawn workers when no memory limit is set (:pr:`4397`) `Torsten Wörtwein`_
+- ``test_memory`` to use ``gen_cluster`` (:pr:`4811`) `crusaderky`_
+- Increase timeout of ``gen_test`` to 30s (:pr:`4821`) `Florian Jetter`_
+
+
+2021.05.0
+---------
+
+Released on May 14, 2021
+
+- Merge global annotations on the client (:pr:`4691`) `Mads R. B. Kristensen`_
+- Add support for ``click`` 8 (:pr:`4810`) `James Bourbeau`_
+- Add HTML reprs to some scheduler classes (:pr:`4795`) `James Bourbeau`_
+- Use JupyterLab theme variables (:pr:`4796`) `Ian Rose`_
+- Allow the dashboard to run on multiple ports (:pr:`4786`) `Jacob Tomlinson`_
+- Remove ``release_dep`` from ``WorkerPlugin`` API (:pr:`4791`) `James Bourbeau`_
+- Support for UCX 1.10+ (:pr:`4787`) `Peter Andreas Entschev`_
+- Reduce complexity of ``test_gather_allow_worker_reconnect`` (:pr:`4739`) `Florian Jetter`_
+- Fix doctests in ``utils.py`` (:pr:`4785`) `Jacob Tomlinson`_
+- Ensure deps are actually logged in worker (:pr:`4753`) `Florian Jetter`_
+- Add ``stacklevel`` keyword into ``performance_report()`` to allow for selecting calling code to be displayed (:pr:`4777`) `Nathan Danielsen`_
+- Unregister worker plugin (:pr:`4748`) `Naty Clementi`_
+- Fixes some pickling issues in the Cythonized ``Scheduler`` (:pr:`4768`) `jakirkham`_
+- Improve graceful shutdown if nanny is involved (:pr:`4725`) `Florian Jetter`_
+- Update cythonization in CI (:pr:`4764`) `James Bourbeau`_
+- Use ``contextlib.nullcontext`` (:pr:`4763`) `James Bourbeau`_
+- Cython fixes for ``MemoryState`` (:pr:`4761`) `jakirkham`_
+- Fix errors in ``check_thread_leak`` (:pr:`4747`) `James Bourbeau`_
+- Handle missing ``key`` case in ``report_on_key`` (:pr:`4755`) `jakirkham`_
+- Drop temporary ``set`` variables ``s`` (:pr:`4758`) `jakirkham`_
+
+
 2021.04.1
 ---------
 
@@ -2334,3 +2388,6 @@ significantly without many new features.
 .. _`James Lamb`: https://github.com/jameslamb
 .. _`Hristo Georgiev`: https://github.com/hristog
 .. _`Matteo De Wint`: https://github.com/mdwint
+.. _`Naty Clementi`: https://github.com/ncclementi
+.. _`Nathan Danielsen`: https://github.com/ndanielsen
+.. _`Torsten Wörtwein`: https://github.com/twoertwein

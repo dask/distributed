@@ -201,7 +201,7 @@ class Future(WrappedKey):
         return self._state.status
 
     def done(self):
-        """ Is the computation complete? """
+        """Is the computation complete?"""
         return self._state.done()
 
     def result(self, timeout=None):
@@ -309,7 +309,7 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """ Returns True if the future has been cancelled """
+        """Returns True if the future has been cancelled"""
         return self._state.status == "cancelled"
 
     async def _traceback(self):
@@ -491,7 +491,7 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """ Coroutine that waits on future, then calls callback """
+    """Coroutine that waits on future, then calls callback"""
     while future.status == "pending":
         await future._state.wait()
     callback(future)
@@ -579,7 +579,7 @@ class Client:
 
     Extra keywords will be passed directly to LocalCluster
 
-    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
 
     See Also
     --------
@@ -715,6 +715,7 @@ class Client:
         )
 
         self._start_arg = address
+        self._set_as_default = set_as_default
         if set_as_default:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
@@ -926,11 +927,8 @@ class Client:
         if info:
             workers = list(info["workers"].values())
             cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
-            else:
-                memory = ""
+            memory = [w["memory_limit"] for w in workers]
+            memory = format_bytes(sum(memory)) if all(memory) else ""
 
             text2 = (
                 '<h3 style="text-align: left;">Cluster</h3>\n'
@@ -953,13 +951,13 @@ class Client:
             return text
 
     def start(self, **kwargs):
-        """ Start scheduler running in separate thread """
+        """Start scheduler running in separate thread"""
         if self.status != "newly-created":
             return
 
         self._loop_runner.start()
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "connecting"
 
         if self.asynchronous:
@@ -1150,8 +1148,8 @@ class Client:
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "running"
 
         for msg in self._pending_msg_buffer:
@@ -1197,7 +1195,7 @@ class Client:
         return self
 
     async def __aenter__(self):
-        await self._started
+        await self
         return self
 
     async def __aexit__(self, typ, value, traceback):
@@ -1221,7 +1219,7 @@ class Client:
                 self._release_key(key)
 
     def _release_key(self, key):
-        """ Release key from distributed memory """
+        """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
         if st is not None:
@@ -1232,7 +1230,7 @@ class Client:
             )
 
     async def _handle_report(self):
-        """ Listen to scheduler """
+        """Listen to scheduler"""
         with log_errors():
             try:
                 while True:
@@ -1325,7 +1323,7 @@ class Client:
         logger.exception(exception)
 
     async def _close(self, fast=False):
-        """ Send close signal and wait until scheduler completes """
+        """Send close signal and wait until scheduler completes"""
         if self.status == "closed":
             return
 
@@ -1419,7 +1417,7 @@ class Client:
         if timeout == no_default:
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
-        if self.status == "closed":
+        if self.status in ["closed", "newly-created"]:
             if self.asynchronous:
                 future = asyncio.Future()
                 future.set_result(None)
@@ -1815,7 +1813,7 @@ class Client:
                     direct = True
 
         async def wait(k):
-            """ Want to stop the All(...) early if we find an error """
+            """Want to stop the All(...) early if we find an error"""
             st = self.futures[k]
             await st.wait()
             if st.status != "finished" and errors == "raise":
@@ -4116,7 +4114,7 @@ class Client:
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
-    """ This is used to support older setup functions as callbacks """
+    """This is used to support older setup functions as callbacks"""
 
     def __init__(self, setup):
         self._setup = setup
@@ -4129,7 +4127,7 @@ class _WorkerSetupPlugin(WorkerPlugin):
 
 
 class Executor(Client):
-    """ Deprecated: see Client """
+    """Deprecated: see Client"""
 
     def __init__(self, *args, **kwargs):
         warnings.warn("Executor has been renamed to Client")
@@ -4463,7 +4461,7 @@ class as_completed:
                 return
 
     def clear(self):
-        """ Clear out all submitted futures """
+        """Clear out all submitted futures"""
         with self.lock:
             self.futures.clear()
             while not self.queue.empty():
@@ -4475,7 +4473,7 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started """
+    """Return a client if one has started"""
     c = c or _get_global_client()
     if c:
         return c
@@ -4700,6 +4698,9 @@ class performance_report:
 
     async def __aenter__(self):
         self.start = time()
+        self.last_count = await get_client().run_on_scheduler(
+            lambda dask_scheduler: dask_scheduler.monitor.count
+        )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
@@ -4710,7 +4711,7 @@ class performance_report:
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, code=code
+            start=self.start, last_count=self.last_count, code=code
         )
         with open(self.filename, "w") as f:
             f.write(data)

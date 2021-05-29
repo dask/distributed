@@ -6,6 +6,7 @@ import math
 import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
 
 from tornado import gen
 
@@ -98,7 +99,7 @@ class ProcessInterface:
         self._event_finished.set()
 
     async def finished(self):
-        """ Wait until the server has finished """
+        """Wait until the server has finished"""
         await self._event_finished.wait()
 
     def __repr__(self):
@@ -413,7 +414,15 @@ class SpecCluster(Cluster):
             return
         if self.status == Status.running or self.status == Status.failed:
             self.status = Status.closing
-            self.scale(0)
+
+            # Need to call stop here before we close all servers to avoid having
+            # dangling tasks in the ioloop
+            with suppress(AttributeError):
+                self._adaptive.stop()
+
+            f = self.scale(0)
+            if isawaitable(f):
+                await f
             await self._correct_state()
             for future in self._futures:
                 await future
@@ -446,7 +455,7 @@ class SpecCluster(Cluster):
         self._loop_runner.stop()
 
     def _threads_per_worker(self) -> int:
-        """ Return the number of threads per worker for new workers """
+        """Return the number of threads per worker for new workers"""
         if not self.new_spec:
             raise ValueError("To scale by cores= you must specify cores per worker")
 
@@ -458,7 +467,7 @@ class SpecCluster(Cluster):
             raise ValueError("To scale by cores= you must specify cores per worker")
 
     def _memory_per_worker(self) -> int:
-        """ Return the memory limit per worker for new workers """
+        """Return the memory limit per worker for new workers"""
         if not self.new_spec:
             raise ValueError(
                 "to scale by memory= your worker definition must include a memory_limit definition"
