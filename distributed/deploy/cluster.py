@@ -428,7 +428,9 @@ class Cluster:
             await f
 
     @property
-    def scheduler_address(self):
+    def scheduler_address(self) -> str:
+        if not self.scheduler_comm:
+            return "<Not Connected>"
         return self.scheduler_comm.address
 
     @property
@@ -464,7 +466,7 @@ class Cluster:
         return {d["name"] for d in self.scheduler_info["workers"].values()}
 
     def __eq__(self, other):
-        return self.name == other.name
+        return type(other) == type(self) and self.name == other.name
 
     def __hash__(self):
         return id(self)

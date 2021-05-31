@@ -1479,6 +1479,7 @@ def check_instances():
     Worker._instances.clear()
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
+    Worker._initialized_clients.clear()
     # assert all(n.status == "closed" for n in Nanny._instances), {
     #     n: n.status for n in Nanny._instances
     # }
@@ -1501,6 +1502,12 @@ def check_instances():
             if w.status == Status.running:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
+
+    start = time()
+    while any(c.status != "closed" for c in Worker._initialized_clients):
+        sleep(0.1)
+        assert time() < start + 10
+    Worker._initialized_clients.clear()
 
     for i in range(5):
         if all(c.closed() for c in Comm._instances):
