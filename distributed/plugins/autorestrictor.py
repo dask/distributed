@@ -71,17 +71,15 @@ class AutoRestrictor(SchedulerPlugin):
         # back through the graph, starting at the deepest terminal nodes, and
         # try to find a depth at which there was enough work to utilise all
         # workers.
-        while len(part_nodes) < n_worker:
+        while (len(part_nodes) < n_worker) & (max_depth > 0):
             _part_nodes = part_nodes.copy()
             for pn in _part_nodes:
                 if node_depths[pn] == max_depth:
                     part_nodes ^= set((pn,))
                     part_nodes |= dependencies[pn]
             max_depth -= 1
-            if max_depth == 0:
-                raise ValueError("AutoRestrictor cannot determine a sensible "
-                                 "work assignment pattern. Falling back to "
-                                 "default behaviour.")
+            if max_depth <= 0:
+                return  # In this case, there in nothing we can do - fall back.
 
         part_roots = {}
         part_dependencies = {}
@@ -123,19 +121,13 @@ class AutoRestrictor(SchedulerPlugin):
                 hash_map[k] = \
                     set().union(*[hash_map[kk] for kk in shared_roots.keys()])
 
-        worker_weights = dict(zip(workers, (0,) * len(workers)))
-        assignments = {}
+        task_groups = defaultdict(set)
 
         for pn in part_nodes:
 
             pdp = part_dependencies[pn]
             pdn = part_dependents[pn]
 
-            # Assume that the amount of work required is proportional to the
-            # number of tasks involved. Add one for the task we are looking at.
-            weight = len(pdp) + len(pdn) + 1
-
-            # TODO: This can likely be improved.
             if pdp:
                 groups = hash_map[tokenize(*sorted(part_roots[pn]))]
             else:  # Special case - no dependencies.
@@ -143,22 +135,21 @@ class AutoRestrictor(SchedulerPlugin):
                 group_offset += 1
 
             for g in groups:
-                if g in assignments:
-                    assignee = assignments[g]
-                else:
-                    assignee = min(worker_weights, key=worker_weights.get)
-                    assignments[g] = assignee
-                worker_weights[assignee] += weight
+                task_groups[g] |= pdp | pdn | {pn}
 
-            assignees = {assignments[g] for g in groups}
-            # Set restrictions on a partition node, its depdendents and
-            # dependencies.
-            for task_name in [pn, *pdp, *pdn]:
+        worker_loads = {wkr: 0 for wkr in workers}
+
+        for task_group in task_groups.values():
+
+            assignee = min(worker_loads, key=worker_loads.get)
+            worker_loads[assignee] += len(task_group)
+
+            for task_name in task_group:
                 try:
                     task = tasks[task_name]
                 except KeyError:  # Keys may not have an assosciated task.
                     continue
                 if task._worker_restrictions is None:
                     task._worker_restrictions = set()
-                task._worker_restrictions |= assignees
+                task._worker_restrictions |= {assignee}
                 task._loose_restrictions = False
