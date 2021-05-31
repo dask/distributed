@@ -76,7 +76,7 @@ class AutoRestrictor(SchedulerPlugin):
                     terminal_nodes ^= set((tn,))
                     terminal_nodes |= dependencies[tn]
             max_depth -= 1
-            if max_depth == -1:
+            if max_depth == 0:
                 raise ValueError("AutoRestrictor cannot determine a sensible "
                                  "work assignment pattern. Falling back to "
                                  "default behaviour.")
@@ -106,7 +106,7 @@ class AutoRestrictor(SchedulerPlugin):
         # Associate terminal roots with a specific group if they are not a
         # subset of another larger root set. TODO: This can likely be improved.
         for k, v in root_tokens.items():
-            if any([v < vv for vv in root_tokens.values()]):  # Strict subset.
+            if any(v < vv for vv in root_tokens.values()):  # Strict subset.
                 continue
             else:
                 hash_map[k] |= set([group_offset])
@@ -115,6 +115,8 @@ class AutoRestrictor(SchedulerPlugin):
         # If roots were a subset, they should share the annotation of their
         # superset/s.
         for k, v in root_tokens.items():
+            if not v:  # Special case - no dependencies.
+                continue
             shared_roots = \
                 {kk: None for kk, vv in root_tokens.items() if v < vv}
             if shared_roots:
@@ -134,16 +136,21 @@ class AutoRestrictor(SchedulerPlugin):
             weight = len(tdp) + len(tdn)
 
             # TODO: This can likely be improved.
-            groups = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
+            if tdp:
+                groups = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
+            else:  # Special case - no dependencies.
+                groups = set((group_offset,))
+                group_offset += 1
 
             for g in groups:
                 if g in assignments:
                     assignee = assignments[g]
                 else:
                     assignee = min(worker_weights, key=worker_weights.get)
+                    assignments[g] = assignee
                 worker_weights[assignee] += weight
-                assignments[g] = assignee
 
+            assignees = {assignments[g] for g in groups}
             # Set restrictions on a terminal node and its dependencies.
             for tn in [k, *tdp, *tdn]:
                 try:
@@ -152,5 +159,5 @@ class AutoRestrictor(SchedulerPlugin):
                     continue
                 if task._worker_restrictions is None:
                     task._worker_restrictions = set()
-                task._worker_restrictions |= {assignments[g] for g in groups}
+                task._worker_restrictions |= assignees
                 task._loose_restrictions = False
