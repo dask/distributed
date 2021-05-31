@@ -121,13 +121,28 @@ class AutoRestrictor(SchedulerPlugin):
                 hash_map[k] = \
                     set().union(*[hash_map[kk] for kk in shared_roots.keys()])
 
+        worker_weights = dict(zip(workers, (0,) * len(workers)))
+        assignments = {}
+
         for k in terminal_dependencies.keys():
 
             tdp = terminal_dependencies[k]
-            tdn = terminal_dependents[k] if terminal_dependents[k] else set()
+            tdn = terminal_dependents[k]
+
+            # Assume that the amount of work required is proportional to the
+            # number of tasks involved.
+            weight = len(tdp) + len(tdn)
 
             # TODO: This can likely be improved.
-            group = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
+            groups = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
+
+            for g in groups:
+                if g in assignments:
+                    assignee = assignments[g]
+                else:
+                    assignee = min(worker_weights, key=worker_weights.get)
+                worker_weights[assignee] += weight
+                assignments[g] = assignee
 
             # Set restrictions on a terminal node and its dependencies.
             for tn in [k, *tdp, *tdn]:
@@ -137,6 +152,5 @@ class AutoRestrictor(SchedulerPlugin):
                     continue
                 if task._worker_restrictions is None:
                     task._worker_restrictions = set()
-                task._worker_restrictions |= \
-                    {workers[g % n_worker] for g in group}
+                task._worker_restrictions |= {assignments[g] for g in groups}
                 task._loose_restrictions = False
