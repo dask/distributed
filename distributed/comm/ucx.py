@@ -11,15 +11,7 @@ import weakref
 
 import dask
 
-from ..utils import (
-    CancelledError,
-    ensure_ip,
-    get_ip,
-    get_ipv6,
-    log_errors,
-    nbytes,
-    parse_bytes,
-)
+from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes, parse_bytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
@@ -128,12 +120,15 @@ def init_once():
         ucx_create_endpoint = ucp.create_endpoint
         ucx_create_listener = ucp.create_listener
     else:
-        if dask.config.get("ucx.reuse-endpoints"):
-            ucx_create_endpoint = EndpointReuse.create_endpoint
-            ucx_create_listener = EndpointReuse.create_listener
-        else:
+        reuse_endpoints = dask.config.get("ucx.reuse-endpoints")
+        if (
+            reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
+        ) or reuse_endpoints is False:
             ucx_create_endpoint = ucp.create_endpoint
             ucx_create_listener = ucp.create_listener
+        else:
+            ucx_create_endpoint = EndpointReuse.create_endpoint
+            ucx_create_listener = EndpointReuse.create_listener
 
 
 class UCX(Comm):
@@ -266,7 +261,7 @@ class UCX(Comm):
                 (shutdown, nframes) = struct.unpack("?Q", msg)
 
                 if shutdown:  # The writer is closing the connection
-                    raise CancelledError("Connection closed by writer")
+                    raise CommClosedError("Connection closed by writer")
 
                 # Recv which frames are CUDA (bool) and
                 # how large each frame is (uint64)
@@ -275,9 +270,12 @@ class UCX(Comm):
                 await self.ep.recv(header)
                 header = struct.unpack(header_fmt, header)
                 cuda_frames, sizes = header[:nframes], header[nframes:]
-            except (ucp.exceptions.UCXBaseException, CancelledError):
+            except (
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
                 self.abort()
-                raise CommClosedError("While reading, the connection was closed")
+                raise CommClosedError("Connection closed by writer")
             else:
                 # Recv frames
                 frames = [
@@ -311,7 +309,11 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except ucp.exceptions.UCXError:
+            except (
+                ucp.exceptions.UCXError,
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
                 # If the other end is in the process of closing,
                 # UCX will sometimes raise a `Input/output` error,
                 # which we can ignore.
@@ -344,7 +346,13 @@ class UCXConnector(Connector):
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
         init_once()
-        ep = await ucx_create_endpoint(ip, port)
+        try:
+            ep = await ucx_create_endpoint(ip, port)
+        except (
+            ucp.exceptions.UCXCloseError,
+            ucp.exceptions.UCXCanceled,
+        ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
+            raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
             local_addr=None,
@@ -512,11 +520,9 @@ def _scrub_ucx_config():
             options["NET_DEVICES"] = net_devices
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
-    valid_ucx_keys = list(get_config().keys())
-    for k, v in dask.config.get("ucx").items():
-        if k in valid_ucx_keys:
-            options[k] = v
-        else:
+    valid_ucx_vars = list(get_config().keys())
+    for k, v in options.items():
+        if k not in valid_ucx_vars:
             logger.debug(
                 "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
             )

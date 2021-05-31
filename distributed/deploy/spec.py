@@ -6,6 +6,7 @@ import math
 import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
 
 from tornado import gen
 
@@ -413,7 +414,15 @@ class SpecCluster(Cluster):
             return
         if self.status == Status.running or self.status == Status.failed:
             self.status = Status.closing
-            self.scale(0)
+
+            # Need to call stop here before we close all servers to avoid having
+            # dangling tasks in the ioloop
+            with suppress(AttributeError):
+                self._adaptive.stop()
+
+            f = self.scale(0)
+            if isawaitable(f):
+                await f
             await self._correct_state()
             for future in self._futures:
                 await future

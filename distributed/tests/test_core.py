@@ -880,3 +880,76 @@ async def test_close_properly():
 
         # weakref set/dict should be cleaned up
         assert not len(server._ongoing_coroutines)
+
+
+@pytest.mark.asyncio
+async def test_server_redundant_kwarg():
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        await Server({}, typo_kwarg="foo")
+
+
+async def test_server_comms_mark_active_handlers():
+    """Whether handlers are active can be read off of the self._comms values.
+    ensure this is properly reflected and released. The sentinel for
+    "open comm but no active handler" is `None`
+    """
+
+    async def long_handler(comm):
+        await asyncio.sleep(0.2)
+        return "done"
+
+    server = await Server({"wait": long_handler})
+    await server.listen(0)
+    assert server._comms == {}
+
+    comm = await connect(server.address)
+    await comm.write({"op": "wait"})
+    while not server._comms:
+        await asyncio.sleep(0.05)
+    assert set(server._comms.values()) == {"wait"}
+    assert await comm.read() == "done"
+    assert set(server._comms.values()) == {None}
+    await comm.close()
+    while server._comms:
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_close_fast_without_active_handlers():
+    async def very_fast(comm):
+        return "done"
+
+    server = await Server({"do_stuff": very_fast})
+    await server.listen(0)
+    assert server._comms == {}
+
+    comm = await connect(server.address)
+    await comm.write({"op": "do_stuff"})
+    while not server._comms:
+        await asyncio.sleep(0.05)
+    fut = server.close()
+
+    await asyncio.wait_for(fut, 0.1)
+
+
+@pytest.mark.asyncio
+async def test_close_grace_period_for_handlers():
+    async def long_handler(comm, delay=10):
+        await asyncio.sleep(delay)
+        return "done"
+
+    server = await Server({"wait": long_handler})
+    await server.listen(0)
+    assert server._comms == {}
+
+    comm = await connect(server.address)
+    await comm.write({"op": "wait"})
+    while not server._comms:
+        await asyncio.sleep(0.05)
+    fut = server.close()
+    # since the handler is running for a while, the close will not immediately
+    # go through. We'll give the comm about a second to close itself
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(fut, 0.5)
+    await comm.close()
+    await server.close()

@@ -6278,6 +6278,13 @@ class Scheduler(SchedulerState, ServerNode):
         """
         from .worker import run
 
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot run function as the scheduler has been explicitly disallowed from "
+                "deserializing arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
@@ -6599,7 +6606,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None, code=""):
+    async def performance_report(self, comm=None, start=None, last_count=None, code=""):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
         # Profiles
@@ -6639,6 +6646,7 @@ class Scheduler(SchedulerState, ServerNode):
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
         source.data.update(rects)
 
+        # Bandwidth
         from distributed.dashboard.components.scheduler import (
             BandwidthTypes,
             BandwidthWorkers,
@@ -6648,6 +6656,12 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_workers.update()
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
+
+        # System monitor
+        from distributed.dashboard.components.shared import SystemMonitor
+
+        sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
+        sysmon.update()
 
         from bokeh.models import Div, Panel, Tabs
 
@@ -6706,11 +6720,13 @@ class Scheduler(SchedulerState, ServerNode):
             child=bandwidth_workers.root, title="Bandwidth (Workers)"
         )
         bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
+        system = Panel(child=sysmon.root, title="System")
 
         tabs = Tabs(
             tabs=[
                 html,
                 task_stream,
+                system,
                 compute,
                 workers,
                 scheduler,
