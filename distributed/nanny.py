@@ -22,7 +22,6 @@ from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
 from .core import CommClosedError, RPCClosed, Status, coerce_to_address
-from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
@@ -386,8 +385,6 @@ class Nanny(ServerNode):
         return result
 
     async def restart(self, comm=None, timeout=2, executor_wait=True):
-        start = time()
-
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -405,7 +402,7 @@ class Nanny(ServerNode):
     def _psutil_process(self):
         pid = self.process.process.pid
         try:
-            proc = self._psutil_process_obj
+            self._psutil_process_obj
         except AttributeError:
             self._psutil_process_obj = psutil.Process(pid)
 
