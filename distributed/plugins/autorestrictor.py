@@ -53,58 +53,58 @@ class AutoRestrictor(SchedulerPlugin):
         dependents = reverse_dict(dependencies)
 
         _, total_dependencies = ndependencies(dependencies, dependents)
+        # TODO: Avoid calling graph metrics.
         metrics = graph_metrics(dependencies, dependents, total_dependencies)
 
         # Terminal nodes have no dependents, root nodes have no dependencies.
-        terminal_nodes = {k for (k, v) in dependents.items() if not v}
+        # Horizontal partition nodes are initialized as the terminal nodes.
+        part_nodes = {k for (k, v) in dependents.items() if not v}
         root_nodes = {k for (k, v) in dependencies.items() if not v}
 
         # Figure out the depth of every task. Depth is defined as maximum
-        # distance from a root node.
+        # distance from a root node. TODO: Optimize get_node_depths.
         node_depths = get_node_depths(dependencies, root_nodes, metrics)
         max_depth = max(node_depths.values())
 
-        # If we have fewer terminal nodes than workers, we cannot utilise all
+        # If we have fewer partition nodes than workers, we cannot utilise all
         # the workers and are likely dealing with a reduction. We work our way
         # back through the graph, starting at the deepest terminal nodes, and
         # try to find a depth at which there was enough work to utilise all
         # workers.
-        while len(terminal_nodes) < n_worker:
-            _terminal_nodes = terminal_nodes.copy()
-            for tn in _terminal_nodes:
-                if node_depths[tn] == max_depth:
-                    terminal_nodes ^= set((tn,))
-                    terminal_nodes |= dependencies[tn]
+        while len(part_nodes) < n_worker:
+            _part_nodes = part_nodes.copy()
+            for pn in _part_nodes:
+                if node_depths[pn] == max_depth:
+                    part_nodes ^= set((pn,))
+                    part_nodes |= dependencies[pn]
             max_depth -= 1
             if max_depth == 0:
                 raise ValueError("AutoRestrictor cannot determine a sensible "
                                  "work assignment pattern. Falling back to "
                                  "default behaviour.")
 
-        roots_per_terminal = {}
-        terminal_dependencies = {}
-        terminal_dependents = {}
+        part_roots = {}
+        part_dependencies = {}
+        part_dependents = {}
 
-        for tn in terminal_nodes:
-            # Get dependencies per terminal node.
-            terminal_dependencies[tn] = unravel_deps(dependencies, tn)
-            # Get dependents per terminal node. TODO: This terminology is
-            # confusing - the terminal nodes are not necessarily the last.
-            terminal_dependents[tn] = unravel_deps(dependents, tn)
-            # Associate terminal nodes with root nodes.
-            roots_per_terminal[tn] = root_nodes & terminal_dependencies[tn]
+        for pn in part_nodes:
+            # Get dependencies per partition node.
+            part_dependencies[pn] = unravel_deps(dependencies, pn)
+            # Get dependents per partition node.
+            part_dependents[pn] = unravel_deps(dependents, pn)
+            # Associate partition nodes with root nodes.
+            part_roots[pn] = root_nodes & part_dependencies[pn]
 
-        # Create a unique token for each set of terminal roots. TODO: This is
+        # Create a unique token for each set of partition roots. TODO: This is
         # very strict. What about nodes with very similar roots? Tokenization
         # may be overkill too.
-        root_tokens = \
-            {tokenize(*sorted(v)): v for v in roots_per_terminal.values()}
+        root_tokens = {tokenize(*sorted(v)): v for v in part_roots.values()}
 
         hash_map = defaultdict(set)
         group_offset = 0
 
-        # Associate terminal roots with a specific group if they are not a
-        # subset of another larger root set. TODO: This can likely be improved.
+        # Associate partition roots with a specific group if they are not a
+        # subset of another, larger root set.
         for k, v in root_tokens.items():
             if any(v < vv for vv in root_tokens.values()):  # Strict subset.
                 continue
@@ -112,10 +112,10 @@ class AutoRestrictor(SchedulerPlugin):
                 hash_map[k] |= set([group_offset])
                 group_offset += 1
 
-        # If roots were a subset, they should share the annotation of their
+        # If roots were a subset, they should share the group of their
         # superset/s.
         for k, v in root_tokens.items():
-            if not v:  # Special case - no dependencies.
+            if not v:  # Special case - no dependencies. Handled below.
                 continue
             shared_roots = \
                 {kk: None for kk, vv in root_tokens.items() if v < vv}
@@ -126,20 +126,20 @@ class AutoRestrictor(SchedulerPlugin):
         worker_weights = dict(zip(workers, (0,) * len(workers)))
         assignments = {}
 
-        for k in terminal_dependencies.keys():
+        for pn in part_nodes:
 
-            tdp = terminal_dependencies[k]
-            tdn = terminal_dependents[k]
+            pdp = part_dependencies[pn]
+            pdn = part_dependents[pn]
 
             # Assume that the amount of work required is proportional to the
-            # number of tasks involved.
-            weight = len(tdp) + len(tdn)
+            # number of tasks involved. Add one for the task we are looking at.
+            weight = len(pdp) + len(pdn) + 1
 
             # TODO: This can likely be improved.
-            if tdp:
-                groups = hash_map[tokenize(*sorted(roots_per_terminal[k]))]
+            if pdp:
+                groups = hash_map[tokenize(*sorted(part_roots[pn]))]
             else:  # Special case - no dependencies.
-                groups = set((group_offset,))
+                groups = {group_offset}
                 group_offset += 1
 
             for g in groups:
@@ -151,10 +151,11 @@ class AutoRestrictor(SchedulerPlugin):
                 worker_weights[assignee] += weight
 
             assignees = {assignments[g] for g in groups}
-            # Set restrictions on a terminal node and its dependencies.
-            for tn in [k, *tdp, *tdn]:
+            # Set restrictions on a partition node, its depdendents and
+            # dependencies.
+            for task_name in [pn, *pdp, *pdn]:
                 try:
-                    task = tasks[tn]
+                    task = tasks[task_name]
                 except KeyError:  # Keys may not have an assosciated task.
                     continue
                 if task._worker_restrictions is None:
