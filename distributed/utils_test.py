@@ -24,6 +24,8 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from time import sleep
 
+from distributed.scheduler import Scheduler
+
 try:
     import ssl
 except ImportError:
@@ -770,10 +772,6 @@ def gen_test(timeout=_TEST_TIMEOUT):
         return test_func
 
     return _
-
-
-from .scheduler import Scheduler
-from .worker import Worker
 
 
 async def start_cluster(
