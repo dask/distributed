@@ -3661,7 +3661,6 @@ async def test_async_whowhat(c, s, a, b):
     assert has_what == {a.address: (x.key,), b.address: ()}
 
 
-@pytest.mark.xfail(reason="Want to fix to use `WhoHas` + `WhatHas`")
 def test_client_repr(c):
     x = c.submit(inc, 1)
 
