@@ -580,7 +580,7 @@ class Client:
 
     Extra keywords will be passed directly to LocalCluster
 
-    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
 
     See Also
     --------
@@ -928,11 +928,8 @@ class Client:
         if info:
             workers = list(info["workers"].values())
             cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
-            else:
-                memory = ""
+            memory = [w["memory_limit"] for w in workers]
+            memory = format_bytes(sum(memory)) if all(memory) else ""
 
             text2 = (
                 '<h3 style="text-align: left;">Cluster</h3>\n'
@@ -1199,7 +1196,7 @@ class Client:
         return self
 
     async def __aenter__(self):
-        await self._started
+        await self
         return self
 
     async def __aexit__(self, typ, value, traceback):
@@ -3061,11 +3058,14 @@ class Client:
         )
 
     async def _rebalance(self, futures=None, workers=None):
-        await _wait(futures)
-        keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        if futures is not None:
+            await _wait(futures)
+            keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        else:
+            keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
-            raise ValueError(
+            raise KeyError(
                 f"During rebalance {len(result['keys'])} keys were found to be missing"
             )
         assert result["status"] == "OK"
@@ -4702,6 +4702,9 @@ class performance_report:
 
     async def __aenter__(self):
         self.start = time()
+        self.last_count = await get_client().run_on_scheduler(
+            lambda dask_scheduler: dask_scheduler.monitor.count
+        )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
@@ -4712,7 +4715,7 @@ class performance_report:
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, code=code
+            start=self.start, last_count=self.last_count, code=code
         )
         with open(self.filename, "w") as f:
             f.write(data)

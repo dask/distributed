@@ -166,7 +166,8 @@ copied to another worker node in the course of normal computation if that
 result is required by another task that is intended to by run by a different
 worker.  This occurs if a task requires two pieces of data on different
 machines (at least one must move) or through work stealing.  In these cases it
-is the policy for the second machine to maintain its redundant copy of the data.  This helps to organically spread around data that is in high demand.
+is the policy for the second machine to maintain its redundant copy of the data.
+This helps to organically spread around data that is in high demand.
 
 However, advanced users may want to control the location, replication, and
 balancing of data more directly throughout the cluster.  They may know ahead of

@@ -1,6 +1,7 @@
 import collections
 import logging
 import math
+from typing import Iterable
 
 import tlz as toolz
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -87,7 +88,16 @@ class AdaptiveCore:
                 pass
 
         if self.interval:
-            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
+            import weakref
+
+            self_ref = weakref.ref(self)
+
+            async def _adapt():
+                core = self_ref()
+                if core:
+                    await core.adapt()
+
+            self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
             try:
                 self.loop.add_callback(f)
             except AttributeError:
@@ -133,6 +143,12 @@ class AdaptiveCore:
             n = self.minimum
 
         return n
+
+    async def scale_down(self, n: int):
+        raise NotImplementedError()
+
+    async def scale_up(self, workers: Iterable):
+        raise NotImplementedError()
 
     async def recommendations(self, target: int) -> dict:
         """
@@ -203,7 +219,14 @@ class AdaptiveCore:
                 await self.scale_down(**recommendations)
         except OSError as e:
             if status != "down":
-                logger.error("Adaptive stopping due to error %s", str(e))
+                logger.error("Adaptive stopping due to error", exc_info=True)
                 self.stop()
+            else:
+                logger.error(
+                    "Error during adaptive downscaling. Ignoring.", exc_info=True
+                )
         finally:
             self._adapting = False
+
+    def __del__(self):
+        self.stop()

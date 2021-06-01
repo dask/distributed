@@ -290,9 +290,7 @@ class NBytesCluster(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            limit = sum(
-                getattr(ws, "memory_limit", 0) for ws in self.scheduler.workers.values()
-            )
+            limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
             meminfo = self.scheduler.memory
             color = _nbytes_color(meminfo.process, limit)
 
