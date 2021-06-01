@@ -3208,7 +3208,7 @@ class Client:
             keys = None
 
         async def _():
-            return WhoHas(self.scheduler.who_has(keys=keys, **kwargs))
+            return WhoHas(await self.scheduler.who_has(keys=keys, **kwargs))
 
         return self.sync(_)
 
