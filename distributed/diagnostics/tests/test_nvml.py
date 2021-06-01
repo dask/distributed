@@ -19,7 +19,7 @@ def test_one_time():
 def test_1_visible_devices():
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     output = nvml.one_time()
-    h = nvml._pynvml_handles()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
     assert output["memory-total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
 
 
@@ -31,8 +31,8 @@ def test_2_visible_devices(CVD):
     os.environ["CUDA_VISIBLE_DEVICES"] = CVD
     idx = int(CVD.split(",")[0])
 
-    h = nvml._pynvml_handles()
-    h2 = pynvml.nvmlDeviceGetHandleByIndex(idx)
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
+    h2 = pynvml.nvmlDeviceGetHandleByIndex(1)
 
     s = pynvml.nvmlDeviceGetSerial(h)
     s2 = pynvml.nvmlDeviceGetSerial(h2)
@@ -42,7 +42,7 @@ def test_2_visible_devices(CVD):
 
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
-    h = nvml._pynvml_handles()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
 
     assert "gpu" in a.metrics
     assert (
@@ -58,7 +58,7 @@ async def test_gpu_metrics(s, a, b):
 
 @gen_cluster()
 async def test_gpu_monitoring(s, a, b):
-    h = nvml._pynvml_handles()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
     res = await s.get_worker_monitor_info(recent=True)
 
     assert (

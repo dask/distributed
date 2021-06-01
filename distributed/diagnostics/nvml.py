@@ -14,13 +14,9 @@ def init_once():
     nvmlInit()
 
 
-def _pynvml_handles():
-    return pynvml.nvmlDeviceGetHandleByIndex(0)
-
-
 def real_time():
     init_once()
-    h = _pynvml_handles()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
     return {
         "utilization": pynvml.nvmlDeviceGetUtilizationRates(h).gpu,
         "memory-used": pynvml.nvmlDeviceGetMemoryInfo(h).used,
@@ -29,7 +25,7 @@ def real_time():
 
 def one_time():
     init_once()
-    h = _pynvml_handles()
+    h = pynvml.nvmlDeviceGetHandleByIndex(0)
     return {
         "memory-total": pynvml.nvmlDeviceGetMemoryInfo(h).total,
         "name": pynvml.nvmlDeviceGetName(h).decode(),
