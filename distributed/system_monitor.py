@@ -91,8 +91,7 @@ class SystemMonitor:
             self.num_fds.append(num_fds)
             result["num_fds"] = num_fds
 
-        # give external modules (like dask-cuda) a chance to initialize CUDA context
-        if nvml is not None and nvml.nvmlInit is not None:
+        if nvml is not None:
             gpu_metrics = nvml.real_time()
             self.gpu_utilization.append(gpu_metrics["utilization"])
             self.gpu_memory_used.append(gpu_metrics["memory-used"])
