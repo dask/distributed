@@ -2354,7 +2354,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
 # This test is heavily influenced by hard-to-control factors such as memory management
 # by the Python interpreter and the OS, so it occasionally glitches
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
-# ~33s runtime, or distributed.memory.recent_to_old_time + 3s
+# ~33s runtime, or distributed.memory.recent-to-old-time + 3s
 @pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60
@@ -2407,7 +2407,7 @@ async def test_memory(c, s, *_):
     await assert_memory(s, "managed_spilled", 1, 999)
 
     # Wait for the spilling to finish. Note that this does not make the test take
-    # longer as we're waiting for recent_to_old_time anyway.
+    # longer as we're waiting for recent-to-old-time anyway.
     await asyncio.sleep(10)
 
     # Delete spilled keys
@@ -2505,3 +2505,286 @@ async def test_close_scheduler__close_workers_Nanny(s, a, b):
             await asyncio.sleep(0.05)
     log = log.getvalue()
     assert "retry" not in log
+
+
+async def assert_ndata(client, by_addr, total=None):
+    """Test that the number of elements in Worker.data is as expected.
+    To be used when the worker is wrapped by a nanny.
+
+    by_addr: dict of either exact numbers or (min, max) tuples
+    total: optional exact match on the total number of keys (with duplicates) across all
+    workers
+    """
+    out = await client.run(lambda dask_worker: len(dask_worker.data))
+    try:
+        for k, v in by_addr.items():
+            if isinstance(v, tuple):
+                assert v[0] <= out[k] <= v[1]
+            else:
+                assert out[k] == v
+        if total is not None:
+            assert sum(out.values()) == total
+    except AssertionError:
+        raise AssertionError(f"Expected {by_addr}, total={total}; got {out}")
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+)
+async def test_rebalance(c, s, *_):
+    # We used nannies to have separate processes for each worker
+    a, b = s.workers
+
+    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
+    # utilisation slightly above 50% (after counting unmanaged) which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+    await assert_ndata(c, {a: 10, b: 0})
+    await s.rebalance()
+    # Allow for some uncertainty as the unmanaged memory is not stable
+    await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
+
+    # rebalance() when there is nothing to do
+    await s.rebalance()
+    await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
+    s.validate_state()
+
+
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)] * 3,
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+)
+async def test_rebalance_workers_and_keys(client, s, *_):
+    a, b, c = s.workers
+    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+
+    # Passing empty iterables is not the same as omitting the arguments
+    await s.rebalance(keys=[])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+    await s.rebalance(workers=[])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+    # Limit operation to workers that have nothing to do
+    await s.rebalance(workers=[b, c])
+    await assert_ndata(client, {a: 10, b: 0, c: 0})
+
+    # Limit rebalancing to two arbitrary keys and two arbitrary workers
+    await s.rebalance(keys=[futures[3].key, futures[7].key], workers=[a, b])
+    await assert_ndata(client, {a: 8, b: 2, c: 0}, total=10)
+
+    with pytest.raises(KeyError):
+        await s.rebalance(workers=["notexist"])
+
+    s.validate_state()
+
+
+@gen_cluster()
+async def test_rebalance_missing_data1(s, a, b):
+    """key never existed"""
+    out = await s.rebalance(keys=["notexist"])
+    assert out == {"status": "missing-data", "keys": ["notexist"]}
+    s.validate_state()
+
+
+@gen_cluster(client=True)
+async def test_rebalance_missing_data2(c, s, a, b):
+    """keys exist but belong to unfinished futures. Unlike Client.rebalance(),
+    Scheduler.rebalance() does not wait for unfinished futures.
+    """
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    await asyncio.sleep(0.1)
+    out = await s.rebalance(keys=[f.key for f in futures])
+    assert out["status"] == "missing-data"
+    assert 8 <= len(out["keys"]) <= 10
+    s.validate_state()
+
+
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+async def test_rebalance_raises_missing_data3(c, s, *_):
+    """keys exist when the sync part of rebalance runs, but are gone by the time the
+    actual data movement runs
+    """
+    a, _ = s.workers
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    await assert_memory(s, "process", 512, 1024)
+    del futures
+    out = await s.rebalance()
+    assert out["status"] == "missing-data"
+    assert 1 <= len(out["keys"]) <= 10
+    s.validate_state()
+
+
+@gen_cluster(nthreads=[])
+async def test_rebalance_no_workers(s):
+    await s.rebalance()
+    s.validate_state()
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0.3,
+    },
+)
+async def test_rebalance_managed_memory(c, s, *_):
+    a, b = s.workers
+    # Generate 100 buffers worth 400 MiB total on worker a. This sends its memory
+    # utilisation to exactly 40%, ignoring unmanaged, which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = c.map(lambda _: "x" * (2 ** 22), range(100), workers=[a])
+    await wait(futures)
+    # Even if we're just using managed memory, which is instantaneously accounted for as
+    # soon as the tasks finish, MemoryState.managed is still capped by the process
+    # memory, so we need to wait for the heartbeat.
+    await assert_memory(s, "managed", 400, 401)
+    await assert_ndata(c, {a: 100, b: 0})
+    await s.rebalance()
+    # We can expect an exact, stable result because we are completely bypassing the
+    # unpredictability of unmanaged memory.
+    await assert_ndata(c, {a: 62, b: 38})
+    s.validate_state()
+
+
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
+async def test_rebalance_no_limit(c, s, a, b):
+    # See notes in test_rebalance_managed_memory
+    futures = c.map(lambda _: "x", range(100), workers=[a.address])
+    await wait(futures)
+    # No reason to wait for memory here as we're allocating hundreds of bytes, so
+    # there's plenty of unmanaged process memory to pad it out
+    await assert_ndata(c, {a.address: 100, b.address: 0})
+    await s.rebalance()
+    # Disabling memory_limit made us ignore all % thresholds set in the config
+    await assert_ndata(c, {a.address: 50, b.address: 50})
+    s.validate_state()
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.recipient-max": 0.4,
+    },
+)
+async def test_rebalance_no_recipients(c, s, *_):
+    """There are sender workers, but no recipient workers"""
+    a, b = s.workers
+    futures = [
+        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[a]),  # 40%
+        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[b]),  # 40%
+    ] + c.map(
+        lambda _: "x" * (2 ** 21), range(100), workers=[a]
+    )  # 20%
+    await wait(futures)
+    await assert_memory(s, "managed", 1000, 1001)
+    await assert_ndata(c, {a: 101, b: 1})
+    await s.rebalance()
+    await assert_ndata(c, {a: 101, b: 1})
+    s.validate_state()
+
+
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)] * 3,
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
+async def test_rebalance_skip_recipient(client, s, a, b, c):
+    """A recipient is skipped because it already holds a copy of the key to be sent"""
+    futures = client.map(lambda _: "x", range(10), workers=[a.address])
+    await wait(futures)
+    await client.replicate(futures[0:2], workers=[a.address, b.address])
+    await client.replicate(futures[2:4], workers=[a.address, c.address])
+    await assert_ndata(client, {a.address: 10, b.address: 2, c.address: 2})
+    await client.rebalance(futures[:2])
+    await assert_ndata(client, {a.address: 8, b.address: 2, c.address: 4})
+    s.validate_state()
+
+
+@gen_cluster(
+    client=True,
+    worker_kwargs={"memory_limit": 0},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
+async def test_rebalance_skip_all_recipients(c, s, a, b):
+    """All recipients are skipped because they already hold copies"""
+    futures = c.map(lambda _: "x", range(10), workers=[a.address])
+    await wait(futures)
+    await c.replicate([futures[0]])
+    await assert_ndata(c, {a.address: 10, b.address: 1})
+    await c.rebalance(futures[:2])
+    await assert_ndata(c, {a.address: 9, b.address: 2})
+    s.validate_state()
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={"distributed.worker.memory.rebalance.measure": "managed"},
+)
+async def test_rebalance_sender_below_mean(c, s, *_):
+    """A task remains on the sender because moving it would send it below the mean"""
+    a, b = s.workers
+    f1 = c.submit(lambda: "x" * (400 * 2 ** 20), workers=[a])
+    await wait([f1])
+    f2 = c.submit(lambda: "x" * (10 * 2 ** 20), workers=[a])
+    await wait([f2])
+    await assert_memory(s, "managed", 410, 411)
+    await assert_ndata(c, {a: 2, b: 0})
+    await s.rebalance()
+    assert await c.has_what() == {a: (f1.key,), b: (f2.key,)}
+
+
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1000 MiB"},
+    config={
+        "distributed.worker.memory.rebalance.measure": "managed",
+        "distributed.worker.memory.rebalance.sender-min": 0.3,
+    },
+)
+async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
+    """
+    1. keys are picked using a least recently inserted policy
+    2. workers below sender-min are never senders
+    """
+    a, b = s.workers
+    small_futures = c.map(lambda _: "x", range(10), workers=[a])
+    await wait(small_futures)
+    await assert_ndata(c, {a: 10, b: 0})
+    await s.rebalance()
+    await assert_ndata(c, {a: 10, b: 0})
+
+    large_future = c.submit(lambda: "x" * (300 * 2 ** 20), workers=[a])
+    await wait([large_future])
+    await assert_memory(s, "managed", 300, 301)
+    await assert_ndata(c, {a: 11, b: 0})
+    await s.rebalance()
+    await assert_ndata(c, {a: 1, b: 10})
+    assert await c.has_what() == {
+        a: (large_future.key,),
+        b: tuple(f.key for f in small_futures),
+    }

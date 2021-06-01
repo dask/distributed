@@ -2892,92 +2892,128 @@ async def test_badly_serialized_exceptions(c, s, a, b):
         raise BadlySerializedException("hello world")
 
     x = c.submit(f)
-
-    try:
-        result = await x
-    except Exception as e:
-        assert "hello world" in str(e)
-    else:
-        assert False
+    with pytest.raises(Exception, match="hello world"):
+        await x
 
 
-@gen_cluster(client=True)
-async def test_rebalance(c, s, a, b):
-    aws = s.workers[a.address]
-    bws = s.workers[b.address]
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+    config={"distributed.worker.memory.rebalance.sender-min": 0.3},
+)
+async def test_rebalance(c, s, *_):
+    """Test Client.rebalance(). These are just to test the Client wrapper around
+    Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
+    """
+    # We used nannies to have separate processes for each worker
+    a, b = s.workers
 
-    x, y = await c.scatter([1, 2], workers=[a.address])
-    assert len(a.data) == 2
-    assert len(b.data) == 0
+    # Generate 10 buffers worth 512 MiB total on worker a. This sends its memory
+    # utilisation slightly above 50% (after counting unmanaged) which is above the
+    # distributed.worker.memory.rebalance.sender-min threshold.
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    while s.memory.process < 2 ** 29:
+        await asyncio.sleep(0.1)
 
-    s.validate_state()
+    assert await c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
+
     await c.rebalance()
-    s.validate_state()
 
-    assert len(b.data) == 1
-    assert {ts.key for ts in bws.has_what} == set(b.data)
-    assert bws in s.tasks[x.key].who_has or bws in s.tasks[y.key].who_has
-
-    assert len(a.data) == 1
-    assert {ts.key for ts in aws.has_what} == set(a.data)
-    assert aws not in s.tasks[x.key].who_has or aws not in s.tasks[y.key].who_has
+    ndata = await c.run(lambda dask_worker: len(dask_worker.data))
+    # Allow for some uncertainty as the unmanaged memory is not stable
+    assert sum(ndata.values()) == 10
+    assert 3 <= ndata[a] <= 7
+    assert 3 <= ndata[b] <= 7
 
 
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 4, client=True)
-async def test_rebalance_workers(e, s, a, b, c, d):
-    w, x, y, z = await e.scatter([1, 2, 3, 4], workers=[a.address])
-    assert len(a.data) == 4
-    assert len(b.data) == 0
-    assert len(c.data) == 0
-    assert len(d.data) == 0
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)] * 3,
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": "1 GiB"},
+)
+async def test_rebalance_workers_and_keys(client, s, *_):
+    """Test Client.rebalance(). These are just to test the Client wrapper around
+    Scheduler.rebalance(); for more thorough tests on the latter see test_scheduler.py.
+    """
+    a, b, c = s.workers
+    futures = client.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    while s.memory.process < 2 ** 29:
+        await asyncio.sleep(0.1)
 
-    await e.rebalance([x, y], workers=[a.address, c.address])
-    assert len(a.data) == 3
-    assert len(b.data) == 0
-    assert len(c.data) == 1
-    assert len(d.data) == 0
-    assert c.data == {x.key: 2} or c.data == {y.key: 3}
+    # Passing empty iterables is not the same as omitting the arguments
+    await client.rebalance([])
+    await client.rebalance(workers=[])
+    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
+        a: 10,
+        b: 0,
+        c: 0,
+    }
 
-    await e.rebalance()
-    assert len(a.data) == 1
-    assert len(b.data) == 1
-    assert len(c.data) == 1
-    assert len(d.data) == 1
-    s.validate_state()
+    # Limit rebalancing to two arbitrary keys and two arbitrary workers.
+    await client.rebalance([futures[3], futures[7]], [a, b])
+    assert await client.run(lambda dask_worker: len(dask_worker.data)) == {
+        a: 8,
+        b: 2,
+        c: 0,
+    }
 
-
-@gen_cluster(client=True)
-async def test_rebalance_execution(c, s, a, b):
-    futures = c.map(inc, range(10), workers=a.address)
-    await c.rebalance(futures)
-    assert len(a.data) == len(b.data) == 5
-    s.validate_state()
+    with pytest.raises(KeyError):
+        await client.rebalance(workers=["notexist"])
 
 
-def test_rebalance_sync(c, s, a, b):
-    futures = c.map(inc, range(10), workers=[a["address"]])
-    c.rebalance(futures)
+def test_rebalance_sync():
+    # can't use the 'c' fixture because we need workers to run in a separate process
+    with Client(n_workers=2, memory_limit="1 GiB") as c:
+        s = c.cluster.scheduler
+        a, b = [ws.address for ws in s.workers.values()]
+        futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+        wait(futures)
+        # Wait for heartbeat
+        while s.memory.process < 2 ** 29:
+            sleep(0.1)
 
-    has_what = c.has_what()
-    assert len(has_what) == 2
-    assert list(valmap(len, has_what).values()) == [5, 5]
+        assert c.run(lambda dask_worker: len(dask_worker.data)) == {a: 10, b: 0}
+        c.rebalance()
+        ndata = c.run(lambda dask_worker: len(dask_worker.data))
+        # Allow for some uncertainty as the unmanaged memory is not stable
+        assert sum(ndata.values()) == 10
+        assert 3 <= ndata[a] <= 7
+        assert 3 <= ndata[b] <= 7
 
 
 @gen_cluster(client=True)
 async def test_rebalance_unprepared(c, s, a, b):
+    """Client.rebalance() internally waits for unfinished futures"""
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    # Let the futures reach the scheduler
     await asyncio.sleep(0.1)
+    # We didn't wait enough for futures to complete. However, Client.rebalance() will
+    # block until all futures are completed before invoking Scheduler.rebalance().
     await c.rebalance(futures)
     s.validate_state()
 
 
-@gen_cluster(client=True)
-async def test_rebalance_raises_missing_data(c, s, a, b):
-    with pytest.raises(ValueError, match="keys were found to be missing"):
-        futures = await c.scatter(range(100))
-        keys = [f.key for f in futures]
-        del futures
-        await c.rebalance(keys)
+@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
+async def test_rebalance_raises_missing_data(c, s, *_):
+    a, b = s.workers
+    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
+    await wait(futures)
+    # Wait for heartbeats
+    while s.memory.process < 2 ** 29:
+        await asyncio.sleep(0.1)
+
+    # Descoping the futures enqueues a coroutine to release the data on the server
+    del futures
+    with pytest.raises(KeyError, match="keys were found to be missing"):
+        # During the synchronous part of rebalance, the futures still exist, but they
+        # will be (partially) gone by the time the actual transferring happens.
+        await c.rebalance()
 
 
 @gen_cluster(client=True)
