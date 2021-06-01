@@ -3206,7 +3206,11 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
-        return WhoHas(self.sync(self.scheduler.who_has, keys=keys, **kwargs))
+
+        async def _():
+            return WhoHas(self.scheduler.who_has(keys=keys, **kwargs))
+
+        return self.sync(_)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
@@ -3240,7 +3244,11 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
-        return HasWhat(self.sync(self.scheduler.has_what, workers=workers, **kwargs))
+
+        async def _():
+            return HasWhat(await self.scheduler.has_what(workers=workers, **kwargs))
+
+        return self.sync(_)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker
