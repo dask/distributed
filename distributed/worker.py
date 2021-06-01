@@ -16,7 +16,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
@@ -1499,7 +1499,7 @@ class Worker(ServerNode):
                 if ts:
                     ts.scheduler_holds_ref = False
                 self.log.append((key, "delete"))
-                self.release_key(key, cause="delete data")
+                self.release_key(key, reason="delete data")
 
             logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
         return "OK"
@@ -2338,9 +2338,16 @@ class Worker(ServerNode):
                 self.log.append(("receive-dep", worker, list(response["data"])))
             except EnvironmentError:
                 logger.exception("Worker stream died during communication: %s", worker)
-                self.log.append(("receive-dep-failed", worker))
-                for d in self.has_what.pop(worker):
-                    self.tasks[d].who_has.remove(worker)
+                has_what = self.has_what.pop(worker)
+                self.log.append(("receive-dep-failed", worker, has_what))
+                for d in has_what:
+                    ts = self.tasks[d]
+                    # FIXME: We might break the "invariant" that a task in state
+                    # 'fetch' either has a set attribute who_has or is tracked
+                    # in missing_flight_dep and is "handled as missing". This
+                    # leaves the task for a while in an ill defined state
+                    # What about `pending_data_per_worker`?
+                    ts.who_has.remove(worker)
 
             except Exception as e:
                 logger.exception(e)
@@ -2354,6 +2361,7 @@ class Worker(ServerNode):
                 busy = response.get("status", "") == "busy"
                 data = response.get("data", {})
 
+                assert to_gather_keys == self.in_flight_workers.get(worker)
                 for d in self.in_flight_workers.pop(worker):
 
                     ts = self.tasks.get(d)
@@ -2361,15 +2369,24 @@ class Worker(ServerNode):
                     if not busy and d in data:
                         self.transition(ts, "memory", value=data[d])
                     elif ts is None or ts.state == "executing":
-                        self.release_key(d, cause="already executing at gather")
-                        continue
+                        self.log.append(("already-executing", d))
+                        self.release_key(d, reason="already executing at gather")
+                    elif ts.state == "flight" and not ts.dependents:
+                        self.log.append(("flight no-dependents", d))
+                        self.release_key(
+                            d, reason="In-flight task no longer has dependents."
+                        )
                     elif ts.state not in ("ready", "memory"):
+                        self.log.append(("busy?", d, busy))
                         self.transition(ts, "fetch")
-
-                    if not busy and d not in data and ts.dependents:
+                    elif not busy and d not in data and ts.dependents:
                         self.log.append(("missing-dep", d))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"Unexpected state for {ts} encountered after gather_dep"
                         )
 
                 if self.validate:
@@ -2397,7 +2414,7 @@ class Worker(ServerNode):
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
             self.transition(ts, "error")
-        self.release_key(dep.key, cause="bad dep")
+        self.release_key(dep.key, reason="bad dep")
 
     async def handle_missing_dep(self, *deps, **kwargs):
         self.log.append(("handle-missing", deps))
@@ -2496,16 +2513,29 @@ class Worker(ServerNode):
             # If task is marked as "constrained" we haven't yet assigned it an
             # `available_resources` to run on, that happens in
             # `transition_constrained_executing`
-            self.release_key(ts.key, cause="stolen")
+            self.release_key(ts.key, reason="stolen")
             if self.validate:
                 assert ts.key not in self.tasks
 
-    def release_key(self, key, cause=None, reason=None, report=True):
+    def release_key(
+        self,
+        key: str,
+        cause: Optional[TaskState] = None,
+        reason: Optional[str] = None,
+        report: bool = True,
+    ):
         try:
             if self.validate:
                 assert isinstance(key, str)
             ts = self.tasks.get(key, TaskState(key=key))
-
+            logger.debug(
+                "Release key %s",
+                {
+                    "key": key,
+                    "cause": cause,
+                    "reason": reason,
+                },
+            )
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}))
             else:
@@ -2539,7 +2569,7 @@ class Worker(ServerNode):
                     # scheduler allow us to. See also handle_delete_data and
                     and not dependency.scheduler_holds_ref
                 ):
-                    self.release_key(dependency.key, cause=f"Dependent {ts} released")
+                    self.release_key(dependency.key, reason=f"Dependent {ts} released")
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
@@ -3217,7 +3247,21 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.runspec is None
         assert ts.key not in self.data
-        assert ts.who_has
+        # FIXME This is currently not an invariant since upon comm failure we
+        # remove the erroneous worker from all who_has and correct the state
+        # upon the next ensure_communicate
+
+        # if not ts.who_has:
+        #     # If we do not know who_has for a fetch task, it must be logged in
+        #     # the missing dep. There should be a handle_missing_dep running for
+        #     # all of these keys
+
+        #     assert ts.key in self._missing_dep_flight, (
+        #         ts.key,
+        #         self.story(ts),
+        #         self._missing_dep_flight.copy(),
+        #         self.in_flight_workers.copy(),
+        #     )
         assert ts.dependents
 
         for w in ts.who_has:
