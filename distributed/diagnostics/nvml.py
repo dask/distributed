@@ -1,5 +1,3 @@
-import os
-
 import pynvml
 
 nvmlInit = None
@@ -17,18 +15,7 @@ def init_once():
 
 
 def _pynvml_handles():
-    count = pynvml.nvmlDeviceGetCount()
-    try:
-        cuda_visible_devices = [
-            int(idx) for idx in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-        ]
-    except ValueError:
-        # CUDA_VISIBLE_DEVICES is not set
-        cuda_visible_devices = False
-    if not cuda_visible_devices:
-        cuda_visible_devices = list(range(count))
-    gpu_idx = cuda_visible_devices[0]
-    return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
+    return pynvml.nvmlDeviceGetHandleByIndex(0)
 
 
 def real_time():
