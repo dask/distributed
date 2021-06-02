@@ -529,7 +529,7 @@ class Client:
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
-        Claim this scheduler as the global dask scheduler
+        Use this Client as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
     security: Security or bool, optional
@@ -3079,6 +3079,9 @@ class Client:
         This operation is generally not well tested against normal operation of
         the scheduler.  It is not recommended to use it while waiting on
         computations.
+
+        For details on the algorithm and tweaks to it, refer to
+        :meth:`distributed.Scheduler.rebalance`.
 
         Parameters
         ----------

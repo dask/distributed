@@ -78,12 +78,14 @@ will not be able to communicate to other workers or to the scheduler.  This
 situation should be avoided.  If you don't link in your own custom C/Fortran
 code then this topic probably doesn't apply.
 
+
 Command Line tool
 -----------------
 
 Use the ``dask-worker`` command line tool to start an individual worker. For
 more details on the command line options, please have a look at the
 `command line tools documentation <https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.
+
 
 Internal Scheduling
 -------------------
@@ -151,15 +153,17 @@ keyword argument, which sets the memory limit per worker processes launched
 by dask-worker ::
 
     $ dask-worker tcp://scheduler:port --memory-limit=auto  # TOTAL_MEMORY * min(1, nthreads / total_nthreads)
-    $ dask-worker tcp://scheduler:port --memory-limit=4e9  # four gigabytes per worker process.
+    $ dask-worker tcp://scheduler:port --memory-limit="4 GiB"  # four gigabytes per worker process.
 
 Workers use a few different heuristics to keep memory use beneath this limit:
 
 1.  At 60% of memory load (as estimated by ``sizeof``), spill least recently used data to disk
-2.  At 70% of memory load, spill least recently used data to disk regardless of
-    what is reported by ``sizeof``
-3.  At 80% of memory load, stop accepting new work on local thread pool
-4.  At 95% of memory load, terminate and restart the worker
+2.  At 70% of memory load (as reported by the OS), spill least recently used data to disk regardless of
+    what is reported by ``sizeof``; this accounts for memory used by the python
+    interpreter, modules, global variables, memory leaks, etc.
+3.  At 80% of memory load (as reported by the OS), stop accepting new work on local
+    thread pool
+4.  At 95% of memory load (as reported by the OS), terminate and restart the worker
 
 These values can be configured by modifying the ``~/.config/dask/distributed.yaml`` file
 
@@ -176,7 +180,7 @@ These values can be configured by modifying the ``~/.config/dask/distributed.yam
          terminate: 0.95  # fraction at which we terminate the worker
 
 
-Spill data to Disk
+Spill data to disk
 ~~~~~~~~~~~~~~~~~~
 
 Every time the worker finishes a task it estimates the size in bytes that the
@@ -232,8 +236,144 @@ YARN, Mesos, SGE, etc..).  After termination the nanny will restart the worker
 in a fresh state.
 
 
+Using the GUI to monitor memory usage
+-------------------------------------
+The Bokeh dashboard (typically available on port 8787) shows a summary of the overall
+memory usage on the cluster as well as the individual usage on each worker. It provides
+different readings:
+
+process
+    Overall memory used by the worker process (RSS), as measured by the OS
+
+managed
+    This is the sum of the ``sizeof`` of all key-value pairs stored on the worker,
+    excluding spilled data.
+
+unmanaged
+    This is the memory usage that dask is not directly aware of. It is the sum of
+
+    - The Python interpreter code, loaded modules, and global variables
+    - Memory temporarily used by running tasks
+    - Dereferenced Python objects that have not been garbage-collected yet
+    - Unused memory that the Python memory allocator did not return to libc through
+      free() yet, for performance reason
+    - Unused memory that the user-space libc free() function did not release to the OS
+      yet (see memory allocators below)
+    - Memory fragmentation
+    - Memory leaks
+
+unmanaged recent
+    Unmanaged memory that has appeared within the last 30 seconds. This is not included
+    in the 'unmanaged' memory above. Ideally, this memory should be for the most part
+    caused by spikes caused by temporary allocations by tasks plus soon-to-be garbage
+    collected objects.
+
+    The time it takes for unmanaged memory to transition away from its "recent" stae
+    "old" can be tweaked through the ``distributed.worker.memory.recent-to-old-time``
+    key in the ``~/.config/dask/distributed.yaml`` file. If your tasks typically run for
+    longer than 30 seconds, it's recommended that you increase this setting accordingly.
+
+    By default, :meth:`distributed.Client.rebalance` and
+    :meth:`distributed.Scheduler.rebalance` ignore unmanaged recent memory. This
+    behaviour can also be tweaked using the dask config - see the methods'
+    documentation.
+
+spilled
+    managed memory that has been spilled to disk. This is not included in the 'managed'
+    measure above.
+
+The sum of managed + unmanaged + unmanaged recent is equal definition to the process
+memory.
+
+
+Tweaking memory allocators
+--------------------------
+Different OSs use different default policies when it comes to allocating - and, most
+importantly, freeing - memory. Both the Linux and MacOS memory allocators try to avoid
+performing a kernel call every time the application calls ``free()`` by implementing a
+user-space memory management system. Upon ``free()``, memory can remain allocated in
+user space and potentially reusable at the next ``malloc()`` - which in turn won't
+require a system call either. This is generally very desirable for C/C++ applications
+which have no memory allocator of their own, as it can drastically boost performance at
+the cost of a larger memory footprint. CPython however adds its own memory allocator on
+top, which reduces the need for this additional abstraction.
+
+Dask.distributed measures the total process memory (also known as RSS) and uses it for
+decision-making in several points; namely:
+
+- the spill, pause, and terminate thresholds (see above)
+- :meth:`distributed.Client.rebalance` and :meth:`distributed.Scheduler.rebalance`
+
+In some cases, it is easy to have these heuristics misbehave because there are large
+amounts of process memory that the libc did not release to the OS yet - but Dask does
+not have the means to tell them apart from a memory leak. This phenomenon is the first
+thing you should investigate when you see large amounts of unexplained unmanaged memory
+in the dashboard.
+
+Manually trim memory
+^^^^^^^^^^^^^^^^^^^^
+*Linux only*
+
+It is possible to forcefully release allocated but unutilized memory as follows:
+
+.. code-block:: python
+
+    import ctypes
+
+    def trim_memory() -> int:
+        libc = ctypes.CDLL("libc.so.6")
+        return libc.malloc_trim(0)
+
+    client.run(trim_memory)
+
+This should be only used as a one-off debugging action.
+
+Automatically trim memory
+^^^^^^^^^^^^^^^^^^^^^^^^^
+*Linux only*
+
+To aggressively and automatically trim the memory in a production environment, you
+should instead set the environment variable ``MALLOC_TRIM_THRESHOLD_`` (note the final
+underscore) to 0 or a low number; see the ``mallopt`` man page for details. The
+variable must be set before starting the dask-worker process.
+
+jemalloc
+^^^^^^^^
+*Linux and MacOS*
+
+Alternatively to the above, you may experiment with the `jemalloc <http://jemalloc.net>`
+memory allocator, as follows:
+
+.. code-block:: bash
+
+    conda install jemalloc
+    LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
+
+jemalloc has a wealth of configuration tweaks of its own - please refer to its
+documentation.
+
+Don't read process memory
+^^^^^^^^^^^^^^^^^^^^^^^^^
+If all else fails, you may want to stop dask from using the process (RSS) memory in its
+decision-making:
+
+.. code-block:: yaml
+
+   distributed:
+     worker:
+       memory:
+         rebalance:
+           measure: managed_in_memory
+         spill: false
+         pause: false
+         terminate: false
+
+This of course will be problematic if you have a genuine issue with unmanaged memory,
+e.g. memory leaks and/or suffer from heavy fragmentation.
+
+
 Nanny
-~~~~~
+-----
 
 Dask workers are by default launched, monitored, and managed by a small Nanny
 process.

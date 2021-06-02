@@ -2946,14 +2946,12 @@ class Worker(ServerNode):
             while memory > target:
                 if not self.data.fast:
                     logger.warning(
-                        "Memory use is high but worker has no data "
-                        "to store to disk.  Perhaps some other process "
-                        "is leaking memory?  Process memory: %s -- "
-                        "Worker memory limit: %s",
+                        "Unmanaged memory use is high. This may indicate a memory leak "
+                        "or the memory may not be released to the OS; see "
+                        "https://distributed.dask.org/en/latest/memory.html "
+                        "-- Unmanaged memory: %s -- Worker memory limit: %s",
                         format_bytes(memory),
-                        format_bytes(self.memory_limit)
-                        if self.memory_limit is not None
-                        else "None",
+                        format_bytes(self.memory_limit),
                     )
                     break
                 k, v, weight = self.data.fast.evict()
