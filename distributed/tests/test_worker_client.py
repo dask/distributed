@@ -301,7 +301,7 @@ async def test_worker_client_rejoins(c, s, a, b):
         with worker_client():
             pass
 
-        return threading.current_thread() in get_worker().executors["default"]._threads
+        return threading.current_thread() in get_worker().executor._threads
 
     result = await c.submit(f)
     assert result

@@ -61,7 +61,7 @@ from distributed.worker import Worker, error_message, logger, parse_memory_limit
 async def test_worker_nthreads(cleanup):
     async with Scheduler() as s:
         async with Worker(s.address) as w:
-            assert w.executors["default"]._max_workers == CPU_COUNT
+            assert w.executor._max_workers == CPU_COUNT
 
 
 @gen_cluster()
@@ -492,7 +492,7 @@ async def test_run_coroutine_dask_worker(c, s, a, b):
 async def test_Executor(c, s):
     with ThreadPoolExecutor(2) as e:
         w = Worker(s.address, executor=e)
-        assert w.executors["default"] is e
+        assert w.executor is e
         w = await w
 
         future = c.submit(inc, 1)
@@ -1769,7 +1769,7 @@ async def test_executor_offload(cleanup, monkeypatch):
         async with Worker(s.address, executor="offload") as w:
             from distributed.utils import _offload_executor
 
-            assert w.executors["default"] is _offload_executor
+            assert w.executor is _offload_executor
 
             async with Client(s.address, asynchronous=True) as c:
                 x = SameThreadClass()
