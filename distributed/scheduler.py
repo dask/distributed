@@ -5545,7 +5545,9 @@ class Scheduler(SchedulerState, ServerNode):
         """Rebalance keys so that each worker ends up with roughly the same process
         memory (managed+unmanaged).
 
-        FIXME this method is not robust when the cluster is not idle.
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         **Algorithm**
 
@@ -5553,13 +5555,19 @@ class Scheduler(SchedulerState, ServerNode):
            unmanaged process memory that has been there for at least 30 seconds
            (``distributed.worker.memory.recent-to-old-time``).
            This lets us ignore temporary spikes caused by task heap usage.
+
+           Alternatively, you may change how memory is measured both for the individual
+           workers as well as to calculate the mean through
+           ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
+           to disregard bogous OS memory readings.
+
         #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
            (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
            This helps avoid data from bouncing around the cluster repeatedly.
         #. Workers above the mean are senders; those below are recipients.
-        #. Discard senders whose absolute occupancy is below 40%
+        #. Discard senders whose absolute occupancy is below 30%
            (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
-           is moved regardless of imbalancing as long as all workers are below 40%.
+           is moved regardless of imbalancing as long as all workers are below 30%.
         #. Discard recipients whose absolute occupancy is above 60%
            (``distributed.worker.memory.rebalance.recipient-max``).
            Note that this threshold by default is the same as
@@ -5571,8 +5579,8 @@ class Scheduler(SchedulerState, ServerNode):
 
            A recipient will be skipped if it already has a copy of the data. In other
            words, this method does not degrade replication.
-           A key will be skipped if there are no recipients that have both enough memory
-           to accept and don't already hold a copy.
+           A key will be skipped if there are no recipients available with enough memory
+           to accept the key and that don't already hold a copy.
 
         The least recently insertd (LRI) policy is a greedy choice with the advantage of
         being O(1), trivial to implement (it relies on python dict insertion-sorting)
@@ -5581,7 +5589,7 @@ class Scheduler(SchedulerState, ServerNode):
         - Largest first. O(n*log(n)) save for non-trivial additional data structures and
           risks causing the largest chunks of data to repeatedly move around the
           cluster like pinballs.
-        - Least recently utilized. This information is currently available on the
+        - Least recently used (LRU). This information is currently available on the
           workers only and not trivial to replicate on the scheduler; transmitting it
           over the network would be very expensive. Also, note that dask will go out of
           its way to minimise the amount of time intermediate keys are held in memory,

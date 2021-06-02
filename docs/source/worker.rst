@@ -27,6 +27,7 @@ look like the following::
    Alice -> Bob:        Sure.  x is 3!
    Bob -> Scheduler:    I've computed y and am holding on to it!
 
+
 Storing Data
 ------------
 
@@ -142,6 +143,7 @@ exceptions to this are when:
   previously assigned to a separate worker to a new worker.  This most commonly
   occurs when a `worker dies <killed>`_ during computation.
 
+
 .. _memman:
 
 Memory Management
@@ -165,7 +167,8 @@ Workers use a few different heuristics to keep memory use beneath this limit:
     thread pool
 4.  At 95% of memory load (as reported by the OS), terminate and restart the worker
 
-These values can be configured by modifying the ``~/.config/dask/distributed.yaml`` file
+These values can be configured by modifying the ``~/.config/dask/distributed.yaml``
+file:
 
 .. code-block:: yaml
 
@@ -185,14 +188,14 @@ Spill data to disk
 
 Every time the worker finishes a task it estimates the size in bytes that the
 result costs to keep in memory using the ``sizeof`` function.  This function
-defaults to ``sys.getsizeof`` for arbitrary objects which uses the standard
+defaults to ``sys.getsizeof`` for arbitrary objects, which uses the standard
 Python `__sizeof__ protocol
 <https://docs.python.org/3/library/sys.html#sys.getsizeof>`_, but also has
 special-cased implementations for common data types like NumPy arrays and
 Pandas dataframes.
 
 When the sum of the number of bytes of the data in memory exceeds 60% of the
-available threshold the worker will begin to dump the least recently used data
+memory limit, the worker will begin to dump the least recently used data
 to disk.  You can control this location with the ``--local-directory``
 keyword.::
 
@@ -200,14 +203,14 @@ keyword.::
 
 That data is still available and will be read back from disk when necessary.
 On the diagnostic dashboard status page disk I/O will show up in the task
-stream plot as orange blocks.  Additionally the memory plot in the upper left
-will become orange and then red.
+stream plot as orange blocks. Additionally, the memory plot in the upper left
+will become yellow and then red.
 
 
 Monitor process memory load
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The approach above can fail for a few reasons
+The approach above can fail for a few reasons:
 
 1.  Custom objects may not report their memory size accurately
 2.  User functions may take up more RAM than expected
@@ -222,7 +225,7 @@ usage then the worker will start dumping unused data to disk, even if internal
 Halt worker threads
 ~~~~~~~~~~~~~~~~~~~
 
-At 80% load the worker's thread pool will stop accepting new tasks.  This
+At 80% load, the worker's thread pool will stop accepting new tasks.  This
 gives time for the write-to-disk functionality to take effect even in the face
 of rapidly accumulating data.
 
@@ -230,33 +233,33 @@ of rapidly accumulating data.
 Kill Worker
 ~~~~~~~~~~~
 
-At 95% memory load a worker's nanny process will terminate it.  This is to
+At 95% memory load, a worker's nanny process will terminate it.  This is to
 avoid having our worker job being terminated by an external job scheduler (like
-YARN, Mesos, SGE, etc..).  After termination the nanny will restart the worker
+YARN, Mesos, SGE, etc..).  After termination, the nanny will restart the worker
 in a fresh state.
 
 
 Using the GUI to monitor memory usage
--------------------------------------
-The Bokeh dashboard (typically available on port 8787) shows a summary of the overall
-memory usage on the cluster as well as the individual usage on each worker. It provides
-different readings:
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The dashboard (typically available on port 8787) shows a summary of the overall memory
+usage on the cluster, as well as the individual usage on each worker. It provides
+different memory readings:
 
 process
     Overall memory used by the worker process (RSS), as measured by the OS
 
 managed
-    This is the sum of the ``sizeof`` of all key-value pairs stored on the worker,
-    excluding spilled data.
+    This is the sum of the ``sizeof`` of all dask data stored on the worker, excluding
+    spilled data.
 
 unmanaged
-    This is the memory usage that dask is not directly aware of. It is the sum of
+    This is the memory usage that dask is not directly aware of. It is the sum of:
 
     - The Python interpreter code, loaded modules, and global variables
     - Memory temporarily used by running tasks
     - Dereferenced Python objects that have not been garbage-collected yet
     - Unused memory that the Python memory allocator did not return to libc through
-      free() yet, for performance reason
+      free() yet
     - Unused memory that the user-space libc free() function did not release to the OS
       yet (see memory allocators below)
     - Memory fragmentation
@@ -264,18 +267,18 @@ unmanaged
 
 unmanaged recent
     Unmanaged memory that has appeared within the last 30 seconds. This is not included
-    in the 'unmanaged' memory above. Ideally, this memory should be for the most part
-    caused by spikes caused by temporary allocations by tasks plus soon-to-be garbage
-    collected objects.
+    in the 'unmanaged' memory measure above. Ideally, this memory should be for the most
+    part a temporary spike caused by tasks' heap use plus soon-to-be garbage collected
+    objects.
 
-    The time it takes for unmanaged memory to transition away from its "recent" stae
-    "old" can be tweaked through the ``distributed.worker.memory.recent-to-old-time``
-    key in the ``~/.config/dask/distributed.yaml`` file. If your tasks typically run for
-    longer than 30 seconds, it's recommended that you increase this setting accordingly.
+    The time it takes for unmanaged memory to transition away from its "recent" state
+    can be tweaked through the ``distributed.worker.memory.recent-to-old-time`` key in
+    the ``~/.config/dask/distributed.yaml`` file. If your tasks typically run for longer
+    than 30 seconds, it's recommended that you increase this setting accordingly.
 
     By default, :meth:`distributed.Client.rebalance` and
-    :meth:`distributed.Scheduler.rebalance` ignore unmanaged recent memory. This
-    behaviour can also be tweaked using the dask config - see the methods'
+    :meth:`distributed.scheduler.Scheduler.rebalance` ignore unmanaged recent memory.
+    This behaviour can also be tweaked using the dask config - see the methods'
     documentation.
 
 spilled
@@ -286,32 +289,33 @@ The sum of managed + unmanaged + unmanaged recent is equal definition to the pro
 memory.
 
 
-Tweaking memory allocators
---------------------------
+Tweaking OS memory allocation
+-----------------------------
 Different OSs use different default policies when it comes to allocating - and, most
 importantly, freeing - memory. Both the Linux and MacOS memory allocators try to avoid
 performing a kernel call every time the application calls ``free()`` by implementing a
 user-space memory management system. Upon ``free()``, memory can remain allocated in
-user space and potentially reusable at the next ``malloc()`` - which in turn won't
+user space and potentially reusable by the next ``malloc()`` - which in turn won't
 require a system call either. This is generally very desirable for C/C++ applications
 which have no memory allocator of their own, as it can drastically boost performance at
 the cost of a larger memory footprint. CPython however adds its own memory allocator on
-top, which reduces the need for this additional abstraction.
+top, which reduces the need for this additional abstraction (with caveats).
 
 Dask.distributed measures the total process memory (also known as RSS) and uses it for
 decision-making in several points; namely:
 
 - the spill, pause, and terminate thresholds (see above)
-- :meth:`distributed.Client.rebalance` and :meth:`distributed.Scheduler.rebalance`
+- :meth:`distributed.Client.rebalance` and
+  :meth:`distributed.scheduler.Scheduler.rebalance`
 
 In some cases, it is easy to have these heuristics misbehave because there are large
 amounts of process memory that the libc did not release to the OS yet - but Dask does
 not have the means to tell them apart from a memory leak. This phenomenon is the first
 thing you should investigate when you see large amounts of unexplained unmanaged memory
-in the dashboard.
+in the dashboard or in the logs.
 
 Manually trim memory
-^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~
 *Linux only*
 
 It is possible to forcefully release allocated but unutilized memory as follows:
@@ -326,34 +330,34 @@ It is possible to forcefully release allocated but unutilized memory as follows:
 
     client.run(trim_memory)
 
-This should be only used as a one-off debugging action.
+This should be only used as a one-off debugging experiment.
 
 Automatically trim memory
-^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~
 *Linux only*
 
 To aggressively and automatically trim the memory in a production environment, you
 should instead set the environment variable ``MALLOC_TRIM_THRESHOLD_`` (note the final
-underscore) to 0 or a low number; see the ``mallopt`` man page for details. The
-variable must be set before starting the dask-worker process.
+underscore) to 0 or a low number; see the ``mallopt`` man page for details. Reducing
+this value will increase the number of syscalls, and as a consequence may degrade
+performance. The variable must be set before starting the dask-worker process.
 
 jemalloc
-^^^^^^^^
+~~~~~~~~
 *Linux and MacOS*
 
-Alternatively to the above, you may experiment with the `jemalloc <http://jemalloc.net>`
-memory allocator, as follows:
+Alternatively to the above, you may experiment with the
+`jemalloc <http://jemalloc.net>`_ memory allocator, as follows:
 
 .. code-block:: bash
 
     conda install jemalloc
     LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
 
-jemalloc has a wealth of configuration tweaks of its own - please refer to its
-documentation.
+jemalloc offers a wealth of configuration settings; please refer to its documentation.
 
-Don't read process memory
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Ignore process memory
+~~~~~~~~~~~~~~~~~~~~~
 If all else fails, you may want to stop dask from using the process (RSS) memory in its
 decision-making:
 
