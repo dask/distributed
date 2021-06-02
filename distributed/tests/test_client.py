@@ -3661,7 +3661,7 @@ async def test_async_whowhat(c, s, a, b):
     assert has_what == {a.address: (x.key,), b.address: ()}
 
 
-def test_client_repr(c):
+def test_client_repr_html(c):
     x = c.submit(inc, 1)
 
     who_has = c.who_has()
