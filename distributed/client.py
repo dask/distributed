@@ -53,7 +53,7 @@ from .core import (
 )
 from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
-from .objects import HasWhat, SchedulerInfo, WhoHas
+from .objects import SchedulerInfo
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -1226,7 +1226,7 @@ class Client:
         return self
 
     async def __aenter__(self):
-        await self._started
+        await self
         return self
 
     async def __aexit__(self, typ, value, traceback):
@@ -3088,11 +3088,14 @@ class Client:
         )
 
     async def _rebalance(self, futures=None, workers=None):
-        await _wait(futures)
-        keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        if futures is not None:
+            await _wait(futures)
+            keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        else:
+            keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
-            raise ValueError(
+            raise KeyError(
                 f"During rebalance {len(result['keys'])} keys were found to be missing"
             )
         assert result["status"] == "OK"
@@ -3233,7 +3236,7 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
-        return WhoHas(self.sync(self.scheduler.who_has, keys=keys, **kwargs))
+        return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
@@ -3267,7 +3270,7 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
-        return HasWhat(self.sync(self.scheduler.has_what, workers=workers, **kwargs))
+        return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker

@@ -5,6 +5,7 @@ import threading
 import uuid
 import warnings
 from contextlib import suppress
+from inspect import isawaitable
 
 from tornado.ioloop import PeriodicCallback
 
@@ -83,6 +84,9 @@ class Cluster:
     async def _close(self):
         if self.status == Status.closed:
             return
+
+        with suppress(AttributeError):
+            self._adaptive.stop()
 
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
@@ -435,10 +439,14 @@ class Cluster:
         return self
 
     async def __aexit__(self, typ, value, traceback):
-        await self.close()
+        f = self.close()
+        if isawaitable(f):
+            await f
 
     @property
-    def scheduler_address(self):
+    def scheduler_address(self) -> str:
+        if not self.scheduler_comm:
+            return "<Not Connected>"
         return self.scheduler_comm.address
 
     @property
@@ -474,7 +482,7 @@ class Cluster:
         return {d["name"] for d in self.scheduler_info["workers"].values()}
 
     def __eq__(self, other):
-        return self.name == other.name
+        return type(other) == type(self) and self.name == other.name
 
     def __hash__(self):
         return id(self)
