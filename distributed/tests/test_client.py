@@ -3656,6 +3656,8 @@ async def test_async_whowhat(c, s, a, b):
 
     who_has = await c.who_has()
     has_what = await c.has_what()
+    assert type(who_has) is WhoHas
+    assert type(has_what) is HasWhat
 
     assert who_has == {x.key: (a.address,)}
     assert has_what == {a.address: (x.key,), b.address: ()}
