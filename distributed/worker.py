@@ -3849,7 +3849,10 @@ _global_workers = Worker._instances
 
 try:
     from .diagnostics import nvml
-except Exception:
+
+    if nvml.device_get_count() < 1:
+        raise RuntimeError
+except (Exception, RuntimeError):
     pass
 else:
 

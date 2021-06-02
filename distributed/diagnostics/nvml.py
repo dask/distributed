@@ -14,6 +14,11 @@ def init_once():
     nvmlInit()
 
 
+def device_get_count():
+    init_once()
+    return pynvml.nvmlDeviceGetCount()
+
+
 def real_time():
     init_once()
     h = pynvml.nvmlDeviceGetHandleByIndex(0)
