@@ -28,7 +28,7 @@ from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
 
-from . import comm, preloading, profile, system
+from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import connect, get_address_host
 from .comm.addressing import address_from_user_args
@@ -634,16 +634,25 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
-        if executor == "offload":
-            from distributed.utils import _offload_executor as executor
 
+        # Common executors always available
         self.executors = {
-            "default": executor
-            or ThreadPoolExecutor(
-                self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
-            ),
+            "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
+
+        # Find the default executor
+        if executor == "offload":
+            self.executors["default"] = self.executors["offload"]
+        elif isinstance(executor, dict):
+            self.executors.update(executor)
+        elif executor is not None:
+            self.executors["default"] = executor
+        if "default" not in self.executors:
+            self.executors["default"] = ThreadPoolExecutor(
+                self.nthreads, thread_name_prefix="Dask-Default-Threads'"
+            )
+
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
@@ -1291,6 +1300,8 @@ class Worker(ServerNode):
                     await self.batched_stream.close(timedelta(seconds=timeout))
 
             for executor in self.executors.values():
+                if executor is utils._offload_executor:
+                    continue  # Never shutdown the offload executor
                 if isinstance(executor, ThreadPoolExecutor):
                     executor._work_queue.queue.clear()
                     executor.shutdown(wait=executor_wait, timeout=timeout)
@@ -2801,8 +2812,14 @@ class Worker(ServerNode):
                 if self.digests is not None:
                     self.digests["disk-load-duration"].add(stop - start)
 
+            executor = ts.annotations.get("executor", "default")
+            assert executor in self.executors
+
             logger.debug(
-                "Execute key: %s worker: %s", ts.key, self.address
+                "Execute key: %s worker: %s, executor: %s",
+                ts.key,
+                self.address,
+                executor,
             )  # TODO: comment out?
             assert key == ts.key
             try:
@@ -2819,7 +2836,7 @@ class Worker(ServerNode):
                         self.active_threads_lock,
                         self.scheduler_delay,
                     ),
-                    executor=self.executors["default"],
+                    executor=self.executors[executor],
                 )
             except RuntimeError as e:
                 executor_error = e
