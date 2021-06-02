@@ -759,6 +759,7 @@ def gen_test(timeout=_TEST_TIMEOUT):
     """
 
     def _(func):
+        @pytest.mark.distributed_cleanup
         def test_func():
             with clean() as loop:
                 if iscoroutinefunction(func):
@@ -875,6 +876,7 @@ def gen_cluster(
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
+        @pytest.mark.distributed_cleanup
         def test_func():
             result = None
             workers = []
