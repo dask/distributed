@@ -248,8 +248,10 @@ class LocalCluster(SpecCluster):
             "Please see the `cluster.scale` method instead."
         )
 
-    def _repr_html_(self):
-        cluster_status = f"""
+    def _repr_html_(self, cluster_status=None):
+        if cluster_status is None:
+            cluster_status = ""
+        cluster_status += f"""
             <tr>
                 <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
                 <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
