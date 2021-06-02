@@ -2812,7 +2812,10 @@ class Worker(ServerNode):
                 if self.digests is not None:
                     self.digests["disk-load-duration"].add(stop - start)
 
-            executor = ts.annotations.get("executor", "default")
+            if ts.annotations is not None and "executor" in ts.annotations:
+                executor = ts.annotations["executor"]
+            else:
+                executor = "default"
             assert executor in self.executors
 
             logger.debug(
