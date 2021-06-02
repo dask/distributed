@@ -154,6 +154,8 @@ class TaskState:
         serializable (e.g. int, string, list, dict).
     * **nbytes**: ``int``
         The size of a particular piece of data
+    * **annotations**: ``dict``
+        Task annotations
 
     Parameters
     ----------
@@ -188,6 +190,7 @@ class TaskState:
         self.stop_time = None
         self.metadata = {}
         self.nbytes = None
+        self.annotations = None
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -1503,6 +1506,7 @@ class Worker(ServerNode):
         duration=None,
         resource_restrictions=None,
         actor=False,
+        annotations=None,
         **kwargs2,
     ):
         try:
@@ -1549,6 +1553,7 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
+            ts.annotations = annotations
 
             who_has = who_has or {}
 
