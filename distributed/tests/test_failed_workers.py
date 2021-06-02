@@ -384,32 +384,61 @@ async def test_restart_during_computation(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, timeout=60)
+class SlowTransmitData:
+    def __init__(self, data, delay=0.1):
+        self.delay = delay
+        self.data = data
+
+    def __reduce__(self):
+        import time
+
+        time.sleep(self.delay)
+        return (SlowTransmitData, (self.delay,))
+
+    def __sizeof__(self) -> int:
+        # Ensure this is offloaded to avoid blocking loop
+        import dask
+        from dask.utils import parse_bytes
+
+        return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
+
+
+@gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    n.auto_restart = False
 
     start = time()
     while len(s.nthreads) < 3:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    futures = c.map(slowinc, range(20), delay=0.01, key=["f%d" % i for i in range(20)])
-    await wait(futures)
-
-    result = await c.submit(sum, futures, workers=a.address)
-    deps = [dep for dep in a.tasks.values() if dep.key not in a.data_needed]
-    for dep in deps:
-        a.release_key(dep.key, report=True)
+    def slow_ser(x, delay):
+        return SlowTransmitData(x, delay=delay)
 
     n_worker_address = n.worker_address
+    futures = c.map(
+        slow_ser,
+        range(20),
+        delay=0.1,
+        key=["f%d" % i for i in range(20)],
+        workers=[n_worker_address],
+        allow_other_workers=True,
+    )
+
+    def sink(*args):
+        pass
+
+    await wait(futures)
+    result_fut = c.submit(sink, futures, workers=a.address)
+
     with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
     while len(s.workers) > 2:
         await asyncio.sleep(0.01)
 
-    total = c.submit(sum, futures, workers=a.address)
-    await total
+    await result_fut
 
     assert not a.has_what.get(n_worker_address)
     assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)

@@ -2639,9 +2639,9 @@ class SchedulerState:
             # XXX factor this out?
             ts_nbytes: Py_ssize_t = ts.get_nbytes()
             worker_msg = {
-                "op": "delete-data",
+                "op": "free-keys",
                 "keys": [key],
-                "report": False,
+                "reason": f"Memory->Released {key}",
             }
             for ws in ts._who_has:
                 del ws._has_what[ts]
@@ -2745,7 +2745,7 @@ class SchedulerState:
                 if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
 
-            w_msg = {"op": "release-task", "key": key}
+            w_msg = {"op": "free-keys", "keys": [key], "reason": "Erred->Released"}
             for w in ts._erred_on:
                 worker_msgs[w] = [w_msg]
             ts._erred_on.clear()
@@ -2819,7 +2819,9 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = [{"op": "release-task", "key": key}]
+                worker_msgs[w] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Processing->Released"}
+                ]
 
             ts.state = "released"
 
@@ -4471,7 +4473,9 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                worker_msgs[worker] = [{"op": "release-task", "key": key}]
+                worker_msgs[worker] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Stimulus Finished"}
+                ]
 
         return recommendations, client_msgs, worker_msgs
 
@@ -5128,7 +5132,7 @@ class Scheduler(SchedulerState, ServerNode):
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
-        tasks: set = {parent._tasks[k] for k in keys}
+        tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
         removed_tasks: set = tasks.intersection(ws._has_what)
 
         ts: TaskState
@@ -5534,8 +5538,11 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
+
         await retry_operation(
-            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+            self.rpc(addr=worker_address).free_keys,
+            keys=list(keys),
+            reason="rebalance/replicate",
         )
 
         ws: WorkerState = parent._workers_dv[worker_address]
@@ -6286,6 +6293,7 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return "not found"
         ws: WorkerState = parent._workers_dv[worker]
+        superfluous_data = []
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
@@ -6294,9 +6302,16 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what[ts] = None
                     ts._who_has.add(ws)
             else:
-                self.worker_send(
-                    worker, {"op": "delete-data", "keys": [key], "report": False}
-                )
+                superfluous_data.append(key)
+        if superfluous_data:
+            self.worker_send(
+                worker,
+                {
+                    "op": "superfluous-data",
+                    "keys": superfluous_data,
+                    "reason": f"Add keys which are not in-memory {superfluous_data}",
+                },
+            )
 
         return "OK"
 
@@ -7323,7 +7338,13 @@ def _propagate_forgotten(
         ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = [{"op": "delete-data", "keys": [key], "report": False}]
+            worker_msgs[w] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "reason": f"propagate-forgotten {ts.key}",
+                }
+            ]
     ts._who_has.clear()
 
 
