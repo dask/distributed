@@ -394,6 +394,10 @@ class Cluster:
                 </td>
             </tr>
         """
+        try:
+            scheduler_info_repr = self.scheduler_info._repr_html_()
+        except AttributeError:
+            scheduler_info_repr = "Scheduler not started yet."
 
         return f"""
             <div class="jp-RenderedHTMLCommon jp-RenderedHTML jp-mod-trusted jp-OutputArea-output">
@@ -412,7 +416,7 @@ class Cluster:
                     </table>
                     <details>
                     <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
-                    {self.scheduler_info._repr_html_()}
+                    {scheduler_info_repr}
                     </details>
                 </div>
             </div>

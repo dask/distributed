@@ -828,7 +828,10 @@ class Client:
             return self.cluster.dashboard_link
         except AttributeError:
             scheduler, info = self._get_scheduler_info()
-            protocol, rest = scheduler.address.split("://")
+            try:
+                protocol, rest = scheduler.address.split("://")
+            except AttributeError:
+                return None
 
             port = info["services"]["dashboard"]
             if protocol == "inproc":
@@ -951,15 +954,16 @@ class Client:
                 </tr>
                 """
 
-        client_status += f"""
-            <tr>
-                <td style="text-align: left;">
-                    <strong>Dashboard: </strong>
-                    <a href="{self.dashboard_link}">{self.dashboard_link}</a>
-                </td>
-                <td style="text-align: left;"></td>
-            </tr>
-            """
+        if self.dashboard_link:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;">
+                        <strong>Dashboard: </strong>
+                        <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                    </td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
         return f"""
             <div>
