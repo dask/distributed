@@ -827,6 +827,10 @@ class Worker(ServerNode):
         )
         return self.local_directory
 
+    @property
+    def executor(self):
+        return self.executors["default"]
+
     async def get_metrics(self):
         out = dict(
             executing=self.executing_count,
