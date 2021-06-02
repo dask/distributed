@@ -186,6 +186,21 @@ class SchedulerInfo(dict):
                 </tr>
                 """
 
+            gpu = ""
+
+            if "gpu" in worker:
+                gpu = f"""
+                <tr>
+                    <td style="text-align: left;">
+                        <strong>GPU: </strong>{worker["gpu"]["name"]}
+                    </td>
+                    <td style="text-align: left;">
+                        <strong>GPU memory: </strong>
+                        {format_bytes(worker["gpu"]["memory-total"])}
+                    </td>
+                </tr>
+                """
+
             workers += f"""
             <div style="margin-bottom: 20px;">
                 <div style="width: 24px;
@@ -224,6 +239,7 @@ class SchedulerInfo(dict):
                                 {worker["local_directory"]}
                             </td>
                         </tr>
+                        {gpu}
                         {metrics}
                     </table>
                 </details>
