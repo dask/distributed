@@ -2,18 +2,16 @@ import os
 
 import pynvml
 
-nvmlInit = None
+nvmlInitialized = False
 
 
 def init_once():
-    global nvmlInit
-    if nvmlInit is not None:
+    global nvmlInitialized
+    if nvmlInitialized is True:
         return
 
-    from pynvml import nvmlInit as _nvmlInit
-
-    nvmlInit = _nvmlInit
-    nvmlInit()
+    pynvml.nvmlInit()
+    nvmlInitialized = True
 
 
 def device_get_count():
