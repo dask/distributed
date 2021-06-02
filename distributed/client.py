@@ -53,7 +53,7 @@ from .core import (
 )
 from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
-from .objects import SchedulerInfo
+from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -3240,7 +3240,11 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
-        return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
+
+        async def _():
+            return WhoHas(await self.scheduler.who_has(keys=keys, **kwargs))
+
+        return self.sync(_)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
@@ -3274,7 +3278,11 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
+
+        async def _():
+            return HasWhat(await self.scheduler.has_what(workers=workers, **kwargs))
+
+        return self.sync(_)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker

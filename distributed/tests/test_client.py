@@ -3656,13 +3656,14 @@ async def test_async_whowhat(c, s, a, b):
 
     who_has = await c.who_has()
     has_what = await c.has_what()
+    assert type(who_has) is WhoHas
+    assert type(has_what) is HasWhat
 
     assert who_has == {x.key: (a.address,)}
     assert has_what == {a.address: (x.key,), b.address: ()}
 
 
-@pytest.mark.xfail(reason="Want to fix to use `WhoHas` + `WhatHas`")
-def test_client_repr(c):
+def test_client_repr_html(c):
     x = c.submit(inc, 1)
 
     who_has = c.who_has()
