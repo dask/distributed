@@ -230,11 +230,9 @@ class Worker(ServerNode):
 
     * **nthreads:** ``int``:
         Number of nthreads used by this worker process
-    * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
-        Executor used to perform computation
-        This can also be the string "offload" in which case this uses the same
-        thread pool used for offloading communications.  This results in the
-        same thread being used for deserialization and computation.
+    * **executors:** ``Dict[str, concurrent.futures.ThreadPoolExecutor]``:
+        Executors used to perform computation. Always contains the default
+        executor.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
@@ -331,7 +329,10 @@ class Worker(ServerNode):
         Fraction of memory at which we start spilling to disk
     memory_pause_fraction: float
         Fraction of memory at which we stop running new tasks
-    executor: concurrent.futures.Executor
+    executor: concurrent.futures.Executor, str
+        The default executor. This can also be the string "offload" in which
+        case this uses the same thread pool used for offloading communications.
+        This results in the same thread being used for deserialization and computation.
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
@@ -635,12 +636,14 @@ class Worker(ServerNode):
         self.reconnect = reconnect
         if executor == "offload":
             from distributed.utils import _offload_executor as executor
-        self.executor = executor or ThreadPoolExecutor(
-            self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
-        )
-        self.actor_executor = ThreadPoolExecutor(
-            1, thread_name_prefix="Dask-Actor-Threads"
-        )
+
+        self.executors = {
+            "default": executor
+            or ThreadPoolExecutor(
+                self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
+            ),
+            "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
+        }
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
@@ -1287,13 +1290,12 @@ class Worker(ServerNode):
                 with suppress(TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
 
-            self.actor_executor._work_queue.queue.clear()
-            if isinstance(self.executor, ThreadPoolExecutor):
-                self.executor._work_queue.queue.clear()
-                self.executor.shutdown(wait=executor_wait, timeout=timeout)
-            else:
-                self.executor.shutdown(wait=False)
-            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
+            for executor in self.executors.values():
+                if isinstance(executor, ThreadPoolExecutor):
+                    executor._work_queue.queue.clear()
+                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                else:
+                    executor.shutdown(wait=False)
 
             self.stop()
             await self.rpc.close()
@@ -2569,7 +2571,7 @@ class Worker(ServerNode):
         callbacks to ensure things run smoothly.  This can get tricky, so we
         pull it off into an separate method.
         """
-        executor = executor or self.executor
+        executor = executor or self.executors["default"]
         job_counter[0] += 1
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         kwargs = kwargs or {}
@@ -2665,7 +2667,7 @@ class Worker(ServerNode):
                     self.active_threads,
                     self.active_threads_lock,
                 ),
-                executor=self.actor_executor,
+                executor=self.executors["actor"],
             )
         else:
             result = func(*args, **kwargs)
@@ -2817,6 +2819,7 @@ class Worker(ServerNode):
                         self.active_threads_lock,
                         self.scheduler_delay,
                     ),
+                    executor=self.executors["default"],
                 )
             except RuntimeError as e:
                 executor_error = e
