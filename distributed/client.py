@@ -3970,6 +3970,14 @@ class Client:
         else:
             return msgs
 
+    async def _register_scheduler_plugin(self, plugin=None, idempotent=False, **kwargs):
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
+        return await self.scheduler.register_scheduler_plugin(
+            plugin=dumps(plugin, protocol=4)
+        )
+
     def register_scheduler_plugin(self, plugin=None, idempotent=False, **kwargs):
         """Register a scheduler plugin.
 
@@ -3978,19 +3986,19 @@ class Client:
         Parameters
         ----------
         plugin : SchedulerPlugin
-            Plugin object to pass to the scheduler.
+            Plugin class (not instance) to pass to the scheduler.
         idempotent : bool
             If multiple registrations of the plugin induce no changes.
+        **kwargs : Any
+            Arguments passed to the Plugin class.
 
         """
-
-        async def f(dask_scheduler=None, plugin=None, idempotent=None, **kwargs):
-            if isinstance(plugin, type):
-                plugin = plugin(**kwargs)
-            await plugin.start()
-            dask_scheduler.add_plugin(plugin=plugin, idempotent=idempotent, **kwargs)
-
-        self.run_on_scheduler(f, plugin=plugin, idempotent=idempotent, **kwargs)
+        return self.sync(
+            self._register_scheduler_plugin,
+            plugin=plugin,
+            idempotent=idempotent,
+            **kwargs,
+        )
 
     def unregister_scheduler_plugin(self, plugin=None):
         pass

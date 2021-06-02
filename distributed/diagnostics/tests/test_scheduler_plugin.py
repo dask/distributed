@@ -1,7 +1,7 @@
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import cleanup, gen_cluster, inc  # noqa: F401
+from distributed.utils_test import async_wait_for, cleanup, gen_cluster, inc  # noqa: F401
 
 
 @gen_cluster(client=True)
@@ -125,3 +125,16 @@ async def test_lifecycle(cleanup):
 
     assert plugin.history == ["started", "closed"]
     assert plugin.scheduler is s
+
+
+@gen_cluster(client=True)
+async def test_register_scheduler_plugin(c, s, a, b):
+    temp_list = []
+
+    class Dummy(SchedulerPlugin):
+        def start(self, scheduler):
+            temp_list.append(1)
+
+    await c._register_scheduler_plugin(Dummy)
+
+    async_wait_for(temp_list, 1)
