@@ -91,7 +91,7 @@ class SystemMonitor:
             self.num_fds.append(num_fds)
             result["num_fds"] = num_fds
 
-        if nvml is not None and nvml.device_get_count()> 0:
+        if nvml is not None and nvml.device_get_count() > 0:
             gpu_metrics = nvml.real_time()
             self.gpu_utilization.append(gpu_metrics["utilization"])
             self.gpu_memory_used.append(gpu_metrics["memory-used"])
