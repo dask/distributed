@@ -338,7 +338,7 @@ Automatically trim memory
 
 To aggressively and automatically trim the memory in a production environment, you
 should instead set the environment variable ``MALLOC_TRIM_THRESHOLD_`` (note the final
-underscore) to 0 or a low number; see the ``mallopt`` man page for details. Reducing
+underscore) to 0 or a low number; see the `mallopt <https://man7.org/linux/man-pages/man3/mallopt.3.html>`_ man page for details. Reducing
 this value will increase the number of syscalls, and as a consequence may degrade
 performance. The variable must be set before starting the dask-worker process.
 
