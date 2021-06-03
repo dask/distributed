@@ -230,7 +230,7 @@ class Worker(ServerNode):
 
     * **nthreads:** ``int``:
         Number of nthreads used by this worker process
-    * **executors:** ``Dict[str, concurrent.futures.ThreadPoolExecutor]``:
+    * **executors:** ``Dict[str, concurrent.futures.Executor]``:
         Executors used to perform computation. Always contains the default
         executor.
     * **local_directory:** ``path``:
@@ -329,10 +329,15 @@ class Worker(ServerNode):
         Fraction of memory at which we start spilling to disk
     memory_pause_fraction: float
         Fraction of memory at which we stop running new tasks
-    executor: concurrent.futures.Executor, str
-        The default executor. This can also be the string "offload" in which
-        case this uses the same thread pool used for offloading communications.
-        This results in the same thread being used for deserialization and computation.
+    executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], str
+        The executor(s) to use. Depending on the type, it has the following meanings:
+            - Executor instance: The default executor.
+            - Dict[str, Executor]: mapping names to Executor instances. If the
+              "default" key isn't in the dict, a "default" executor will be created
+              ``ThreadPoolExecutor(nthreads)``.
+            - Str: The string "offload", which refer to the same thread pool used for
+              offloading communications. This results in the same thread being used for
+              deserialization and computation.
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
