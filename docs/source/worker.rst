@@ -253,7 +253,7 @@ managed
     spilled data.
 
 unmanaged
-    This is the memory usage that dask is not directly aware of. It is the sum of:
+    This is the memory usage that dask is not directly aware of. It is ``process - managed``, which typically includes:
 
     - The Python interpreter code, loaded modules, and global variables
     - Memory temporarily used by running tasks
