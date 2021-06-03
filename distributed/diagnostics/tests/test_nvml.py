@@ -57,7 +57,7 @@ async def test_gpu_metrics(s, a, b):
 
 
 @gen_cluster()
-async def test_gpu_monitoring(s, a, b):
+async def test_gpu_monitoring_recent(s, a, b):
     h = nvml._pynvml_handles()
     res = await s.get_worker_monitor_info(recent=True)
 
@@ -71,3 +71,13 @@ async def test_gpu_monitoring(s, a, b):
     )
     assert res[a.address]["gpu_name"] == pynvml.nvmlDeviceGetName(h).decode()
     assert res[a.address]["gpu_memory_total"] == pynvml.nvmlDeviceGetMemoryInfo(h).total
+
+
+@gen_cluster()
+async def test_gpu_monitoring_range_query(s, a, b):
+    res = await s.get_worker_monitor_info()
+    ms = ["gpu_utilization", "gpu_memory_used"]
+    for w in (a, b):
+        assert all(res[w.address]["range_query"][m] is not None for m in ms)
+        assert res[w.address]["count"] is not None
+        assert res[w.address]["last_time"] is not None
