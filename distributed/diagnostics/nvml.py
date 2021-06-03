@@ -1,6 +1,9 @@
 import os
 
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pyvnml = None
 
 nvmlInitialized = False
 nvmlLibraryNotFound = False
@@ -9,7 +12,7 @@ nvmlOwnerPID = None
 
 def init_once():
     global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
-    if nvmlInitialized is True and nvmlOwnerPID == os.getpid():
+    if pynvml is None or (nvmlInitialized is True and nvmlOwnerPID == os.getpid()):
         return
 
     nvmlInitialized = True
