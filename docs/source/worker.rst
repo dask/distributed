@@ -289,7 +289,7 @@ spilled
     managed memory that has been spilled to disk. This is not included in the 'managed'
     measure above.
 
-The sum of managed + unmanaged + unmanaged recent is equal definition to the process
+The sum of managed + unmanaged + unmanaged recent is equal by definition to the process
 memory.
 
 
