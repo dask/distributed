@@ -254,7 +254,7 @@ class ClusterMemory(DashboardComponent):
             self.root = figure(
                 title="Bytes stored on cluster",
                 tools="",
-                id="bk-cluster-memory-worker-plot",
+                id="bk-cluster-memory-plot",
                 width=int(width / 2),
                 name="cluster_memory",
                 **kwargs,
