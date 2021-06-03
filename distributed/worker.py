@@ -334,10 +334,10 @@ class Worker(ServerNode):
             - Executor instance: The default executor.
             - Dict[str, Executor]: mapping names to Executor instances. If the
               "default" key isn't in the dict, a "default" executor will be created
-              ``ThreadPoolExecutor(nthreads)``.
+              using ``ThreadPoolExecutor(nthreads)``.
             - Str: The string "offload", which refer to the same thread pool used for
-              offloading communications. This results in the same thread being used for
-              deserialization and computation.
+              offloading communications. This results in the same thread being used
+              for deserialization and computation.
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
