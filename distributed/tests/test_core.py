@@ -888,6 +888,7 @@ async def test_server_redundant_kwarg():
         await Server({}, typo_kwarg="foo")
 
 
+@pytest.mark.asyncio
 async def test_server_comms_mark_active_handlers():
     """Whether handlers are active can be read off of the self._comms values.
     ensure this is properly reflected and released. The sentinel for
