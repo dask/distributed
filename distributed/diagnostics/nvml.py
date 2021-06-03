@@ -3,21 +3,24 @@ import os
 import pynvml
 
 nvmlInitialized = False
+nvmlLibraryNotFound = False
 
 
 def init_once():
-    global nvmlInitialized
+    global nvmlInitialized, nvmlLibraryNotFound
     if nvmlInitialized is True:
         return
 
-    pynvml.nvmlInit()
     nvmlInitialized = True
+    try:
+        pynvml.nvmlInit()
+    except pynvml.NVMLError_LibraryNotFound:
+        nvmlLibraryNotFound = True
 
 
 def device_get_count():
-    try:
-        init_once()
-    except pynvml.NVMLError_LibraryNotFound:
+    init_once()
+    if nvmlLibraryNotFound:
         return 0
     else:
         return pynvml.nvmlDeviceGetCount()
@@ -26,7 +29,10 @@ def device_get_count():
 def _pynvml_handles():
     count = device_get_count()
     if count == 0:
-        raise RuntimeError("No GPUs available or NVML is not installed")
+        if nvmlLibraryNotFound:
+            raise RuntimeError("PyNVML is installed, but NVML is not")
+        else:
+            raise RuntimeError("No GPUs available")
 
     try:
         cuda_visible_devices = [
