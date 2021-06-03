@@ -53,7 +53,8 @@ Thread Pool
 -----------
 
 Each worker sends computations to a thread in a
-`concurrent.futures.ThreadPoolExecutor <https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor>`_
+`concurrent.futures.ThreadPoolExecutor
+<https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor>`_
 for computation.  These computations occur in the same process as the Worker
 communication server so that they can access and share data efficiently between
 each other.  For the purposes of data locality all threads within a worker are
@@ -85,7 +86,8 @@ Command Line tool
 
 Use the ``dask-worker`` command line tool to start an individual worker. For
 more details on the command line options, please have a look at the
-`command line tools documentation <https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.
+`command line tools documentation
+<https://docs.dask.org/en/latest/setup/cli.html#dask-worker>`_.
 
 
 Internal Scheduling
@@ -159,10 +161,11 @@ by dask-worker ::
 
 Workers use a few different heuristics to keep memory use beneath this limit:
 
-1.  At 60% of memory load (as estimated by ``sizeof``), spill least recently used data to disk
-2.  At 70% of memory load (as reported by the OS), spill least recently used data to disk regardless of
-    what is reported by ``sizeof``; this accounts for memory used by the python
-    interpreter, modules, global variables, memory leaks, etc.
+1.  At 60% of memory load (as estimated by ``sizeof``), spill least recently used data
+    to disk
+2.  At 70% of memory load (as reported by the OS), spill least recently used data to
+    disk regardless of what is reported by ``sizeof``; this accounts for memory used by
+    the python interpreter, modules, global variables, memory leaks, etc.
 3.  At 80% of memory load (as reported by the OS), stop accepting new work on local
     thread pool
 4.  At 95% of memory load (as reported by the OS), terminate and restart the worker
@@ -233,7 +236,7 @@ of rapidly accumulating data.
 Kill Worker
 ~~~~~~~~~~~
 
-At 95% memory load, a worker's nanny process will terminate it.  This is to
+At 95% memory load, a worker's nanny process will terminate it. This is to
 avoid having our worker job being terminated by an external job scheduler (like
 YARN, Mesos, SGE, etc..).  After termination, the nanny will restart the worker
 in a fresh state.
@@ -253,14 +256,15 @@ managed
     spilled data.
 
 unmanaged
-    This is the memory usage that dask is not directly aware of. It is ``process - managed``, which typically includes:
+    This is the memory usage that dask is not directly aware of. It is estimated by
+    subtracting managed memory from the total process memory and typically includes:
 
     - The Python interpreter code, loaded modules, and global variables
     - Memory temporarily used by running tasks
     - Dereferenced Python objects that have not been garbage-collected yet
     - Unused memory that the Python memory allocator did not return to libc through
-      free() yet
-    - Unused memory that the user-space libc free() function did not release to the OS
+      `free`_ yet
+    - Unused memory that the user-space libc `free`_ function did not release to the OS
       yet (see memory allocators below)
     - Memory fragmentation
     - Memory leaks
@@ -291,32 +295,34 @@ memory.
 
 Tweaking OS memory allocation
 -----------------------------
-Different OSs use different default policies when it comes to allocating - and, most
-importantly, freeing - memory. Both the Linux and MacOS memory allocators try to avoid
-performing a kernel call every time the application calls ``free()`` by implementing a
-user-space memory management system. Upon ``free()``, memory can remain allocated in
-user space and potentially reusable by the next ``malloc()`` - which in turn won't
-require a system call either. This is generally very desirable for C/C++ applications
-which have no memory allocator of their own, as it can drastically boost performance at
-the cost of a larger memory footprint. CPython however adds its own memory allocator on
-top, which reduces the need for this additional abstraction (with caveats).
+In many cases, high unmanaged memory usage or "memory leak" warnings on workers can be
+misleading: a worker may not actually be using its memory for anything, but simply
+hasn't returned that unused memory back to the operating system, and is hoarding it just
+in case it needs the memory capacity again. This is not a bug in your code, nor in
+Dask — it's actually normal behavior for all processes on Linux and MacOS, and is a
+consequence of how the low-level memory allocator works (see below for details).
 
-Dask.distributed measures the total process memory (also known as RSS) and uses it for
-decision-making in several points; namely:
+Because Dask makes decisions (spill-to-disk, pause, terminate,
+:meth:`~distributed.Client.rebalance`) based on the worker's memory usage as reported by
+the OS, and is unaware of how much of this memory is actually in use versus empty and
+"hoarded", it can overestimate — sometimes significantly — how much memory the process
+is using and think the worker is running out of memory when in fact it isn't.
 
-- the spill, pause, and terminate thresholds (see above)
-- :meth:`distributed.Client.rebalance` and
-  :meth:`distributed.scheduler.Scheduler.rebalance`
+More in detail:
 
-In some cases, it is easy to have these heuristics misbehave because there are large
-amounts of process memory that the libc did not release to the OS yet - but Dask does
-not have the means to tell them apart from a memory leak. This phenomenon is the first
-thing you should investigate when you see large amounts of unexplained unmanaged memory
-in the dashboard or in the logs.
+Both the Linux and MacOS memory allocators try to avoid performing a `brk`_ kernel call
+every time the application calls `free`_ by implementing a user-space memory management
+system. Upon `free`_, memory can remain allocated in user space and potentially reusable
+by the next `malloc`_ - which in turn won't require a kernel call either. This is
+generally very desirable for C/C++ applications which have no memory allocator of their
+own, as it can drastically boost performance at the cost of a larger memory footprint.
+CPython however adds its own memory allocator on top, which reduces the need for this
+additional abstraction (with caveats).
+
 
 Manually trim memory
 ~~~~~~~~~~~~~~~~~~~~
-*Linux only*
+*Linux workers only*
 
 It is possible to forcefully release allocated but unutilized memory as follows:
 
@@ -330,17 +336,23 @@ It is possible to forcefully release allocated but unutilized memory as follows:
 
     client.run(trim_memory)
 
-This should be only used as a one-off debugging experiment. Watch the dashboard while running the above code. If unmanaged worker memory (on the "Bytes stored" plot) decreases significantly after calling ``client.run(trim_memory)``, then move on to the next section. Otherwise, you likely do have a memory leak.
+This should be only used as a one-off debugging experiment. Watch the dashboard while
+running the above code. If unmanaged worker memory (on the "Bytes stored" plot)
+decreases significantly after calling ``client.run(trim_memory)``, then move on to the
+next section. Otherwise, you likely do have a memory leak.
 
-Note that you should only run this ``malloc_trim`` if you are using the default glibc memory allocator. When using a custom allocator, this could cause unexpected behavior including segfaults. (If you don't know what this means, you're probably using the default glibc allocator and are safe to run this.)
+Note that you should only run this `malloc_trim`_ if you are using the default glibc
+memory allocator. When using a custom allocator such as `jemalloc`_ (see below), this
+could cause unexpected behavior including segfaults. (If you don't know what this means,
+you're probably using the default glibc allocator and are safe to run this).
 
 Automatically trim memory
 ~~~~~~~~~~~~~~~~~~~~~~~~~
-*Linux only*
+*Linux workers only*
 
 To aggressively and automatically trim the memory in a production environment, you
 should instead set the environment variable ``MALLOC_TRIM_THRESHOLD_`` (note the final
-underscore) to 0 or a low number; see the `mallopt <https://man7.org/linux/man-pages/man3/mallopt.3.html>`_ man page for details. Reducing
+underscore) to 0 or a low number; see the `mallopt`_ man page for details. Reducing
 this value will increase the number of syscalls, and as a consequence may degrade
 performance. **The variable must be set before starting the ``dask-worker`` process.**
 
@@ -348,20 +360,30 @@ jemalloc
 ~~~~~~~~
 *Linux and MacOS workers*
 
-Alternatively to the above, you may experiment with the
-`jemalloc <http://jemalloc.net>`_ memory allocator, as follows:
+Alternatively to the above, you may experiment with the `jemalloc`_ memory allocator, as
+follows:
+
+On Linux:
 
 .. code-block:: bash
 
     conda install jemalloc
     LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
 
-jemalloc offers a wealth of configuration settings; please refer to its documentation.
+On MacOS:
+
+.. code-block:: bash
+
+    conda install jemalloc
+    DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask-worker <...>
+
+`jemalloc`_ offers a wealth of configuration settings; please refer to its
+documentation.
 
 Ignore process memory
 ~~~~~~~~~~~~~~~~~~~~~
-If all else fails, you may want to stop dask from using memory metrics from the OS (RSS) in its
-decision-making:
+If all else fails, you may want to stop dask from using memory metrics from the OS (RSS)
+in its decision-making:
 
 .. code-block:: yaml
 
@@ -392,3 +414,11 @@ API Documentation
 
 .. autoclass:: distributed.worker.TaskState
 .. autoclass:: distributed.worker.Worker
+
+
+.. _malloc: https://www.man7.org/linux/man-pages/man3/malloc.3.html
+.. _free: https://www.man7.org/linux/man-pages/man3/free.3.html
+.. _mallopt: https://man7.org/linux/man-pages/man3/mallopt.3.html
+.. _malloc_trim: https://man7.org/linux/man-pages/man3/malloc_trim.3.html
+.. _brk: https://www.man7.org/linux/man-pages/man2/brk.2.html
+.. _jemalloc: http://jemalloc.net
