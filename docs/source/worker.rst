@@ -360,7 +360,7 @@ jemalloc offers a wealth of configuration settings; please refer to its document
 
 Ignore process memory
 ~~~~~~~~~~~~~~~~~~~~~
-If all else fails, you may want to stop dask from using the process (RSS) memory in its
+If all else fails, you may want to stop dask from using memory metrics from the OS (RSS) in its
 decision-making:
 
 .. code-block:: yaml
