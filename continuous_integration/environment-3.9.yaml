@@ -23,6 +23,7 @@ dependencies:
   - paramiko
   - prometheus_client
   - psutil
+  - pynvml  # Only tested here
   - pytest
   - pytest-asyncio<0.14.0
   - pytest-faulthandler
