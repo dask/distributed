@@ -3,7 +3,7 @@ import os
 try:
     import pynvml
 except ImportError:
-    pyvnml = None
+    pynvml = None
 
 nvmlInitialized = False
 nvmlLibraryNotFound = False
@@ -25,7 +25,7 @@ def init_once():
 
 def device_get_count():
     init_once()
-    if nvmlLibraryNotFound:
+    if nvmlLibraryNotFound or not nvmlInitialized:
         return 0
     else:
         return pynvml.nvmlDeviceGetCount()
