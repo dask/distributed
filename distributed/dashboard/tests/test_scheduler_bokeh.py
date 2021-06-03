@@ -21,13 +21,11 @@ from distributed.compatibility import MACOS
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
+    ClusterMemory,
     ComputePerKey,
     CurrentLoad,
     Events,
     MemoryByKey,
-    NBytes,
-    NBytesCluster,
-    NBytesHistogram,
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
@@ -37,6 +35,8 @@ from distributed.dashboard.components.scheduler import (
     TaskGraph,
     TaskProgress,
     TaskStream,
+    WorkersMemory,
+    WorkersMemoryHistogram,
     WorkerTable,
 )
 from distributed.dashboard.components.worker import Counters
@@ -276,8 +276,8 @@ async def test_ProcessingHistogram(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytes(c, s, a, b):
-    cl = NBytes(s)
+async def test_WorkersMemory(c, s, a, b):
+    cl = WorkersMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -293,8 +293,8 @@ async def test_NBytes(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesCluster(c, s, a, b):
-    cl = NBytesCluster(s)
+async def test_ClusterMemory(c, s, a, b):
+    cl = ClusterMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -302,7 +302,7 @@ async def test_NBytesCluster(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
     llens = {len(l) for l in d.values()}
-    # Unlike NBytes, empty rects here aren't pruned away.
+    # Unlike WorkersMemory, empty rects here aren't pruned away.
     assert llens == {4}
     # There is definitely going to be managed_in_memory and
     # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
@@ -311,8 +311,8 @@ async def test_NBytesCluster(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesHistogram(c, s, a, b):
-    nh = NBytesHistogram(s)
+async def test_WorkersMemoryHistogram(c, s, a, b):
+    nh = WorkersMemoryHistogram(s)
     nh.update()
     assert any(nh.source.data["top"] != 0)
 
