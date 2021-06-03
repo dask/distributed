@@ -344,7 +344,7 @@ performance. The variable must be set before starting the dask-worker process.
 
 jemalloc
 ~~~~~~~~
-*Linux and MacOS*
+*Linux and MacOS workers*
 
 Alternatively to the above, you may experiment with the
 `jemalloc <http://jemalloc.net>`_ memory allocator, as follows:
