@@ -9,7 +9,7 @@ from distributed.utils_test import gen_cluster
 
 
 def test_one_time():
-    if pynvml.nvmlDeviceGetCount() < 1:
+    if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
     output = nvml.one_time()
@@ -20,7 +20,7 @@ def test_one_time():
 
 
 def test_1_visible_devices():
-    if pynvml.nvmlDeviceGetCount() < 1:
+    if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -31,7 +31,7 @@ def test_1_visible_devices():
 
 @pytest.mark.parametrize("CVD", ["1,0", "0,1"])
 def test_2_visible_devices(CVD):
-    if pynvml.nvmlDeviceGetCount() < 2:
+    if nvml.device_get_count() < 2:
         pytest.skip("Less than two GPUs available")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = CVD
@@ -48,7 +48,7 @@ def test_2_visible_devices(CVD):
 
 @gen_cluster()
 async def test_gpu_metrics(s, a, b):
-    if pynvml.nvmlDeviceGetCount() < 1:
+    if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
     h = nvml._pynvml_handles()
@@ -67,7 +67,7 @@ async def test_gpu_metrics(s, a, b):
 
 @gen_cluster()
 async def test_gpu_monitoring(s, a, b):
-    if pynvml.nvmlDeviceGetCount() < 1:
+    if nvml.device_get_count() < 1:
         pytest.skip("No GPUs available")
 
     h = nvml._pynvml_handles()
