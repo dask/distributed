@@ -4,14 +4,16 @@ import pynvml
 
 nvmlInitialized = False
 nvmlLibraryNotFound = False
+nvmlOwnerPID = None
 
 
 def init_once():
-    global nvmlInitialized, nvmlLibraryNotFound
-    if nvmlInitialized is True:
+    global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
+    if nvmlInitialized is True and nvmlOwnerPID == os.getpid():
         return
 
     nvmlInitialized = True
+    nvmlOwnerPID = os.getpid()
     try:
         pynvml.nvmlInit()
     except pynvml.NVMLError_LibraryNotFound:
