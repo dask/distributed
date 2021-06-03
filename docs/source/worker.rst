@@ -199,7 +199,7 @@ memory limit, the worker will begin to dump the least recently used data
 to disk.  You can control this location with the ``--local-directory``
 keyword.::
 
-   $ dask-worker tcp://scheduler:port --memory-limit 4e9 --local-directory /scratch
+   $ dask-worker tcp://scheduler:port --memory-limit="4 GiB" --local-directory /scratch
 
 That data is still available and will be read back from disk when necessary.
 On the diagnostic dashboard status page disk I/O will show up in the task
