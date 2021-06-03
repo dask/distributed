@@ -330,7 +330,9 @@ It is possible to forcefully release allocated but unutilized memory as follows:
 
     client.run(trim_memory)
 
-This should be only used as a one-off debugging experiment.
+This should be only used as a one-off debugging experiment. Watch the dashboard while running the above code. If unmanaged worker memory (on the "Bytes stored" plot) decreases significantly after calling ``client.run(trim_memory)``, then move on to the next section. Otherwise, you likely do have a memory leak.
+
+Note that you should only run this ``malloc_trim`` if you are using the default glibc memory allocator. When using a custom allocator, this could cause unexpected behavior including segfaults. (If you don't know what this means, you're probably using the default glibc allocator and are safe to run this.)
 
 Automatically trim memory
 ~~~~~~~~~~~~~~~~~~~~~~~~~
