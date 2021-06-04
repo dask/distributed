@@ -53,8 +53,7 @@ Thread Pool
 -----------
 
 Each worker sends computations to a thread in a
-`concurrent.futures.ThreadPoolExecutor
-<https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor>`_
+:class:`concurrent.futures.ThreadPoolExecutor`
 for computation.  These computations occur in the same process as the Worker
 communication server so that they can access and share data efficiently between
 each other.  For the purposes of data locality all threads within a worker are
@@ -191,11 +190,9 @@ Spill data to disk
 
 Every time the worker finishes a task it estimates the size in bytes that the
 result costs to keep in memory using the ``sizeof`` function.  This function
-defaults to ``sys.getsizeof`` for arbitrary objects, which uses the standard
-Python `__sizeof__ protocol
-<https://docs.python.org/3/library/sys.html#sys.getsizeof>`_, but also has
-special-cased implementations for common data types like NumPy arrays and
-Pandas dataframes.
+defaults to :func:`sys.getsizeof` for arbitrary objects, which uses the standard
+Python ``__sizeof__`` protocol, but also has special-cased implementations for
+common data types like NumPy arrays and Pandas dataframes.
 
 When the sum of the number of bytes of the data in memory exceeds 60% of the
 memory limit, the worker will begin to dump the least recently used data
@@ -308,17 +305,17 @@ the OS, and is unaware of how much of this memory is actually in use versus empt
 "hoarded", it can overestimate — sometimes significantly — how much memory the process
 is using and think the worker is running out of memory when in fact it isn't.
 
-More in detail:
+More in detail: both the Linux and MacOS memory allocators try to avoid performing a
+`brk`_ kernel call every time the application calls `free`_ by implementing a user-space
+memory management system. Upon `free`_, memory can remain allocated in user space and
+potentially reusable by the next `malloc`_ - which in turn won't require a kernel call
+either. This is generally very desirable for C/C++ applications which have no memory
+allocator of their own, as it can drastically boost performance at the cost of a larger
+memory footprint. CPython however adds its own memory allocator on top, which reduces
+the need for this additional abstraction (with caveats).
 
-Both the Linux and MacOS memory allocators try to avoid performing a `brk`_ kernel call
-every time the application calls `free`_ by implementing a user-space memory management
-system. Upon `free`_, memory can remain allocated in user space and potentially reusable
-by the next `malloc`_ - which in turn won't require a kernel call either. This is
-generally very desirable for C/C++ applications which have no memory allocator of their
-own, as it can drastically boost performance at the cost of a larger memory footprint.
-CPython however adds its own memory allocator on top, which reduces the need for this
-additional abstraction (with caveats).
-
+There are steps you can take to alleviate situations where worker memory is not released
+back to the OS. These steps are discussed in the following sections.
 
 Manually trim memory
 ~~~~~~~~~~~~~~~~~~~~

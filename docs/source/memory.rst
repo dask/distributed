@@ -8,9 +8,8 @@ from memory as quickly as possible in order to make room for more computation.
 The result of a task is kept in memory if either of the following conditions
 hold:
 
-1. A client holds a future pointing to this task (typically via
-   :meth:`~distributed.Client.persist`). The data should stay in RAM so that the client
-   can gather the data on demand.
+1. A client holds a future pointing to this task. The data should stay in RAM so that
+   the client can gather the data on demand.
 2. The task is necessary for ongoing computations that are working to produce
    the final results pointed to by futures. These tasks will be removed once
    no ongoing tasks require them.
