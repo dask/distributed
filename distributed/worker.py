@@ -41,6 +41,7 @@ from .core import (
     pingpong,
     send_recv,
 )
+from .diagnostics import nvml
 from .diagnostics.plugin import _get_worker_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
@@ -77,11 +78,6 @@ from .utils import (
 from .utils_comm import gather_from_workers, pack_data, retry_operation
 from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
-
-try:
-    from .diagnostics import nvml
-except Exception:
-    nvml = None
 
 logger = logging.getLogger(__name__)
 
@@ -1085,7 +1081,7 @@ class Worker(ServerNode):
             count=self.monitor.count,
             last_time=self.monitor.last_time,
         )
-        if nvml is not None:
+        if nvml.device_get_count() > 0:
             result["gpu_name"] = self.monitor.gpu_name
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
         return result
@@ -3849,7 +3845,10 @@ _global_workers = Worker._instances
 
 try:
     from .diagnostics import nvml
-except Exception:
+
+    if nvml.device_get_count() < 1:
+        raise RuntimeError
+except (Exception, RuntimeError):
     pass
 else:
 
