@@ -2948,8 +2948,8 @@ class Worker(ServerNode):
                     logger.warning(
                         "Unmanaged memory use is high. This may indicate a memory leak "
                         "or the memory may not be released to the OS; see "
-                        "https://distributed.dask.org/en/latest/worker.html#memman for "
-                        "more information. "
+                        "https://distributed.dask.org/en/latest/worker.html#memtrim "
+                        "for more information. "
                         "-- Unmanaged memory: %s -- Worker memory limit: %s",
                         format_bytes(memory),
                         format_bytes(self.memory_limit),

@@ -290,6 +290,8 @@ The sum of managed + unmanaged + unmanaged recent is equal by definition to the 
 memory.
 
 
+.. _memtrim:
+
 Memory not released back to the OS
 ----------------------------------
 In many cases, high unmanaged memory usage or "memory leak" warnings on workers can be
