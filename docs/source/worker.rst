@@ -242,8 +242,8 @@ YARN, Mesos, SGE, etc..).  After termination, the nanny will restart the worker
 in a fresh state.
 
 
-Using the GUI to monitor memory usage
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Using the dashboard to monitor memory usage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The dashboard (typically available on port 8787) shows a summary of the overall memory
 usage on the cluster, as well as the individual usage on each worker. It provides
 different memory readings:
