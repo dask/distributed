@@ -5559,7 +5559,7 @@ class Scheduler(SchedulerState, ServerNode):
            Alternatively, you may change how memory is measured both for the individual
            workers as well as to calculate the mean through
            ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
-           to disregard bogous OS memory readings.
+           to disregard inaccurate OS memory measurements.
 
         #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
            (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
