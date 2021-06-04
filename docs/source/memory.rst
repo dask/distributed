@@ -208,6 +208,6 @@ usually necessary.
    Client.scatter
 
 
-Worker-side memory management
------------------------------
+Worker memory management
+------------------------
 Memory usage can be optimized by configuring worker-side :ref:`memman`.
