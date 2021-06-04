@@ -290,8 +290,8 @@ The sum of managed + unmanaged + unmanaged recent is equal by definition to the 
 memory.
 
 
-Tweaking OS memory allocation
------------------------------
+Memory not released back to the OS
+----------------------------------
 In many cases, high unmanaged memory usage or "memory leak" warnings on workers can be
 misleading: a worker may not actually be using its memory for anything, but simply
 hasn't returned that unused memory back to the operating system, and is hoarding it just
