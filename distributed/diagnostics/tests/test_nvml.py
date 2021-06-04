@@ -87,6 +87,9 @@ async def test_gpu_monitoring_recent(s, a, b):
 
 @gen_cluster()
 async def test_gpu_monitoring_range_query(s, a, b):
+    if nvml.device_get_count() < 1:
+        pytest.skip("No GPUs available")
+
     res = await s.get_worker_monitor_info()
     ms = ["gpu_utilization", "gpu_memory_used"]
     for w in (a, b):
