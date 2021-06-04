@@ -1997,3 +1997,27 @@ async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a,
 
         with pytest.raises(ValueError):
             default_client()
+
+
+@pytest.mark.asyncio
+async def test_multiple_executors(cleanup):
+    def get_thread_name():
+        return threading.current_thread().name
+
+    async with Scheduler() as s:
+        async with Worker(
+            s.address,
+            nthreads=2,
+            executor={
+                "GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")
+            },
+        ) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                futures = []
+                with dask.annotate(executor="default"):
+                    futures.append(c.submit(get_thread_name, pure=False))
+                with dask.annotate(executor="GPU"):
+                    futures.append(c.submit(get_thread_name, pure=False))
+                default_result, gpu_result = await c.gather(futures)
+                assert "Dask-Default-Threads" in default_result
+                assert "Dask-GPU-Threads" in gpu_result

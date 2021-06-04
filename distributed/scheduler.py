@@ -7366,6 +7366,8 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
     else:
         msg["task"] = task
 
+    if ts._annotations:
+        msg["annotations"] = ts._annotations
     return msg
 
 
