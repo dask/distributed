@@ -99,7 +99,7 @@ bring the entire result back to the local machine, so it is unwise to use them o
 datasets, but can be very convenient for smaller results, particularly because they
 return concrete results in a way that most other tools expect.
 
-In simpler words, ``df.compute()`` is equivalent to ``client.compute(df).result()``.
+In other words, ``df.compute()`` is equivalent to ``client.compute(df).result()``.
 
 Typically we use asynchronous methods like ``client.persist`` to set up large
 collections and then use ``df.compute()`` for fast analyses.
