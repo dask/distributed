@@ -3077,7 +3077,7 @@ class Client:
         either affects a subset of the keys/workers or the entire network,
         depending on keyword arguments.
 
-        For details on the algorithm and configuration tweaks, refer to the matching
+        For details on the algorithm and configuration options, refer to the matching
         scheduler-side method :meth:`~distributed.scheduler.Scheduler.rebalance`.
 
         .. warning::
