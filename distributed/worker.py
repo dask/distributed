@@ -1,5 +1,6 @@
 import asyncio
 import bisect
+import concurrent.futures
 import errno
 import heapq
 import logging
@@ -16,7 +17,7 @@ from datetime import timedelta
 from functools import partial
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Iterable
+from typing import Dict, Iterable
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
@@ -641,7 +642,7 @@ class Worker(ServerNode):
         self.reconnect = reconnect
 
         # Common executors always available
-        self.executors = {
+        self.executors: Dict[str, concurrent.futures.Executor] = {
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
@@ -1315,7 +1316,7 @@ class Worker(ServerNode):
                     executor._work_queue.queue.clear()
                     executor.shutdown(wait=executor_wait, timeout=timeout)
                 else:
-                    executor.shutdown(wait=False)
+                    executor.shutdown(wait=executor_wait)
 
             self.stop()
             await self.rpc.close()
