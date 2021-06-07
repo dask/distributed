@@ -9,6 +9,7 @@ from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
     AdaptiveTicker,
+    Arrow,
     BasicTicker,
     BoxSelectTool,
     BoxZoomTool,
@@ -18,6 +19,7 @@ from bokeh.models import (
     DataRange1d,
     GroupFilter,
     HoverTool,
+    LabelSet,
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
@@ -28,6 +30,7 @@ from bokeh.models import (
     Tabs,
     TapTool,
     Title,
+    VeeHead,
     WheelZoomTool,
     value,
 )
@@ -68,6 +71,7 @@ from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
+from distributed.diagnostics.tg_graph_utils import get_depth, toposort_layers
 from distributed.metrics import time
 from distributed.utils import format_time, log_errors, parse_timedelta
 
@@ -1720,6 +1724,209 @@ class TaskGraph(DashboardComponent):
         self.scheduler.remove_plugin(self.layout)
 
 
+##########Task Group Graph #########
+class TGroupGraph(DashboardComponent):
+    """
+    Task Group Graph
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.x = {}
+        self.y = {}
+        self.collision = {}
+        self.y_next = 0
+        self.nstart = []
+        self.nend = []
+        self.tg_stack = []
+
+        # GET DATA FOR THE GRAPH
+
+        self.node_source = ColumnDataSource(
+            {
+                "x": [],
+                "y": [],
+                "name": [],
+                "name_short": [],
+                "tot_tasks": [],
+                "colors": [],
+            }
+        )  # I think we need the tg_key not sure yet
+        self.arrow_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
+
+        # node_colors = #something here
+
+        self.root = figure(title="Task Groups Graph", **kwargs)
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.root.add_layout(self.subtitle, "above")
+
+        # Let's start with squares we, will modify later to progress bars
+        rect = self.root.square(
+            x="x",
+            y="y",
+            size=30,
+            color="colors",
+            fill_alpha=0.5,
+            source=self.node_source,
+        )
+
+        self.arrows = Arrow(
+            end=VeeHead(size=10),
+            line_color="black",
+            line_alpha=0.5,
+            line_width=1,
+            x_start="xs",
+            y_start="ys",
+            x_end="xe",
+            y_end="ye",
+            source=self.arrow_source,
+        )
+        self.root.add_layout(self.arrows)
+
+        self.labels = LabelSet(
+            x="x",
+            y="y",
+            text="name_short",
+            source=self.node_source,
+            background_fill_color=None,
+        )  #  We probably need an offset like x_offset=-1, also need to chop the name somehow
+        self.root.add_layout(self.labels)
+
+        self.root.xgrid.grid_line_color = None
+        self.root.ygrid.grid_line_color = None
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks")],
+            renderers=[rect],
+        )
+        self.root.add_tools(hover)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            #####We need to get here tg_stack
+
+            if self.scheduler.task_groups:
+                # get dependecies per task group
+                dependencies = {
+                    k: [
+                        ds.name for ds in ts.dependencies if ds.name != k
+                    ]  # in some cases there are tg that have themeselves as
+                    for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
+                }
+
+                # get dependents per task group
+                dependents = {k: [] for k in dependencies}
+                for k, v in dependencies.items():
+                    for dep in v:
+                        dependents[dep].append(k)
+
+                dependencies_depth = {
+                    k: get_depth(dependencies, k) for k in dependencies.keys()
+                }
+
+                stack_order = toposort_layers(dependencies)
+                stack_it = stack_order[::-1].copy()
+
+                while stack_it:
+                    tg = stack_it.pop()
+                    self.x[tg] = dependencies_depth[tg]
+                    if dependencies_depth[tg] == 0:
+                        self.y[tg] = self.y_next
+                        self.y_next += 1
+
+                    sort_dependents = [
+                        ele for ele in stack_order if ele in dependents[tg]
+                    ]
+                    for dep in sort_dependents:
+                        if dep not in self.y:
+                            self.y[dep] = self.y[tg] + sort_dependents.index(dep)
+
+                    if (self.x[tg], self.y[tg]) in self.collision:
+                        old_x, old_y = self.x[tg], self.y[tg]
+                        self.x[tg], self.y[tg] = self.collision[
+                            (self.x[tg], self.y[tg])
+                        ]
+                        self.y[tg] += 0.5
+                        self.collision[old_x, old_y] = (self.x[tg], self.y[tg])
+                    else:
+                        self.collision[(self.x[tg], self.y[tg])] = (
+                            self.x[tg],
+                            self.y[tg],
+                        )
+
+                    self.nstart += dependencies[tg]
+                    self.nend += [tg] * len(dependencies[tg])
+                    self.tg_stack.append(tg)
+
+            self.add_nodes_arrows(self.tg_stack)
+
+            if len(self.scheduler.tasks) == 0:
+                self.subtitle.text = "Scheduler is empty."
+            else:
+                self.subtitle.text = " "
+
+    @without_property_validation
+    def add_nodes_arrows(self, tg_stack):
+        if tg_stack:
+            node_x = []
+            node_y = []
+            node_name = []
+            node_short_name = []
+            node_color = []
+            node_tot_tasks = []
+
+            x = self.layout.x
+            y = self.layout.y
+
+            # coords for arrows
+            arrow_xs = [x[s] for s in self.layout.nstart]
+            arrow_ys = [y[s] for s in self.layout.nstart]
+            arrow_xe = [x[e] for e in self.layout.nend]
+            arrow_ye = [y[e] for e in self.layout.nend]
+
+            groups = self.scheduler.task_groups
+
+            for key in tg_stack:
+                try:
+                    tg = groups[key]
+                except KeyError:
+                    continue
+                xx = x[key]
+                yy = y[key]
+                node_x.append(xx)
+                node_y.append(yy)
+                node_name.append(tg.prefix.name)
+                node_short_name.append(
+                    tg.prefix.name[:10]
+                )  # need to change how to choose the short name
+                node_color.append(color_of(tg.prefix.name))
+                node_tot_tasks.append(sum(tg.states.values()))
+
+            node = {
+                "x": node_x,
+                "y": node_y,
+                "name": node_name,
+                "name_short": node_short_name,
+                "colors": node_color,
+                "tot_tasks": node_tot_tasks,
+            }
+
+            arrow = {
+                "xs": arrow_xs,
+                "ys": arrow_ys,
+                "xe": arrow_xe,
+                "ye": arrow_ye,
+            }
+
+            self.node_source.stream(node)
+            self.arrow_source.stream(arrow)
+
+
+##########Task Group Graph #########
+
+
 class TaskProgress(DashboardComponent):
     """Progress bars per task type"""
 
@@ -2253,6 +2460,22 @@ def graph_doc(scheduler, extra, doc):
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
+
+
+#####Using this for now, when adding progress bar we might need to move to status doc ####
+def tg_graph_doc(scheduler, extra, doc):
+    with log_errors():
+        tg_graph = TGroupGraph(scheduler, sizing_mode="stretch_both")
+        doc.title = "Dask: Task Group Graph"
+        tg_graph.update()
+        add_periodic_callback(doc, tg_graph, 200)
+        doc.add_root(tg_graph.root)
+        doc.template = env.get_template("simple.html")
+        doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
+
+
+######
 
 
 def status_doc(scheduler, extra, doc):
