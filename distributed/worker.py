@@ -2685,7 +2685,7 @@ class Worker(ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                     ),
-                    executor=self.actor_executor,
+                    executor=self.executors["actor"],
                 )
             else:
                 result = func(*args, **kwargs)
