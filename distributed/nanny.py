@@ -9,6 +9,7 @@ import warnings
 import weakref
 from contextlib import suppress
 from multiprocessing.queues import Empty
+from time import sleep as sync_sleep
 
 import psutil
 from tornado import gen
@@ -362,7 +363,6 @@ class Nanny(ServerNode):
                 config=self.config,
             )
 
-        self.auto_restart = True
         if self.death_timeout:
             try:
                 result = await asyncio.wait_for(
@@ -378,7 +378,11 @@ class Nanny(ServerNode):
                 raise
 
         else:
-            result = await self.process.start()
+            try:
+                result = await self.process.start()
+            except Exception:
+                await self.close()
+                raise
         return result
 
     async def restart(self, comm=None, timeout=2, executor_wait=True):
@@ -414,9 +418,10 @@ class Nanny(ServerNode):
         """Track worker's memory.  Restart if it goes above terminate fraction"""
         if self.status != Status.running:
             return
+        if self.process is None or self.process.process is None:
+            return None
         process = self.process.process
-        if process is None:
-            return
+
         try:
             proc = self._psutil_process
             memory = proc.memory_info().rss
@@ -519,6 +524,9 @@ class Nanny(ServerNode):
 
 
 class WorkerProcess:
+    # The interval how often to check the msg queue for init
+    _init_msg_interval = 0.05
+
     def __init__(
         self,
         worker_kwargs,
@@ -584,9 +592,14 @@ class WorkerProcess:
         except OSError:
             logger.exception("Nanny failed to start process", exc_info=True)
             self.process.terminate()
-            return
-
-        msg = await self._wait_until_connected(uid)
+            self.status = Status.failed
+            return self.status
+        try:
+            msg = await self._wait_until_connected(uid)
+        except Exception:
+            self.status = Status.failed
+            self.process.terminate()
+            raise
         if not msg:
             return self.status
         self.worker_address = msg["address"]
@@ -683,14 +696,15 @@ class WorkerProcess:
                 logger.error("Failed to kill worker process: %s", e)
 
     async def _wait_until_connected(self, uid):
-        delay = 0.05
         while True:
             if self.status != Status.starting:
                 return
+            # This is a multiprocessing queue and we'd block the event loop if
+            # we simply called get
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(self._init_msg_interval)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues
@@ -700,7 +714,6 @@ class WorkerProcess:
                 logger.error(
                     "Failed while trying to start worker process: %s", msg["exception"]
                 )
-                await self.process.join()
                 raise msg["exception"]
             else:
                 return msg
@@ -718,88 +731,108 @@ class WorkerProcess:
         config,
         Worker,
     ):  # pragma: no cover
-        os.environ.update(env)
-        dask.config.set(config)
         try:
-            from dask.multiprocessing import initialize_worker_process
-        except ImportError:  # old Dask version
-            pass
-        else:
-            initialize_worker_process()
-
-        if silence_logs:
-            logger.setLevel(silence_logs)
-
-        IOLoop.clear_instance()
-        loop = IOLoop()
-        loop.make_current()
-        worker = Worker(**worker_kwargs)
-
-        async def do_stop(timeout=5, executor_wait=True):
+            os.environ.update(env)
+            dask.config.set(config)
             try:
-                await worker.close(
-                    report=True,
-                    nanny=False,
-                    safe=True,  # TODO: Graceful or not?
-                    executor_wait=executor_wait,
-                    timeout=timeout,
-                )
-            finally:
-                loop.stop()
-
-        def watch_stop_q():
-            """
-            Wait for an incoming stop message and then stop the
-            worker cleanly.
-            """
-            while True:
-                try:
-                    msg = child_stop_q.get(timeout=1000)
-                except Empty:
-                    pass
-                else:
-                    child_stop_q.close()
-                    assert msg.pop("op") == "stop"
-                    loop.add_callback(do_stop, **msg)
-                    break
-
-        t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
-        t.daemon = True
-        t.start()
-
-        async def run():
-            """
-            Try to start worker and inform parent of outcome.
-            """
-            try:
-                await worker
-            except Exception as e:
-                logger.exception("Failed to start worker")
-                init_result_q.put({"uid": uid, "exception": e})
-                init_result_q.close()
+                from dask.multiprocessing import initialize_worker_process
+            except ImportError:  # old Dask version
+                pass
             else:
-                try:
-                    assert worker.address
-                except ValueError:
-                    pass
-                else:
-                    init_result_q.put(
-                        {
-                            "address": worker.address,
-                            "dir": worker.local_directory,
-                            "uid": uid,
-                        }
-                    )
-                    init_result_q.close()
-                    await worker.finished()
-                    logger.info("Worker closed")
+                initialize_worker_process()
 
-        try:
-            loop.run_sync(run)
-        except (TimeoutError, gen.TimeoutError):
-            # Loop was stopped before wait_until_closed() returned, ignore
-            pass
-        except KeyboardInterrupt:
-            # At this point the loop is not running thus we have to run
-            # do_stop() explicitly.
-            loop.run_sync(do_stop)
+            if silence_logs:
+                logger.setLevel(silence_logs)
+
+            IOLoop.clear_instance()
+            loop = IOLoop()
+            loop.make_current()
+            worker = Worker(**worker_kwargs)
+
+            async def do_stop(timeout=5, executor_wait=True):
+                try:
+                    await worker.close(
+                        report=True,
+                        nanny=False,
+                        safe=True,  # TODO: Graceful or not?
+                        executor_wait=executor_wait,
+                        timeout=timeout,
+                    )
+                finally:
+                    loop.stop()
+
+            def watch_stop_q():
+                """
+                Wait for an incoming stop message and then stop the
+                worker cleanly.
+                """
+                while True:
+                    try:
+                        msg = child_stop_q.get(timeout=1000)
+                    except Empty:
+                        pass
+                    else:
+                        child_stop_q.close()
+                        assert msg.pop("op") == "stop"
+                        loop.add_callback(do_stop, **msg)
+                        break
+
+            t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
+            t.daemon = True
+            t.start()
+
+            async def run():
+                """
+                Try to start worker and inform parent of outcome.
+                """
+                try:
+                    await worker
+                except Exception as e:
+                    logger.exception("Failed to start worker")
+                    init_result_q.put({"uid": uid, "exception": e})
+                    init_result_q.close()
+                    # If we hit an exception here we need to wait for a least
+                    # one interval for the outside to pick up this message.
+                    # Otherwise we arrive in a race condition where the process
+                    # cleanup wipes the queue before the exception can be
+                    # properly handled. See also
+                    # WorkerProcess._wait_until_connected (the 2 is for good
+                    # measure)
+                    sync_sleep(cls._init_msg_interval * 2)
+                else:
+                    try:
+                        assert worker.address
+                    except ValueError:
+                        pass
+                    else:
+                        init_result_q.put(
+                            {
+                                "address": worker.address,
+                                "dir": worker.local_directory,
+                                "uid": uid,
+                            }
+                        )
+                        init_result_q.close()
+                        await worker.finished()
+                        logger.info("Worker closed")
+
+        except Exception as e:
+            logger.exception("Failed to initialize Worker")
+            init_result_q.put({"uid": uid, "exception": e})
+            init_result_q.close()
+            # If we hit an exception here we need to wait for a least one
+            # interval for the outside to pick up this message. Otherwise we
+            # arrive in a race condition where the process cleanup wipes the
+            # queue before the exception can be properly handled. See also
+            # WorkerProcess._wait_until_connected (the 2 is for good measure)
+            sync_sleep(cls._init_msg_interval * 2)
+        else:
+            try:
+                loop.run_sync(run)
+            except (TimeoutError, gen.TimeoutError):
+                # Loop was stopped before wait_until_closed() returned, ignore
+                pass
+            except KeyboardInterrupt:
+                # At this point the loop is not running thus we have to run
+                # do_stop() explicitly.
+                loop.run_sync(do_stop)

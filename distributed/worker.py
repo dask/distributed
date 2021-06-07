@@ -1,5 +1,6 @@
 import asyncio
 import bisect
+import concurrent.futures
 import errno
 import heapq
 import logging
@@ -16,6 +17,7 @@ from datetime import timedelta
 from functools import partial
 from inspect import isawaitable
 from pickle import PicklingError
+from typing import Dict, Iterable
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
@@ -27,7 +29,7 @@ from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
 
-from . import comm, preloading, profile, system
+from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import connect, get_address_host
 from .comm.addressing import address_from_user_args
@@ -40,6 +42,7 @@ from .core import (
     pingpong,
     send_recv,
 )
+from .diagnostics import nvml
 from .diagnostics.plugin import _get_worker_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
@@ -76,11 +79,6 @@ from .utils import (
 from .utils_comm import gather_from_workers, pack_data, retry_operation
 from .utils_perf import ThrottledGC, disable_gc_diagnosis, enable_gc_diagnosis
 from .versions import get_versions
-
-try:
-    from .diagnostics import nvml
-except Exception:
-    nvml = None
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +151,8 @@ class TaskState:
         serializable (e.g. int, string, list, dict).
     * **nbytes**: ``int``
         The size of a particular piece of data
+    * **annotations**: ``dict``
+        Task annotations
 
     Parameters
     ----------
@@ -187,6 +187,7 @@ class TaskState:
         self.stop_time = None
         self.metadata = {}
         self.nbytes = None
+        self.annotations = None
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
@@ -226,11 +227,9 @@ class Worker(ServerNode):
 
     * **nthreads:** ``int``:
         Number of nthreads used by this worker process
-    * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
-        Executor used to perform computation
-        This can also be the string "offload" in which case this uses the same
-        thread pool used for offloading communications.  This results in the
-        same thread being used for deserialization and computation.
+    * **executors:** ``Dict[str, concurrent.futures.Executor]``:
+        Executors used to perform computation. Always contains the default
+        executor.
     * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
@@ -327,7 +326,15 @@ class Worker(ServerNode):
         Fraction of memory at which we start spilling to disk
     memory_pause_fraction: float
         Fraction of memory at which we stop running new tasks
-    executor: concurrent.futures.Executor
+    executor: concurrent.futures.Executor, dict[str, concurrent.futures.Executor], str
+        The executor(s) to use. Depending on the type, it has the following meanings:
+            - Executor instance: The default executor.
+            - Dict[str, Executor]: mapping names to Executor instances. If the
+              "default" key isn't in the dict, a "default" executor will be created
+              using ``ThreadPoolExecutor(nthreads)``.
+            - Str: The string "offload", which refer to the same thread pool used for
+              offloading communications. This results in the same thread being used
+              for deserialization and computation.
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
@@ -362,6 +369,7 @@ class Worker(ServerNode):
     """
 
     _instances = weakref.WeakSet()
+    _initialized_clients = weakref.WeakSet()
 
     def __init__(
         self,
@@ -628,14 +636,25 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.reconnect = reconnect
+
+        # Common executors always available
+        self.executors: Dict[str, concurrent.futures.Executor] = {
+            "offload": utils._offload_executor,
+            "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
+        }
+
+        # Find the default executor
         if executor == "offload":
-            from distributed.utils import _offload_executor as executor
-        self.executor = executor or ThreadPoolExecutor(
-            self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
-        )
-        self.actor_executor = ThreadPoolExecutor(
-            1, thread_name_prefix="Dask-Actor-Threads"
-        )
+            self.executors["default"] = self.executors["offload"]
+        elif isinstance(executor, dict):
+            self.executors.update(executor)
+        elif executor is not None:
+            self.executors["default"] = executor
+        if "default" not in self.executors:
+            self.executors["default"] = ThreadPoolExecutor(
+                self.nthreads, thread_name_prefix="Dask-Default-Threads"
+            )
+
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
@@ -809,6 +828,10 @@ class Worker(ServerNode):
             "The local_dir attribute has moved to local_directory", stacklevel=2
         )
         return self.local_directory
+
+    @property
+    def executor(self):
+        return self.executors["default"]
 
     async def get_metrics(self):
         out = dict(
@@ -1083,7 +1106,7 @@ class Worker(ServerNode):
             count=self.monitor.count,
             last_time=self.monitor.last_time,
         )
-        if nvml is not None:
+        if nvml.device_get_count() > 0:
             result["gpu_name"] = self.monitor.gpu_name
             result["gpu_memory_total"] = self.monitor.gpu_memory_total
         return result
@@ -1235,6 +1258,29 @@ class Worker(ServerNode):
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
+
+            if self._client:
+                # If this worker is the last one alive, clean up the worker
+                # initialized clients
+                if not any(
+                    w
+                    for w in Worker._instances
+                    if w != self and w.status == Status.running
+                ):
+                    for c in Worker._initialized_clients:
+                        # Regardless of what the client was initialized with
+                        # we'll require the result as a future. This is
+                        # necessary since the heursitics of asynchronous are not
+                        # reliable and we might deadlock here
+                        c._asynchronous = True
+                        if c.asynchronous:
+                            await c.close()
+                        else:
+                            # There is still the chance that even with us
+                            # telling the client to be async, itself will decide
+                            # otherwise
+                            c.close()
+
             with suppress(EnvironmentError, TimeoutError):
                 if report and self.contact_address is not None:
                     await asyncio.wait_for(
@@ -1259,13 +1305,14 @@ class Worker(ServerNode):
                 with suppress(TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
 
-            self.actor_executor._work_queue.queue.clear()
-            if isinstance(self.executor, ThreadPoolExecutor):
-                self.executor._work_queue.queue.clear()
-                self.executor.shutdown(wait=executor_wait, timeout=timeout)
-            else:
-                self.executor.shutdown(wait=False)
-            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
+            for executor in self.executors.values():
+                if executor is utils._offload_executor:
+                    continue  # Never shutdown the offload executor
+                if isinstance(executor, ThreadPoolExecutor):
+                    executor._work_queue.queue.clear()
+                    executor.shutdown(wait=executor_wait, timeout=timeout)
+                else:
+                    executor.shutdown(wait=executor_wait)
 
             self.stop()
             await self.rpc.close()
@@ -1478,6 +1525,7 @@ class Worker(ServerNode):
         duration=None,
         resource_restrictions=None,
         actor=False,
+        annotations=None,
         **kwargs2,
     ):
         try:
@@ -1524,6 +1572,7 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
+            ts.annotations = annotations
 
             who_has = who_has or {}
 
@@ -1988,42 +2037,50 @@ class Worker(ServerNode):
                     changed = True
                     continue
 
-                deps = ts.dependencies
+                dependencies = ts.dependencies
                 if self.validate:
-                    assert all(dep.key in self.tasks for dep in deps)
+                    assert all(dep.key in self.tasks for dep in dependencies)
 
-                deps = {dep for dep in deps if dep.state == "fetch"}
+                dependencies_fetch = set()
+                dependencies_missing = set()
+                for dependency_ts in dependencies:
+                    if dependency_ts.state == "fetch":
+                        if not dependency_ts.who_has:
+                            dependencies_missing.add(dependency_ts)
+                        else:
+                            dependencies_fetch.add(dependency_ts)
 
-                missing_deps = {dep for dep in deps if not dep.who_has}
-                if missing_deps:
+                del dependencies
+
+                if dependencies_missing:
                     logger.info("Can't find dependencies for key %s", key)
                     missing_deps2 = {
                         dep
-                        for dep in missing_deps
+                        for dep in dependencies_missing
                         if dep.key not in self._missing_dep_flight
                     }
                     for dep in missing_deps2:
                         self._missing_dep_flight.add(dep.key)
                     self.loop.add_callback(self.handle_missing_dep, *missing_deps2)
 
-                    deps = [dep for dep in deps if dep not in missing_deps]
+                    dependencies_fetch -= dependencies_missing
 
-                log_keys = {d.key for d in deps}
-                self.log.append(("gather-dependencies", key, log_keys))
+                self.log.append(
+                    ("gather-dependencies", key, {d.key for d in dependencies_fetch})
+                )
 
                 in_flight = False
 
-                while deps and (
+                while dependencies_fetch and (
                     len(self.in_flight_workers) < self.total_out_connections
                     or self.comm_nbytes < self.total_comm_nbytes
                 ):
-                    dep = deps.pop()
-                    if dep.state != "fetch":
-                        continue
-                    if not dep.who_has:
-                        continue
+                    to_gather_ts = dependencies_fetch.pop()
+
                     workers = [
-                        w for w in dep.who_has if w not in self.in_flight_workers
+                        w
+                        for w in to_gather_ts.who_has
+                        if w not in self.in_flight_workers
                     ]
                     if not workers:
                         in_flight = True
@@ -2035,18 +2092,23 @@ class Worker(ServerNode):
                     else:
                         worker = random.choice(list(workers))
                     to_gather, total_nbytes = self.select_keys_for_gather(
-                        worker, dep.key
+                        worker, to_gather_ts.key
                     )
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
+                        dependencies_fetch.discard(self.tasks.get(d))
                         self.transition(self.tasks[d], "flight", worker=worker)
                     self.loop.add_callback(
-                        self.gather_dep, worker, dep, to_gather, total_nbytes, cause=key
+                        self.gather_dep,
+                        worker=worker,
+                        to_gather=to_gather,
+                        total_nbytes=total_nbytes,
+                        cause=ts,
                     )
                     changed = True
 
-                if not deps and not in_flight:
+                if not dependencies_fetch and not in_flight:
                     self.data_needed.popleft()
 
         except Exception as e:
@@ -2154,60 +2216,67 @@ class Worker(ServerNode):
 
         return deps, total_bytes
 
-    async def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
+    async def gather_dep(
+        self,
+        worker: str,
+        to_gather: Iterable[str],
+        total_nbytes: int,
+        cause: TaskState,
+    ):
         """Gather dependencies for a task from a worker who has them
 
         Parameters
         ----------
         worker : str
-            address of worker to gather dependency from
-        dep : TaskState
-            task we want to gather dependencies for
-        deps : list
-            keys of dependencies to gather from worker -- this is not
+            Address of worker to gather dependencies from
+        to_gather : list
+            Keys of dependencies to gather from worker -- this is not
             necessarily equivalent to the full list of dependencies of ``dep``
             as some dependencies may already be present on this worker.
+        total_nbytes : int
+            Total number of bytes for all the dependencies in to_gather combined
+        cause : TaskState
+            Task we want to gather dependencies for
         """
         if self.status != Status.running:
             return
         with log_errors():
             response = {}
+            to_gather_keys = set()
             try:
                 if self.validate:
                     self.validate_state()
+                for dependency_key in to_gather:
+                    dependency_ts = self.tasks.get(dependency_key)
+                    if dependency_ts and dependency_ts.state == "flight":
+                        to_gather_keys.add(dependency_key)
+                del to_gather
 
-                # dep states may have changed before gather_dep runs
-                # if a dep is no longer in-flight then don't fetch it
-                deps_ts = [self.tasks.get(key, None) or TaskState(key) for key in deps]
-                deps_ts = tuple(ts for ts in deps_ts if ts.state == "flight")
-                deps = [d.key for d in deps_ts]
-
-                self.log.append(("request-dep", dep.key, worker, deps))
-                logger.debug("Request %d keys", len(deps))
+                self.log.append(("request-dep", cause.key, worker, to_gather_keys))
+                logger.debug("Request %d keys for task %s", len(to_gather_keys), cause)
 
                 start = time()
                 response = await get_data_from_worker(
-                    self.rpc, deps, worker, who=self.address
+                    self.rpc, to_gather_keys, worker, who=self.address
                 )
                 stop = time()
 
                 if response["status"] == "busy":
-                    self.log.append(("busy-gather", worker, deps))
-                    for ts in deps_ts:
-                        if ts.state == "flight":
+                    self.log.append(("busy-gather", worker, to_gather_keys))
+                    for key in to_gather_keys:
+                        ts = self.tasks.get(key)
+                        if ts and ts.state == "flight":
                             self.transition(ts, "fetch")
                     return
 
-                if cause:
-                    cause_ts = self.tasks.get(cause, TaskState(key=cause))
-                    cause_ts.startstops.append(
-                        {
-                            "action": "transfer",
-                            "start": start + self.scheduler_delay,
-                            "stop": stop + self.scheduler_delay,
-                            "source": worker,
-                        }
-                    )
+                cause.startstops.append(
+                    {
+                        "action": "transfer",
+                        "start": start + self.scheduler_delay,
+                        "stop": stop + self.scheduler_delay,
+                        "source": worker,
+                    }
+                )
 
                 total_bytes = sum(
                     self.tasks[key].get_nbytes()
@@ -2299,7 +2368,7 @@ class Worker(ServerNode):
                     self.repetitively_busy += 1
                     await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
-                    await self.query_who_has(dep.key)
+                    await self.query_who_has(*to_gather_keys)
                     self.ensure_communicating()
 
     def bad_dep(self, dep):
@@ -2519,7 +2588,7 @@ class Worker(ServerNode):
         callbacks to ensure things run smoothly.  This can get tricky, so we
         pull it off into an separate method.
         """
-        executor = executor or self.executor
+        executor = executor or self.executors["default"]
         job_counter[0] += 1
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         kwargs = kwargs or {}
@@ -2755,8 +2824,17 @@ class Worker(ServerNode):
                 if self.digests is not None:
                     self.digests["disk-load-duration"].add(stop - start)
 
+            if ts.annotations is not None and "executor" in ts.annotations:
+                executor = ts.annotations["executor"]
+            else:
+                executor = "default"
+            assert executor in self.executors
+
             logger.debug(
-                "Execute key: %s worker: %s", ts.key, self.address
+                "Execute key: %s worker: %s, executor: %s",
+                ts.key,
+                self.address,
+                executor,
             )  # TODO: comment out?
             assert key == ts.key
             try:
@@ -2773,6 +2851,7 @@ class Worker(ServerNode):
                         self.active_threads_lock,
                         self.scheduler_delay,
                     ),
+                    executor=self.executors[executor],
                 )
             except RuntimeError as e:
                 executor_error = e
@@ -3220,10 +3299,21 @@ class Worker(ServerNode):
         except ValueError:  # no clients found, need to make a new one
             pass
         else:
+            # must be lazy import otherwise cyclic import
+            from distributed.deploy.cluster import Cluster
+
             if (
                 client.scheduler
                 and client.scheduler.address == self.scheduler.address
-                or client._start_arg == self.scheduler.address
+                # The below conditions should only happen in case a second
+                # cluster is alive, e.g. if a submitted task spawned its onwn
+                # LocalCluster, see gh4565
+                or (
+                    isinstance(client._start_arg, str)
+                    and client._start_arg == self.scheduler.address
+                    or isinstance(client._start_arg, Cluster)
+                    and client._start_arg.scheduler_address == self.scheduler.address
+                )
             ):
                 self._client = client
 
@@ -3241,6 +3331,7 @@ class Worker(ServerNode):
                 name="worker",
                 timeout=timeout,
             )
+            Worker._initialized_clients.add(self._client)
             if not asynchronous:
                 assert self._client.status == "running"
 
@@ -3798,7 +3889,10 @@ _global_workers = Worker._instances
 
 try:
     from .diagnostics import nvml
-except Exception:
+
+    if nvml.device_get_count() < 1:
+        raise RuntimeError
+except (Exception, RuntimeError):
     pass
 else:
 

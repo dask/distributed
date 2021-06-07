@@ -1,6 +1,48 @@
 Changelog
 =========
 
+2021.06.0
+---------
+
+Released on June 4, 2021
+
+- Multiple worker executors (:pr:`4869`) `Mads R. B. Kristensen`_
+- Ensure PyNVML works correctly when installed with no GPUs (:pr:`4873`) `Peter Andreas Entschev`_
+- Show more in test summary (:pr:`4875`) `James Bourbeau`_
+- Move ``SystemMonitor`` s GPU initialization back to constructor (:pr:`4866`) `Peter Andreas Entschev`_
+- Mark ``test_server_comms_mark_active_handlers`` with ``pytest.mark.asyncio`` (:pr:`4876`) `James Bourbeau`_
+- Who has has what html reprs v2 (:pr:`4865`) `Jacob Tomlinson`_
+- O(1) rebalance (:pr:`4774`) `crusaderky`_
+- Ensure repr and eq for cluster always works (:pr:`4799`) `Florian Jetter`_
+
+
+2021.05.1
+---------
+
+Released on May 28, 2021
+
+- Drop usage of ``WhoHas`` & ``WhatHas`` from ``Client`` (:pr:`4863`) `jakirkham`_
+- Ensure adaptive scaling is properly awaited and closed (:pr:`4720`) `Florian Jetter`_
+- Fix ``WhoHas``/ ``HasWhat`` ``async`` usage (:pr:`4860`) `Benjamin Zaitlen`_
+- Add HTML reprs for ``Client.who_has`` and ``Client.has_what`` (:pr:`4853`) `Jacob Tomlinson`_
+- Prevent accidentally starting multiple ``Worker`` s in the same process (:pr:`4852`) `crusaderky`_
+- Add system tab to performance reports (:pr:`4561`) `Charles Blackmon-Luca`_
+- Let servers close faster if there are no active handlers (:pr:`4805`) `Florian Jetter`_
+- Fix UCX scrub config logging (:pr:`4850`) `Peter Andreas Entschev`_
+- Ensure worker clients are closed (:pr:`3921`) `Florian Jetter`_
+- Fix warning for attribute error when deleting a client (:pr:`4807`) `Florian Jetter`_
+- Ensure exceptions are raised if workers are incorrectly started (:pr:`4733`) `Florian Jetter`_
+- Update handling of UCX exceptions on endpoint closing (:pr:`4836`) `Peter Andreas Entschev`_
+- Ensure busy workloads properly look up ``who_has`` (:pr:`4793`) `Florian Jetter`_
+- Check ``distributed.scheduler.pickle`` in ``Scheduler.run_function`` (:pr:`4838`) `James Bourbeau`_
+- Add performance_report to API docs (:pr:`4840`) `James Bourbeau`_
+- Use ``dict`` ``_workers_dv`` in unordered use cases (:pr:`4826`) `jakirkham`_
+- Bump ``pre-commit`` hook versions (:pr:`4835`) `James Bourbeau`_
+- Do not mindlessly spawn workers when no memory limit is set (:pr:`4397`) `Torsten Wörtwein`_
+- ``test_memory`` to use ``gen_cluster`` (:pr:`4811`) `crusaderky`_
+- Increase timeout of ``gen_test`` to 30s (:pr:`4821`) `Florian Jetter`_
+
+
 2021.05.0
 ---------
 
@@ -2363,3 +2405,4 @@ significantly without many new features.
 .. _`Matteo De Wint`: https://github.com/mdwint
 .. _`Naty Clementi`: https://github.com/ncclementi
 .. _`Nathan Danielsen`: https://github.com/ndanielsen
+.. _`Torsten Wörtwein`: https://github.com/twoertwein
