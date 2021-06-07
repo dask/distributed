@@ -1801,6 +1801,7 @@ class TGroupGraph(DashboardComponent):
 
     @without_property_validation
     def update(self):
+
         with log_errors():
 
             if self.scheduler.task_groups:
@@ -1824,6 +1825,14 @@ class TGroupGraph(DashboardComponent):
 
                 stack_order = toposort_layers(dependencies)
                 stack_it = stack_order[::-1].copy()
+
+                self.x = {}
+                self.y = {}
+                self.collision = {}
+                self.y_next = 0
+                self.nstart = []
+                self.nend = []
+                self.tg_stack = []
 
                 while stack_it:
                     tg = stack_it.pop()
@@ -1916,8 +1925,8 @@ class TGroupGraph(DashboardComponent):
                 "ye": arrow_ye,
             }
 
-            self.node_source.stream(node)
-            self.arrow_source.stream(arrow)
+            self.node_source.data.update(node)
+            self.arrow_source.data.update(arrow)
 
 
 ##########Task Group Graph #########
