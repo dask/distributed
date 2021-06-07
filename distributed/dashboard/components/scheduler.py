@@ -1740,8 +1740,6 @@ class TGroupGraph(DashboardComponent):
         self.nend = []
         self.tg_stack = []
 
-        # GET DATA FOR THE GRAPH
-
         self.node_source = ColumnDataSource(
             {
                 "x": [],
@@ -1751,10 +1749,9 @@ class TGroupGraph(DashboardComponent):
                 "tot_tasks": [],
                 "colors": [],
             }
-        )  # I think we need the tg_key not sure yet
-        self.arrow_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
+        )
 
-        # node_colors = #something here
+        self.arrow_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
 
         self.root = figure(title="Task Groups Graph", **kwargs)
         self.subtitle = Title(text=" ", text_font_style="italic")
@@ -1805,7 +1802,6 @@ class TGroupGraph(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            #####We need to get here tg_stack
 
             if self.scheduler.task_groups:
                 # get dependecies per task group
