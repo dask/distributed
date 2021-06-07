@@ -2162,6 +2162,47 @@ class WorkerTable(DashboardComponent):
         self.source.data.update(data)
 
 
+class SchedulerLogTable(DashboardComponent):
+    """Sortable table of the scheduler logs"""
+
+    table_names = {"level": "log level", "msg": "message"}
+
+    def __init__(self, scheduler, width=800, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource({k: [] for k in self.table_names})
+
+        columns = {
+            name: TableColumn(field=name, title=title)
+            for name, title in self.table_names.items()
+        }
+
+        table = DataTable(
+            source=self.source,
+            columns=list(columns.values()),
+            sortable=True,
+            width=width,
+            index_position=None,
+        )
+
+        if "sizing_mode" in kwargs:
+            sizing_mode = {"sizing_mode": kwargs["sizing_mode"]}
+        else:
+            sizing_mode = {}
+
+        components = [table]
+
+        self.root = column(*components, id="bk-scheduler-log-table", **sizing_mode)
+
+    def get_data(self):
+        logs = self.scheduler.get_logs()
+        return {k: list(log[i] for log in logs) for i, k in enumerate(self.table_names)}
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            self.source.stream(self.get_data(), 1000)
+
+
 def systemmonitor_doc(scheduler, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(scheduler, sizing_mode="stretch_both")
