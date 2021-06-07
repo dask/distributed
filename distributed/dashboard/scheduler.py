@@ -23,6 +23,7 @@ from .components.scheduler import (
     TaskGraph,
     TaskProgress,
     TaskStream,
+    TGroupGraph,
     WorkerTable,
     events_doc,
     graph_doc,
@@ -35,13 +36,23 @@ from .components.scheduler import (
     stealing_doc,
     systemmonitor_doc,
     tasks_doc,
+    tg_graph_doc,
     workers_doc,
 )
 from .core import BokehApplication
 from .worker import counters_doc
 
 template_variables = {
-    "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
+    "pages": [
+        "status",
+        "workers",
+        "tasks",
+        "system",
+        "profile",
+        "graph",
+        "tg-graph ",
+        "info",
+    ]
 }
 
 if NVML_ENABLED:
@@ -78,12 +89,14 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/tg-graph": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(
         TaskStream, 100, n_rectangles=1000, clear_interval="10s"
     ),
     "/individual-progress": individual_doc(TaskProgress, 100, height=160),
     "/individual-graph": individual_doc(TaskGraph, 200),
+    "/individual-tg-graph": individual_doc(TGroupGraph, 200),
     "/individual-nbytes": individual_doc(NBytes, 100),
     "/individual-nbytes-cluster": individual_doc(NBytesCluster, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
