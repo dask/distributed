@@ -1877,14 +1877,14 @@ class TGroupGraph(DashboardComponent):
             node_color = []
             node_tot_tasks = []
 
-            x = self.layout.x
-            y = self.layout.y
+            x = self.x
+            y = self.y
 
             # coords for arrows
-            arrow_xs = [x[s] for s in self.layout.nstart]
-            arrow_ys = [y[s] for s in self.layout.nstart]
-            arrow_xe = [x[e] for e in self.layout.nend]
-            arrow_ye = [y[e] for e in self.layout.nend]
+            arrow_xs = [x[s] for s in self.nstart]
+            arrow_ys = [y[s] for s in self.nstart]
+            arrow_xe = [x[e] for e in self.nend]
+            arrow_ye = [y[e] for e in self.nend]
 
             groups = self.scheduler.task_groups
 
