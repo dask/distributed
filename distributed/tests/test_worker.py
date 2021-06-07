@@ -29,6 +29,8 @@ from distributed import (
     get_worker,
     wait,
 )
+from distributed.comm.registry import backends
+from distributed.comm.tcp import TCPBackend
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
@@ -1545,6 +1547,25 @@ async def test_protocol_from_scheduler_address(Worker):
             async with Client(s.address, asynchronous=True) as c:
                 info = c.scheduler_info()
                 assert info["address"].startswith("ucx://")
+
+
+@pytest.mark.asyncio
+async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
+    # Ensure worker uses scheduler's protocol to determine host address, not the default scheme
+    # See https://github.com/dask/distributed/pull/4883
+
+    class BadBackend(TCPBackend):
+        def get_address_host(self, loc):
+            raise ValueError("asdf")
+
+    monkeypatch.setitem(backends, "foo", BadBackend())
+
+    with dask.config.set({"distributed.comm.default-scheme": "foo"}):
+        async with Scheduler(protocol="tcp") as s:
+            async with Worker(s.address) as w:
+                # Ensure that worker is able to properly start up
+                # without BadBackend.get_address_host raising a ValueError
+                pass
 
 
 @pytest.mark.asyncio
