@@ -4,6 +4,8 @@ import pytest
 
 pynvml = pytest.importorskip("pynvml")
 
+import dask
+
 from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
 
@@ -17,6 +19,25 @@ def test_one_time():
     assert "name" in output
 
     assert len(output["name"]) > 0
+
+
+def test_enable_disable_nvml():
+    try:
+        pynvml.nvmlShutdown()
+    except pynvml.NVMLError_Uninitialized:
+        pass
+    else:
+        nvml.nvmlInitialized = False
+
+    with dask.config.set({"distributed.diagnostics.nvml": False}):
+        nvml.init_once()
+        assert nvml.nvmlEnabled is False
+        assert nvml.nvmlInitialized is False
+
+    with dask.config.set({"distributed.diagnostics.nvml": True}):
+        nvml.init_once()
+        assert nvml.nvmlEnabled is True
+        assert nvml.nvmlInitialized is True
 
 
 def test_1_visible_devices():
