@@ -1530,13 +1530,13 @@ class Worker(ServerNode):
 
         For stronger guarantees, see handler free_keys
         """
+        self.log.append(("Handle superfluous data", keys, reason))
         for key in list(keys):
             ts = self.tasks.get(key)
-            self.log.append((key, "nofity superfluous data", reason))
             if ts and not ts.scheduler_holds_ref:
                 self.release_key(key, reason=f"delete data: {reason}", report=False)
 
-                logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
+        logger.debug("Worker %s -- Deleted %d keys", self.name, len(keys))
         return "OK"
 
     async def set_resources(self, **resources):
@@ -1732,7 +1732,7 @@ class Worker(ServerNode):
             if self.validate:
                 assert ts.state == "new"
                 assert ts.runspec is None
-                # assert who_has
+                assert who_has
 
             for dependent in ts.dependents:
                 dependent.waiting_for_data.add(ts.key)
@@ -2541,8 +2541,10 @@ class Worker(ServerNode):
                         if dependent.key in dep.waiting_for_data:
                             self.data_needed.append(dependent.key)
             if still_missing:
-                logger.critical(
-                    "Found self referencing who has response from scheduler. Trying again handle_missing"
+                logger.debug(
+                    "Found self referencing who has response from scheduler for keys %s.\n"
+                    "Trying again handle_missing",
+                    deps,
                 )
                 await self.handle_missing_dep(*deps)
         except Exception:
@@ -2576,6 +2578,12 @@ class Worker(ServerNode):
 
                 if dep in self.tasks:
                     if self.address in workers and self.tasks[dep].state != "memory":
+                        logger.debug(
+                            "Scheduler claims worker %s holds data for task %s which is not true.",
+                            self.name,
+                            dep,
+                        )
+                        # Do not mutate the input dict. That's rude
                         workers = set(workers) - {self.address}
                     self.tasks[dep].who_has.update(workers)
 

@@ -1916,7 +1916,7 @@ async def test_task_groups(c, s, a, b):
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
     await c.replicate(y)
-    # TODO: Are we supposed to track repliacted memory here? See also Scheduelr.add_keys
+    # TODO: Are we supposed to track replicated memory here? See also Scheduler.add_keys
     assert tg.nbytes_in_memory == y.nbytes
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)

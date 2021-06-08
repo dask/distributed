@@ -406,7 +406,6 @@ class SlowTransmitData:
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
-    n.auto_restart = False
 
     start = time()
     while len(s.nthreads) < 3:

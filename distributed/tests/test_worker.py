@@ -2171,7 +2171,6 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     f.release()
     g.release()
 
-    # We no longer hold any refs. Cluster should reset completely
     # This is not happening
     for server in [s, a, b]:
         while server.tasks:
