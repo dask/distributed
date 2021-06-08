@@ -1,11 +1,3 @@
-# Get dependencies depth
-def get_depth(deps, key):
-    """Gets dependencies depth."""
-    if len(deps[key]) == 0:
-        return 0
-    return max(get_depth(deps, val) + 1 for val in deps[key])
-
-
 # Get stack order
 def toposort_layers(dependencies):
     """Sorts the layers in a graph topologically
