@@ -2158,7 +2158,7 @@ class SchedulerState:
                     del parent._task_groups[tg._name]
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
                 import pdb
@@ -3817,14 +3817,10 @@ class Scheduler(SchedulerState, ServerNode):
         signal to the worker to shut down.  This works regardless of whether or
         not the worker has a nanny process restarting it
         """
-        parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            ws: WorkerState = parent._workers_dv[worker]
-            nanny_addr = ws._nanny
-            address = nanny_addr or worker
-
+            # FIXME: This does not handly nannys
             self.worker_send(worker, {"op": "close", "report": False})
             await self.remove_worker(address=worker, safe=safe)
 
@@ -5405,7 +5401,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
                     await self.remove_worker(address=addr, close=addr not in nannies)
-                except Exception as e:
+                except Exception:
                     logger.info(
                         "Exception while restarting.  This is normal", exc_info=True
                     )
@@ -6547,7 +6543,7 @@ class Scheduler(SchedulerState, ServerNode):
                     metadata[key] = dict()
                 metadata = metadata[key]
             metadata[keys[-1]] = value
-        except Exception as e:
+        except Exception:
             import pdb
 
             pdb.set_trace()
@@ -6612,7 +6608,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def unregister_worker_plugin(self, comm, name):
         """Unregisters a worker plugin"""
         try:
-            worker_plugins = self.worker_plugins.pop(name)
+            self.worker_plugins.pop(name)
         except KeyError:
             raise ValueError(f"The worker plugin {name} does not exists")
 

@@ -219,7 +219,7 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            write = await asyncio.wait_for(comm.write(local_info), timeout=timeout)
+            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
             handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())

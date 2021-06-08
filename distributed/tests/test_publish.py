@@ -8,13 +8,7 @@ from distributed import Client
 from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.protocol import Serialized
-from distributed.utils_test import (  # noqa F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    inc,
-    loop,
-)
+from distributed.utils_test import gen_cluster, inc
 
 
 @gen_cluster(client=False)

@@ -5,7 +5,6 @@ import yaml
 
 from distributed import Client
 from distributed.scheduler import COMPILED
-from distributed.utils_test import cleanup  # noqa: F401
 from distributed.utils_test import popen
 
 

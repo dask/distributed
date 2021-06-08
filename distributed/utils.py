@@ -24,7 +24,8 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
-from typing import Any, Dict, List
+from typing import Any as AnyType
+from typing import Dict, List
 
 import click
 import tblib.pickling_support
@@ -335,7 +336,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
-        except Exception as exc:
+        except Exception:
             error[0] = sys.exc_info()
         finally:
             assert thread_state.asynchronous > 0
@@ -1507,7 +1508,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: Any, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
     """
     Examples
     --------

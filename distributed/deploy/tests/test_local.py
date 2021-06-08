@@ -24,17 +24,15 @@ from distributed.metrics import time
 from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     assert_cannot_connect,
     captured_logger,
     clean,
-    cleanup,
     gen_test,
     inc,
-    loop,
     slowinc,
     tls_only_security,
 )

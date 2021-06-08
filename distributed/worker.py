@@ -2127,7 +2127,7 @@ class Worker(ServerNode):
                     value = self.data[ts.key]
                 except KeyError:
                     value = self.actors[ts.key]
-                nbytes = ts.nbytes = sizeof(value)
+                ts.nbytes = sizeof(value)
                 typ = ts.type = type(value)
                 del value
             try:
@@ -2319,7 +2319,7 @@ class Worker(ServerNode):
                 self.incoming_count += 1
 
                 self.log.append(("receive-dep", worker, list(response["data"])))
-            except EnvironmentError as e:
+            except EnvironmentError:
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
                 for d in self.has_what.pop(worker):
@@ -3881,8 +3881,6 @@ async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=T
 _global_workers = Worker._instances
 
 try:
-    from .diagnostics import nvml
-
     if nvml.device_get_count() < 1:
         raise RuntimeError
 except (Exception, RuntimeError):

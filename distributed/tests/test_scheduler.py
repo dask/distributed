@@ -20,7 +20,6 @@ from dask import delayed
 from dask.compatibility import apply
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
-from distributed.client import wait
 from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
@@ -28,16 +27,14 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     captured_logger,
-    cleanup,
     cluster,
     dec,
     div,
     gen_cluster,
     gen_test,
     inc,
-    loop,
     nodebug,
     slowadd,
     slowdec,
@@ -2214,7 +2211,7 @@ async def test_unknown_task_duration_config(client, s, a, b):
 
 
 @gen_cluster()
-async def test_unknown_task_duration_config(s, a, b):
+async def test_unknown_task_duration_config_2(s, a, b):
     assert s.idle_since == s.time_started
 
 
