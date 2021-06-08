@@ -1732,6 +1732,7 @@ class TGroupGraph(DashboardComponent):
 
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
+        self.current_groups = set()
 
         self.node_source = ColumnDataSource(
             {
@@ -1796,8 +1797,10 @@ class TGroupGraph(DashboardComponent):
     def update(self):
 
         with log_errors():
-
-            if self.scheduler.task_groups:
+            if self.current_groups != self.scheduler.task_groups.keys():
+                self.current_groups.update(
+                    self.scheduler.task_groups.keys()
+                )  # update this, right now only covering one case
                 # get dependecies per task group
                 dependencies = {
                     k: [
