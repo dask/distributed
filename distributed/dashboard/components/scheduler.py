@@ -1851,7 +1851,9 @@ class TGroupGraph(DashboardComponent):
                         self.x[tg], self.y[tg] = self.collision[
                             (self.x[tg], self.y[tg])
                         ]
-                        self.y[tg] += 0.5
+                        self.y[
+                            tg
+                        ] += 0.5  ##need to change when changing size of squares.
                         self.collision[old_x, old_y] = (self.x[tg], self.y[tg])
                     else:
                         self.collision[(self.x[tg], self.y[tg])] = (
