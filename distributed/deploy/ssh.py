@@ -295,14 +295,14 @@ def SSHCluster(
     >>> client = Client(cluster)
 
     An example using a different worker module, in particular the
-    ``dask-cuda-worker`` command from the ``dask-cuda`` project.
+    ``CUDAWorker`` worker from the ``dask-cuda`` project.
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
     ...     ["localhost", "hostwithgpus", "anothergpuhost"],
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module='dask_cuda.dask_cuda_worker')
+    ...     worker_module="dask_cuda.CUDAWorker")
     >>> client = Client(cluster)
 
     See Also
