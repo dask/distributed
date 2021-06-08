@@ -71,7 +71,7 @@ from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
-from distributed.diagnostics.tg_graph_utils import get_depth, toposort_layers
+from distributed.diagnostics.tg_graph_utils import toposort_layers
 from distributed.metrics import time
 from distributed.utils import format_time, log_errors, parse_timedelta
 
@@ -1819,10 +1819,6 @@ class TGroupGraph(DashboardComponent):
                     for dep in v:
                         dependents[dep].append(k)
 
-                dependencies_depth = {
-                    k: get_depth(dependencies, k) for k in dependencies.keys()
-                }
-
                 stack_order = toposort_layers(dependencies)
                 stack_it = stack_order[::-1].copy()
 
@@ -1836,10 +1832,12 @@ class TGroupGraph(DashboardComponent):
 
                 while stack_it:
                     tg = stack_it.pop()
-                    self.x[tg] = dependencies_depth[tg]
-                    if dependencies_depth[tg] == 0:
+                    if not dependencies[tg]:
+                        self.x[tg] = 0
                         self.y[tg] = self.y_next
                         self.y_next += 1
+                    else:
+                        self.x[tg] = max(self.x[dep] for dep in dependencies[tg]) + 1
 
                     sort_dependents = [
                         ele for ele in stack_order if ele in dependents[tg]
