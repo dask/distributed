@@ -49,7 +49,6 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@pytest.mark.xfail()
 @nodebug
 @gen_test()
 async def test_simple():
@@ -362,7 +361,7 @@ def _parent_process(child_pipe):
 
     with pristine_loop() as loop:
         try:
-            loop.run_sync(parent_process_coroutine(), timeout=10)
+            loop.run_sync(parent_process_coroutine, timeout=10)
         finally:
             loop.stop()
 

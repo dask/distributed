@@ -6,7 +6,6 @@ import threading
 import weakref
 from queue import Queue as PyQueue
 
-from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
@@ -268,8 +267,7 @@ class AsyncProcess:
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
         return fut
 
-    @gen.coroutine
-    def join(self, timeout=None):
+    async def join(self, timeout=None):
         """
         Wait for the child process to exit.
 
@@ -280,10 +278,12 @@ class AsyncProcess:
         if self._state.exitcode is not None:
             return
         if timeout is None:
-            yield self._exit_future
+            await self._exit_future
         else:
             try:
-                yield asyncio.wait_for(self._exit_future, timeout)
+                # Shield otherwise the timeout cancels the future and our
+                # on_exit callback will try to set a result on a canceled future
+                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
             except TimeoutError:
                 pass
 
