@@ -1742,6 +1742,7 @@ class TGroupGraph(DashboardComponent):
                 "name_short": [],
                 "tot_tasks": [],
                 "colors": [],
+                "alpha": [],
             }
         )
 
@@ -1757,7 +1758,7 @@ class TGroupGraph(DashboardComponent):
             y="y",
             size=30,
             color="colors",
-            fill_alpha=0.5,
+            fill_alpha="alpha",
             source=self.node_source,
         )
 
@@ -1788,7 +1789,7 @@ class TGroupGraph(DashboardComponent):
 
         hover = HoverTool(
             point_policy="follow_mouse",
-            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks")],
+            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks"), ("frac", "@alpha")],
             renderers=[rect],
         )
         self.root.add_tools(hover)
@@ -1808,6 +1809,16 @@ class TGroupGraph(DashboardComponent):
                     ]  # in some cases there are tg that have themeselves as
                     for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
                 }
+                completed = {
+                    k: 1.0
+                    - (
+                        tg.states["waiting"]
+                        + tg.states["no-worker"]
+                        + tg.states["processing"]
+                    )
+                    / sum(tg.states.values())
+                    for k, tg in self.scheduler.task_groups.items()
+                }
 
                 # get dependents per task group
                 dependents = {k: [] for k in dependencies}
@@ -1821,6 +1832,7 @@ class TGroupGraph(DashboardComponent):
                 data_layout = {
                     "x": {},
                     "y": {},
+                    "alpha": {},
                     "collision": {},
                     "y_next": 0,
                     "nstart": [],
@@ -1829,6 +1841,7 @@ class TGroupGraph(DashboardComponent):
                 }
                 while stack_it:
                     tg = stack_it.pop()
+                    data_layout["alpha"][tg] = completed[tg]
                     if not dependencies[tg]:
                         data_layout["x"][tg] = 0
                         data_layout["y"][tg] = data_layout["y_next"]
@@ -1891,6 +1904,7 @@ class TGroupGraph(DashboardComponent):
             node_name = []
             node_short_name = []
             node_color = []
+            node_alpha = []
             node_tot_tasks = []
 
             x = data_layout["x"]
@@ -1918,6 +1932,9 @@ class TGroupGraph(DashboardComponent):
                     tg.prefix.name[:10]
                 )  # need to change how to choose the short name
                 node_color.append(color_of(tg.prefix.name))
+                keys = set(data_layout["alpha"].keys())
+                # raise Exception(str(keys) + key)
+                node_alpha.append(data_layout["alpha"][key])
                 node_tot_tasks.append(sum(tg.states.values()))
 
             node = {
@@ -1926,6 +1943,7 @@ class TGroupGraph(DashboardComponent):
                 "name": node_name,
                 "name_short": node_short_name,
                 "colors": node_color,
+                "alpha": node_alpha,
                 "tot_tasks": node_tot_tasks,
             }
 
