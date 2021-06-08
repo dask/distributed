@@ -553,6 +553,10 @@ def client(loop, cluster_fixture):
         yield client
 
 
+# Compatibility. A lot of tests simply use `c` as fixture name
+c = client
+
+
 @pytest.fixture
 def client_secondary(loop, cluster_fixture):
     scheduler, workers = cluster_fixture

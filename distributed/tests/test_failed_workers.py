@@ -15,7 +15,6 @@ from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.scheduler import COMPILED
 from distributed.utils import CancelledError, sync
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     captured_logger,
     cluster,

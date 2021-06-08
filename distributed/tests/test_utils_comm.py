@@ -5,7 +5,7 @@ import pytest
 from distributed.comm import Comm
 from distributed.core import ConnectionPool
 from distributed.utils_comm import gather_from_workers, pack_data, retry, subs_multiple
-from distributed.utils_test import gen_cluster, loop  # noqa: F401
+from distributed.utils_test import gen_cluster
 
 
 def test_pack_data():

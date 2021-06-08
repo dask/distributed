@@ -3882,8 +3882,6 @@ async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=T
 _global_workers = Worker._instances
 
 try:
-    from .diagnostics import nvml
-
     if nvml.device_get_count() < 1:
         raise RuntimeError
 except (Exception, RuntimeError):

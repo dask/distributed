@@ -35,23 +35,16 @@ from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     TaskStateMetadataPlugin,
-    a,
-    b,
     captured_logger,
-    cleanup,
-    client,
-    cluster_fixture,
     dec,
     div,
     gen_cluster,
     gen_test,
     inc,
-    loop,
     mul,
     nodebug,
-    s,
     slowinc,
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight

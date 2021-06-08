@@ -409,6 +409,22 @@ async def test_dont_steal_executing_tasks(c, s, a, b):
     assert len(b.data) == 0
 
 
+@gen_cluster(client=True)
+async def test_dont_steal_executing_tasks_2(c, s, a, b):
+    steal = s.extensions["stealing"]
+
+    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
+    while not a.executing_count:
+        await asyncio.sleep(0.01)
+
+    steal.move_task_request(
+        s.tasks[future.key], s.workers[a.address], s.workers[b.address]
+    )
+    await asyncio.sleep(0.1)
+    assert a.tasks[future.key].state == "executing"
+    assert not b.executing_count
+
+
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
@@ -667,22 +683,6 @@ async def test_steal_twice(c, s, a, b):
 
     await c._close()
     await asyncio.gather(*[w.close() for w in workers])
-
-
-@gen_cluster(client=True)
-async def test_dont_steal_executing_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-
-    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
-    while not a.executing_count:
-        await asyncio.sleep(0.01)
-
-    steal.move_task_request(
-        s.tasks[future.key], s.workers[a.address], s.workers[b.address]
-    )
-    await asyncio.sleep(0.1)
-    assert a.tasks[future.key].state == "executing"
-    assert not b.executing_count
 
 
 @gen_cluster(client=True)

@@ -8,7 +8,7 @@ from dask.utils import format_bytes
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import cleanup, gen_test, inc, loop, popen  # noqa: 401
+from distributed.utils_test import popen
 
 try:
     HOST = get_ip()
