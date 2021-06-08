@@ -1732,13 +1732,6 @@ class TGroupGraph(DashboardComponent):
 
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.x = {}
-        self.y = {}
-        self.collision = {}
-        self.y_next = 0
-        self.nstart = []
-        self.nend = []
-        self.tg_stack = []
 
         self.node_source = ColumnDataSource(
             {
@@ -1822,59 +1815,72 @@ class TGroupGraph(DashboardComponent):
                 stack_order = toposort_layers(dependencies)
                 stack_it = stack_order[::-1].copy()
 
-                self.x = {}
-                self.y = {}
-                self.collision = {}
-                self.y_next = 0
-                self.nstart = []
-                self.nend = []
-                self.tg_stack = []
+                data_layout = {
+                    "x": {},
+                    "y": {},
+                    "collision": {},
+                    "y_next": 0,
+                    "nstart": [],
+                    "nend": [],
+                    "tg_stack": [],
+                }
 
                 while stack_it:
                     tg = stack_it.pop()
                     if not dependencies[tg]:
-                        self.x[tg] = 0
-                        self.y[tg] = self.y_next
-                        self.y_next += 1
+                        data_layout["x"][tg] = 0
+                        data_layout["y"][tg] = data_layout["y_next"]
+                        data_layout["y_next"] += 1
                     else:
-                        self.x[tg] = max(self.x[dep] for dep in dependencies[tg]) + 1
+                        data_layout["x"][tg] = (
+                            max(data_layout["x"][dep] for dep in dependencies[tg]) + 1
+                        )
 
                     sort_dependents = [
                         ele for ele in stack_order if ele in dependents[tg]
                     ]
                     for dep in sort_dependents:
-                        if dep not in self.y:
-                            self.y[dep] = self.y[tg] + sort_dependents.index(dep)
+                        if dep not in data_layout["y"]:
+                            data_layout["y"][dep] = data_layout["y"][
+                                tg
+                            ] + sort_dependents.index(dep)
 
-                    if (self.x[tg], self.y[tg]) in self.collision:
-                        old_x, old_y = self.x[tg], self.y[tg]
-                        self.x[tg], self.y[tg] = self.collision[
-                            (self.x[tg], self.y[tg])
-                        ]
-                        self.y[
+                    if (data_layout["x"][tg], data_layout["y"][tg]) in data_layout[
+                        "collision"
+                    ]:
+                        old_x, old_y = data_layout["x"][tg], data_layout["y"][tg]
+                        data_layout["x"][tg], data_layout["y"][tg] = data_layout[
+                            "collision"
+                        ][(data_layout["x"][tg], data_layout["y"][tg])]
+                        data_layout["y"][
                             tg
                         ] += 0.5  ##need to change when changing size of squares.
-                        self.collision[old_x, old_y] = (self.x[tg], self.y[tg])
+                        data_layout["collision"][old_x, old_y] = (
+                            data_layout["x"][tg],
+                            data_layout["y"][tg],
+                        )
                     else:
-                        self.collision[(self.x[tg], self.y[tg])] = (
-                            self.x[tg],
-                            self.y[tg],
+                        data_layout["collision"][
+                            (data_layout["x"][tg], data_layout["y"][tg])
+                        ] = (
+                            data_layout["x"][tg],
+                            data_layout["y"][tg],
                         )
 
-                    self.nstart += dependencies[tg]
-                    self.nend += [tg] * len(dependencies[tg])
-                    self.tg_stack.append(tg)
+                    data_layout["nstart"] += dependencies[tg]
+                    data_layout["nend"] += [tg] * len(dependencies[tg])
+                    data_layout["tg_stack"].append(tg)
 
-            self.add_nodes_arrows(self.tg_stack)
+                self.add_nodes_arrows(data_layout)
 
-            if len(self.scheduler.tasks) == 0:
+            if not self.scheduler.task_groups:
                 self.subtitle.text = "Scheduler is empty."
             else:
                 self.subtitle.text = " "
 
     @without_property_validation
-    def add_nodes_arrows(self, tg_stack):
-        if tg_stack:
+    def add_nodes_arrows(self, data_layout):
+        if data_layout["tg_stack"]:
             node_x = []
             node_y = []
             node_name = []
@@ -1882,18 +1888,18 @@ class TGroupGraph(DashboardComponent):
             node_color = []
             node_tot_tasks = []
 
-            x = self.x
-            y = self.y
+            x = data_layout["x"]
+            y = data_layout["y"]
 
             # coords for arrows
-            arrow_xs = [x[s] for s in self.nstart]
-            arrow_ys = [y[s] for s in self.nstart]
-            arrow_xe = [x[e] for e in self.nend]
-            arrow_ye = [y[e] for e in self.nend]
+            arrow_xs = [x[s] for s in data_layout["nstart"]]
+            arrow_ys = [y[s] for s in data_layout["nstart"]]
+            arrow_xe = [x[e] for e in data_layout["nend"]]
+            arrow_ye = [y[e] for e in data_layout["nend"]]
 
             groups = self.scheduler.task_groups
 
-            for key in tg_stack:
+            for key in data_layout["tg_stack"]:
                 try:
                     tg = groups[key]
                 except KeyError:
