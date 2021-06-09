@@ -2353,7 +2353,11 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
-        if ts._dependencies or valid_workers is not None:
+        if (
+            ts._dependencies
+            or valid_workers is not None
+            or ts._group._last_worker is not None
+        ):
             ws = decide_worker(
                 ts,
                 self._workers_dv.values(),
@@ -2361,6 +2365,7 @@ class SchedulerState:
                 partial(self.worker_objective, ts),
             )
         else:
+            # Fastpath when there are no related tasks or restrictions
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
             wp_vals = worker_pool.values()
@@ -2381,6 +2386,12 @@ class SchedulerState:
                             break
             else:  # dumb but fast in large case
                 ws = wp_vals[self._n_tasks % n_workers]
+
+            # TODO repeated logic from `decide_worker`
+            ts._group._last_worker = ws
+            ts._group._last_worker_tasks_left = math.floor(
+                len(ts._group) / self._total_nthreads
+            )
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
