@@ -638,9 +638,11 @@ async def test_TGroupGraph(c, s, a, b):
     assert dnode["tot_tasks"] == [5, 10]
 
     del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
 
     tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
-    assert not all(tgg.node_source.data.values())
+    assert not any(tgg.node_source.data.values())
 
 
 #######Adding TGroupGraph tests ######

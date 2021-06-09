@@ -1798,9 +1798,9 @@ class TGroupGraph(DashboardComponent):
 
         with log_errors():
             if self.current_groups != self.scheduler.task_groups.keys():
-                self.current_groups.update(
-                    self.scheduler.task_groups.keys()
-                )  # update this, right now only covering one case
+                # Update current set of task groups
+                self.current_groups = set(self.scheduler.task_groups.keys())
+
                 # get dependecies per task group
                 dependencies = {
                     k: [
@@ -1827,7 +1827,6 @@ class TGroupGraph(DashboardComponent):
                     "nend": [],
                     "tg_stack": [],
                 }
-
                 while stack_it:
                     tg = stack_it.pop()
                     if not dependencies[tg]:
@@ -1883,7 +1882,10 @@ class TGroupGraph(DashboardComponent):
 
     @without_property_validation
     def add_nodes_arrows(self, data_layout):
-        if data_layout["tg_stack"]:
+        if not data_layout["tg_stack"]:
+            self.node_source.data.clear()
+            self.arrow_source.data.clear()
+        else:
             node_x = []
             node_y = []
             node_name = []
@@ -1933,7 +1935,6 @@ class TGroupGraph(DashboardComponent):
                 "xe": arrow_xe,
                 "ye": arrow_ye,
             }
-
             self.node_source.data.update(node)
             self.arrow_source.data.update(arrow)
 
