@@ -2785,3 +2785,10 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
         a: (large_future.key,),
         b: tuple(f.key for f in small_futures),
     }
+
+
+def test_init_twice_no_warning():
+    with pytest.warns(None) as records:
+        for _ in range(2):
+            Scheduler()
+    assert not records
