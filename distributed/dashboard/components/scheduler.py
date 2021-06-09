@@ -1756,7 +1756,7 @@ class TGroupGraph(DashboardComponent):
         rect = self.root.square(
             x="x",
             y="y",
-            size=30,
+            size=60,
             color="colors",
             fill_alpha="alpha",
             source=self.node_source,
@@ -1779,6 +1779,7 @@ class TGroupGraph(DashboardComponent):
             x="x",
             y="y",
             text="name_short",
+            text_align="center",
             source=self.node_source,
             background_fill_color=None,
         )  #  We probably need an offset like x_offset=-1, also need to chop the name somehow
@@ -1786,6 +1787,8 @@ class TGroupGraph(DashboardComponent):
 
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
+        self.root.x_range.range_padding = 0.5
+        self.root.y_range.range_padding = 0.5
 
         hover = HoverTool(
             point_policy="follow_mouse",
