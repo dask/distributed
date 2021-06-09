@@ -644,6 +644,43 @@ async def test_TGroupGraph(c, s, a, b):
     assert not any(tgg.node_source.data.values())
 
 
+@gen_cluster(client=True)
+async def test_TGroupGraph_arrows(c, s, a, b):
+    tgg = TGroupGraph(s)
+
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    dnode = dict(tgg.node_source.data)
+    assert all(len(L) == 1 for L in dnode.values())
+    assert dnode["name"] == ["inc"]
+    assert dnode["tot_tasks"] == [10]
+
+    darr = dict(tgg.arrow_source.data)
+    assert all(len(L) == 0 for L in darr.values())
+
+    futures2 = c.map(dec, futures)
+    await wait(futures2)
+
+    tgg.update()
+    dnode = dict(tgg.node_source.data)
+    assert all(len(L) == 2 for L in dnode.values())
+    assert dnode["name"] == ["inc", "dec"]  # they follow the tg_stack
+    assert dnode["tot_tasks"] == [10, 10]
+
+    darr = dict(tgg.arrow_source.data)
+    assert all(len(L) == 1 for L in darr.values())
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    assert not any(tgg.node_source.data.values())
+    assert not any(tgg.arrow_source.data.values())
+
+
 @gen_cluster(
     client=True,
     config={
