@@ -2388,10 +2388,11 @@ class SchedulerState:
                 ws = wp_vals[self._n_tasks % n_workers]
 
             # TODO repeated logic from `decide_worker`
+            print("fastpath")
             ts._group._last_worker = ws
-            ts._group._last_worker_tasks_left = math.floor(
-                len(ts._group) / self._total_nthreads
-            )
+            # ts._group._last_worker_tasks_left = math.floor(
+            #     len(ts._group) / self._total_nthreads
+            # )
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -7545,7 +7546,9 @@ def decide_worker(
             break
     else:
         group: TaskGroup = ts._group
-        ws = group._last_worker
+        old: WorkerState = group._last_worker
+
+        ws = min(candidates, key=objective)
 
         total_nthreads = sum(
             wws._nthreads for wws in candidates
@@ -7556,20 +7559,41 @@ def decide_worker(
         # Try to schedule sibling root-like tasks on the same workers, so subsequent reduction tasks
         # don't require data transfer. Assumes `decide_worker` is being called in priority order.
         if (
-            ws is not None  # there is a previous worker
-            and group._last_worker_tasks_left > 0  # previous worker not fully assigned
+            old is not None  # there is a previous worker
             and ts._dependents  # task has dependents
             and group_tasks_per_worker > 1  # group is larger than cluster
+            # and group._last_worker_tasks_left > 0  # previous worker not fully assigned
+            and ts._prefix._duration_average + old.occupancy < ws.occupancy + math.ceil(group_tasks_per_worker) * ts._prefix._duration_average
             and (  # is a root-like task (task group depends on very few tasks)
                 sum(map(len, group._dependencies)) < 5  # TODO what number
             )
         ):
-            group._last_worker_tasks_left -= 1
-            return ws
+            # group._last_worker_tasks_left -= 1
+            print("using last worker")
+            return old
 
-        ws = min(candidates, key=objective)
+        print(
+            f"{ts.prefix_key}",
+            f"{ts._prefix._duration_average=}",
+            f"{old.occupancy=}" if old else None,
+            f"{ws.occupancy=}",
+            f"{group_tasks_per_worker=}",
+        )
+        # print(
+        #     f"{old is not None=}",
+        #     f"{ts._dependents=}",
+        #     f"{group_tasks_per_worker > 1=}",
+        #     f"{ts._prefix._duration_average + old.occupancy}",
+        #     f"{ws.occupancy + math.ceil(group_tasks_per_worker) * ts._prefix._duration_average}",
+        #     f"{sum(map(len, group._dependencies))=}",
+        #     f"{group._dependencies=}",
+        #     f"{group=}",
+        #     f"{ts=}",
+        # )
+
+        # ws = min(candidates, key=objective)
         group._last_worker = ws
-        group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
+        # group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
 
     return ws
 
