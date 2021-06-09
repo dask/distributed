@@ -7558,7 +7558,6 @@ def decide_worker(
         if (
             ws is not None  # there is a previous worker
             and group._last_worker_tasks_left > 0  # previous worker not fully assigned
-            and ts._dependents  # task has dependents
             and group_tasks_per_worker > 1  # group is larger than cluster
             and (  # is a root-like task (task group depends on very few tasks)
                 sum(map(len, group._dependencies)) < 5  # TODO what number
