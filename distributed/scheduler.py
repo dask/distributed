@@ -950,6 +950,8 @@ class TaskGroup:
     _start: double
     _stop: double
     _all_durations: object
+    _last_worker: WorkerState
+    _last_worker_tasks_left: int  # TODO Py_ssize_t?
 
     def __init__(self, name: str):
         self._name = name
@@ -964,6 +966,8 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
+        self._last_worker = None
+        self._last_worker_tasks_left = 0
 
     @property
     def name(self):
@@ -1008,6 +1012,18 @@ class TaskGroup:
     @property
     def stop(self):
         return self._stop
+
+    @property
+    def last_worker(self):
+        return self._last_worker
+
+    @property
+    def last_worker_tasks_left(self):
+        return self._last_worker_tasks_left
+
+    @last_worker_tasks_left.setter
+    def last_worker_tasks_left(self, n: int):
+        self._last_worker_tasks_left = n
 
     @ccall
     def add(self, o):
@@ -7517,7 +7533,33 @@ def decide_worker(
         for ws in candidates:
             break
     else:
+        group: TaskGroup = ts._group
+        ws = group._last_worker
+
+        total_nthreads = sum(
+            wws._nthreads for wws in candidates
+        )  # TODO get `self._total_threads` from scheduler? Though that doesn't account for worker restrictions.
+
+        group_tasks_per_worker = len(group) / total_nthreads
+
+        # Try to schedule sibling root-like tasks on the same workers, so subsequent reduction tasks
+        # don't require data transfer. Assumes `decide_worker` is being called in priority order.
+        if (
+            ws is not None  # there is a previous worker
+            and group._last_worker_tasks_left > 0  # previous worker not fully assigned
+            and ts._dependents  # task has dependents
+            and group_tasks_per_worker > 1  # group is larger than cluster
+            and (  # is a root-like task (task group depends on very few tasks)
+                sum(map(len, group._dependencies)) < 5  # TODO what number
+            )
+        ):
+            group._last_worker_tasks_left -= 1
+            return ws
+
         ws = min(candidates, key=objective)
+        group._last_worker = ws
+        group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
+
     return ws
 
 
