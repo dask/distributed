@@ -611,18 +611,17 @@ async def test_TaskGraph_order(c, s, a, b):
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"
 
 
-####Adding TGroupGraph tests ######
 @gen_cluster(client=True)
 async def test_TGroupGraph(c, s, a, b):
     tgg = TGroupGraph(s)
 
-    futures = c.map(slowinc, range(10), delay=0.001)
+    futures = c.map(inc, range(10))
     await wait(futures)
 
     tgg.update()
     dnode = dict(tgg.node_source.data)
     assert all(len(L) == 1 for L in dnode.values())
-    assert dnode["name"] == ["slowinc"]
+    assert dnode["name"] == ["inc"]
     assert dnode["tot_tasks"] == [10]
 
     darr = dict(tgg.arrow_source.data)
@@ -634,7 +633,7 @@ async def test_TGroupGraph(c, s, a, b):
     tgg.update()
     dnode = dict(tgg.node_source.data)
     assert all(len(L) == 2 for L in dnode.values())
-    assert dnode["name"] == ["dec", "slowinc"]  # they follow the tg_stack
+    assert dnode["name"] == ["dec", "inc"]  # they follow the tg_stack
     assert dnode["tot_tasks"] == [5, 10]
 
     del futures, futures2
@@ -643,9 +642,6 @@ async def test_TGroupGraph(c, s, a, b):
 
     tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
     assert not any(tgg.node_source.data.values())
-
-
-#######Adding TGroupGraph tests ######
 
 
 @gen_cluster(
