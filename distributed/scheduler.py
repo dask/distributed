@@ -2363,6 +2363,7 @@ class SchedulerState:
                 self._workers_dv.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
+                self._total_nthreads,
             )
         else:
             # Fastpath when there are no related tasks or restrictions
@@ -7498,7 +7499,11 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 @cfunc
 @exceptval(check=False)
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: set, objective
+    ts: TaskState,
+    all_workers,
+    valid_workers: set,
+    objective,
+    total_nthreads: Py_ssize_t,
 ) -> WorkerState:
     """
     Decide which worker should take task *ts*.
@@ -7534,7 +7539,7 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    ws = decide_worker(ts, all_workers, None, objective)
+                    ws = decide_worker(ts, all_workers, None, objective, total_nthreads)
                 return ws
 
     ncandidates: Py_ssize_t = len(candidates)
@@ -7547,9 +7552,8 @@ def decide_worker(
         group: TaskGroup = ts._group
         ws = group._last_worker
 
-        total_nthreads = sum(
-            wws._nthreads for wws in candidates
-        )  # TODO get `self._total_threads` from scheduler? Though that doesn't account for worker restrictions.
+        if valid_workers is not None:
+            total_nthreads = sum(wws._nthreads for wws in candidates)
 
         group_tasks_per_worker = len(group) / total_nthreads
 
