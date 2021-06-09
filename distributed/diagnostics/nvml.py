@@ -15,11 +15,13 @@ nvmlOwnerPID = None
 
 def init_once():
     global nvmlEnabled, nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
-    if pynvml is None or (nvmlInitialized is True and nvmlOwnerPID == os.getpid()):
-        return
 
     nvmlEnabled = dask.config.get("distributed.diagnostics.nvml")
     if nvmlEnabled is False:
+        nvmlInitialized = False
+        return
+
+    if pynvml is None or (nvmlInitialized is True and nvmlOwnerPID == os.getpid()):
         return
 
     nvmlInitialized = True
