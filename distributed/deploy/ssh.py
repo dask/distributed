@@ -295,7 +295,7 @@ def SSHCluster(
     >>> client = Client(cluster)
 
     An example using a different worker module, in particular the
-    ``CUDAWorker`` worker from the ``dask-cuda`` project.
+    ``dask-cuda-worker`` command from the ``dask-cuda`` project.
 
     >>> from dask.distributed import Client, SSHCluster
     >>> cluster = SSHCluster(
