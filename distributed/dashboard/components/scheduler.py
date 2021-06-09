@@ -1798,7 +1798,8 @@ class TGroupGraph(DashboardComponent):
     def update(self):
 
         with log_errors():
-            if self.current_groups != self.scheduler.task_groups.keys():
+            # Always update for now -- TODO: split up layout and internal node updates
+            if self.scheduler.task_groups.keys():
                 # Update current set of task groups
                 self.current_groups = set(self.scheduler.task_groups.keys())
 
