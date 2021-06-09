@@ -2329,7 +2329,12 @@ class Worker(ServerNode):
                 del to_gather, dependency_key, dependency_ts
 
                 self.log.append(("request-dep", cause.key, worker, to_gather_keys))
-                logger.debug("Request %d keys for task %s", len(to_gather_keys), cause)
+                logger.debug(
+                    "Request %d keys for task %s from %s",
+                    len(to_gather_keys),
+                    cause,
+                    worker,
+                )
 
                 start = time()
                 response = await get_data_from_worker(
