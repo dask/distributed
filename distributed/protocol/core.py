@@ -100,7 +100,7 @@ def loads(frames, deserialize=True, deserializers=None):
                 else:
                     return Serialized(sub_header, sub_frames)
             else:
-                return msgpack_decode_default(obj)
+                return msgpack_decode_default(obj, deserialize=deserialize)
 
         return msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts

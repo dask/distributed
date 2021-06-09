@@ -24,7 +24,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from dask.compatibility import apply
 from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
@@ -58,7 +57,6 @@ from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
     LRU,
     TimeoutError,
-    _maybe_complex,
     deprecated,
     get_ip,
     has_arg,
@@ -3572,6 +3570,7 @@ cache_loads = LRU(maxsize=100)
 
 
 def loads_function(bytes_object):
+    # TODO: remove use SerializedCallable instead
     """Load a function from bytes, cache bytes"""
     if len(bytes_object) < 100000:
         try:
@@ -3624,6 +3623,7 @@ _cache_lock = threading.Lock()
 
 
 def dumps_function(func):
+    # TODO: remove use SerializedCallable instead
     """Dump a function to bytes, cache functions"""
     try:
         with _cache_lock:
@@ -3639,34 +3639,10 @@ def dumps_function(func):
 
 
 def dumps_task(task):
-    """Serialize a dask task
+    # TODO: use serialize_graph() instead
+    from .protocol.serialize import Computations, serialize_computations
 
-    Returns a dict of bytestrings that can each be loaded with ``loads``
-
-    Examples
-    --------
-    Either returns a task as a function, args, kwargs dict
-
-    >>> from operator import add
-    >>> dumps_task((add, 1))  # doctest: +SKIP
-    {'function': b'\x80\x04\x95\x00\x8c\t_operator\x94\x8c\x03add\x94\x93\x94.'
-     'args': b'\x80\x04\x95\x07\x00\x00\x00K\x01K\x02\x86\x94.'}
-
-    Or as a single task blob if it can't easily decompose the result.  This
-    happens either if the task is highly nested, or if it isn't a task at all
-
-    >>> dumps_task(1)  # doctest: +SKIP
-    {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
-    """
-    if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
+    return Computations(serialize_computations(task))
 
 
 _warn_dumps_warned = [False]

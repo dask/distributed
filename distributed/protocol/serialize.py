@@ -1,15 +1,19 @@
+import collections.abc
 import importlib
+import threading
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from typing import Callable, Mapping, MutableMapping
 
 import msgpack
+import tlz as toolz
 
 import dask
 from dask.base import normalize_token
 
-from ..utils import ensure_bytes, has_keyword, typename
+from ..utils import LRU, ensure_bytes, has_keyword, typename
 from . import pickle
 from .compression import decompress, maybe_compress
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
@@ -106,10 +110,11 @@ def import_allowed_module(name):
         )
 
 
-def msgpack_decode_default(obj):
+def msgpack_decode_default(obj, *, deserialize=False):
     """
     Custom packer/unpacker for msgpack
     """
+
     if "__Enum__" in obj:
         mod = import_allowed_module(obj["__module__"])
         typ = getattr(mod, obj["__name__"])
@@ -117,6 +122,21 @@ def msgpack_decode_default(obj):
 
     if "__Set__" in obj:
         return set(obj["as-list"])
+
+    if "__SerializedCallable__" in obj:
+        return SerializedCallable(obj["data"])
+
+    if "__MsgpackList__" in obj:
+        if deserialize:
+            return list(obj["as-tuple"])
+        else:
+            return MsgpackList(obj["as-tuple"])
+
+    if "__Computations__" in obj:
+        if deserialize:
+            return obj["data"]
+        else:
+            return Computations(obj["data"])
 
     if "__Serialized__" in obj:
         # Notice, the data here is marked a Serialized rather than deserialized. This
@@ -133,6 +153,15 @@ def msgpack_encode_default(obj):
     """
     Custom packer/unpacker for msgpack
     """
+
+    if isinstance(obj, SerializedCallable):
+        return {"__SerializedCallable__": True, "data": obj.data}
+
+    if isinstance(obj, Computations):
+        return {"__Computations__": True, "data": obj.data}
+
+    if isinstance(obj, MsgpackList):
+        return {"__MsgpackList__": True, "as-tuple": tuple(obj.data)}
 
     if isinstance(obj, Serialize):
         return {"__Serialized__": True, "data": serialize(obj.data)}
@@ -529,7 +558,141 @@ class Serialized:
         return not (self == other)
 
 
-def nested_deserialize(x):
+class MsgpackList(collections.abc.MutableSequence):
+    __class__ = list  # Make `isinstance(x, list)` true
+
+    def __init__(self, x):
+        self.data = x
+
+    def __getitem__(self, i):
+        return self.data[i]
+
+    def __delitem__(self, i):
+        del self.data[i]
+
+    def __setitem__(self, i, v):
+        self.data[i] = v
+
+    def __len__(self):
+        return len(self.data)
+
+    def insert(self, i, v):
+        return self.data.insert(i, v)
+
+    def __repr__(self):
+        return f"MsgpackList({repr(self.data)})"
+
+
+class SerializedCallable:
+    data: bytes
+    cache_dumps: MutableMapping[int, bytes] = LRU(maxsize=100)
+    cache_loads: MutableMapping[int, Callable] = LRU(maxsize=100)
+    cache_max_sized_obj = 1_000_000
+    cache_dumps_lock = threading.Lock()
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    @classmethod
+    def dumps_function(cls, func: Callable) -> bytes:
+        """Dump a function to bytes, cache functions"""
+
+        try:
+            with cls.cache_dumps_lock:
+                ret = cls.cache_dumps[func]
+        except KeyError:
+            ret = pickle.dumps(func)
+            if len(ret) <= cls.cache_max_sized_obj:
+                with cls.cache_dumps_lock:
+                    cls.cache_dumps[func] = ret
+        except TypeError:  # Unhashable function
+            ret = pickle.dumps(func)
+        return ret
+
+    @classmethod
+    def loads_function(cls, dumped_func: bytes):
+        """Load a function from bytes, cache bytes"""
+        if len(dumped_func) > cls.cache_max_sized_obj:
+            return pickle.loads(dumped_func)
+
+        try:
+            ret = cls.cache_loads[dumped_func]
+        except KeyError:
+            cls.cache_loads[dumped_func] = ret = pickle.loads(dumped_func)
+        return ret
+
+    @classmethod
+    def serialize(cls, func: Callable) -> "SerializedCallable":
+        if isinstance(func, cls):
+            return func
+        else:
+            return cls(cls.dumps_function(func))
+
+    def deserialize(self) -> Callable:
+        return self.loads_function(self.data)
+
+    def __call__(self, *args, **kwargs):
+        return self.deserialize()(*args, **kwargs)
+
+
+class Computations:
+    """Mark object as a computation not concerning the scheduler
+    This is usefull for objects we don't want the scheduler to interpret
+    literally such as `False` and `None`, which makes code like
+    `dsk.get("key") is not None` work as expected.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def __repr__(self):
+        return f"<Computations: {repr(self.data)}>"
+
+    def __eq__(self, other):
+        return isinstance(other, Computations) and other.data == self.data
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __hash__(self):
+        return hash(self.data)
+
+
+def msgpack_persist_lists(obj):
+    typ = type(obj)
+    if typ is list:
+        return MsgpackList([msgpack_persist_lists(o) for o in obj])
+    if typ in (tuple, list, set, frozenset):
+        return typ(msgpack_persist_lists(o) for o in obj)
+    if typ is dict:
+        return {k: msgpack_persist_lists(v) for k, v in obj.items()}
+    return obj
+
+
+def serialize_computations(obj):
+    """Fine grained serialization"""
+    typ = type(obj)
+    if typ is list:
+        return MsgpackList([serialize_computations(o) for o in obj])
+    elif typ is tuple:
+        if obj:
+            f = obj[0]
+            if callable(f):
+                return (SerializedCallable.serialize(f),) + tuple(
+                    serialize_computations(o) for o in obj[1:]
+                )
+        return msgpack_persist_lists(obj)  # Non-task tuples cannot contain computations
+    elif typ in {None, str, bool, int, float, Enum, Serialized, Serialize}:
+        return obj
+    else:
+        return Serialize(obj)
+
+
+def serialize_graph(dsk: Mapping) -> dict:
+    return toolz.valmap(serialize_computations, dsk)
+
+
+def nested_deserialize(obj):
     """
     Replace all Serialize and Serialized values nested in *x*
     with the original values.  Returns a copy of *x*.
@@ -539,32 +702,23 @@ def nested_deserialize(x):
     {'op': 'update', 'data': 123}
     """
 
-    def replace_inner(x):
-        if type(x) is dict:
-            x = x.copy()
-            for k, v in x.items():
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
-        elif type(x) is list:
-            x = list(x)
-            for k, v in enumerate(x):
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
-        return x
-
-    return replace_inner(x)
+    typ = type(obj)
+    if typ is dict:
+        return {k: nested_deserialize(v) for k, v in obj.items()}
+    elif typ is list or typ is tuple:
+        return typ(nested_deserialize(o) for o in obj)
+    elif typ is Serialize:
+        return obj.data
+    elif typ is Serialized:
+        return deserialize(obj.header, obj.frames)
+    elif typ is SerializedCallable:
+        return obj.deserialize()
+    if typ is MsgpackList:
+        return list(nested_deserialize(obj.data))
+    if typ is Computations:
+        return obj.data
+    else:
+        return obj
 
 
 def serialize_bytelist(x, **kwargs):
