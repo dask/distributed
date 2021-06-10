@@ -952,6 +952,7 @@ class TaskGroup:
     _all_durations: object
     _last_worker: WorkerState
     _last_worker_tasks_left: int  # TODO Py_ssize_t?
+    _last_worker_priority: tuple  # TODO remove (debugging only)
 
     def __init__(self, name: str):
         self._name = name
@@ -968,6 +969,7 @@ class TaskGroup:
         self._all_durations = defaultdict(float)
         self._last_worker = None
         self._last_worker_tasks_left = 0
+        self._last_worker_priority = ()
 
     @property
     def name(self):
@@ -1024,6 +1026,14 @@ class TaskGroup:
     @last_worker_tasks_left.setter
     def last_worker_tasks_left(self, n: int):
         self._last_worker_tasks_left = n
+
+    @property
+    def last_worker_priority(self):
+        return self._last_worker_priority
+
+    @last_worker_priority.setter
+    def last_worker_priority(self, x: tuple):
+        self._last_worker_priority = x
 
     @ccall
     def add(self, o):
@@ -2393,6 +2403,7 @@ class SchedulerState:
             ts._group._last_worker_tasks_left = math.floor(
                 len(ts._group) / self._total_nthreads
             )
+            ts._group._last_worker_priority = ts._priority
 
         if self._validate:
             assert ws is None or isinstance(ws, WorkerState), (
@@ -7568,11 +7579,21 @@ def decide_worker(
             )
         ):
             group._last_worker_tasks_left -= 1
+            if group._last_worker_priority >= ts.priority:
+                print(
+                    f"decide_worker called out of priority order: {group._last_worker_priority} >= {ts.priority}.\n"
+                    f"{ts=}\n"
+                    f"{group.last_worker=}\n"
+                    f"{group.last_worker_tasks_left=}\n"
+                    f"{group_tasks_per_worker=}\n"
+                )
+            group._last_worker_priority = ts.priority
             return ws
 
         ws = min(candidates, key=objective)
         group._last_worker = ws
         group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
+        group._last_worker_priority = ts.priority
 
     return ws
 
