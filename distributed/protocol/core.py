@@ -2,11 +2,10 @@ import logging
 
 import msgpack
 
-from .compression import decompress, maybe_compress
+from .compression import maybe_compress
 from .serialize import (
     Serialize,
     Serialized,
-    merge_and_deserialize,
     msgpack_decode_default,
     msgpack_encode_default,
     serialize_and_split,
@@ -91,14 +90,10 @@ def loads(frames, deserialize=True, deserializers=None):
                 )
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]
+                ret = Serialized(sub_header, sub_frames, deserializers)
                 if deserialize:
-                    if "compression" in sub_header:
-                        sub_frames = decompress(sub_header, sub_frames)
-                    return merge_and_deserialize(
-                        sub_header, sub_frames, deserializers=deserializers
-                    )
-                else:
-                    return Serialized(sub_header, sub_frames)
+                    ret = ret.deserialize()
+                return ret
             else:
                 return msgpack_decode_default(obj, deserialize=deserialize)
 

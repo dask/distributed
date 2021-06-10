@@ -49,6 +49,12 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
+from .protocol.serialize import (
+    Computations,
+    Serialized,
+    nested_deserialize,
+    serialize_computations,
+)
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -714,6 +720,7 @@ class Worker(ServerNode):
             stream_handlers=stream_handlers,
             io_loop=self.loop,
             connection_args=self.connection_args,
+            deserialize=False,
             **kwargs,
         )
 
@@ -895,7 +902,11 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                comm = await connect(self.scheduler.address, **self.connection_args)
+                comm = await connect(
+                    self.scheduler.address,
+                    deserialize=False,
+                    **self.connection_args,
+                )
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -1466,7 +1477,10 @@ class Worker(ServerNode):
     ###################
 
     def update_data(self, comm=None, data=None, report=True, serializers=None):
+        nbytes = {}
         for key, value in data.items():
+            value = nested_deserialize(value)
+            nbytes[key] = sizeof(value)
             ts = self.tasks.get(key)
             if getattr(ts, "state", None) is not None:
                 self.transition(ts, "memory", value=value)
@@ -1480,7 +1494,7 @@ class Worker(ServerNode):
 
         if report:
             self.batched_stream.send({"op": "add-keys", "keys": list(data)})
-        info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
+        info = {"nbytes": nbytes, "status": "OK"}
         return info
 
     def delete_data(self, comm=None, keys=None, report=True):
@@ -2275,6 +2289,7 @@ class Worker(ServerNode):
                         "source": worker,
                     }
                 )
+                response["data"] = nested_deserialize(response["data"])
 
                 total_bytes = sum(
                     self.tasks[key].get_nbytes()
@@ -3596,6 +3611,8 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
         function = execute_task
         args = (task,)
 
+    args = nested_deserialize(args)
+    kwargs = nested_deserialize(kwargs)
     return function, args or (), kwargs or {}
 
 
@@ -3613,6 +3630,8 @@ def execute_task(task):
         return func(*map(execute_task, args))
     elif isinstance(task, list):
         return list(map(execute_task, task))
+    elif isinstance(task, Serialized):
+        return task.deserialize()
     else:
         return task
 

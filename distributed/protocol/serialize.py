@@ -11,6 +11,7 @@ import msgpack
 import tlz as toolz
 
 import dask
+import dask.utils
 from dask.base import normalize_token
 
 from ..utils import LRU, ensure_bytes, has_keyword, typename
@@ -543,9 +544,10 @@ class Serialized:
     data without actually unpacking that data.
     """
 
-    def __init__(self, header, frames):
+    def __init__(self, header, frames, deserializers=None):
         self.header = header
         self.frames = frames
+        self.deserializers = deserializers
 
     def __eq__(self, other):
         return (
@@ -557,30 +559,13 @@ class Serialized:
     def __ne__(self, other):
         return not (self == other)
 
-
-class MsgpackList(collections.abc.MutableSequence):
-    __class__ = list  # Make `isinstance(x, list)` true
-
-    def __init__(self, x):
-        self.data = x
-
-    def __getitem__(self, i):
-        return self.data[i]
-
-    def __delitem__(self, i):
-        del self.data[i]
-
-    def __setitem__(self, i, v):
-        self.data[i] = v
-
-    def __len__(self):
-        return len(self.data)
-
-    def insert(self, i, v):
-        return self.data.insert(i, v)
-
-    def __repr__(self):
-        return f"MsgpackList({repr(self.data)})"
+    def deserialize(self):
+        frames = self.frames
+        if "compression" in self.header:
+            frames = decompress(self.header, self.frames)
+        return merge_and_deserialize(
+            self.header, frames, deserializers=self.deserializers
+        )
 
 
 class SerializedCallable:
@@ -658,6 +643,31 @@ class Computations:
         return hash(self.data)
 
 
+class MsgpackList(collections.abc.MutableSequence):
+    __class__ = list  # Make `isinstance(x, list)` true
+
+    def __init__(self, x):
+        self.data = x
+
+    def __getitem__(self, i):
+        return self.data[i]
+
+    def __delitem__(self, i):
+        del self.data[i]
+
+    def __setitem__(self, i, v):
+        self.data[i] = v
+
+    def __len__(self):
+        return len(self.data)
+
+    def insert(self, i, v):
+        return self.data.insert(i, v)
+
+    def __repr__(self):
+        return f"MsgpackList({repr(self.data)})"
+
+
 def msgpack_persist_lists(obj):
     typ = type(obj)
     if typ is list:
@@ -675,12 +685,17 @@ def serialize_computations(obj):
     if typ is list:
         return MsgpackList([serialize_computations(o) for o in obj])
     elif typ is tuple:
-        if obj:
+        nelem = len(obj)
+        if nelem > 0:
             f = obj[0]
             if callable(f):
-                return (SerializedCallable.serialize(f),) + tuple(
-                    serialize_computations(o) for o in obj[1:]
-                )
+                fs = SerializedCallable.serialize(f)
+                if f is dask.utils.apply:
+                    # Optimize the special case where the apply() function is used
+                    gs = SerializedCallable.serialize(obj[1])
+                    return (fs, gs) + tuple(serialize_computations(o) for o in obj[2:])
+                else:
+                    return (fs,) + tuple(serialize_computations(o) for o in obj[1:])
         return msgpack_persist_lists(obj)  # Non-task tuples cannot contain computations
     elif typ in {None, str, bool, int, float, Enum, Serialized, Serialize}:
         return obj
@@ -710,7 +725,7 @@ def nested_deserialize(obj):
     elif typ is Serialize:
         return obj.data
     elif typ is Serialized:
-        return deserialize(obj.header, obj.frames)
+        return obj.deserialize()
     elif typ is SerializedCallable:
         return obj.deserialize()
     if typ is MsgpackList:
