@@ -3638,10 +3638,35 @@ def dumps_function(func):
     return result
 
 
+_warn_dumps_warned = [False]
+
+
+def warn_large_args(obj, limit=1e6):
+    if _warn_dumps_warned[0]:
+        return
+    size = sizeof(obj)
+    if size > limit:
+        _warn_dumps_warned[0] = True
+        s = str(obj)
+        if len(s) > 70:
+            s = s[:50] + " ... " + s[-15:]
+        warnings.warn(
+            "Large object of size %s detected in task graph: \n"
+            "  %s\n"
+            "Consider scattering large objects ahead of time\n"
+            "with client.scatter to reduce scheduler burden and \n"
+            "keep data on workers\n\n"
+            "    future = client.submit(func, big_data)    # bad\n\n"
+            "    big_future = client.scatter(big_data)     # good\n"
+            "    future = client.submit(func, big_future)  # good"
+            % (format_bytes(size), s)
+        )
+
+
 def dumps_task(task):
     # TODO: use serialize_graph() instead
-    from .protocol.serialize import Computations, serialize_computations
-
+    if istask(task):
+        warn_large_args(task[1:])
     return Computations(serialize_computations(task))
 
 
