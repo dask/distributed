@@ -7,7 +7,7 @@ from ssl import SSLError
 from typing import Callable
 
 from tornado import web
-from tornado.httpclient import HTTPRequest
+from tornado.httpclient import HTTPRequest, HTTPClientError
 from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
@@ -380,6 +380,8 @@ class WSConnector(Connector):
                 "TLS expects a `ssl_context` argument of type "
                 "ssl.SSLContext (perhaps check your TLS configuration?)"
             ) from err
+        except HTTPClientError as e:
+            raise CommClosedError(f"in {self}: {e}") from e
         return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):
