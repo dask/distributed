@@ -7,7 +7,7 @@ from ssl import SSLError
 from typing import Callable
 
 from tornado import web
-from tornado.httpclient import HTTPRequest, HTTPClientError
+from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
