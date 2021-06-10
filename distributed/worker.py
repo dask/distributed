@@ -2403,14 +2403,10 @@ class Worker(ServerNode):
             except EnvironmentError:
                 logger.exception("Worker stream died during communication: %s", worker)
                 has_what = self.has_what.pop(worker)
+                self.pending_data_per_worker.pop(worker)
                 self.log.append(("receive-dep-failed", worker, has_what))
                 for d in has_what:
                     ts = self.tasks[d]
-                    # FIXME: We might break the "invariant" that a task in state
-                    # 'fetch' either has a set attribute who_has or is tracked
-                    # in missing_flight_dep and is "handled as missing". This
-                    # leaves the task for a while in an ill defined state
-                    # What about `pending_data_per_worker`?
                     ts.who_has.remove(worker)
 
             except Exception as e:
@@ -2449,14 +2445,12 @@ class Worker(ServerNode):
                         and ts.dependents
                         and ts.state != "memory"
                     ):
-                        # FIXME: Is this the correct behaviour in case we do not receive the data?
+                        ts.who_has.discard(worker)
+                        self.has_what[worker].discard(ts.key)
                         self.log.append(("missing-dep", d))
                         self.batched_stream.send(
                             {"op": "missing-data", "errant_worker": worker, "key": d}
                         )
-                        # TODO: What happens if we transition to fetch but the
-                        # task is in fact missing? and what is happening if it
-                        # is *not* missing?
                         self.transition(ts, "fetch")
                     elif ts.state not in ("ready", "memory"):
                         self.transition(ts, "fetch")
