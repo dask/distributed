@@ -716,7 +716,7 @@ def nested_deserialize(obj):
     if typ is MsgpackList:
         return list(nested_deserialize(obj.data))
     if typ is Computations:
-        return obj.data
+        return nested_deserialize(obj.data)
     else:
         return obj
 
