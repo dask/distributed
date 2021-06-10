@@ -2746,8 +2746,8 @@ class SchedulerState:
                     recommendations[dts._key] = "waiting"
 
             w_msg = {"op": "free-keys", "keys": [key], "reason": "Erred->Released"}
-            for w in ts._erred_on:
-                worker_msgs[w] = [w_msg]
+            for ws_addr in ts._erred_on:
+                worker_msgs[ws_addr] = [w_msg]
             ts._erred_on.clear()
 
             report_msg = {"op": "task-retried", "key": key}

@@ -685,7 +685,7 @@ class Worker(ServerNode):
             "run_coroutine": self.run_coroutine,
             "get_data": self.get_data,
             "update_data": self.update_data,
-            "free_keys": self.free_keys_comm,
+            "free_keys": self.handle_free_keys,
             "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
@@ -1490,13 +1490,9 @@ class Worker(ServerNode):
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
-    def free_keys_comm(self, comm, keys, reason):
-        """This is a comm handler calling `free_keys`"""
-        return self.handle_free_keys(keys, reason)
-
-    def handle_free_keys(self, keys, reason):
+    def handle_free_keys(self, comm=None, keys=None, reason=None):
         """
-        Stream handler to be called by the scheduler.
+        Handler to be called by the scheduler.
 
         The given keys are no longer referred to and required by the scheduler.
         The worker is now allowed to release the key, if applicable.
