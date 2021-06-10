@@ -5432,7 +5432,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             try:
                 resps = await asyncio.wait_for(resps, timeout)
-            except TimeoutError:
+            except (TimeoutError, OSError):
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
