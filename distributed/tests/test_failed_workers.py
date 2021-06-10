@@ -3,6 +3,7 @@ import os
 import random
 from contextlib import suppress
 from time import sleep
+from unittest import mock
 
 import pytest
 from tlz import first, partition_all
@@ -443,6 +444,51 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)
 
     await n.close()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 3)],
+)
+async def test_worker_same_host_replicas_missing(c, s, a, b, x):
+    # See GH4784
+    def mock_address_host(addr):
+        # act as if A and X are on the same host
+        nonlocal a, b, x
+        if addr in [a.address, x.address]:
+            return "A"
+        else:
+            return "B"
+
+    with mock.patch("distributed.worker.get_address_host", mock_address_host):
+        futures = c.map(
+            slowinc,
+            range(20),
+            delay=0.1,
+            key=["f%d" % i for i in range(20)],
+            workers=[a.address],
+            allow_other_workers=True,
+        )
+        await wait(futures)
+
+        # replicate data to avoid the scheduler retriggering the computation
+        # retriggering cleans up the state nicely but doesn't reflect real world
+        # scenarios where there may be replicas on the cluster, e.g. they are
+        # replicated as a dependency somewhere else
+        await c.replicate(futures, n=2, workers=[a.address, b.address])
+
+        def sink(*args):
+            pass
+
+        # Since A and X are mocked to be co-located, X will consistently pick A
+        # to fetch data from. It will never succeed since we're removing data
+        # artificially, without notifying the scheduler.
+        # This can only succeed if B handles the missing data properly by
+        # removing A from the known sources of keys
+        a.handle_free_keys(keys=["f1"], reason="Am I evil?")  # Yes, I am!
+        result_fut = c.submit(sink, futures, workers=x.address)
+
+        await result_fut
 
 
 @pytest.mark.slow
