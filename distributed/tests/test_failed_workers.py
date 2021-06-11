@@ -522,3 +522,101 @@ async def test_worker_time_to_live(c, s, a, b):
         assert time() < start + interval + 0.1
 
     set(s.workers) == {b.address}
+
+
+class SlowDeserialize:
+    def __init__(self, data, delay=0.1):
+        self.delay = delay
+        self.data = data
+
+    def __getstate__(self):
+        return self.delay
+
+    def __setstate__(self, state):
+        delay = state
+        import time
+
+        time.sleep(delay)
+        return SlowDeserialize(delay)
+
+    def __sizeof__(self) -> int:
+        # Ensure this is offloaded to avoid blocking loop
+        import dask
+        from dask.utils import parse_bytes
+
+        return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
+
+
+@gen_cluster(client=True, timeout=None)
+async def test_handle_superfluous_data(c, s, a, b):
+    """
+    See https://github.com/dask/distributed/pull/4784#discussion_r649210094
+    """
+
+    def slow_deser(x, delay):
+        return SlowDeserialize(x, delay=delay)
+
+    futA = c.submit(
+        slow_deser, 1, delay=1, workers=[a.address], key="A", allow_other_workers=True
+    )
+    futB = c.submit(inc, 1, workers=[b.address], key="B")
+    await wait([futA, futB])
+
+    def reducer(*args):
+        return
+
+    assert len(a.tasks) == 1
+    assert futA.key in a.tasks
+
+    assert len(b.tasks) == 1
+    assert futB.key in b.tasks
+
+    red = c.submit(reducer, [futA, futB], workers=[b.address], key="reducer")
+
+    dep_key = futA.key
+
+    # Wait for the connection to be established
+    while dep_key not in b.tasks or not b.tasks[dep_key].state == "flight":
+        await asyncio.sleep(0.001)
+
+    # Wait for the connection to be returned to the pool. this signals that
+    # worker B is done with the communication and is about to deserialize the
+    # result
+    while a.address not in b.rpc.available and not b.rpc.available[a.address]:
+        await asyncio.sleep(0.001)
+
+    assert b.tasks[dep_key].state == "flight"
+    # After the comm is finished and the deserialization starts, Worker B
+    # wouldn't notice that A dies.
+    await a.close()
+    # However, while B is busy deserializing a third worker might notice that A
+    # is dead and issues a handle-missing signal to the scheduler. Since at this
+    # point in time, A was the only worker with a verified replica, the
+    # scheduler reschedules the computation by transitioning it to released. The
+    # released transition has the side effect that it purges all data which is
+    # in memory which exposes us to a race condition on B if B also receives the
+    # signal to compute that task in the meantime.
+    s.handle_missing_data(key=dep_key, errant_worker=a.address)
+    await red
+
+
+@gen_cluster()
+async def test_forget_data_not_supposed_to_have(s, a, b):
+    """
+    If a depednecy fetch finishes on a worker after the scheduler already
+    released everything, the worker might be stuck with a redundant replica
+    which is never cleaned up.
+    """
+    # FIXME: Replace with "blackbox test" which shows an actual example where
+    # this situation is provoked if this is even possible.
+    # If this cannot be constructed, the entire superfuous_data handler and its
+    # corresponding pieces on the scheduler side may be removed
+    from distributed.worker import TaskState
+
+    ts = TaskState("key")
+    ts.state = "flight"
+    a.tasks["key"] = ts
+    a.transition_flight_memory(ts, value=123)
+    assert a.data
+    while a.data:
+        await asyncio.sleep(0.001)
