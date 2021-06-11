@@ -7,17 +7,15 @@ try:
 except ImportError:
     pynvml = None
 
-nvmlEnabled = True
 nvmlInitialized = False
 nvmlLibraryNotFound = False
 nvmlOwnerPID = None
 
 
 def init_once():
-    global nvmlEnabled, nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
+    global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
 
-    nvmlEnabled = dask.config.get("distributed.diagnostics.nvml")
-    if nvmlEnabled is False:
+    if dask.config.get("distributed.diagnostics.nvml") is False:
         nvmlInitialized = False
         return
 

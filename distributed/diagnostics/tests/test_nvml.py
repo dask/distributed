@@ -31,12 +31,10 @@ def test_enable_disable_nvml():
 
     with dask.config.set({"distributed.diagnostics.nvml": False}):
         nvml.init_once()
-        assert nvml.nvmlEnabled is False
         assert nvml.nvmlInitialized is False
 
     with dask.config.set({"distributed.diagnostics.nvml": True}):
         nvml.init_once()
-        assert nvml.nvmlEnabled is True
         assert nvml.nvmlInitialized is True
 
 
