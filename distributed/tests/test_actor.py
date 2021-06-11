@@ -9,6 +9,7 @@ import dask
 from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
 from distributed.utils_test import (  # noqa: F401
+    async_wait_for,
     client,
     cluster,
     cluster_fixture,
@@ -490,10 +491,7 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
-    while a.data or b.data:
-        await asyncio.sleep(0.01)
-        assert time() < start + 30
+    await async_wait_for(lambda: a.data or b.data, timeout=10)
 
 
 def test_compute_sync(client):
