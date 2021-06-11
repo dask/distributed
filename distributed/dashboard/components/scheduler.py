@@ -32,10 +32,12 @@ from bokeh.models import (
     value,
 )
 from bokeh.models.widgets import DataTable, TableColumn
+from bokeh.models.widgets.markups import Div
 from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
+from jinja2.environment import Template
 from tlz import curry, pipe
 from tlz.curried import concat, groupby, map
 from tornado import escape
@@ -2162,45 +2164,39 @@ class WorkerTable(DashboardComponent):
         self.source.data.update(data)
 
 
-class SchedulerLogTable(DashboardComponent):
-    """Sortable table of the scheduler logs"""
-
-    table_names = {"level": "log level", "msg": "message"}
-
-    def __init__(self, scheduler, width=800, **kwargs):
-        self.scheduler = scheduler
-        self.source = ColumnDataSource({k: [] for k in self.table_names})
-
-        columns = {
-            name: TableColumn(field=name, title=title)
-            for name, title in self.table_names.items()
-        }
-
-        table = DataTable(
-            source=self.source,
-            columns=list(columns.values()),
-            sortable=True,
-            width=width,
-            index_position=None,
+class SchedulerLogs:
+    def __init__(self, scheduler):
+        template = Template(
+            """
+            {% for level, message in logs %}
+            <p class="dask-{{ level.lower() }}">
+                {{ message }}
+            </p>
+            {% endfor %}
+            <style>
+                p {
+                    font-family: monospace;
+                    margin:0;
+                }
+                p.dask-warning {
+                    font-weight: bold;
+                    color: orange
+                }
+                p.dask-critical {
+                    font-weight: bold;
+                    color: orangered;
+                }
+                p.dask-error {
+                    font-weight: bold;
+                    color: crimson;
+                }
+            </style>
+        """
         )
 
-        if "sizing_mode" in kwargs:
-            sizing_mode = {"sizing_mode": kwargs["sizing_mode"]}
-        else:
-            sizing_mode = {}
+        logs = scheduler.get_logs()
 
-        components = [table]
-
-        self.root = column(*components, id="bk-scheduler-log-table", **sizing_mode)
-
-    def get_data(self):
-        logs = self.scheduler.get_logs()
-        return {k: list(log[i] for log in logs) for i, k in enumerate(self.table_names)}
-
-    @without_property_validation
-    def update(self):
-        with log_errors():
-            self.source.stream(self.get_data(), 1000)
+        self.root = Div(text=template.render(logs=logs))
 
 
 def systemmonitor_doc(scheduler, extra, doc):
