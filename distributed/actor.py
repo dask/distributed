@@ -168,7 +168,7 @@ class Actor(WrappedKey):
 
                     async def unwrap():
                         result = await run_actor_function_on_worker()
-                        if "result" in result:
+                        if result["status"] == "OK":
                             return result["result"]
                         raise result["exception"]
 
@@ -194,7 +194,7 @@ class Actor(WrappedKey):
                 x = await self._worker_rpc.actor_attribute(
                     attribute=key, actor=self.key
                 )
-                if "result" in x:
+                if x["status"] == "OK":
                     return x["result"]
                 else:
                     raise x["exception"]
@@ -252,7 +252,7 @@ class ActorFuture:
             return self._cached_result
         except AttributeError:
             out = self.q.get(timeout=timeout)
-            if "result" in out:
+            if out["status"] == "OK":
                 self._cached_result = out["result"]
             else:
                 self._cached_result = out["exception"]

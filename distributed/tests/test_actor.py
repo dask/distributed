@@ -609,3 +609,25 @@ def test_exception():
 
         with pytest.raises(MyException):
             ac.prop
+
+
+@gen_cluster(client=True)
+async def test_exception_async(client, s, a, b):
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    ac = await client.submit(Broken, actor=True)
+    acfut = ac.method()
+    with pytest.raises(MyException):
+        await acfut
+
+    with pytest.raises(MyException):
+        await ac.prop
