@@ -15,6 +15,18 @@ from .utils import msgpack_opts
 logger = logging.getLogger(__name__)
 
 
+class DeserializeFlag:
+    def __init__(self, value: bool, *, raise_exception: bool = None):
+        self.value = value
+        if raise_exception is None:  # Defaults to `value`
+            self.raise_exception = value
+        else:
+            self.raise_exception = raise_exception
+
+    def __bool__(self):
+        return self.value
+
+
 def dumps(msg, serializers=None, on_error="message", context=None) -> list:
     """Transform Python message to bytestream suitable for communication
 

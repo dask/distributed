@@ -49,6 +49,7 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
+from .protocol.core import DeserializeFlag
 from .protocol.serialize import (
     Computations,
     Serialized,
@@ -720,7 +721,7 @@ class Worker(ServerNode):
             stream_handlers=stream_handlers,
             io_loop=self.loop,
             connection_args=self.connection_args,
-            deserialize=False,
+            deserialize=DeserializeFlag(False, raise_exception=True),
             **kwargs,
         )
 
@@ -904,7 +905,7 @@ class Worker(ServerNode):
                 _start = time()
                 comm = await connect(
                     self.scheduler.address,
-                    deserialize=False,
+                    deserialize=DeserializeFlag(False, raise_exception=True),
                     **self.connection_args,
                 )
                 comm.name = "Worker->Scheduler"
@@ -2681,6 +2682,9 @@ class Worker(ServerNode):
         actor = self.actors[key]
         func = getattr(actor, function)
         name = key_split(key) + "." + function
+
+        args = nested_deserialize(args)
+        kwargs = nested_deserialize(kwargs)
 
         if iscoroutinefunction(func):
             result = await func(*args, **kwargs)

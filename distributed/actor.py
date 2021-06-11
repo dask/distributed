@@ -5,6 +5,7 @@ from queue import Queue
 
 from .client import Future, default_client
 from .protocol import to_serialize
+from .protocol.serialize import nested_deserialize
 from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
 from .worker import get_worker
@@ -162,7 +163,7 @@ class Actor(WrappedKey):
                             await self._future
                         else:
                             raise OSError("Unable to contact Actor's worker")
-                    return result["result"]
+                    return nested_deserialize(result["result"])
 
                 if self._asynchronous:
                     return asyncio.ensure_future(run_actor_function_on_worker())
@@ -187,7 +188,7 @@ class Actor(WrappedKey):
                 x = await self._worker_rpc.actor_attribute(
                     attribute=key, actor=self.key
                 )
-                return x["result"]
+                return nested_deserialize(x["result"])
 
             return self._sync(get_actor_attribute_from_worker)
 

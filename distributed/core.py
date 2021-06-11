@@ -29,6 +29,7 @@ from .comm import (
     unparse_host_port,
 )
 from .metrics import time
+from .protocol.serialize import nested_deserialize
 from .system_monitor import SystemMonitor
 from .utils import (
     CancelledError,
@@ -658,7 +659,14 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             comm.abort()
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
-        if comm.deserialize:
+        raise_exception = comm.deserialize
+        try:
+            raise_exception = comm.deserialize.raise_exception
+        except AttributeError:
+            pass
+
+        if raise_exception:
+            response = nested_deserialize(response)
             typ, exc, tb = clean_exception(**response)
             raise exc.with_traceback(tb)
         else:
