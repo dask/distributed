@@ -208,3 +208,13 @@ async def test_empty_plugin(c, s, w):
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_default_name(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        pass
+
+    await c.register_worker_plugin(MyCustomPlugin())
+    assert len(w.plugins) == 1
+    assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
