@@ -2399,6 +2399,7 @@ class SchedulerState:
                 ws = wp_vals[self._n_tasks % n_workers]
 
             # TODO repeated logic from `decide_worker`
+            print(f"nodeps / no last worker fastpah - {ts.group_key}")
             ts._group._last_worker = ws
             ts._group._last_worker_tasks_left = math.floor(
                 len(ts._group) / self._total_nthreads
@@ -7588,8 +7589,10 @@ def decide_worker(
                     f"{group_tasks_per_worker=}\n"
                 )
             group._last_worker_priority = ts.priority
+            print(f"reusing worker - {ts.group_key}")
             return ws
 
+        print(f"picking worker - {ts.group_key}")
         ws = min(candidates, key=objective)
         group._last_worker = ws
         group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
