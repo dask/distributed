@@ -24,6 +24,8 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from time import sleep
 
+from distributed.scheduler import Scheduler
+
 try:
     import ssl
 except ImportError:
@@ -551,6 +553,10 @@ def client(loop, cluster_fixture):
         yield client
 
 
+# Compatibility. A lot of tests simply use `c` as fixture name
+c = client
+
+
 @pytest.fixture
 def client_secondary(loop, cluster_fixture):
     scheduler, workers = cluster_fixture
@@ -770,10 +776,6 @@ def gen_test(timeout=_TEST_TIMEOUT):
         return test_func
 
     return _
-
-
-from .scheduler import Scheduler
-from .worker import Worker
 
 
 async def start_cluster(

@@ -20,7 +20,6 @@ from dask import delayed
 from dask.compatibility import apply
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
-from distributed.client import wait
 from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
@@ -28,16 +27,14 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     captured_logger,
-    cleanup,
     cluster,
     dec,
     div,
     gen_cluster,
     gen_test,
     inc,
-    loop,
     nodebug,
     slowadd,
     slowdec,
@@ -1893,11 +1890,25 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["released"] == 5
     assert tp.states["memory"] == 0
     assert tp.states["released"] == 5
+    assert tp.groups == [tg]
     assert tg.prefix is tp
-    assert tg in tp.groups
+    # these must be true since in this simple case there is a 1to1 mapping
+    # between prefix and group
     assert tg.duration == tp.duration
     assert tg.nbytes_in_memory == tp.nbytes_in_memory
     assert tg.nbytes_total == tp.nbytes_total
+    # It should map down to individual tasks
+    assert tg.nbytes_total == sum(
+        [ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg]
+    )
+    in_memory_ts = sum(
+        [
+            ts.get_nbytes()
+            for ts in s.tasks.values()
+            if ts.group is tg and ts.state == "memory"
+        ]
+    )
+    assert tg.nbytes_in_memory == in_memory_ts
 
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -1905,6 +1916,7 @@ async def test_task_groups(c, s, a, b):
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
     await c.replicate(y)
+    # TODO: Are we supposed to track replicated memory here? See also Scheduler.add_keys
     assert tg.nbytes_in_memory == y.nbytes
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
@@ -2214,7 +2226,7 @@ async def test_unknown_task_duration_config(client, s, a, b):
 
 
 @gen_cluster()
-async def test_unknown_task_duration_config(s, a, b):
+async def test_unknown_task_duration_config_2(s, a, b):
     assert s.idle_since == s.time_started
 
 

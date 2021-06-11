@@ -12,8 +12,7 @@ from distributed.comm import connect, listen, ws
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
+from distributed.utils_test import (
     gen_cluster,
     get_client_ssl_context,
     get_server_ssl_context,

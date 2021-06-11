@@ -23,7 +23,6 @@ from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.compression import compressions
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import loop  # noqa F401
 from distributed.utils_test import (
     assert_can_connect,
     assert_can_connect_from_everywhere_4,

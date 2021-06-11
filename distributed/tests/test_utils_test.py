@@ -11,17 +11,12 @@ from distributed import Client, Nanny, Scheduler, Worker, config, default_client
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils import get_ip
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
+from distributed.utils_test import (
     cluster,
     gen_cluster,
     gen_test,
     inc,
-    loop,
     new_config,
-    security,
-    tls_client,
-    tls_cluster,
     tls_only_security,
     wait_for_port,
 )
@@ -216,7 +211,7 @@ def test_lingering_client():
         default_client()
 
 
-def test_lingering_client(loop):
+def test_lingering_client_2(loop):
     with cluster() as (s, [a, b]):
         client = Client(s["address"], loop=loop)
 

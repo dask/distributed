@@ -530,7 +530,7 @@ class Client:
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
-        Claim this scheduler as the global dask scheduler
+        Use this Client as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
     security: Security or bool, optional
@@ -1127,7 +1127,7 @@ class Client:
                     "versions": version_module.get_versions(),
                 }
             )
-        except Exception as e:
+        except Exception:
             if self.status == "closed":
                 return
             else:
@@ -3077,9 +3077,12 @@ class Client:
         either affects a subset of the keys/workers or the entire network,
         depending on keyword arguments.
 
-        This operation is generally not well tested against normal operation of
-        the scheduler.  It is not recommended to use it while waiting on
-        computations.
+        For details on the algorithm and configuration options, refer to the matching
+        scheduler-side method :meth:`~distributed.scheduler.Scheduler.rebalance`.
+
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         Parameters
         ----------
@@ -3997,7 +4000,6 @@ class Client:
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
-                typ = type(exc)
                 tb = response["traceback"]
                 raise exc.with_traceback(tb)
         return responses

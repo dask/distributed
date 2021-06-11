@@ -67,20 +67,12 @@ from distributed.scheduler import (
 )
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     TaskStateMetadataPlugin,
-    a,
     async_wait_for,
     asyncinc,
-    b,
     captured_logger,
-    cleanup,
-)
-from distributed.utils_test import client as c  # noqa: F401
-from distributed.utils_test import client_secondary as c2  # noqa: F401
-from distributed.utils_test import (  # noqa: F401
     cluster,
-    cluster_fixture,
     dec,
     div,
     double,
@@ -88,14 +80,11 @@ from distributed.utils_test import (  # noqa: F401
     gen_test,
     geninc,
     inc,
-    loop,
-    loop_in_thread,
     map_varying,
     nodebug,
     popen,
     pristine_loop,
     randominc,
-    s,
     save_sys_modules,
     slowadd,
     slowdec,
@@ -1173,15 +1162,6 @@ async def test_scatter_non_list(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_scatter_hash(c, s, a, b):
-    [a] = await c.scatter([1])
-    [b] = await c.scatter([1])
-
-    assert a.key == b.key
-    s.validate_state()
-
-
-@gen_cluster(client=True)
 async def test_scatter_tokenize_local(c, s, a, b):
     from dask.base import normalize_token
 
@@ -1225,6 +1205,15 @@ async def test_scatter_hash(c, s, a, b):
 
     z = await c.scatter(123, hash=False)
     assert z.key != y.key
+
+
+@gen_cluster(client=True)
+async def test_scatter_hash_2(c, s, a, b):
+    [a] = await c.scatter([1])
+    [b] = await c.scatter([1])
+
+    assert a.key == b.key
+    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -1398,6 +1387,20 @@ async def test_scatter_direct(c, s, a, b):
 
     result = await c.gather(future)
     assert not s.counters["op"].components[0]["gather"]
+
+
+@gen_cluster()
+async def test_scatter_direct_2(s, a, b):
+    c = await Client(s.address, asynchronous=True, heartbeat_interval=10)
+
+    last = s.clients[c.id].last_seen
+
+    start = time()
+    while s.clients[c.id].last_seen == last:
+        await asyncio.sleep(0.10)
+        assert time() < start + 5
+
+    await c.close()
 
 
 @gen_cluster(client=True)
@@ -5549,20 +5552,6 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
             future = c.submit(lambda x, y: x, data, i)
 
     assert len(record) < 2
-
-
-@gen_cluster()
-async def test_scatter_direct(s, a, b):
-    c = await Client(s.address, asynchronous=True, heartbeat_interval=10)
-
-    last = s.clients[c.id].last_seen
-
-    start = time()
-    while s.clients[c.id].last_seen == last:
-        await asyncio.sleep(0.10)
-        assert time() < start + 5
-
-    await c.close()
 
 
 @gen_cluster(client=True)
