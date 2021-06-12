@@ -202,23 +202,6 @@ def get_ip_interface(ifname):
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
 
 
-# FIXME: this breaks if changed to async def...
-@gen.coroutine
-def ignore_exceptions(coroutines, *exceptions):
-    """Process list of coroutines, ignoring certain exceptions
-
-    >>> coroutines = [cor(...) for ...]  # doctest: +SKIP
-    >>> x = yield ignore_exceptions(coroutines, TypeError)  # doctest: +SKIP
-    """
-    wait_iterator = gen.WaitIterator(*coroutines)
-    results = []
-    while not wait_iterator.done():
-        with suppress(*exceptions):
-            result = yield wait_iterator.next()
-            results.append(result)
-    raise gen.Return(results)
-
-
 async def All(args, quiet_exceptions=()):
     """Wait on many tasks at the same time
 
@@ -550,11 +533,6 @@ def tmp_text(filename, text):
     finally:
         if os.path.exists(fn):
             os.remove(fn)
-
-
-def clear_queue(q):
-    while not q.empty():
-        q.get_nowait()
 
 
 def is_kernel():
@@ -919,34 +897,6 @@ def ensure_bytes(s):
             ) from e
 
 
-def divide_n_among_bins(n, bins):
-    """
-    >>> divide_n_among_bins(12, [1, 1])
-    [6, 6]
-    >>> divide_n_among_bins(12, [1, 2])
-    [4, 8]
-    >>> divide_n_among_bins(12, [1, 2, 1])
-    [3, 6, 3]
-    >>> divide_n_among_bins(11, [1, 2, 1])
-    [2, 6, 3]
-    >>> divide_n_among_bins(11, [.1, .2, .1])
-    [2, 6, 3]
-    """
-    total = sum(bins)
-    acc = 0.0
-    out = []
-    for b in bins:
-        now = n / total * b + acc
-        now, acc = divmod(now, 1)
-        out.append(int(now))
-    return out
-
-
-def mean(seq):
-    seq = list(seq)
-    return sum(seq) / len(seq)
-
-
 def open_port(host=""):
     """Return a probably-open port
 
@@ -1000,29 +950,6 @@ def import_file(path):
     return loaded
 
 
-class itemgetter:
-    """A picklable itemgetter.
-
-    Examples
-    --------
-    >>> data = [0, 1, 2]
-    >>> get_1 = itemgetter(1)
-    >>> get_1(data)
-    1
-    """
-
-    __slots__ = ("index",)
-
-    def __init__(self, index):
-        self.index = index
-
-    def __call__(self, x):
-        return x[self.index]
-
-    def __reduce__(self):
-        return (itemgetter, (self.index,))
-
-
 def asciitable(columns, rows):
     """Formats an ascii table for given columns and rows.
 
@@ -1053,28 +980,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return frame.nbytes
         except AttributeError:
             return len(frame)
-
-
-def is_writeable(frame):
-    """
-    Check whether frame is writeable
-
-    Will return ``True`` if writeable, ``False`` if readonly, and
-    ``None`` if undetermined.
-    """
-    try:
-        return not memoryview(frame).readonly
-    except TypeError:
-        return None
-
-
-@contextmanager
-def time_warn(duration, text):
-    start = time()
-    yield
-    end = time()
-    if end - start > duration:
-        print("TIME WARNING", text, end - start)
 
 
 def deprecated(*, version_removed: str = None):
