@@ -8,13 +8,7 @@ import dask
 
 from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
-    cluster,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import cluster, gen_cluster
 
 
 class Counter:
@@ -471,6 +465,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
+@pytest.mark.flaky(max_runs=10)
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
@@ -490,7 +485,10 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    await async_wait_for(lambda: a.data or b.data, timeout=10)
+    start = time()
+    while a.data or b.data:
+        await asyncio.sleep(0.01)
+        assert time() < start + 30
 
 
 def test_compute_sync(client):
