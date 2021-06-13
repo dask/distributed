@@ -26,6 +26,7 @@ from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
 from typing import Dict, List
+import tempfile
 
 import click
 import tblib.pickling_support
@@ -861,21 +862,8 @@ def read_block(f, offset, length, delimiter=None):
 
 @contextmanager
 def tmpfile(extension=""):
-    extension = "." + extension.lstrip(".")
-    handle, filename = tempfile.mkstemp(extension)
-    os.close(handle)
-    os.remove(filename)
+    return tempfile.TemporaryFile(extension)
 
-    yield filename
-
-    if os.path.exists(filename):
-        try:
-            if os.path.isdir(filename):
-                shutil.rmtree(filename)
-            else:
-                os.remove(filename)
-        except OSError:  # sometimes we can't remove a generated temp file
-            pass
 
 
 def ensure_bytes(s):
