@@ -5223,7 +5223,14 @@ class Scheduler(SchedulerState, ServerNode):
         self.plugins.remove(plugin)
 
     def register_scheduler_plugin(self, comm=None, plugin=None):
-        """TODO docstring."""
+        """Register a plugin on the scheduler."""
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot register a scheduler plugin as the scheduler "
+                "has been explicitly disallowed from deserializing "
+                "arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
         self.add_plugin(plugin=loads(plugin))
 
     def worker_send(self, worker, msg):

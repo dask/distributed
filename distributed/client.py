@@ -3984,16 +3984,17 @@ class Client:
     def register_scheduler_plugin(self, plugin=None, idempotent=False, **kwargs):
         """Register a scheduler plugin.
 
-        See https://distributed.readthedocs.io/en/latest/plugins.html
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
 
         Parameters
         ----------
         plugin : SchedulerPlugin
-            Plugin class (not instance) to pass to the scheduler.
+            Plugin class or object to pass to the scheduler.
         idempotent : bool
             If multiple registrations of the plugin induce no changes.
         **kwargs : Any
-            Arguments passed to the Plugin class.
+            Arguments passed to the Plugin class (if Plugin is an
+            instance kwargs are unused).
 
         """
         return self.sync(
