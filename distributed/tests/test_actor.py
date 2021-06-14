@@ -465,7 +465,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
-@pytest.mark.flaky(max_runs=10)
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
     @dask.delayed
