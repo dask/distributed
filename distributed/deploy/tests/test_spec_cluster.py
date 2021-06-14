@@ -14,7 +14,6 @@ from distributed.core import Status
 from distributed.deploy.spec import ProcessInterface, close_clusters, run_spec
 from distributed.metrics import time
 from distributed.utils import is_valid_xml
-from distributed.utils_test import cleanup, loop  # noqa: F401
 
 
 class MyWorker(Worker):

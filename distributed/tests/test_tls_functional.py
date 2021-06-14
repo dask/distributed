@@ -9,8 +9,7 @@ import pytest
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
+from distributed.utils_test import (
     double,
     gen_tls_cluster,
     inc,

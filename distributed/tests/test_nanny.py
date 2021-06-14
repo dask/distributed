@@ -19,7 +19,6 @@ from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
-from distributed.utils_test import cleanup  # noqa: F401
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
@@ -478,7 +477,7 @@ async def test_lifetime(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_nanny_closes_cleanly(cleanup):
+async def test_nanny_closes_cleanly_2(cleanup):
     async with Scheduler() as s:
         async with Nanny(s.address) as n:
             async with Client(s.address, asynchronous=True) as client:

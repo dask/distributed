@@ -1,23 +1,44 @@
 import os
 
-import pynvml
+try:
+    import pynvml
+except ImportError:
+    pynvml = None
 
-nvmlInit = None
+nvmlInitialized = False
+nvmlLibraryNotFound = False
+nvmlOwnerPID = None
 
 
 def init_once():
-    global nvmlInit
-    if nvmlInit is not None:
+    global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
+    if pynvml is None or (nvmlInitialized is True and nvmlOwnerPID == os.getpid()):
         return
 
-    from pynvml import nvmlInit as _nvmlInit
+    nvmlInitialized = True
+    nvmlOwnerPID = os.getpid()
+    try:
+        pynvml.nvmlInit()
+    except pynvml.NVMLError_LibraryNotFound:
+        nvmlLibraryNotFound = True
 
-    nvmlInit = _nvmlInit
-    nvmlInit()
+
+def device_get_count():
+    init_once()
+    if nvmlLibraryNotFound or not nvmlInitialized:
+        return 0
+    else:
+        return pynvml.nvmlDeviceGetCount()
 
 
 def _pynvml_handles():
-    count = pynvml.nvmlDeviceGetCount()
+    count = device_get_count()
+    if count == 0:
+        if nvmlLibraryNotFound:
+            raise RuntimeError("PyNVML is installed, but NVML is not")
+        else:
+            raise RuntimeError("No GPUs available")
+
     try:
         cuda_visible_devices = [
             int(idx) for idx in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
@@ -32,7 +53,6 @@ def _pynvml_handles():
 
 
 def real_time():
-    init_once()
     h = _pynvml_handles()
     return {
         "utilization": pynvml.nvmlDeviceGetUtilizationRates(h).gpu,
@@ -41,7 +61,6 @@ def real_time():
 
 
 def one_time():
-    init_once()
     h = _pynvml_handles()
     return {
         "memory-total": pynvml.nvmlDeviceGetMemoryInfo(h).total,

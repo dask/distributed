@@ -23,7 +23,6 @@ from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.compression import compressions
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import loop  # noqa F401
 from distributed.utils_test import (
     assert_can_connect,
     assert_can_connect_from_everywhere_4,
@@ -888,6 +887,7 @@ async def test_server_redundant_kwarg():
         await Server({}, typo_kwarg="foo")
 
 
+@pytest.mark.asyncio
 async def test_server_comms_mark_active_handlers():
     """Whether handlers are active can be read off of the self._comms values.
     ensure this is properly reflected and released. The sentinel for

@@ -6,12 +6,7 @@ import pytest
 
 from distributed import Client, Lock, get_client
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)

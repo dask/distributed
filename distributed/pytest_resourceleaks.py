@@ -345,7 +345,7 @@ class LeakChecker:
             from _pytest.runner import runtestprotocol
 
             item._initrequest()  # Re-init fixtures
-            reports = runtestprotocol(item, nextitem=nextitem, log=False)
+            runtestprotocol(item, nextitem=nextitem, log=False)
 
         nodeid = item.nodeid
         leaks = self.leaks.get(nodeid)
@@ -354,7 +354,7 @@ class LeakChecker:
             try:
                 for i in range(self.max_retries):
                     run_test_again()
-            except Exception as e:
+            except Exception:
                 print("--- Exception when re-running test ---")
                 import traceback
 

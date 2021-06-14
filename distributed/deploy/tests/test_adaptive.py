@@ -9,15 +9,7 @@ import dask
 
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
-    clean,
-    cleanup,
-    gen_test,
-    loop,
-    nodebug,
-    slowinc,
-)
+from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):

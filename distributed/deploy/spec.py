@@ -334,7 +334,6 @@ class SpecCluster(Cluster):
         async with self._lock:
             self._correct_state_waiting = None
 
-            pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 if self.scheduler.status == Status.running:

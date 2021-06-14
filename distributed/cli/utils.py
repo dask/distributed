@@ -42,7 +42,7 @@ def check_python_3():
             _unicodefun._verify_python3_env()
         else:
             _unicodefun._verify_python_env()
-    except (TypeError, RuntimeError) as e:
+    except (TypeError, RuntimeError):
         import click
 
         click.echo(py3_err_msg, err=True)

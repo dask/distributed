@@ -14,17 +14,7 @@ from distributed.comm import Comm
 from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
-    captured_logger,
-    cleanup,
-    client,
-    cluster,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-    slowidentity,
-)
+from distributed.utils_test import captured_logger, cluster, gen_cluster, slowidentity
 
 
 @gen_cluster(client=True)
