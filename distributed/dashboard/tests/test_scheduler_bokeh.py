@@ -614,7 +614,6 @@ async def test_TaskGraph_order(c, s, a, b):
 @gen_cluster(client=True)
 async def test_TGroupGraph(c, s, a, b):
     tgg = TGroupGraph(s)
-    breakpoint()
     futures = c.map(inc, range(10))
     await wait(futures)
 
