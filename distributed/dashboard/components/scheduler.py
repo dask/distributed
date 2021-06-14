@@ -1830,83 +1830,71 @@ class TGroupGraph(DashboardComponent):
     def update_layout(self):
 
         with log_errors():
-            if self.scheduler.task_groups.keys():
+            # get dependecies per task group
+            dependencies = {
+                k: [
+                    ds.name for ds in ts.dependencies if ds.name != k
+                ]  # in some cases there are tg that have themeselves as
+                for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
+            }
 
-                # get dependecies per task group
-                dependencies = {
-                    k: [
-                        ds.name for ds in ts.dependencies if ds.name != k
-                    ]  # in some cases there are tg that have themeselves as
-                    for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
-                }
+            # get dependents per task group
+            dependents = {k: [] for k in dependencies}
+            for k, v in dependencies.items():
+                for dep in v:
+                    dependents[dep].append(k)
 
-                # get dependents per task group
-                dependents = {k: [] for k in dependencies}
-                for k, v in dependencies.items():
-                    for dep in v:
-                        dependents[dep].append(k)
+            stack_order = toposort_layers(dependencies)
+            stack_it = stack_order[::-1].copy()
 
-                stack_order = toposort_layers(dependencies)
-                stack_it = stack_order[::-1].copy()
+            x = {}
+            y = {}
+            y_next = 0
+            collision = {}
 
-                x = {}
-                y = {}
-                y_next = 0
-                collision = {}
+            nodes_layout = {}
+            arrows_layout = {}
 
-                # start and ends based on kwys and dependencies
-                arr_start = {}
-                arr_end = {}
+            while stack_it:
+                tg = stack_it.pop()
 
-                nodes_layout = {}
-                arrows_layout = {}
+                if not dependencies[tg]:
+                    x[tg] = 0
+                    y[tg] = y_next
+                    y_next += 1
+                else:
+                    x[tg] = max(x[dep] for dep in dependencies[tg]) + 1 + 5
 
-                while stack_it:
-                    tg = stack_it.pop()
+                # Given a task group I compute it's y position and it's dependants y-pos
+                sort_dependents = [ele for ele in stack_order if ele in dependents[tg]]
 
-                    if not dependencies[tg]:
-                        x[tg] = 0
-                        y[tg] = y_next
-                        y_next += 1
+                for dep in sort_dependents:
+                    if dep in y:
+                        continue
                     else:
-                        x[tg] = max(x[dep] for dep in dependencies[tg]) + 1 + 5
+                        y[dep] = y[tg] + sort_dependents.index(dep)
 
-                    # Given a task group I compute it's y position and it's dependants y-pos
-                    sort_dependents = [
-                        ele for ele in stack_order if ele in dependents[tg]
-                    ]
+                if (x[tg], y[tg]) in collision:
 
-                    for dep in sort_dependents:
-                        if dep in y:
-                            continue
-                        else:
-                            y[dep] = y[tg] + sort_dependents.index(dep)
+                    old_x, old_y = x[tg], y[tg]
+                    x[tg], y[tg] = collision[(x[tg], y[tg])]
 
-                    if (x[tg], y[tg]) in collision:
+                    y[tg] += 0.75  ##need to change when changing size of squares.
+                    collision[old_x, old_y] = (x[tg], y[tg])
+                else:
+                    collision[(x[tg], y[tg])] = (x[tg], y[tg])
 
-                        old_x, old_y = x[tg], y[tg]
-                        x[tg], y[tg] = collision[(x[tg], y[tg])]
+                # info neded for node layout to coulmn data source
+                nodes_layout[tg] = {}
+                nodes_layout[tg]["x"] = x[tg]
+                nodes_layout[tg]["y"] = y[tg]
 
-                        y[tg] += 0.75  ##need to change when changing size of squares.
-                        collision[old_x, old_y] = (x[tg], y[tg])
-                    else:
-                        collision[(x[tg], y[tg])] = (x[tg], y[tg])
+                # info needed for arrow layout
+                arrows_layout[tg] = {}
+                arrows_layout[tg]["nstart"] = dependencies[tg]
+                arrows_layout[tg]["nend"] = [tg] * len(dependencies[tg])
 
-                    # info neded for node layout to coulmn data source
-                    nodes_layout[tg] = {}
-                    nodes_layout[tg]["x"] = x[tg]
-                    nodes_layout[tg]["y"] = y[tg]
-
-                    # compute arrow layout info needed for column data source
-                    arr_start[tg] = dependencies[tg]
-                    arr_end[tg] = [tg] * len(dependencies[tg])
-
-                    # info needed for arrow layout
-                    arrows_layout[tg] = {}
-                    arrows_layout[tg]["nstart"] = arr_start[tg]
-                    arrows_layout[tg]["nend"] = arr_end[tg]
-
-                return nodes_layout, arrows_layout
+            return nodes_layout, arrows_layout
 
     @without_property_validation
     def update(self):
@@ -1916,12 +1904,8 @@ class TGroupGraph(DashboardComponent):
         else:
             self.subtitle.text = " "
 
-        if set(self.nodes_layout) != set(self.scheduler.task_groups):
-            print("update layout")
-            nodes_layout, arrows_layout = self.update_layout()
-
-            self.nodes_layout = nodes_layout
-            self.arrows_layout = arrows_layout
+        if self.nodes_layout.keys() != self.scheduler.task_groups.keys():
+            self.nodes_layout, self.arrows_layout = self.update_layout()
 
         nodes_data = {
             "x": [],
