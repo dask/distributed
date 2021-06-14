@@ -906,7 +906,7 @@ class Client:
                 self.scheduler.address,
             )
         else:
-            return "<%s: not connected>" % (self.__class__.__name__,)
+            return "<%s: No scheduler connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()

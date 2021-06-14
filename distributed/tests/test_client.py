@@ -2006,7 +2006,7 @@ def test_repr(loop):
 
         for func in funcs:
             text = func(c)
-            assert "not connected" in text
+            assert "No scheduler connected" in text
 
 
 @gen_cluster(client=True)
