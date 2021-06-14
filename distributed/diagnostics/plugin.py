@@ -181,7 +181,7 @@ def _get_worker_plugin_name(plugin) -> str:
     if hasattr(plugin, "name"):
         return plugin.name
     else:
-        return funcname(plugin) + "-" + str(uuid.uuid4())
+        return funcname(type(plugin)) + "-" + str(uuid.uuid4())
 
 
 class PipInstall(WorkerPlugin):
