@@ -48,6 +48,7 @@ from distributed.utils_test import (
     mul,
     nodebug,
     slowinc,
+    slowsum,
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
 
@@ -2092,11 +2093,6 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
-        # We currently don't have a good way to actually release this memory as
-        # long as the tasks still have a dependent. We'll need to live with this
-        # memory for now
-        f.key: "memory",
-        g.key: "memory",
         res.key: "error",
     }
 
@@ -2164,6 +2160,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
 
     expected_states = {
         f.key: "memory",
+        g.key: "memory",
     }
 
     assert_task_states_on_worker(expected_states, a)
@@ -2171,7 +2168,6 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     f.release()
     g.release()
 
-    # This is not happening
     for server in [s, a, b]:
         while server.tasks:
             await asyncio.sleep(0.01)
@@ -2225,13 +2221,14 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     res.release()
     # We no longer hold any refs to f or g and B didn't have any erros. It
     # releases everything as expected
-    while a.tasks:
+    while len(a.tasks) > 1:
         await asyncio.sleep(0.01)
 
     expected_states = {
         g.key: "memory",
     }
 
+    assert_task_states_on_worker(expected_states, a)
     assert_task_states_on_worker(expected_states, b)
 
     g.release()
@@ -2288,7 +2285,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
-        f.key: "memory",
         g.key: "memory",
         h.key: "memory",
         res.key: "error",
@@ -2306,15 +2302,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
-        f.key: "memory",
-        # We actually cannot hold on to G even though the graph would suggest
-        # otherwise. This is because H was only introduced as a dependency and
-        # the scheduler never told the worker how H fits into the big picture.
-        # Therefore, it thinks that G does not have any dependents anymore and
-        # releases it. Too bad. Once we have speculative task assignments this
-        # should be more exact since we should always tell the worker what's
-        # going on
-        # g.key: released,
         h.key: "memory",
         res.key: "error",
     }
@@ -2325,10 +2312,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     expected_states_A = {}
     assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
-        f.key: "memory",
-        # See above
-        # g.key: released,
-        h.key: "memory",
         res.key: "error",
     }
 
@@ -2339,3 +2322,29 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     for server in [s, a, b]:
         while server.tasks:
             await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)], timeout=None)
+async def test_hold_on_to_replicas(c, s, *workers):
+    f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
+    f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")
+
+    sum_1 = c.submit(
+        slowsum, [f1, f2], delay=0.1, workers=[workers[2].address], key="sum"
+    )
+    sum_2 = c.submit(
+        slowsum, [f1, sum_1], delay=0.2, workers=[workers[3].address], key="sum_2"
+    )
+    f1.release()
+    f2.release()
+
+    while sum_2.key not in workers[3].tasks:
+        await asyncio.sleep(0.01)
+
+    while not workers[3].tasks[sum_2.key].state == "memory":
+        assert len(s.tasks[f1.key].who_has) >= 2
+        assert s.tasks[f2.key].state == "released"
+        await asyncio.sleep(0.01)
+
+    while len(workers[2].tasks) > 1:
+        await asyncio.sleep(0.01)

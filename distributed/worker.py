@@ -1661,8 +1661,7 @@ class Worker(ServerNode):
                     ts.dependencies.add(dep_ts)
                     dep_ts.dependents.add(ts)
 
-                if dep_ts.state in ("fetch", "flight"):
-                    # if we _need_ to grab data or are in the process
+                if dep_ts.state not in ("memory",):
                     ts.waiting_for_data.add(dep_ts.key)
 
             self.update_who_has(who_has=who_has)
@@ -1765,9 +1764,6 @@ class Worker(ServerNode):
             # clear `who_has` of stale info
             ts.who_has.clear()
 
-            # remove entry from dependents to avoid a spurious `gather_dep` call``
-            for dependent in ts.dependents:
-                dependent.waiting_for_data.discard(ts.key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1797,9 +1793,6 @@ class Worker(ServerNode):
             # clear `who_has` of stale info
             ts.who_has.clear()
 
-            # remove entry from dependents to avoid a spurious `gather_dep` call``
-            for dependent in ts.dependents:
-                dependent.waiting_for_data.discard(ts.key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1994,6 +1987,8 @@ class Worker(ServerNode):
                     ts.traceback = msg["traceback"]
                     ts.state = "error"
                     out = "error"
+                    for d in ts.dependents:
+                        d.waiting_for_data.add(ts.key)
 
                 # Don't release the dependency keys, but do remove them from `dependents`
                 for dependency in ts.dependencies:
@@ -2624,12 +2619,12 @@ class Worker(ServerNode):
 
             if self.validate:
                 assert isinstance(key, str)
-            ts = self.tasks.get(key, TaskState(key=key))
+            ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
             # data was scattered we must not release it unless the
             # scheduler allow us to. See also handle_delete_data and
-            if ts and ts.scheduler_holds_ref:
+            if ts is None or ts.scheduler_holds_ref:
                 return
             logger.debug(
                 "Release key %s",
@@ -2643,27 +2638,13 @@ class Worker(ServerNode):
                 self.log.append((key, "release-key", {"cause": cause}, reason))
             else:
                 self.log.append((key, "release-key", reason))
-            if key in self.data and not ts.dependents:
+            if key in self.data:
                 try:
                     del self.data[key]
                 except FileNotFoundError:
                     logger.error("Tried to delete %s but no file found", exc_info=True)
-            if key in self.actors and not ts.dependents:
+            if key in self.actors:
                 del self.actors[key]
-
-            # for any dependencies of key we are releasing remove task as dependent
-            for dependency in ts.dependencies:
-                dependency.dependents.discard(ts)
-
-                if not dependency.dependents and dependency.state not in (
-                    # don't boot keys that are in flight
-                    # we don't know if they're already queued up for transit
-                    # in a gather_dep callback
-                    "flight",
-                    # The same is true for already executing keys.
-                    "executing",
-                ):
-                    self.release_key(dependency.key, reason=f"Dependent {ts} released")
 
             for worker in ts.who_has:
                 self.has_what[worker].discard(ts.key)
@@ -2684,8 +2665,10 @@ class Worker(ServerNode):
                 # Inform the scheduler of keys which will have gone missing
                 # We are releasing them before they have completed
                 if ts.state in PROCESSING:
+                    # This path is only hit with work stealing
                     msg = {"op": "release", "key": key, "cause": cause}
                 else:
+                    # This path is only hit when calling release_key manually
                     msg = {
                         "op": "release-worker-data",
                         "keys": [key],
@@ -2694,37 +2677,10 @@ class Worker(ServerNode):
                 self.batched_stream.send(msg)
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
-            if key in self.tasks and not ts.dependents:
-                self.tasks.pop(key)
-            del ts
+            del self.tasks[key]
+
         except CommClosedError:
             pass
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
-
-    def rescind_key(self, key):
-        try:
-            if self.tasks[key].state not in PENDING:
-                return
-
-            ts = self.tasks.pop(key)
-
-            # Task has been rescinded
-            # For every task that it required
-            for dependency in ts.dependencies:
-                # Remove it as a dependent
-                dependency.dependents.remove(key)
-                # If the dependent is now without purpose (no dependencies), remove it
-                if not dependency.dependents:
-                    self.release_key(
-                        dependency.key, reason="All dependent keys rescinded"
-                    )
-
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
