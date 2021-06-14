@@ -1363,25 +1363,44 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(str):
-    """A container for logs"""
+class Log(tuple):
+    """A container for a single log entry"""
+
+    level_styles = {
+        "WARNING": "font-weight: bold; color: orange;",
+        "CRITICAL": "font-weight: bold; color: orangered;",
+        "ERROR": "font-weight: bold; color: crimson;",
+    }
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(
-            log=html.escape(self.rstrip())
+        level, message = self
+
+        style = "font-family: monospace; margin: 0;"
+        style += self.level_styles.get(level, "")
+
+        return '<p style="{style}">{message}</p>'.format(
+            style=html.escape(style),
+            message=html.escape(message),
         )
 
 
-class Logs(dict):
-    """A container for multiple logs"""
+class Logs(list):
+    """A container for a list of log entries"""
+
+    def _repr_html_(self):
+        return "\n".join(Log(entry)._repr_html_() for entry in self)
+
+
+class MultiLogs(dict):
+    """A container for a dict mapping strings to lists of log entries"""
 
     def _repr_html_(self):
         summaries = [
             "<details>\n"
             "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
+            "{logs}\n"
+            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
+            for title, entries in sorted(self.items())
         ]
         return "\n".join(summaries)
 
