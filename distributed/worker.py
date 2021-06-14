@@ -23,10 +23,9 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from dask.compatibility import apply
 from dask.core import istask
 from dask.system import CPU_COUNT
-from dask.utils import format_bytes, funcname
+from dask.utils import apply, format_bytes, funcname
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
