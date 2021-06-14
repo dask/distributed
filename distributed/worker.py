@@ -1582,7 +1582,7 @@ class Worker(ServerNode):
                     return
                 if ts.state in IN_PLAY:
                     return
-                if ts.state == "erred":
+                if ts.state == "error":
                     ts.exception = None
                     ts.traceback = None
                 else:
