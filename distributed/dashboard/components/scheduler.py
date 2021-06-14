@@ -1744,7 +1744,12 @@ class TGroupGraph(DashboardComponent):
                 "name_short": [],
                 "tot_tasks": [],
                 "color": [],
-                "alpha": [],
+                "x_start": [],
+                "x_end": [],
+                "y_start": [],
+                "y_end": [],
+                "x_end_progress": [],
+                "progress": [],
             }
         )
 
@@ -1754,30 +1759,38 @@ class TGroupGraph(DashboardComponent):
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
-        w = 5
-        h = 0.5
+        self.width_node = 10
+        self.height_node = 8
         rect = self.root.rect(
             x="x",
             y="y",
-            width=w,
-            height=h,
-            color="color",
+            width=self.width_node,
+            height=self.height_node,
+            color="white",  # color",
             line_color="black",
             fill_alpha=0.1,
             source=self.nodes_source,
         )
 
-        # Example added for update of alpha,
-        w = 4
-        h = 0.25
+        # progress bar frame
+        self.root.quad(
+            left="x_start",
+            right="x_end",
+            bottom="y_start",
+            top="y_end",
+            color="white",  # "color",
+            line_color="black",
+            source=self.nodes_source,
+        )
 
-        rect2 = self.root.rect(
-            x="x",
-            y="y",
-            width=w,
-            height=h,
+        pbar = self.root.quad(
+            left="x_start",
+            right="x_end_progress",
+            bottom="y_start",
+            top="y_end",
             color="color",
-            fill_alpha="alpha",
+            line_color=None,
+            fill_alpha=0.3,
             source=self.nodes_source,
         )
 
@@ -1817,14 +1830,14 @@ class TGroupGraph(DashboardComponent):
             renderers=[rect],
         )
 
-        hover_alpha = HoverTool(
+        hover_progress = HoverTool(
             point_policy="follow_mouse",
-            tooltips=[("frac", "@alpha")],
-            renderers=[rect2],
+            tooltips=[("% completed", "@progress")],
+            renderers=[pbar],
         )
 
         self.root.add_tools(hover)
-        self.root.add_tools(hover_alpha)
+        self.root.add_tools(hover_progress)
 
     @without_property_validation
     def update_layout(self):
@@ -1861,9 +1874,11 @@ class TGroupGraph(DashboardComponent):
                 if not dependencies[tg]:
                     x[tg] = 0
                     y[tg] = y_next
-                    y_next += 1
+                    y_next += self.height_node + 1
                 else:
-                    x[tg] = max(x[dep] for dep in dependencies[tg]) + 1 + 5
+                    x[tg] = (
+                        max(x[dep] for dep in dependencies[tg]) + 1 + self.width_node
+                    )
 
                 # Given a task group I compute it's y position and it's dependants y-pos
                 sort_dependents = [ele for ele in stack_order if ele in dependents[tg]]
@@ -1872,14 +1887,14 @@ class TGroupGraph(DashboardComponent):
                     if dep in y:
                         continue
                     else:
-                        y[dep] = y[tg] + sort_dependents.index(dep)
+                        y[dep] = y[tg] + sort_dependents.index(dep) * self.height_node
 
                 if (x[tg], y[tg]) in collision:
 
                     old_x, old_y = x[tg], y[tg]
                     x[tg], y[tg] = collision[(x[tg], y[tg])]
 
-                    y[tg] += 0.75  ##need to change when changing size of squares.
+                    y[tg] += 0.5  ##NEED TO SOLVE THIS OR RELATED TO AVOID OVERLAP
                     collision[old_x, old_y] = (x[tg], y[tg])
                 else:
                     collision[(x[tg], y[tg])] = (x[tg], y[tg])
@@ -1914,7 +1929,12 @@ class TGroupGraph(DashboardComponent):
             "name_short": [],
             "color": [],
             "tot_tasks": [],
-            "alpha": [],
+            "x_start": [],
+            "x_end": [],
+            "y_start": [],
+            "y_end": [],
+            "x_end_progress": [],
+            "progress": [],
         }
 
         arrows_data = {
@@ -1925,9 +1945,11 @@ class TGroupGraph(DashboardComponent):
         }
 
         for key, tg in self.scheduler.task_groups.items():
+            x = self.nodes_layout[key]["x"]
+            y = self.nodes_layout[key]["y"]
 
-            nodes_data["x"].append(self.nodes_layout[key]["x"])
-            nodes_data["y"].append(self.nodes_layout[key]["y"])
+            nodes_data["x"].append(x)
+            nodes_data["y"].append(y)
 
             nodes_data["name"].append(tg.prefix.name)
             nodes_data["name_short"].append(
@@ -1938,11 +1960,23 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["tot_tasks"].append(sum(tg.states.values()))
 
+            # progress bar data update
+            Lbar = self.width_node - 0.2
+            nodes_data["x_start"].append(x - self.width_node / 2 + 0.1)
+            nodes_data["x_end"].append(x - self.width_node / 2 + 0.1 + Lbar)
+
+            Hbar = 2
+            nodes_data["y_start"].append(y - self.height_node / 2 + 0.1)
+            nodes_data["y_end"].append(y - self.height_node / 2 - 0.1 + Hbar)
+
             completed = 1.0 - (
                 tg.states["waiting"] + tg.states["no-worker"] + tg.states["processing"]
             ) / sum(tg.states.values())
 
-            nodes_data["alpha"].append(completed)
+            nodes_data["progress"].append(completed * 100)
+            nodes_data["x_end_progress"].append(
+                x - self.width_node / 2 + 0.1 + Lbar * completed
+            )
 
             arrows_data["xs"] += [
                 self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nstart"]
