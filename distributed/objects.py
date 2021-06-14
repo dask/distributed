@@ -211,7 +211,7 @@ class SchedulerInfo(dict):
                 <div style="margin-left: 48px;">
                 <details>
                     <summary>
-                        <h3 style="margin-bottom: 0px; display: inline;">{worker["type"]}: {worker["name"]}</h3>
+                        <h4 style="margin-bottom: 0px; display: inline;">{worker["type"]}: {worker["name"]}</h4>
                     </summary>
                     <table style="width: 100%; text-align: left;">
                         <tr>
