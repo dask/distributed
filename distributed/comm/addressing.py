@@ -5,8 +5,6 @@ import dask
 from ..utils import get_ip_interface
 from . import registry
 
-DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
-
 
 def parse_address(addr, strict=False):
     """
@@ -28,7 +26,7 @@ def parse_address(addr, strict=False):
         )
         raise ValueError(msg)
     if not sep:
-        scheme = DEFAULT_SCHEME
+        scheme = dask.config.get("distributed.comm.default-scheme")
     return scheme, loc
 
 

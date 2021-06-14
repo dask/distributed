@@ -8,13 +8,7 @@ import dask
 
 from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import cluster, gen_cluster
 
 
 class Counter:

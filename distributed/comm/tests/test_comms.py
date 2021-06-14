@@ -33,7 +33,6 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     get_cert,
     get_client_ssl_context,

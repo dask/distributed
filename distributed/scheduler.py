@@ -62,7 +62,7 @@ from .protocol.pickle import loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
-from .recreate_exceptions import ReplayExceptionScheduler
+from .recreate_tasks import ReplayTaskScheduler
 from .security import Security
 from .semaphore import SemaphoreExtension
 from .stealing import WorkStealing
@@ -169,7 +169,7 @@ DEFAULT_EXTENSIONS = [
     LockExtension,
     MultiLockExtension,
     PublishExtension,
-    ReplayExceptionScheduler,
+    ReplayTaskScheduler,
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
@@ -1206,6 +1206,10 @@ class TaskState:
        failed task is stored here (possibly itself).  Otherwise this
        is ``None``.
 
+    .. attribute:: erred_on: set(str)
+
+        Worker addresses on which errors appeared causing this task to be in an error state.
+
     .. attribute:: suspicious: int
 
        The number of times this task has been involved in a worker death.
@@ -1294,6 +1298,7 @@ class TaskState:
     _exception: object
     _traceback: object
     _exception_blame: object
+    _erred_on: set
     _suspicious: Py_ssize_t
     _host_restrictions: set
     _worker_restrictions: set
@@ -1344,6 +1349,7 @@ class TaskState:
         "_who_wants",
         "_exception",
         "_traceback",
+        "_erred_on",
         "_exception_blame",
         "_suspicious",
         "_retries",
@@ -1382,6 +1388,7 @@ class TaskState:
         self._group = None
         self._metadata = {}
         self._annotations = {}
+        self._erred_on = set()
 
     def __hash__(self):
         return self._hash
@@ -1528,6 +1535,10 @@ class TaskState:
     @property
     def prefix_key(self):
         return self._prefix._name
+
+    @property
+    def erred_on(self):
+        return self._erred_on
 
     @ccall
     def add_dependency(self, other: "TaskState"):
@@ -1843,7 +1854,6 @@ class SchedulerState:
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
-            ("erred", "forgotten"): self.transition_released_forgotten,
             ("erred", "released"): self.transition_erred_released,
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
@@ -2159,7 +2169,7 @@ class SchedulerState:
                     del parent._task_groups[tg._name]
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
                 import pdb
@@ -2630,9 +2640,9 @@ class SchedulerState:
             # XXX factor this out?
             ts_nbytes: Py_ssize_t = ts.get_nbytes()
             worker_msg = {
-                "op": "delete-data",
+                "op": "free-keys",
                 "keys": [key],
-                "report": False,
+                "reason": f"Memory->Released {key}",
             }
             for ws in ts._who_has:
                 del ws._has_what[ts]
@@ -2723,7 +2733,6 @@ class SchedulerState:
 
             if self._validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert all([dts._state != "erred" for dts in ts._dependencies])
                     assert ts._exception_blame
                     assert not ts._who_has
                     assert not ts._waiting_on
@@ -2736,6 +2745,11 @@ class SchedulerState:
             for dts in ts._dependents:
                 if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
+
+            w_msg = {"op": "free-keys", "keys": [key], "reason": "Erred->Released"}
+            for ws_addr in ts._erred_on:
+                worker_msgs[ws_addr] = [w_msg]
+            ts._erred_on.clear()
 
             report_msg = {"op": "task-retried", "key": key}
             cs: ClientState
@@ -2806,7 +2820,9 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = [{"op": "release-task", "key": key}]
+                worker_msgs[w] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Processing->Released"}
+                ]
 
             ts.state = "released"
 
@@ -2836,7 +2852,7 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, **kwargs
+        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
     ):
         ws: WorkerState
         try:
@@ -2857,8 +2873,9 @@ class SchedulerState:
                 ws = ts._processing_on
                 ws._actors.remove(ts)
 
-            _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
 
+            ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
             if traceback is not None:
@@ -3819,14 +3836,10 @@ class Scheduler(SchedulerState, ServerNode):
         signal to the worker to shut down.  This works regardless of whether or
         not the worker has a nanny process restarting it
         """
-        parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            ws: WorkerState = parent._workers_dv[worker]
-            nanny_addr = ws._nanny
-            address = nanny_addr or worker
-
+            # FIXME: This does not handly nannys
             self.worker_send(worker, {"op": "close", "report": False})
             await self.remove_worker(address=worker, safe=safe)
 
@@ -4462,7 +4475,9 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                worker_msgs[worker] = [{"op": "release-task", "key": key}]
+                worker_msgs[worker] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Stimulus Finished"}
+                ]
 
         return recommendations, client_msgs, worker_msgs
 
@@ -5119,7 +5134,7 @@ class Scheduler(SchedulerState, ServerNode):
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
-        tasks: set = {parent._tasks[k] for k in keys}
+        tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
         removed_tasks: set = tasks.intersection(ws._has_what)
 
         ts: TaskState
@@ -5411,7 +5426,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
                     await self.remove_worker(address=addr, close=addr not in nannies)
-                except Exception as e:
+                except Exception:
                     logger.info(
                         "Exception while restarting.  This is normal", exc_info=True
                     )
@@ -5529,8 +5544,11 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
+
         await retry_operation(
-            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+            self.rpc(addr=worker_address).free_keys,
+            keys=list(keys),
+            reason="rebalance/replicate",
         )
 
         ws: WorkerState = parent._workers_dv[worker_address]
@@ -5551,7 +5569,9 @@ class Scheduler(SchedulerState, ServerNode):
         """Rebalance keys so that each worker ends up with roughly the same process
         memory (managed+unmanaged).
 
-        FIXME this method is not robust when the cluster is not idle.
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         **Algorithm**
 
@@ -5559,13 +5579,19 @@ class Scheduler(SchedulerState, ServerNode):
            unmanaged process memory that has been there for at least 30 seconds
            (``distributed.worker.memory.recent-to-old-time``).
            This lets us ignore temporary spikes caused by task heap usage.
+
+           Alternatively, you may change how memory is measured both for the individual
+           workers as well as to calculate the mean through
+           ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
+           to disregard inaccurate OS memory measurements.
+
         #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
            (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
            This helps avoid data from bouncing around the cluster repeatedly.
         #. Workers above the mean are senders; those below are recipients.
-        #. Discard senders whose absolute occupancy is below 40%
+        #. Discard senders whose absolute occupancy is below 30%
            (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
-           is moved regardless of imbalancing as long as all workers are below 40%.
+           is moved regardless of imbalancing as long as all workers are below 30%.
         #. Discard recipients whose absolute occupancy is above 60%
            (``distributed.worker.memory.rebalance.recipient-max``).
            Note that this threshold by default is the same as
@@ -5577,8 +5603,8 @@ class Scheduler(SchedulerState, ServerNode):
 
            A recipient will be skipped if it already has a copy of the data. In other
            words, this method does not degrade replication.
-           A key will be skipped if there are no recipients that have both enough memory
-           to accept and don't already hold a copy.
+           A key will be skipped if there are no recipients available with enough memory
+           to accept the key and that don't already hold a copy.
 
         The least recently insertd (LRI) policy is a greedy choice with the advantage of
         being O(1), trivial to implement (it relies on python dict insertion-sorting)
@@ -5587,7 +5613,7 @@ class Scheduler(SchedulerState, ServerNode):
         - Largest first. O(n*log(n)) save for non-trivial additional data structures and
           risks causing the largest chunks of data to repeatedly move around the
           cluster like pinballs.
-        - Least recently utilized. This information is currently available on the
+        - Least recently used (LRU). This information is currently available on the
           workers only and not trivial to replicate on the scheduler; transmitting it
           over the network would be very expensive. Also, note that dask will go out of
           its way to minimise the amount of time intermediate keys are held in memory,
@@ -6273,6 +6299,7 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return "not found"
         ws: WorkerState = parent._workers_dv[worker]
+        superfluous_data = []
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
@@ -6281,9 +6308,16 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what[ts] = None
                     ts._who_has.add(ws)
             else:
-                self.worker_send(
-                    worker, {"op": "delete-data", "keys": [key], "report": False}
-                )
+                superfluous_data.append(key)
+        if superfluous_data:
+            self.worker_send(
+                worker,
+                {
+                    "op": "superfluous-data",
+                    "keys": superfluous_data,
+                    "reason": f"Add keys which are not in-memory {superfluous_data}",
+                },
+            )
 
         return "OK"
 
@@ -6545,7 +6579,7 @@ class Scheduler(SchedulerState, ServerNode):
                     metadata[key] = dict()
                 metadata = metadata[key]
             metadata[keys[-1]] = value
-        except Exception as e:
+        except Exception:
             import pdb
 
             pdb.set_trace()
@@ -6610,7 +6644,7 @@ class Scheduler(SchedulerState, ServerNode):
     async def unregister_worker_plugin(self, comm, name):
         """Unregisters a worker plugin"""
         try:
-            worker_plugins = self.worker_plugins.pop(name)
+            self.worker_plugins.pop(name)
         except KeyError:
             raise ValueError(f"The worker plugin {name} does not exists")
 
@@ -7310,7 +7344,13 @@ def _propagate_forgotten(
         ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = [{"op": "delete-data", "keys": [key], "report": False}]
+            worker_msgs[w] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "reason": f"propagate-forgotten {ts.key}",
+                }
+            ]
     ts._who_has.clear()
 
 

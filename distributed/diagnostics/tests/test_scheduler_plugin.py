@@ -1,12 +1,7 @@
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
-    cleanup,
-    gen_cluster,
-    inc,
-)
+from distributed.utils_test import gen_cluster, inc
 
 
 @gen_cluster(client=True)

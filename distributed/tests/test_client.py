@@ -67,20 +67,12 @@ from distributed.scheduler import (
 )
 from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     TaskStateMetadataPlugin,
-    a,
     async_wait_for,
     asyncinc,
-    b,
     captured_logger,
-    cleanup,
-)
-from distributed.utils_test import client as c  # noqa: F401
-from distributed.utils_test import client_secondary as c2  # noqa: F401
-from distributed.utils_test import (  # noqa: F401
     cluster,
-    cluster_fixture,
     dec,
     div,
     double,
@@ -88,14 +80,11 @@ from distributed.utils_test import (  # noqa: F401
     gen_test,
     geninc,
     inc,
-    loop,
-    loop_in_thread,
     map_varying,
     nodebug,
     popen,
     pristine_loop,
     randominc,
-    s,
     save_sys_modules,
     slowadd,
     slowdec,
@@ -1173,15 +1162,6 @@ async def test_scatter_non_list(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_scatter_hash(c, s, a, b):
-    [a] = await c.scatter([1])
-    [b] = await c.scatter([1])
-
-    assert a.key == b.key
-    s.validate_state()
-
-
-@gen_cluster(client=True)
 async def test_scatter_tokenize_local(c, s, a, b):
     from dask.base import normalize_token
 
@@ -1225,6 +1205,15 @@ async def test_scatter_hash(c, s, a, b):
 
     z = await c.scatter(123, hash=False)
     assert z.key != y.key
+
+
+@gen_cluster(client=True)
+async def test_scatter_hash_2(c, s, a, b):
+    [a] = await c.scatter([1])
+    [b] = await c.scatter([1])
+
+    assert a.key == b.key
+    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -1398,6 +1387,20 @@ async def test_scatter_direct(c, s, a, b):
 
     result = await c.gather(future)
     assert not s.counters["op"].components[0]["gather"]
+
+
+@gen_cluster()
+async def test_scatter_direct_2(s, a, b):
+    c = await Client(s.address, asynchronous=True, heartbeat_interval=10)
+
+    last = s.clients[c.id].last_seen
+
+    start = time()
+    while s.clients[c.id].last_seen == last:
+        await asyncio.sleep(0.10)
+        assert time() < start + 5
+
+    await c.close()
 
 
 @gen_cluster(client=True)
@@ -4676,36 +4679,6 @@ async def test_dont_clear_waiting_data(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_get_future_error_simple(c, s, a, b):
-    f = c.submit(div, 1, 0)
-    await wait(f)
-    assert f.status == "error"
-
-    function, args, kwargs, deps = await c._get_futures_error(f)
-    # args contains only solid values, not keys
-    assert function.__name__ == "div"
-    with pytest.raises(ZeroDivisionError):
-        function(*args, **kwargs)
-
-
-@gen_cluster(client=True)
-async def test_get_futures_error(c, s, a, b):
-    x0 = delayed(dec)(2, dask_key_name="x0")
-    y0 = delayed(dec)(1, dask_key_name="y0")
-    x = delayed(div)(1, x0, dask_key_name="x")
-    y = delayed(div)(1, y0, dask_key_name="y")
-    tot = delayed(sum)(x, y, dask_key_name="tot")
-
-    f = c.compute(tot)
-    await wait(f)
-    assert f.status == "error"
-
-    function, args, kwargs, deps = await c._get_futures_error(f)
-    assert function.__name__ == "div"
-    assert args == (1, y0.key)
-
-
-@gen_cluster(client=True)
 async def test_recreate_error_delayed(c, s, a, b):
     x0 = delayed(dec)(2)
     y0 = delayed(dec)(1)
@@ -4717,7 +4690,8 @@ async def test_recreate_error_delayed(c, s, a, b):
 
     assert f.status == "pending"
 
-    function, args, kwargs = await c._recreate_error_locally(f)
+    error_f = await c._get_errored_future(f)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     assert f.status == "error"
     assert function.__name__ == "div"
     assert args == (1, 0)
@@ -4736,7 +4710,8 @@ async def test_recreate_error_futures(c, s, a, b):
 
     assert f.status == "pending"
 
-    function, args, kwargs = await c._recreate_error_locally(f)
+    error_f = await c._get_errored_future(f)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     assert f.status == "error"
     assert function.__name__ == "div"
     assert args == (1, 0)
@@ -4751,7 +4726,8 @@ async def test_recreate_error_collection(c, s, a, b):
     b = b.persist()
     f = c.compute(b)
 
-    function, args, kwargs = await c._recreate_error_locally(f)
+    error_f = await c._get_errored_future(f)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4768,13 +4744,15 @@ async def test_recreate_error_collection(c, s, a, b):
 
     df2 = df.a.map(make_err)
     f = c.compute(df2)
-    function, args, kwargs = await c._recreate_error_locally(f)
+    error_f = await c._get_errored_future(f)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     with pytest.raises(ValueError):
         function(*args, **kwargs)
 
     # with persist
     df3 = c.persist(df2)
-    function, args, kwargs = await c._recreate_error_locally(df3)
+    error_f = await c._get_errored_future(df3)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     with pytest.raises(ValueError):
         function(*args, **kwargs)
 
@@ -4785,7 +4763,8 @@ async def test_recreate_error_array(c, s, a, b):
     pytest.importorskip("scipy")
     z = (da.linalg.inv(da.zeros((10, 10), chunks=10)) + 1).sum()
     zz = z.persist()
-    func, args, kwargs = await c._recreate_error_locally(zz)
+    error_f = await c._get_errored_future(zz)
+    function, args, kwargs = await c._get_components_from_future(error_f)
     assert "0.,0.,0." in str(args).replace(" ", "")  # args contain actual arrays
 
 
@@ -4806,6 +4785,107 @@ def test_recreate_error_not_error(c):
     f = c.submit(dec, 2)
     with pytest.raises(ValueError, match="No errored futures passed"):
         c.recreate_error_locally(f)
+
+
+@gen_cluster(client=True)
+async def test_recreate_task_delayed(c, s, a, b):
+    x0 = delayed(dec)(2)
+    y0 = delayed(dec)(2)
+    x = delayed(div)(1, x0)
+    y = delayed(div)(1, y0)
+    tot = delayed(sum)([x, y])
+
+    f = c.compute(tot)
+
+    assert f.status == "pending"
+
+    function, args, kwargs = await c._get_components_from_future(f)
+    assert f.status == "finished"
+    assert function.__name__ == "sum"
+    assert args == ([1, 1],)
+    assert function(*args, **kwargs) == 2
+
+
+@gen_cluster(client=True)
+async def test_recreate_task_futures(c, s, a, b):
+    x0 = c.submit(dec, 2)
+    y0 = c.submit(dec, 2)
+    x = c.submit(div, 1, x0)
+    y = c.submit(div, 1, y0)
+    tot = c.submit(sum, [x, y])
+    f = c.compute(tot)
+
+    assert f.status == "pending"
+
+    function, args, kwargs = await c._get_components_from_future(f)
+    assert f.status == "finished"
+    assert function.__name__ == "sum"
+    assert args == ([1, 1],)
+    assert function(*args, **kwargs) == 2
+
+
+@gen_cluster(client=True)
+async def test_recreate_task_collection(c, s, a, b):
+    b = db.range(10, npartitions=4)
+    b = b.map(lambda x: int(3628800 / (x + 1)))
+    b = b.persist()
+    f = c.compute(b)
+
+    function, args, kwargs = await c._get_components_from_future(f)
+    assert function(*args, **kwargs) == [
+        3628800,
+        1814400,
+        1209600,
+        907200,
+        725760,
+        604800,
+        518400,
+        453600,
+        403200,
+        362880,
+    ]
+
+    dd = pytest.importorskip("dask.dataframe")
+    import pandas as pd
+
+    df = dd.from_pandas(pd.DataFrame({"a": [0, 1, 2, 3, 4]}), chunksize=2)
+
+    df2 = df.a.map(lambda x: x + 1)
+    f = c.compute(df2)
+
+    function, args, kwargs = await c._get_components_from_future(f)
+    expected = pd.DataFrame({"a": [1, 2, 3, 4, 5]})["a"]
+    assert function(*args, **kwargs).equals(expected)
+
+    # with persist
+    df3 = c.persist(df2)
+    # recreate_task_locally only works with futures
+    with pytest.raises(AttributeError):
+        function, args, kwargs = await c._get_components_from_future(df3)
+
+    f = c.compute(df3)
+    function, args, kwargs = await c._get_components_from_future(f)
+    assert function(*args, **kwargs).equals(expected)
+
+
+@gen_cluster(client=True)
+async def test_recreate_task_array(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    z = (da.zeros((10, 10), chunks=10) + 1).sum()
+    f = c.compute(z)
+    function, args, kwargs = await c._get_components_from_future(f)
+    assert function(*args, **kwargs) == 100
+
+
+def test_recreate_task_sync(c):
+    x0 = c.submit(dec, 2)
+    y0 = c.submit(dec, 2)
+    x = c.submit(div, 1, x0)
+    y = c.submit(div, 1, y0)
+    tot = c.submit(sum, [x, y])
+    f = c.compute(tot)
+
+    assert c.recreate_task_locally(f) == 2
 
 
 @gen_cluster(client=True)
@@ -5549,20 +5629,6 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
             future = c.submit(lambda x, y: x, data, i)
 
     assert len(record) < 2
-
-
-@gen_cluster()
-async def test_scatter_direct(s, a, b):
-    c = await Client(s.address, asynchronous=True, heartbeat_interval=10)
-
-    last = s.clients[c.id].last_seen
-
-    start = time()
-    while s.clients[c.id].last_seen == last:
-        await asyncio.sleep(0.10)
-        assert time() < start + 5
-
-    await c.close()
 
 
 @gen_cluster(client=True)

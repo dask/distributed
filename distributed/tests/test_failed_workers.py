@@ -3,6 +3,7 @@ import os
 import random
 from contextlib import suppress
 from time import sleep
+from unittest import mock
 
 import pytest
 from tlz import first, partition_all
@@ -15,7 +16,6 @@ from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.scheduler import COMPILED
 from distributed.utils import CancelledError, sync
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     captured_logger,
     cluster,
@@ -385,7 +385,26 @@ async def test_restart_during_computation(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, timeout=60)
+class SlowTransmitData:
+    def __init__(self, data, delay=0.1):
+        self.delay = delay
+        self.data = data
+
+    def __reduce__(self):
+        import time
+
+        time.sleep(self.delay)
+        return (SlowTransmitData, (self.delay,))
+
+    def __sizeof__(self) -> int:
+        # Ensure this is offloaded to avoid blocking loop
+        import dask
+        from dask.utils import parse_bytes
+
+        return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
+
+
+@gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
@@ -394,28 +413,82 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
-    futures = c.map(slowinc, range(20), delay=0.01, key=["f%d" % i for i in range(20)])
-    await wait(futures)
-
-    result = await c.submit(sum, futures, workers=a.address)
-    deps = [dep for dep in a.tasks.values() if dep.key not in a.data_needed]
-    for dep in deps:
-        a.release_key(dep.key, report=True)
+    def slow_ser(x, delay):
+        return SlowTransmitData(x, delay=delay)
 
     n_worker_address = n.worker_address
+    futures = c.map(
+        slow_ser,
+        range(20),
+        delay=0.1,
+        key=["f%d" % i for i in range(20)],
+        workers=[n_worker_address],
+        allow_other_workers=True,
+    )
+
+    def sink(*args):
+        pass
+
+    await wait(futures)
+    result_fut = c.submit(sink, futures, workers=a.address)
+
     with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
     while len(s.workers) > 2:
         await asyncio.sleep(0.01)
 
-    total = c.submit(sum, futures, workers=a.address)
-    await total
+    await result_fut
 
     assert not a.has_what.get(n_worker_address)
     assert not any(n_worker_address in s for ts in a.tasks.values() for s in ts.who_has)
 
     await n.close()
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 3)],
+)
+async def test_worker_same_host_replicas_missing(c, s, a, b, x):
+    # See GH4784
+    def mock_address_host(addr):
+        # act as if A and X are on the same host
+        nonlocal a, b, x
+        if addr in [a.address, x.address]:
+            return "A"
+        else:
+            return "B"
+
+    with mock.patch("distributed.worker.get_address_host", mock_address_host):
+        futures = c.map(
+            slowinc,
+            range(20),
+            delay=0.1,
+            key=["f%d" % i for i in range(20)],
+            workers=[a.address],
+            allow_other_workers=True,
+        )
+        await wait(futures)
+
+        # replicate data to avoid the scheduler retriggering the computation
+        # retriggering cleans up the state nicely but doesn't reflect real world
+        # scenarios where there may be replicas on the cluster, e.g. they are
+        # replicated as a dependency somewhere else
+        await c.replicate(futures, n=2, workers=[a.address, b.address])
+
+        def sink(*args):
+            pass
+
+        # Since A and X are mocked to be co-located, X will consistently pick A
+        # to fetch data from. It will never succeed since we're removing data
+        # artificially, without notifying the scheduler.
+        # This can only succeed if B handles the missing data properly by
+        # removing A from the known sources of keys
+        a.handle_free_keys(keys=["f1"], reason="Am I evil?")  # Yes, I am!
+        result_fut = c.submit(sink, futures, workers=x.address)
+
+        await result_fut
 
 
 @pytest.mark.slow
@@ -449,3 +522,101 @@ async def test_worker_time_to_live(c, s, a, b):
         assert time() < start + interval + 0.1
 
     set(s.workers) == {b.address}
+
+
+class SlowDeserialize:
+    def __init__(self, data, delay=0.1):
+        self.delay = delay
+        self.data = data
+
+    def __getstate__(self):
+        return self.delay
+
+    def __setstate__(self, state):
+        delay = state
+        import time
+
+        time.sleep(delay)
+        return SlowDeserialize(delay)
+
+    def __sizeof__(self) -> int:
+        # Ensure this is offloaded to avoid blocking loop
+        import dask
+        from dask.utils import parse_bytes
+
+        return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
+
+
+@gen_cluster(client=True, timeout=None)
+async def test_handle_superfluous_data(c, s, a, b):
+    """
+    See https://github.com/dask/distributed/pull/4784#discussion_r649210094
+    """
+
+    def slow_deser(x, delay):
+        return SlowDeserialize(x, delay=delay)
+
+    futA = c.submit(
+        slow_deser, 1, delay=1, workers=[a.address], key="A", allow_other_workers=True
+    )
+    futB = c.submit(inc, 1, workers=[b.address], key="B")
+    await wait([futA, futB])
+
+    def reducer(*args):
+        return
+
+    assert len(a.tasks) == 1
+    assert futA.key in a.tasks
+
+    assert len(b.tasks) == 1
+    assert futB.key in b.tasks
+
+    red = c.submit(reducer, [futA, futB], workers=[b.address], key="reducer")
+
+    dep_key = futA.key
+
+    # Wait for the connection to be established
+    while dep_key not in b.tasks or not b.tasks[dep_key].state == "flight":
+        await asyncio.sleep(0.001)
+
+    # Wait for the connection to be returned to the pool. this signals that
+    # worker B is done with the communication and is about to deserialize the
+    # result
+    while a.address not in b.rpc.available and not b.rpc.available[a.address]:
+        await asyncio.sleep(0.001)
+
+    assert b.tasks[dep_key].state == "flight"
+    # After the comm is finished and the deserialization starts, Worker B
+    # wouldn't notice that A dies.
+    await a.close()
+    # However, while B is busy deserializing a third worker might notice that A
+    # is dead and issues a handle-missing signal to the scheduler. Since at this
+    # point in time, A was the only worker with a verified replica, the
+    # scheduler reschedules the computation by transitioning it to released. The
+    # released transition has the side effect that it purges all data which is
+    # in memory which exposes us to a race condition on B if B also receives the
+    # signal to compute that task in the meantime.
+    s.handle_missing_data(key=dep_key, errant_worker=a.address)
+    await red
+
+
+@gen_cluster()
+async def test_forget_data_not_supposed_to_have(s, a, b):
+    """
+    If a depednecy fetch finishes on a worker after the scheduler already
+    released everything, the worker might be stuck with a redundant replica
+    which is never cleaned up.
+    """
+    # FIXME: Replace with "blackbox test" which shows an actual example where
+    # this situation is provoked if this is even possible.
+    # If this cannot be constructed, the entire superfuous_data handler and its
+    # corresponding pieces on the scheduler side may be removed
+    from distributed.worker import TaskState
+
+    ts = TaskState("key")
+    ts.state = "flight"
+    a.tasks["key"] = ts
+    a.transition_flight_memory(ts, value=123)
+    assert a.data
+    while a.data:
+        await asyncio.sleep(0.001)
