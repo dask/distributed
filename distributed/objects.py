@@ -1,6 +1,7 @@
 """This file contains custom objects.
 These are mostly regular objects with more useful _repr_ and _repr_html_ methods."""
 import datetime
+from urllib.parse import urlparse
 
 from dask.utils import format_bytes, format_time_ago
 
@@ -78,8 +79,7 @@ class SchedulerInfo(dict):
     def _repr_html_(self):
         dashboard_address = None
         if "dashboard" in self["services"]:
-            _, addr = self["address"].split("://")
-            host, _ = addr.split(":")
+            host = urlparse(self["address"]).hostname
             dashboard_address = format_dashboard_link(
                 host, self["services"]["dashboard"]
             )
@@ -131,8 +131,7 @@ class SchedulerInfo(dict):
         for worker in sorted(self["workers"].values(), key=lambda k: k["name"]):
             dashboard_address = None
             if "dashboard" in worker["services"]:
-                _, addr = worker["comm"].split("://")
-                host, _ = addr.split(":")
+                host = urlparse(worker["comm"]).hostname
                 dashboard_address = format_dashboard_link(
                     host, worker["services"]["dashboard"]
                 )
