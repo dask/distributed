@@ -1732,34 +1732,53 @@ class TGroupGraph(DashboardComponent):
 
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.current_groups = set()
 
-        self.node_source = ColumnDataSource(
+        self.nodes_layout = {}
+        self.arrows_layout = {}
+
+        self.nodes_source = ColumnDataSource(
             {
                 "x": [],
                 "y": [],
                 "name": [],
                 "name_short": [],
                 "tot_tasks": [],
-                "colors": [],
+                "color": [],
                 "alpha": [],
             }
         )
 
-        self.arrow_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
+        self.arrows_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
 
         self.root = figure(title="Task Groups Graph", **kwargs)
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
-        # Let's start with squares we, will modify later to progress bars
-        rect = self.root.square(
+        w = 5
+        h = 0.5
+        rect = self.root.rect(
             x="x",
             y="y",
-            size=60,
-            color="colors",
+            width=w,
+            height=h,
+            color="color",
+            line_color="black",
+            fill_alpha=0.1,
+            source=self.nodes_source,
+        )
+
+        # Example added for update of alpha,
+        w = 4
+        h = 0.25
+
+        rect2 = self.root.rect(
+            x="x",
+            y="y",
+            width=w,
+            height=h,
+            color="color",
             fill_alpha="alpha",
-            source=self.node_source,
+            source=self.nodes_source,
         )
 
         self.arrows = Arrow(
@@ -1771,16 +1790,18 @@ class TGroupGraph(DashboardComponent):
             y_start="ys",
             x_end="xe",
             y_end="ye",
-            source=self.arrow_source,
+            source=self.arrows_source,
         )
         self.root.add_layout(self.arrows)
 
         self.labels = LabelSet(
             x="x",
             y="y",
+            x_offset=-10,
+            y_offset=20,
             text="name_short",
-            text_align="center",
-            source=self.node_source,
+            text_align="left",
+            source=self.nodes_source,
             background_fill_color=None,
         )  #  We probably need an offset like x_offset=-1, also need to chop the name somehow
         self.root.add_layout(self.labels)
@@ -1791,20 +1812,25 @@ class TGroupGraph(DashboardComponent):
         self.root.y_range.range_padding = 0.5
 
         hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks"), ("frac", "@alpha")],
+            point_policy="snap_to_data",
+            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks")],
             renderers=[rect],
         )
+
+        hover_alpha = HoverTool(
+            point_policy="follow_mouse",
+            tooltips=[("frac", "@alpha")],
+            renderers=[rect2],
+        )
+
         self.root.add_tools(hover)
+        self.root.add_tools(hover_alpha)
 
     @without_property_validation
-    def update(self):
+    def update_layout(self):
 
         with log_errors():
-            # Always update for now -- TODO: split up layout and internal node updates
             if self.scheduler.task_groups.keys():
-                # Update current set of task groups
-                self.current_groups = set(self.scheduler.task_groups.keys())
 
                 # get dependecies per task group
                 dependencies = {
@@ -1812,16 +1838,6 @@ class TGroupGraph(DashboardComponent):
                         ds.name for ds in ts.dependencies if ds.name != k
                     ]  # in some cases there are tg that have themeselves as
                     for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
-                }
-                completed = {
-                    k: 1.0
-                    - (
-                        tg.states["waiting"]
-                        + tg.states["no-worker"]
-                        + tg.states["processing"]
-                    )
-                    / sum(tg.states.values())
-                    for k, tg in self.scheduler.task_groups.items()
                 }
 
                 # get dependents per task group
@@ -1833,132 +1849,132 @@ class TGroupGraph(DashboardComponent):
                 stack_order = toposort_layers(dependencies)
                 stack_it = stack_order[::-1].copy()
 
-                data_layout = {
-                    "x": {},
-                    "y": {},
-                    "alpha": {},
-                    "collision": {},
-                    "y_next": 0,
-                    "nstart": [],
-                    "nend": [],
-                    "tg_stack": [],
-                }
+                x = {}
+                y = {}
+                y_next = 0
+                collision = {}
+
+                # start and ends based on kwys and dependencies
+                arr_start = {}
+                arr_end = {}
+
+                nodes_layout = {}
+                arrows_layout = {}
+
                 while stack_it:
                     tg = stack_it.pop()
-                    data_layout["alpha"][tg] = completed[tg]
-                    if not dependencies[tg]:
-                        data_layout["x"][tg] = 0
-                        data_layout["y"][tg] = data_layout["y_next"]
-                        data_layout["y_next"] += 1
-                    else:
-                        data_layout["x"][tg] = (
-                            max(data_layout["x"][dep] for dep in dependencies[tg]) + 1
-                        )
 
+                    if not dependencies[tg]:
+                        x[tg] = 0
+                        y[tg] = y_next
+                        y_next += 1
+                    else:
+                        x[tg] = max(x[dep] for dep in dependencies[tg]) + 1 + 5
+
+                    # Given a task group I compute it's y position and it's dependants y-pos
                     sort_dependents = [
                         ele for ele in stack_order if ele in dependents[tg]
                     ]
+
                     for dep in sort_dependents:
-                        if dep not in data_layout["y"]:
-                            data_layout["y"][dep] = data_layout["y"][
-                                tg
-                            ] + sort_dependents.index(dep)
+                        if dep in y:
+                            continue
+                        else:
+                            y[dep] = y[tg] + sort_dependents.index(dep)
 
-                    if (data_layout["x"][tg], data_layout["y"][tg]) in data_layout[
-                        "collision"
-                    ]:
-                        old_x, old_y = data_layout["x"][tg], data_layout["y"][tg]
-                        data_layout["x"][tg], data_layout["y"][tg] = data_layout[
-                            "collision"
-                        ][(data_layout["x"][tg], data_layout["y"][tg])]
-                        data_layout["y"][
-                            tg
-                        ] += 0.5  ##need to change when changing size of squares.
-                        data_layout["collision"][old_x, old_y] = (
-                            data_layout["x"][tg],
-                            data_layout["y"][tg],
-                        )
+                    if (x[tg], y[tg]) in collision:
+
+                        old_x, old_y = x[tg], y[tg]
+                        x[tg], y[tg] = collision[(x[tg], y[tg])]
+
+                        y[tg] += 0.75  ##need to change when changing size of squares.
+                        collision[old_x, old_y] = (x[tg], y[tg])
                     else:
-                        data_layout["collision"][
-                            (data_layout["x"][tg], data_layout["y"][tg])
-                        ] = (
-                            data_layout["x"][tg],
-                            data_layout["y"][tg],
-                        )
+                        collision[(x[tg], y[tg])] = (x[tg], y[tg])
 
-                    data_layout["nstart"] += dependencies[tg]
-                    data_layout["nend"] += [tg] * len(dependencies[tg])
-                    data_layout["tg_stack"].append(tg)
+                    # info neded for node layout to coulmn data source
+                    nodes_layout[tg] = {}
+                    nodes_layout[tg]["x"] = x[tg]
+                    nodes_layout[tg]["y"] = y[tg]
 
-                self.add_nodes_arrows(data_layout)
+                    # compute arrow layout info needed for column data source
+                    arr_start[tg] = dependencies[tg]
+                    arr_end[tg] = [tg] * len(dependencies[tg])
 
-            if not self.scheduler.task_groups:
-                self.subtitle.text = "Scheduler is empty."
-            else:
-                self.subtitle.text = " "
+                    # info needed for arrow layout
+                    arrows_layout[tg] = {}
+                    arrows_layout[tg]["nstart"] = arr_start[tg]
+                    arrows_layout[tg]["nend"] = arr_end[tg]
+
+                return nodes_layout, arrows_layout
 
     @without_property_validation
-    def add_nodes_arrows(self, data_layout):
-        if not data_layout["tg_stack"]:
-            self.node_source.data.clear()
-            self.arrow_source.data.clear()
+    def update(self):
+
+        if not self.scheduler.task_groups:
+            self.subtitle.text = "Scheduler is empty."
         else:
-            node_x = []
-            node_y = []
-            node_name = []
-            node_short_name = []
-            node_color = []
-            node_alpha = []
-            node_tot_tasks = []
+            self.subtitle.text = " "
 
-            x = data_layout["x"]
-            y = data_layout["y"]
+        if set(self.nodes_layout) != set(self.scheduler.task_groups):
+            print("update layout")
+            nodes_layout, arrows_layout = self.update_layout()
 
-            # coords for arrows
-            arrow_xs = [x[s] for s in data_layout["nstart"]]
-            arrow_ys = [y[s] for s in data_layout["nstart"]]
-            arrow_xe = [x[e] for e in data_layout["nend"]]
-            arrow_ye = [y[e] for e in data_layout["nend"]]
+            self.nodes_layout = nodes_layout
+            self.arrows_layout = arrows_layout
 
-            groups = self.scheduler.task_groups
+        nodes_data = {
+            "x": [],
+            "y": [],
+            "name": [],
+            "name_short": [],
+            "color": [],
+            "tot_tasks": [],
+            "alpha": [],
+        }
 
-            for key in data_layout["tg_stack"]:
-                try:
-                    tg = groups[key]
-                except KeyError:
-                    continue
-                xx = x[key]
-                yy = y[key]
-                node_x.append(xx)
-                node_y.append(yy)
-                node_name.append(tg.prefix.name)
-                node_short_name.append(
-                    tg.prefix.name[:10]
-                )  # need to change how to choose the short name
-                node_color.append(color_of(tg.prefix.name))
-                keys = set(data_layout["alpha"].keys())
-                # raise Exception(str(keys) + key)
-                node_alpha.append(data_layout["alpha"][key])
-                node_tot_tasks.append(sum(tg.states.values()))
+        arrows_data = {
+            "xs": [],
+            "ys": [],
+            "xe": [],
+            "ye": [],
+        }
 
-            node = {
-                "x": node_x,
-                "y": node_y,
-                "name": node_name,
-                "name_short": node_short_name,
-                "colors": node_color,
-                "alpha": node_alpha,
-                "tot_tasks": node_tot_tasks,
-            }
+        for key, tg in self.scheduler.task_groups.items():
 
-            arrow = {
-                "xs": arrow_xs,
-                "ys": arrow_ys,
-                "xe": arrow_xe,
-                "ye": arrow_ye,
-            }
-            self.node_source.data.update(node)
-            self.arrow_source.data.update(arrow)
+            nodes_data["x"].append(self.nodes_layout[key]["x"])
+            nodes_data["y"].append(self.nodes_layout[key]["y"])
+
+            nodes_data["name"].append(tg.prefix.name)
+            nodes_data["name_short"].append(
+                tg.prefix.name[:10]
+            )  # This needs to be different
+
+            nodes_data["color"].append(color_of(tg.prefix.name))
+
+            nodes_data["tot_tasks"].append(sum(tg.states.values()))
+
+            completed = 1.0 - (
+                tg.states["waiting"] + tg.states["no-worker"] + tg.states["processing"]
+            ) / sum(tg.states.values())
+
+            nodes_data["alpha"].append(completed)
+
+            arrows_data["xs"] += [
+                self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nstart"]
+            ]
+            arrows_data["ys"] += [
+                self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
+            ]
+            arrows_data["xe"] += [
+                self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nend"]
+            ]
+            arrows_data["ye"] += [
+                self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
+            ]
+
+        self.nodes_source.data.update(nodes_data)
+        self.arrows_source.data.update(arrows_data)
 
 
 ##########Task Group Graph #########
