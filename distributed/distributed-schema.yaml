@@ -874,22 +874,22 @@ properties:
       nvlink:
         type: boolean
         description: |
-          Set environment variables to enable UCX over NVLink, implies ``ucx.tcp=True``.
+          Set environment variables to enable UCX over NVLink, implies ``distributed.comm.ucx.tcp=True``.
       infiniband:
         type: boolean
         description: |
-          Set environment variables to enable UCX over InfiniBand, implies ``ucx.tcp=True``.
+          Set environment variables to enable UCX over InfiniBand, implies ``distributed.comm.ucx.tcp=True``.
       rdmacm:
         type: boolean
         description: |
           Set environment variables to enable UCX RDMA connection manager support,
-          requires ``ucx.infiniband=True``.
+          requires ``distributed.comm.ucx.infiniband=True``.
       net-devices:
         type: [string, 'null']
         description: |
           Interface(s) used by workers for UCX communication. Can be a string (like
           ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-          (requires ``ucx.infiniband=True``) to pick the optimal interface per-worker based on
+          (requires ``distributed.comm.ucx.infiniband=True``) to pick the optimal interface per-worker based on
           the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
           all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
           and compiled with hwloc support. Unexpected errors can occur when using

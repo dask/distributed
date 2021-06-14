@@ -107,7 +107,7 @@ def init_once():
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
 
-    pool_size_str = dask.config.get("rmm.pool-size")
+    pool_size_str = dask.config.get("distributed.rmm.pool-size")
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
         rmm.reinitialize(
@@ -120,7 +120,7 @@ def init_once():
         ucx_create_endpoint = ucp.create_endpoint
         ucx_create_listener = ucp.create_listener
     else:
-        reuse_endpoints = dask.config.get("ucx.reuse-endpoints")
+        reuse_endpoints = dask.config.get("distributed.comm.ucx.reuse-endpoints")
         if (
             reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
         ) or reuse_endpoints is False:
@@ -490,12 +490,12 @@ def _scrub_ucx_config():
     # leave UCX to its default configuration
     if any(
         [
-            dask.config.get("ucx.tcp"),
-            dask.config.get("ucx.nvlink"),
-            dask.config.get("ucx.infiniband"),
+            dask.config.get("distributed.comm.ucx.tcp"),
+            dask.config.get("distributed.comm.ucx.nvlink"),
+            dask.config.get("distributed.comm.ucx.infiniband"),
         ]
     ):
-        if dask.config.get("ucx.rdmacm"):
+        if dask.config.get("distributed.comm.ucx.rdmacm"):
             tls = "tcp" if ucx_110 else "tcp,rdmacm"
             tls_priority = "rdmacm"
         else:
@@ -505,17 +505,22 @@ def _scrub_ucx_config():
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
         # defining only the Infiniband flag will not enable cuda_copy
-        if any([dask.config.get("ucx.nvlink"), dask.config.get("ucx.cuda_copy")]):
+        if any(
+            [
+                dask.config.get("distributed.comm.ucx.nvlink"),
+                dask.config.get("distributed.comm.ucx.cuda_copy"),
+            ]
+        ):
             tls = tls + ",cuda_copy"
 
-        if dask.config.get("ucx.infiniband"):
+        if dask.config.get("distributed.comm.ucx.infiniband"):
             tls = "rc," + tls
-        if dask.config.get("ucx.nvlink"):
+        if dask.config.get("distributed.comm.ucx.nvlink"):
             tls = tls + ",cuda_ipc"
 
         options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
 
-        net_devices = dask.config.get("ucx.net-devices")
+        net_devices = dask.config.get("distributed.comm.ucx.net-devices")
         if net_devices is not None and net_devices != "":
             options["NET_DEVICES"] = net_devices
 
