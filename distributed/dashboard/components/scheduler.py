@@ -1750,6 +1750,8 @@ class TGroupGraph(DashboardComponent):
                 "y_end": [],
                 "x_end_progress": [],
                 "progress": [],
+                "x_label": [],
+                "y_label": [],
             }
         )
 
@@ -1808,12 +1810,11 @@ class TGroupGraph(DashboardComponent):
         self.root.add_layout(self.arrows)
 
         self.labels = LabelSet(
-            x="x",
-            y="y",
-            x_offset=-10,
-            y_offset=20,
+            x="x_label",
+            y="y_label",
             text="name_short",
             text_align="left",
+            text_baseline="top",
             source=self.nodes_source,
             background_fill_color=None,
         )  #  We probably need an offset like x_offset=-1, also need to chop the name somehow
@@ -1935,6 +1936,8 @@ class TGroupGraph(DashboardComponent):
             "y_end": [],
             "x_end_progress": [],
             "progress": [],
+            "x_label": [],
+            "y_label": [],
         }
 
         arrows_data = {
@@ -1955,6 +1958,9 @@ class TGroupGraph(DashboardComponent):
             nodes_data["name_short"].append(
                 tg.prefix.name[:10]
             )  # This needs to be different
+
+            nodes_data["x_label"].append(x - self.width_node / 2 + 0.1)
+            nodes_data["y_label"].append(y + self.height_node / 2 - 0.1)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
 
