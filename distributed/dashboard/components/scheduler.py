@@ -1868,19 +1868,20 @@ class TGroupGraph(DashboardComponent):
 
             nodes_layout = {}
             arrows_layout = {}
-
+            scale = 1.5
             while stack_it:
                 tg = stack_it.pop()
 
                 if not dependencies[tg]:
                     x[tg] = 0
                     y[tg] = y_next
-                    y_next += self.height_node + 1
+                    y_next += self.height_node * (len(dependents[tg]) * scale)
                 else:
                     x[tg] = (
-                        max(x[dep] for dep in dependencies[tg]) + 1 + self.width_node
+                        max(x[dep] for dep in dependencies[tg])
+                        + 1
+                        + self.width_node * scale
                     )
-
                 # Given a task group I compute it's y position and it's dependants y-pos
                 sort_dependents = [ele for ele in stack_order if ele in dependents[tg]]
 
@@ -1888,14 +1889,19 @@ class TGroupGraph(DashboardComponent):
                     if dep in y:
                         continue
                     else:
-                        y[dep] = y[tg] + sort_dependents.index(dep) * self.height_node
+                        if sort_dependents.index(dep) == (len(dependents[tg]) - 1):
+                            y[dep] = (
+                                y[tg] + self.height_node * (len(dependents[tg]) - 1) / 2
+                            )
+                        else:
+                            y[dep] = y[tg] + self.height_node * scale
 
                 if (x[tg], y[tg]) in collision:
 
                     old_x, old_y = x[tg], y[tg]
                     x[tg], y[tg] = collision[(x[tg], y[tg])]
 
-                    y[tg] += 0.5  ##NEED TO SOLVE THIS OR RELATED TO AVOID OVERLAP
+                    y[tg] += self.height_node * scale
                     collision[old_x, old_y] = (x[tg], y[tg])
                 else:
                     collision[(x[tg], y[tg])] = (x[tg], y[tg])
