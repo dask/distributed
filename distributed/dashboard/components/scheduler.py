@@ -1752,6 +1752,8 @@ class TGroupGraph(DashboardComponent):
                 "progress": [],
                 "x_label": [],
                 "y_label": [],
+                "mem_alpha": [],
+                "node_line_width": [],
             }
         )
 
@@ -1761,6 +1763,7 @@ class TGroupGraph(DashboardComponent):
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
+        # main box
         self.width_node = 10
         self.height_node = 8
         rect = self.root.rect(
@@ -1768,23 +1771,25 @@ class TGroupGraph(DashboardComponent):
             y="y",
             width=self.width_node,
             height=self.height_node,
-            color="white",  # color",
+            color="color",
+            fill_alpha="mem_alpha",
             line_color="black",
-            fill_alpha=0.1,
+            line_width="node_line_width",
             source=self.nodes_source,
         )
 
-        # progress bar frame
+        # progress bar plain box
         self.root.quad(
             left="x_start",
             right="x_end",
             bottom="y_start",
             top="y_end",
-            color="white",  # "color",
+            color="white",
             line_color="black",
             source=self.nodes_source,
         )
 
+        # progress bar
         pbar = self.root.quad(
             left="x_start",
             right="x_end_progress",
@@ -1792,7 +1797,7 @@ class TGroupGraph(DashboardComponent):
             top="y_end",
             color="color",
             line_color=None,
-            fill_alpha=0.3,
+            fill_alpha=0.6,
             source=self.nodes_source,
         )
 
@@ -1944,6 +1949,8 @@ class TGroupGraph(DashboardComponent):
             "progress": [],
             "x_label": [],
             "y_label": [],
+            "mem_alpha": [],
+            "node_line_width": [],
         }
 
         arrows_data = {
@@ -1957,6 +1964,7 @@ class TGroupGraph(DashboardComponent):
             x = self.nodes_layout[key]["x"]
             y = self.nodes_layout[key]["y"]
 
+            # main boxes layout
             nodes_data["x"].append(x)
             nodes_data["y"].append(y)
 
@@ -1965,12 +1973,22 @@ class TGroupGraph(DashboardComponent):
                 tg.prefix.name[:10]
             )  # This needs to be different
 
-            nodes_data["x_label"].append(x - self.width_node / 2 + 0.1)
-            nodes_data["y_label"].append(y + self.height_node / 2 - 0.1)
+            nodes_data["x_label"].append(x - self.width_node / 2 + 0.2)
+            nodes_data["y_label"].append(y + self.height_node / 2 - 0.2)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
-
             nodes_data["tot_tasks"].append(sum(tg.states.values()))
+
+            # memory alpha factor by 0.4 if not get's too dark
+            nodes_data["mem_alpha"].append(
+                (tg.states["memory"] / sum(tg.states.values())) * 0.4
+            )
+
+            # main box line width
+            if tg.states["processing"]:
+                nodes_data["node_line_width"].append(5)
+            else:
+                nodes_data["node_line_width"].append(1)
 
             # progress bar data update
             Lbar = self.width_node - 0.2
