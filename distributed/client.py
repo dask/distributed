@@ -4036,8 +4036,24 @@ class Client:
             **kwargs,
         )
 
+    async def _unregister_scheduler_plugin(self, plugin):
+        return await self.scheduler.unregister_scheduler_plugin(
+            plugin=dumps(plugin, protocol=4)
+        )
+
     def unregister_scheduler_plugin(self, plugin=None):
-        pass
+        """Unregister a scheduler plugin.
+
+        The scheduler assumes the existence of a single instance of
+        the plugin type to be unregistered.
+
+        Parameters
+        ----------
+        plugin : SchedulerPlugin
+            Plugin instance to remove from from the scheduler.
+
+        """
+        return self.sync(self._unregister_scheduler_plugin, plugin=plugin)
 
     def register_worker_callbacks(self, setup=None):
         """
