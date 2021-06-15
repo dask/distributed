@@ -17,7 +17,6 @@ from collections.abc import Hashable, Iterable, Iterator, Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
-from inspect import isawaitable
 from numbers import Number
 from typing import Optional
 
@@ -5230,7 +5229,7 @@ class Scheduler(SchedulerState, ServerNode):
         """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
 
-    def register_scheduler_plugin(self, comm=None, plugin=None):
+    async def register_scheduler_plugin(self, comm=None, plugin=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5245,8 +5244,8 @@ class Scheduler(SchedulerState, ServerNode):
         if hasattr(plugin, "start"):
             try:
                 result = plugin.start(self)
-                if isawaitable(result):
-                    result = self.sync(result)
+                if inspect.isawaitable(result):
+                    result = await result
             except Exception as e:
                 msg = error_message(e)
                 return msg

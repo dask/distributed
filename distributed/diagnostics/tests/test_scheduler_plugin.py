@@ -1,7 +1,7 @@
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import async_wait_for, gen_cluster, inc
+from distributed.utils_test import gen_cluster, inc
 
 
 @gen_cluster(client=True)
@@ -129,12 +129,10 @@ async def test_lifecycle(cleanup):
 
 @gen_cluster(client=True)
 async def test_register_scheduler_plugin(c, s, a, b):
-    temp_list = []
-
     class Dummy(SchedulerPlugin):
         def start(self, scheduler):
-            temp_list.append(1)
+            scheduler.foo = "bar"
 
+    assert not hasattr(s, "foo")
     await c.register_scheduler_plugin(Dummy)
-
-    await async_wait_for(temp_list, 1)
+    assert s.foo == "bar"
