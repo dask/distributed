@@ -945,8 +945,7 @@ class Client:
                     <td style="text-align: left;"><strong>Cluster type:</strong> {type(self.cluster).__name__}</td>
                 </tr>
                 """
-
-        if self.scheduler_file:
+        elif self.scheduler_file:
             client_status += f"""
                 <tr>
                     <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
