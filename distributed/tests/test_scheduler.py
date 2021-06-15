@@ -313,10 +313,15 @@ async def test_blocked_handlers_are_respected(s, a, b):
     await comm.close()
 
 
-def test_scheduler_init_pulls_blocked_handlers_from_config():
+@pytest.mark.asyncio
+async def test_scheduler_init_pulls_blocked_handlers_from_config():
+    # This test is async to allow us to properly close the scheduler since the
+    # init is already opening sockets for the HTTP server See also
+    # https://github.com/dask/distributed/issues/4806
     with dask.config.set({"distributed.scheduler.blocked-handlers": ["test-handler"]}):
         s = Scheduler()
     assert s.blocked_handlers == ["test-handler"]
+    await s.close()
 
 
 @gen_cluster()
@@ -1396,7 +1401,11 @@ async def test_get_task_status(c, s, a, b):
     assert result == {future.key: "memory"}
 
 
-def test_deque_handler():
+@pytest.mark.asyncio
+async def test_deque_handler():
+    # This test is async to allow us to properly close the scheduler since the
+    # init is already opening sockets for the HTTP server See also
+    # https://github.com/dask/distributed/issues/4806
     from distributed.scheduler import logger
 
     s = Scheduler()
@@ -1406,6 +1415,7 @@ def test_deque_handler():
     msg = deque_handler.deque[-1]
     assert "distributed.scheduler" in deque_handler.format(msg)
     assert any(msg.msg == "foo123" for msg in deque_handler.deque)
+    await s.close()
 
 
 @gen_cluster(client=True)
