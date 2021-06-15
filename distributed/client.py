@@ -828,10 +828,10 @@ class Client:
             return self.cluster.dashboard_link
         except AttributeError:
             scheduler, info = self._get_scheduler_info()
-            try:
-                protocol, rest = scheduler.address.split("://")
-            except AttributeError:
+            if scheduler is None:
                 return None
+            else:
+                protocol, rest = scheduler.address.split("://")
 
             port = info["services"]["dashboard"]
             if protocol == "inproc":
