@@ -1754,6 +1754,9 @@ class TGroupGraph(DashboardComponent):
                 "y_label": [],
                 "mem_alpha": [],
                 "node_line_width": [],
+                "xc_pbar": [],
+                "yc_pbar": [],
+                "comp_tasks": [],
             }
         )
 
@@ -1814,6 +1817,7 @@ class TGroupGraph(DashboardComponent):
         )
         self.root.add_layout(self.arrows)
 
+        # top left title
         self.labels = LabelSet(
             x="x_label",
             y="y_label",
@@ -1822,8 +1826,20 @@ class TGroupGraph(DashboardComponent):
             text_baseline="top",
             source=self.nodes_source,
             background_fill_color=None,
-        )  #  We probably need an offset like x_offset=-1, also need to chop the name somehow
+        )
         self.root.add_layout(self.labels)
+
+        # display completed / total tasks
+        self.task_comp_labels = LabelSet(
+            x="xc_pbar",
+            y="yc_pbar",
+            text="comp_tasks",
+            text_align="center",
+            text_baseline="center",
+            source=self.nodes_source,
+            background_fill_color=None,
+        )
+        self.root.add_layout(self.task_comp_labels)
 
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -1951,6 +1967,9 @@ class TGroupGraph(DashboardComponent):
             "y_label": [],
             "mem_alpha": [],
             "node_line_width": [],
+            "xc_pbar": [],
+            "yc_pbar": [],
+            "comp_tasks": [],
         }
 
         arrows_data = {
@@ -1963,6 +1982,11 @@ class TGroupGraph(DashboardComponent):
         for key, tg in self.scheduler.task_groups.items():
             x = self.nodes_layout[key]["x"]
             y = self.nodes_layout[key]["y"]
+
+            comp_tasks = (
+                tg.states["waiting"] + tg.states["no-worker"] + tg.states["processing"]
+            )
+            tot_tasks = sum(tg.states.values())
 
             # main boxes layout
             nodes_data["x"].append(x)
@@ -1977,7 +2001,7 @@ class TGroupGraph(DashboardComponent):
             nodes_data["y_label"].append(y + self.height_node / 2 - 0.2)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
-            nodes_data["tot_tasks"].append(sum(tg.states.values()))
+            nodes_data["tot_tasks"].append(tot_tasks)
 
             # memory alpha factor by 0.4 if not get's too dark
             nodes_data["mem_alpha"].append(
@@ -1999,15 +2023,20 @@ class TGroupGraph(DashboardComponent):
             nodes_data["y_start"].append(y - self.height_node / 2 + 0.1)
             nodes_data["y_end"].append(y - self.height_node / 2 - 0.1 + Hbar)
 
-            completed = 1.0 - (
-                tg.states["waiting"] + tg.states["no-worker"] + tg.states["processing"]
-            ) / sum(tg.states.values())
+            completed = 1.0 - (comp_tasks / tot_tasks)
 
             nodes_data["progress"].append(completed * 100)
             nodes_data["x_end_progress"].append(
                 x - self.width_node / 2 + 0.1 + Lbar * completed
             )
 
+            # comp/tot label
+            nodes_data["xc_pbar"].append(x)
+            nodes_data["yc_pbar"].append(y - self.height_node / 2)
+
+            nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks} Tasks")
+
+            # arrows
             arrows_data["xs"] += [
                 self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nstart"]
             ]
