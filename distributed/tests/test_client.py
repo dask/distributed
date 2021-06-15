@@ -1999,14 +1999,14 @@ def test_repr(loop):
             for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
-                assert "threads=3" in text or "Cores: </b>3" in text
+                assert "threads=3" in text or "Total threads: </strong>" in text
                 assert "6.00 GB" in text or "5.59 GiB" in text
                 if "<table" not in text:
                     assert len(text) < 80
 
         for func in funcs:
             text = func(c)
-            assert "not connected" in text
+            assert "No scheduler connected" in text
 
 
 @gen_cluster(client=True)

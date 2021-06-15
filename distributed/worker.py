@@ -23,10 +23,9 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from dask.compatibility import apply
 from dask.core import istask
 from dask.system import CPU_COUNT
-from dask.utils import format_bytes, funcname
+from dask.utils import apply, format_bytes, funcname
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -1583,7 +1582,7 @@ class Worker(ServerNode):
                     return
                 if ts.state in IN_PLAY:
                     return
-                if ts.state == "erred":
+                if ts.state == "error":
                     ts.exception = None
                     ts.traceback = None
                 else:
@@ -2830,30 +2829,36 @@ class Worker(ServerNode):
         func = getattr(actor, function)
         name = key_split(key) + "." + function
 
-        if iscoroutinefunction(func):
-            result = await func(*args, **kwargs)
-        elif separate_thread:
-            result = await self.executor_submit(
-                name,
-                apply_function_actor,
-                args=(
-                    func,
-                    args,
-                    kwargs,
-                    self.execution_state,
+        try:
+            if iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            elif separate_thread:
+                result = await self.executor_submit(
                     name,
-                    self.active_threads,
-                    self.active_threads_lock,
-                ),
-                executor=self.executors["actor"],
-            )
-        else:
-            result = func(*args, **kwargs)
-        return {"status": "OK", "result": to_serialize(result)}
+                    apply_function_actor,
+                    args=(
+                        func,
+                        args,
+                        kwargs,
+                        self.execution_state,
+                        name,
+                        self.active_threads,
+                        self.active_threads_lock,
+                    ),
+                    executor=self.executors["actor"],
+                )
+            else:
+                result = func(*args, **kwargs)
+            return {"status": "OK", "result": to_serialize(result)}
+        except Exception as ex:
+            return {"status": "error", "exception": to_serialize(ex)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
-        value = getattr(self.actors[actor], attribute)
-        return {"status": "OK", "result": to_serialize(value)}
+        try:
+            value = getattr(self.actors[actor], attribute)
+            return {"status": "OK", "result": to_serialize(value)}
+        except Exception as ex:
+            return {"status": "error", "exception": to_serialize(ex)}
 
     def meets_resource_constraints(self, key):
         ts = self.tasks[key]

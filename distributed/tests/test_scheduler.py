@@ -17,7 +17,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.compatibility import apply
+from dask.utils import apply
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
