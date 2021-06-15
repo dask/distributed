@@ -17,6 +17,7 @@ from collections.abc import Hashable, Iterable, Iterator, Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
+from inspect import isawaitable
 from numbers import Number
 from typing import Optional
 
@@ -49,7 +50,14 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import CommClosedError, Status, clean_exception, rpc, send_recv
+from .core import (
+    CommClosedError,
+    Status,
+    clean_exception,
+    error_message,
+    rpc,
+    send_recv,
+)
 from .diagnostics.plugin import SchedulerPlugin
 from .event import EventExtension
 from .http import get_handlers
@@ -5231,7 +5239,17 @@ class Scheduler(SchedulerState, ServerNode):
                 "arbitrary bytestrings using pickle via the "
                 "'distributed.scheduler.pickle' configuration setting."
             )
-        self.add_plugin(plugin=loads(plugin))
+        plugin = loads(plugin)
+        self.add_plugin(plugin=plugin)
+
+        if hasattr(plugin, "start"):
+            try:
+                result = plugin.start(self)
+                if isawaitable(result):
+                    result = self.sync(result)
+            except Exception as e:
+                msg = error_message(e)
+                return msg
 
     def worker_send(self, worker, msg):
         """Send message to worker
