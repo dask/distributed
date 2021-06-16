@@ -2032,7 +2032,7 @@ class TGroupGraph(DashboardComponent):
             nodes_data["xc_pbar"].append(x)
             nodes_data["yc_pbar"].append(y - self.height_node / 2 + 0.1 + Hbar / 2)
 
-            nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks} Tasks")
+            nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks}")
 
             # arrows
             arrows_data["xs"] += [
