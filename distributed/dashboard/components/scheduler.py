@@ -1896,7 +1896,7 @@ class TGroupGraph(DashboardComponent):
                 if not dependencies[tg]:
                     x[tg] = 0
                     y[tg] = y_next
-                    y_next += self.height_node * (len(dependents[tg]) * scale)
+                    y_next += self.height_node * (len(dependents[tg]) + 1)
                 else:
                     x[tg] = (
                         max(x[dep] for dep in dependencies[tg])
@@ -1910,12 +1910,9 @@ class TGroupGraph(DashboardComponent):
                     if dep in y:
                         continue
                     else:
-                        if sort_dependents.index(dep) == (len(dependents[tg]) - 1):
-                            y[dep] = (
-                                y[tg] + self.height_node * (len(dependents[tg]) - 1) / 2
-                            )
-                        else:
-                            y[dep] = y[tg] + self.height_node * scale
+                        y[dep] = (
+                            y[tg] + self.height_node * (len(dependents[tg]) - 1) / 2
+                        )
 
                 if (x[tg], y[tg]) in collision:
 
