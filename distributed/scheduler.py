@@ -7610,18 +7610,24 @@ def decide_worker(
     if is_root_ish and ws is not None and group._last_worker_tasks_left > 0:
         # Root-ish task and previous worker not fully assigned - reuse previous worker.
         # (When the previous worker _is_ fully assigned, we fall through here to the pick-a-worker logic.)
-        if group._last_worker_priority >= ts.priority:
-            print(
-                f"decide_worker called out of priority order: {group._last_worker_priority} >= {ts.priority}.\n"
-                f"{ts=}\n"
-                f"{group.last_worker=}\n"
-                f"{group.last_worker_tasks_left=}\n"
-                f"{group_tasks_per_worker=}\n"
-            )
-        group._last_worker_priority = ts.priority
-        group._last_worker_tasks_left -= 1
-        print(f"reusing worker - {ts.group_key} -> {ws.name}")
-        return ws
+        if group._last_worker_priority < ts.priority:
+            group._last_worker_priority = ts.priority
+            group._last_worker_tasks_left -= 1
+            # print(f"reusing worker - {ts.group_key} -> {ws.name}")
+            return ws
+
+        # We're not being called in priority order---this is probably not actually a
+        # root-ish task; disable root task mode for its whole task group.
+        # print(
+        #     f"decide_worker called out of priority order: {group._last_worker_priority} >= {ts.priority}.\n"
+        #     f"{ts=}\n"
+        #     f"{group.last_worker=}\n"
+        #     f"{group.last_worker_tasks_left=}\n"
+        #     f"{group_tasks_per_worker=}\n"
+        # )
+        group._last_worker = NOT_ROOT_ISH
+        group._last_worker_tasks_left = 0
+        is_root_ish = False
 
     # Pick a worker to run this task
     deps: set = ts._dependencies
@@ -7658,17 +7664,17 @@ def decide_worker(
 
     ncandidates: Py_ssize_t = len(candidates)
     if ncandidates == 0:
-        print(f"no candidates - {ts.group_key}")
+        # print(f"no candidates - {ts.group_key}")
         return None
     elif ncandidates == 1:
         # NOTE: this is the ideal case: all the deps are already on the same worker.
         # We did a good job in previous `decide_worker`s!
         for ws in candidates:
             break
-        print(f"1 candidate - {ts.group_key} -> {ws.name}")
+        # print(f"1 candidate - {ts.group_key} -> {ws.name}")
     else:
         ws = min(candidates, key=objective)
-        print(f"picked worker - {ts.group_key} -> {ws.name}")
+        # print(f"picked worker - {ts.group_key} -> {ws.name}")
 
     if is_root_ish:
         group._last_worker = ws
