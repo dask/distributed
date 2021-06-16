@@ -1981,7 +1981,7 @@ class TGroupGraph(DashboardComponent):
             y = self.nodes_layout[key]["y"]
 
             comp_tasks = (
-                tg.states["waiting"] + tg.states["no-worker"] + tg.states["processing"]
+                tg.states["released"] + tg.states["memory"] + tg.states["erred"]
             )
             tot_tasks = sum(tg.states.values())
 
@@ -2020,7 +2020,7 @@ class TGroupGraph(DashboardComponent):
             nodes_data["y_start"].append(y - self.height_node / 2 + 0.1)
             nodes_data["y_end"].append(y - self.height_node / 2 - 0.1 + Hbar)
 
-            completed = 1.0 - (comp_tasks / tot_tasks)
+            completed = comp_tasks / tot_tasks
 
             nodes_data["progress"].append(completed * 100)
             nodes_data["x_end_progress"].append(
