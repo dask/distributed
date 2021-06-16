@@ -6939,6 +6939,11 @@ class Scheduler(SchedulerState, ServerNode):
         sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
         sysmon.update()
 
+        # Scheduler logs
+        from distributed.dashboard.components.scheduler import SchedulerLogs
+
+        logs = SchedulerLogs(self)
+
         from bokeh.models import Div, Panel, Tabs
 
         import distributed
@@ -6997,12 +7002,14 @@ class Scheduler(SchedulerState, ServerNode):
         )
         bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
         system = Panel(child=sysmon.root, title="System")
+        logs = Panel(child=logs.root, title="Scheduler Logs")
 
         tabs = Tabs(
             tabs=[
                 html,
                 task_stream,
                 system,
+                logs,
                 compute,
                 workers,
                 scheduler,
