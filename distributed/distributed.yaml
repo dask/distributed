@@ -169,6 +169,14 @@ distributed:
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+    ucx:
+      cuda_copy: False  # enable cuda-copy
+      tcp: False  # enable tcp
+      nvlink: False  # enable cuda_ipc
+      infiniband: False # enable Infiniband
+      rdmacm: False # enable RDMACM
+      net-devices: null  # define what interface to use for UCX comm
+      reuse-endpoints: null  # enable endpoint reuse
 
     zstd:
       level: 3      # Compression level, between 1 and 22.
@@ -223,13 +231,5 @@ distributed:
     system-monitor:
       interval: 500ms
     event-loop: tornado
-rmm:
-  pool-size: null
-ucx:
-  cuda_copy: False  # enable cuda-copy
-  tcp: False  # enable tcp
-  nvlink: False  # enable cuda_ipc
-  infiniband: False # enable Infiniband
-  rdmacm: False # enable RDMACM
-  net-devices: null  # define what interface to use for UCX comm
-  reuse-endpoints: null  # enable endpoint reuse
+  rmm:
+    pool-size: null
