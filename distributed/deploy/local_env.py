@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import sys
 import weakref
 from typing import List, Union
 
@@ -104,12 +103,12 @@ class Worker(Process):
 
         # We watch stderr in order to get the address, then we return
         while True:
-            _, line = await self.proc.communicate()
-            if not line.decode().strip():
+            line = await self.proc.stderr.readline()
+            if not line.decode('ascii').strip():
                 raise Exception("Worker failed to start")
             else:
-                line = line.decode()
-            logger.info(line.strip())
+                line = line.decode('ascii').strip()
+            logger.info(line)
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
                 self.status = Status.running
@@ -161,12 +160,12 @@ class Scheduler(Process):
 
         # We watch stderr in order to get the address, then we return
         while True:
-            _, line = await self.proc.communicate()
-            if not line.decode().strip():
-                raise Exception("Worker failed to start")
+            line = await self.proc.stderr.readline()
+            if not line.decode('ascii').strip():
+                raise Exception("Scheduler failed to start")
             else:
-                line = line.decode()
-            logger.info(line.strip())
+                line = line.decode('ascii').strip()
+            logger.info(line)
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
                 break
@@ -175,6 +174,18 @@ class Scheduler(Process):
 
 
 async def _set_env_helper(connect_options: dict):
+    """Helper function to locate existing dask internal config for the remote
+    scheduler and workers to inherit when started.
+
+    Parameters
+    ----------
+    connect_options : dict
+        Connection options to pass to the async subprocess shell.
+
+    Returns
+    -------
+        Dask config to inherit, if any.
+    """
     proc = await asyncio.create_subprocess_shell("uname", **connect_options)
     await proc.communicate()
     if proc.returncode == 0:
