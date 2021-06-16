@@ -1762,12 +1762,12 @@ class TGroupGraph(DashboardComponent):
 
         self.arrows_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
 
-        self.root = figure(title="Task Groups Graph", **kwargs)
+        self.root = figure(title="Task Groups Graph", match_aspect=True, **kwargs)
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
         # main box
-        self.width_node = 10
+        self.width_node = 16
         self.height_node = 8
         rect = self.root.rect(
             x="x",
@@ -1822,6 +1822,7 @@ class TGroupGraph(DashboardComponent):
             x="x_label",
             y="y_label",
             text="name_short",
+            text_font_size="1vmin",
             text_align="left",
             text_baseline="top",
             source=self.nodes_source,
@@ -1834,8 +1835,9 @@ class TGroupGraph(DashboardComponent):
             x="xc_pbar",
             y="yc_pbar",
             text="comp_tasks",
+            text_font_size="1vmin",
             text_align="center",
-            text_baseline="center",
+            text_baseline="middle",
             source=self.nodes_source,
             background_fill_color=None,
         )
@@ -2013,24 +2015,24 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["node_line_width"].append(1)
 
             # progress bar data update
-            Lbar = self.width_node - 0.2
-            nodes_data["x_start"].append(x - self.width_node / 2 + 0.1)
-            nodes_data["x_end"].append(x - self.width_node / 2 + 0.1 + Lbar)
+            Lbar = self.width_node
+            nodes_data["x_start"].append(x - self.width_node / 2)
+            nodes_data["x_end"].append(x - self.width_node / 2 + Lbar)
 
-            Hbar = 2
-            nodes_data["y_start"].append(y - self.height_node / 2 + 0.1)
-            nodes_data["y_end"].append(y - self.height_node / 2 - 0.1 + Hbar)
+            Hbar = 3
+            nodes_data["y_start"].append(y - self.height_node / 2)
+            nodes_data["y_end"].append(y - self.height_node / 2 + Hbar)
 
             completed = comp_tasks / tot_tasks
 
             nodes_data["progress"].append(completed * 100)
             nodes_data["x_end_progress"].append(
-                x - self.width_node / 2 + 0.1 + Lbar * completed
+                x - self.width_node / 2 + Lbar * completed
             )
 
             # comp/tot label
             nodes_data["xc_pbar"].append(x)
-            nodes_data["yc_pbar"].append(y - self.height_node / 2 + 0.1 + Hbar / 2)
+            nodes_data["yc_pbar"].append(y - self.height_node / 2 + Hbar / 2)
 
             nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks}")
 
