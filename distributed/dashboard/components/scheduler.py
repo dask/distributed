@@ -1989,9 +1989,10 @@ class TGroupGraph(DashboardComponent):
             nodes_data["x"].append(x)
             nodes_data["y"].append(y)
 
-            nodes_data["name"].append(tg.prefix.name)
+            name = tg.prefix.name
+            nodes_data["name"].append(name)
             nodes_data["name_short"].append(
-                tg.prefix.name[:10]
+                name if len(name) <= 15 else name[:12] + "..."
             )  # This needs to be different
 
             nodes_data["x_label"].append(x - self.width_node / 2 + 0.2)
