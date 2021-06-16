@@ -7520,8 +7520,45 @@ def decide_worker(
     objective,
     total_nthreads: Py_ssize_t,
 ) -> WorkerState:
-    """
+    r"""
     Decide which worker should take task *ts*.
+
+    There are two modes: root(ish) tasks, and normal tasks.
+
+    Root(ish) tasks
+    ~~~~~~~~~~~~~~~
+
+    Root(ish) have no (or very very few) dependencies and fan out widely:
+    they belong to TaskGroups that contain more tasks than there are workers.
+    We want neighboring root tasks to run on the same worker, since there's a
+    good chance those neighbors will be combined in a downstream operation:
+
+          i       j
+         / \     / \
+        e   f   g   h
+        |   |   |   |
+        a   b   c   d
+        \   \  /   /
+             X
+
+    In the above case, we want ``a`` and ``b`` to run on the same worker,
+    and ``c`` and ``d`` to run on the same worker, reducing future
+    data transfer. We can also ignore the location of ``X``, because
+    as a common dependency, it will eventually get transferred everywhere.
+
+    Calculaing this directly from the graph would be expensive, so instead
+    we use task priority as a proxy. We aim to send tasks close in priority
+    within a `TaskGroup` to the same worker. To do this efficiently, we rely
+    on the fact that `decide_worker` is generally called in priority order
+    for root tasks (because `Scheduler.update_graph` creates recommendations
+    in priority order), and track only the last worker used for a `TaskGroup`,
+    and how many more tasks can be assigned to it before picking a new one.
+
+    By colocating related root tasks, we ensure that placing thier downstream
+    normal tasks is set up for success.
+
+    Normal tasks
+    ~~~~~~~~~~~~
 
     We choose the worker that has the data on which *ts* depends.
 
