@@ -2349,10 +2349,10 @@ class SchedulerState:
             or len(ts._group) > self.total_nthreads
         ):
             ws = decide_worker(
-                ts,
-                self._workers_dv.values(),
-                valid_workers,
-                partial(self.worker_objective, ts),
+                ts=ts,
+                all_workers=self._workers_dv.values(),
+                valid_workers=valid_workers,
+                objective=partial(self.worker_objective, ts),
                 nthreads=self.total_nthreads,
                 unknown_task_duration=self.UNKNOWN_TASK_DURATION,
             )
@@ -7532,12 +7532,12 @@ def decide_worker(
             if not candidates:
                 if ts._loose_restrictions:
                     ws = decide_worker(
-                        ts,
-                        all_workers,
-                        None,
-                        objective,
-                        nthreads,
-                        unknown_task_duration,
+                        ts=ts,
+                        all_workers=all_workers,
+                        valid_workers=None,
+                        objective=objective,
+                        nthreads=nthreads,
+                        unknown_task_duration=unknown_task_duration,
                     )
                 return ws
 
@@ -7551,7 +7551,7 @@ def decide_worker(
         ws = min(candidates, key=objective)
 
     if len(ts._group) > nthreads * 2 and sum(map(len, ts._group._dependencies)) < 5:
-        if ts._group._last_scheduled_worker is None:
+        if ts._group._last_scheduled_worker is None:  # First time
             ts._group._last_scheduled_worker = ws
         else:
             duration = ts._prefix.duration_average
@@ -7561,6 +7561,7 @@ def decide_worker(
             alternate = ts._group._last_scheduled_worker
             ratio = math.ceil(len(ts._group) / nthreads)
 
+            # Allow a few tasks to pile up before moving to the next worker
             if alternate.occupancy < ws.occupancy + duration * ratio:
                 ws = alternate
             else:
