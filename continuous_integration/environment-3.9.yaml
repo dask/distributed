@@ -45,7 +45,7 @@ dependencies:
   - zict  # overridden by git tip below
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask
+      - git+https://github.com/madsbk/dask.git@formalization_of_computation
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
       - git+https://github.com/intake/filesystem_spec
