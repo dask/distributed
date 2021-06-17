@@ -2347,7 +2347,6 @@ class SchedulerState:
             ts._dependencies
             or valid_workers is not None
             or len(ts._group) > self.total_nthreads
-            and sum(map(len, ts._group._dependencies)) < 5
         ):
             ws = decide_worker(
                 ts,
