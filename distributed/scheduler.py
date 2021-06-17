@@ -7554,7 +7554,10 @@ def decide_worker(
     # Then assign sequential tasks to similar workers, even if occupancy isn't ideal
     if len(ts._group) > nthreads * 2 and sum(map(len, ts._group._dependencies)) < 5:
         if ts._group._last_scheduled_worker is None:  # First time
-            ts._group._last_scheduled_worker = ws
+            if (
+                ts._group.states["released"] > len(ts._group) / 2
+            ):  # many tasks to be scheduled
+                ts._group._last_scheduled_worker = ws
         else:
             duration = ts._prefix.duration_average
             if duration < 0.0:
@@ -7571,6 +7574,9 @@ def decide_worker(
                 ws = alternate
             else:
                 ts._group._last_scheduled_worker = ws
+
+            if ts._group.states["released"] == 0:  # all done, reset
+                ts._group._last_scheduled_worker = None
 
     return ws
 
