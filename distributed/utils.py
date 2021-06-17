@@ -982,34 +982,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def deprecated(*, version_removed: str = None):
-    """Decorator to mark a function as deprecated
-
-    Parameters
-    ----------
-    version_removed : str, optional
-        If specified, include the version in which the deprecated function
-        will be removed. Defaults to "a future release".
-    """
-
-    def decorator(func):
-        nonlocal version_removed
-        msg = f"{funcname(func)} is deprecated and will be removed in"
-        if version_removed is not None:
-            msg += f" version {version_removed}"
-        else:
-            msg += " a future release"
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            warnings.warn(msg, DeprecationWarning, stacklevel=2)
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
