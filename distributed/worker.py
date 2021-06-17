@@ -3808,13 +3808,6 @@ def dumps_function(func):
     return result
 
 
-def dumps_task(task):
-    from .protocol.computation import typeset_computation
-
-    # TODO: replace all calls to dumps_task() with calls to typeset_computation()
-    return typeset_computation(task)
-
-
 def apply_function(
     function,
     args,

@@ -13,7 +13,7 @@ from unittest import mock
 
 import cloudpickle
 import pytest
-from tlz import concat, first, frequencies, merge, valmap
+from tlz import concat, first, frequencies, merge
 
 import dask
 from dask import delayed
@@ -23,6 +23,7 @@ from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
+from distributed.protocol.computation import typeset_dask_graph
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
@@ -41,7 +42,7 @@ from distributed.utils_test import (
     tls_only_security,
     varying,
 )
-from distributed.worker import dumps_function, dumps_task
+from distributed.worker import dumps_function
 
 if sys.version_info < (3, 8):
     try:
@@ -184,7 +185,7 @@ async def test_retire_workers_empty(s):
 @gen_cluster()
 async def test_remove_client(s, a, b):
     s.update_graph(
-        tasks={"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
+        tasks=typeset_dask_graph({"x": (inc, 1), "y": (inc, "x")}),
         dependencies={"x": [], "y": ["x"]},
         keys=["y"],
         client="ident",
@@ -211,7 +212,7 @@ async def test_server_listens_to_other_ops(s, a, b):
 async def test_remove_worker_from_scheduler(s, a, b):
     dsk = {("x-%d" % i): (inc, i) for i in range(20)}
     s.update_graph(
-        tasks=valmap(dumps_task, dsk),
+        tasks=typeset_dask_graph(dsk),
         keys=list(dsk),
         dependencies={k: set() for k in dsk},
     )
@@ -279,7 +280,7 @@ async def test_add_worker(s, a, b):
 
     dsk = {("x-%d" % i): (inc, i) for i in range(10)}
     s.update_graph(
-        tasks=valmap(dumps_task, dsk),
+        tasks=typeset_dask_graph(dsk),
         keys=list(dsk),
         client="client",
         dependencies={k: set() for k in dsk},
@@ -438,7 +439,7 @@ async def test_filtered_communication(s, a, b):
     await c.write(
         {
             "op": "update-graph",
-            "tasks": {"x": dumps_task((inc, 1)), "y": dumps_task((inc, "x"))},
+            "tasks": typeset_dask_graph({"x": (inc, 1), "y": (inc, "x")}),
             "dependencies": {"x": [], "y": ["x"]},
             "client": "c",
             "keys": ["y"],
@@ -448,10 +449,12 @@ async def test_filtered_communication(s, a, b):
     await f.write(
         {
             "op": "update-graph",
-            "tasks": {
-                "x": dumps_task((inc, 1)),
-                "z": dumps_task((operator.add, "x", 10)),
-            },
+            "tasks": typeset_dask_graph(
+                {
+                    "x": (inc, 1),
+                    "z": (operator.add, "x", 10),
+                }
+            ),
             "dependencies": {"x": [], "z": ["x"]},
             "client": "f",
             "keys": ["z"],
@@ -479,7 +482,7 @@ def test_dumps_function():
 @gen_cluster()
 async def test_ready_remove_worker(s, a, b):
     s.update_graph(
-        tasks={"x-%d" % i: dumps_task((inc, i)) for i in range(20)},
+        tasks=typeset_dask_graph({"x-%d" % i: (inc, i) for i in range(20)}),
         keys=["x-%d" % i for i in range(20)],
         client="client",
         dependencies={"x-%d" % i: [] for i in range(20)},
@@ -640,11 +643,13 @@ async def test_file_descriptors_dont_leak(s):
 @gen_cluster()
 async def test_update_graph_culls(s, a, b):
     s.update_graph(
-        tasks={
-            "x": dumps_task((inc, 1)),
-            "y": dumps_task((inc, "x")),
-            "z": dumps_task((inc, 2)),
-        },
+        tasks=typeset_dask_graph(
+            {
+                "x": (inc, 1),
+                "y": (inc, "x"),
+                "z": (inc, 2),
+            }
+        ),
         keys=["y"],
         dependencies={"y": "x", "x": [], "z": []},
         client="client",

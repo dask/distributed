@@ -76,16 +76,14 @@ def record_display(*args):
 import re
 from operator import add
 
-from tlz import valmap
-
 from distributed.client import wait
 from distributed.diagnostics.progressbar import (
     MultiProgressWidget,
     ProgressWidget,
     progress,
 )
+from distributed.protocol.computation import typeset_dask_graph
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
-from distributed.worker import dumps_task
 
 
 @gen_cluster(client=True)
@@ -149,8 +147,7 @@ async def test_multi_progressbar_widget(c, s, a, b):
 @gen_cluster()
 async def test_multi_progressbar_widget_after_close(s, a, b):
     s.update_graph(
-        tasks=valmap(
-            dumps_task,
+        tasks=typeset_dask_graph(
             {
                 "x-1": (inc, 1),
                 "x-2": (inc, "x-1"),
@@ -235,8 +232,7 @@ def test_progressbar_cancel(client):
 @gen_cluster()
 async def test_multibar_complete(s, a, b):
     s.update_graph(
-        tasks=valmap(
-            dumps_task,
+        tasks=typeset_dask_graph(
             {
                 "x-1": (inc, 1),
                 "x-2": (inc, "x-1"),
