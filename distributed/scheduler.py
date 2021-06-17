@@ -7491,6 +7491,7 @@ def decide_worker(
         candidates = set(all_workers)
     else:
         if len(random_workers_set) <= N_RANDOM_WORKERS:
+            # Fastpath: every worker would end up in `candidates`, so no need to build the set from `who_has`.
             candidates = random_workers_set
         else:
             candidates = {wws for dts in deps for wws in dts._who_has}
