@@ -2346,7 +2346,7 @@ class SchedulerState:
         if (
             ts._dependencies
             or valid_workers is not None
-            or len(ts._group) > self.total_nthreads
+            or len(ts._group) > self.total_nthreads * 2
         ):
             ws = decide_worker(
                 ts=ts,
