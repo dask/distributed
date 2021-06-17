@@ -2038,13 +2038,15 @@ class TGroupGraph(DashboardComponent):
 
             # arrows
             arrows_data["xs"] += [
-                self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nstart"]
+                self.nodes_layout[k]["x"] + self.width_node / 2
+                for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["ys"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["xe"] += [
-                self.nodes_layout[k]["x"] for k in self.arrows_layout[key]["nend"]
+                self.nodes_layout[k]["x"] - self.width_node / 2
+                for k in self.arrows_layout[key]["nend"]
             ]
             arrows_data["ye"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
