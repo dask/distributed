@@ -7550,6 +7550,8 @@ def decide_worker(
     else:
         ws = min(candidates, key=objective)
 
+    # If our group is large with few dependencies
+    # Then assign sequential tasks to similar workers, even if occupancy isn't ideal
     if len(ts._group) > nthreads * 2 and sum(map(len, ts._group._dependencies)) < 5:
         if ts._group._last_scheduled_worker is None:  # First time
             ts._group._last_scheduled_worker = ws
@@ -7562,7 +7564,10 @@ def decide_worker(
             ratio = math.ceil(len(ts._group) / nthreads)
 
             # Allow a few tasks to pile up before moving to the next worker
-            if alternate.occupancy < ws.occupancy + duration * ratio:
+            if (
+                alternate.occupancy < ws.occupancy + duration * ratio
+                and alternate in all_workers
+            ):
                 ws = alternate
             else:
                 ts._group._last_scheduled_worker = ws
