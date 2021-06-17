@@ -678,6 +678,7 @@ async def test_update_graph_culls(s, a, b):
 def test_io_loop(loop):
     s = Scheduler(loop=loop, validate=True)
     assert s.io_loop is loop
+    loop.run_sync(s.close)
 
 
 @gen_cluster(client=True)
