@@ -126,6 +126,24 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c):
+    root = await client.scatter(1)
+    assert sum(root.key in worker.data for worker in [a, b, c]) == 1
+
+    start = time()
+    tasks = client.map(sleep, [root] * 6, pure=False)
+    await wait(tasks)
+    elapsed = time() - start
+
+    assert elapsed <= 4
+    assert all(root.key in worker.data for worker in [a, b, c])
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)
