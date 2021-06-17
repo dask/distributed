@@ -95,6 +95,13 @@ TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
+logos_dict = {
+    "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",
+    "pandas": "https://static.bokeh.org/logos/logo.png",  # this is a bokeh logo but haven't found a pandas png one
+    "builtins": "https://logos-download.com/wp-content/uploads/2016/10/Python_logo_icon.png",
+}
+
+
 class Occupancy(DashboardComponent):
     """Occupancy (in time) per worker"""
 
@@ -2073,30 +2080,20 @@ class TGroupGraph(DashboardComponent):
             arrows_data["ye"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
             ]
+
             # LOGOS (it seems svg not supported? can't display this for example
             #  https://numpy.org/images/logos/numpy.svg)
 
-            logos_dict = {
-                "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",
-                "pandas": "https://static.bokeh.org/logos/logo.png",
-                "builtins": "https://logos-download.com/wp-content/uploads/2016/10/Python_logo_icon.png",
-            }
-
-            # if key in visited:
-            #     continue
-            # else:
             if len(tg.types) == 1:
-                tg_dtype = tg.types.copy()
-                logo_type = tg_dtype.pop().split(".")[0]
+                logo_type = next(iter(tg.types)).split(".")[0]
                 try:
-                    url_logo = logos_dict[logo_type]
-                    # visited.append(key)
+                    url_logo = logos_dict[
+                        logo_type
+                    ]  # now plotting a bokeh logo when is a pandas tg
                 except KeyError:
                     url_logo = ""
-                    # visited.append(key)
             else:
                 url_logo = ""
-                # visited.append(key)
 
             nodes_data["url_logo"].append(url_logo)
 
