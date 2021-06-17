@@ -399,10 +399,16 @@ class SpecCluster(Cluster):
             if self.status == Status.created:
                 await self._start()
             await self.scheduler
-            await self._correct_state()
-            if self.workers:
-                await asyncio.wait(list(self.workers.values()))  # maybe there are more
-            return self
+            try:
+                await self._correct_state()
+                if self.workers:
+                    await asyncio.wait(
+                        list(self.workers.values())
+                    )  # maybe there are more
+                return self
+            except Exception:
+                await self.scheduler.close()
+                raise
 
         return _().__await__()
 

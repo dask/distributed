@@ -1070,12 +1070,12 @@ async def test_local_cluster_redundant_kwarg(nanny):
         # Extra arguments are forwarded to the worker class. Depending on
         # whether we use the nanny or not, the error treatment is quite
         # different and we should assert that an exception is raised
-        async with await LocalCluster(
-            typo_kwarg="foo", processes=nanny, n_workers=1
+        async with LocalCluster(
+            typo_kwarg="foo", processes=nanny, n_workers=1, asynchronous=True
         ) as cluster:
 
             # This will never work but is a reliable way to block without hard
             # coding any sleep values
-            async with Client(cluster) as c:
+            async with Client(cluster, asynchronous=True) as c:
                 f = c.submit(sleep, 0)
                 await f
