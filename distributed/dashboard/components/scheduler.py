@@ -1748,7 +1748,7 @@ class TGroupGraph(DashboardComponent):
                 "x": [],
                 "y": [],
                 "name": [],
-                "name_short": [],
+                # "name_short": [],
                 "tot_tasks": [],
                 "color": [],
                 "x_start": [],
@@ -1757,8 +1757,8 @@ class TGroupGraph(DashboardComponent):
                 "y_end": [],
                 "x_end_progress": [],
                 "progress": [],
-                "x_label": [],
-                "y_label": [],
+                # "x_label": [],
+                # "y_label": [],
                 "mem_alpha": [],
                 "node_line_width": [],
                 "xc_pbar": [],
@@ -1779,8 +1779,9 @@ class TGroupGraph(DashboardComponent):
         self.root.add_layout(self.subtitle, "above")
 
         # main box
-        self.width_node = 16
-        self.height_node = 8
+        self.width_node = 0.5
+        self.height_node = self.width_node / 2
+
         rect = self.root.rect(
             x="x",
             y="y",
@@ -1828,7 +1829,7 @@ class TGroupGraph(DashboardComponent):
         )
 
         self.arrows = Arrow(
-            end=VeeHead(size=10),
+            end=VeeHead(size=8),
             line_color="black",
             line_alpha=0.5,
             line_width=1,
@@ -1841,17 +1842,17 @@ class TGroupGraph(DashboardComponent):
         self.root.add_layout(self.arrows)
 
         # top left title
-        self.labels = LabelSet(
-            x="x_label",
-            y="y_label",
-            text="name_short",
-            text_font_size="1vmin",
-            text_align="left",
-            text_baseline="top",
-            source=self.nodes_source,
-            background_fill_color=None,
-        )
-        self.root.add_layout(self.labels)
+        # self.labels = LabelSet(
+        #     x="x_label",
+        #     y="y_label",
+        #     text="name_short",
+        #     text_font_size="1vmin",
+        #     text_align="left",
+        #     text_baseline="top",
+        #     source=self.nodes_source,
+        #     background_fill_color=None,
+        # )
+        # self.root.add_layout(self.labels)
 
         # display completed / total tasks
         self.task_comp_labels = LabelSet(
@@ -1891,68 +1892,54 @@ class TGroupGraph(DashboardComponent):
 
         with log_errors():
             # get dependecies per task group
+            # in some cases there are tg that have themeselves as dependencies, we remove those.
             dependencies = {
-                k: [
-                    ds.name for ds in ts.dependencies if ds.name != k
-                ]  # in some cases there are tg that have themeselves as
-                for k, ts in self.scheduler.task_groups.items()  # dependencies, we remove those.
+                k: {ds.name for ds in ts.dependencies if ds.name != k}
+                for k, ts in self.scheduler.task_groups.items()
             }
 
-            # get dependents per task group
-            dependents = {k: [] for k in dependencies}
-            for k, v in dependencies.items():
-                for dep in v:
-                    dependents[dep].append(k)
+            import dask
 
-            stack_order = toposort_layers(dependencies)
-            stack_it = stack_order[::-1].copy()
+            order = dask.order.order(
+                dsk={group.name: 1 for k, group in self.scheduler.task_groups.items()},
+                dependencies=dependencies,
+            )
 
-            x = {}
-            y = {}
-            y_next = 0
-            collision = {}
+            ordered = sorted(self.scheduler.task_groups, key=order.get)
 
+            xs = {}
+            ys = {}
+            locations = set()
             nodes_layout = {}
             arrows_layout = {}
-            scale = 1.5
-            while stack_it:
-                tg = stack_it.pop()
-
-                if not dependencies[tg]:
-                    x[tg] = 0
-                    y[tg] = y_next
-                    y_next += self.height_node * (len(dependents[tg]) + 1)
+            for tg in ordered:
+                if dependencies[tg]:
+                    x = (
+                        max(xs[dep] for dep in dependencies[tg]) + 1
+                    )  # just to the right
+                    y = max(
+                        ys[dep] for dep in dependencies[tg]
+                    )  # always move up and to the right
+                    if (
+                        len(dependencies[tg]) > 1
+                        and len({ys[dep] for dep in dependencies[tg]}) == 1
+                    ):
+                        y += 1
                 else:
-                    x[tg] = (
-                        max(x[dep] for dep in dependencies[tg])
-                        + 1
-                        + self.width_node * scale
-                    )
-                # Given a task group I compute it's y position and it's dependants y-pos
-                sort_dependents = [ele for ele in stack_order if ele in dependents[tg]]
+                    x = 0
+                    y = max(ys.values()) + 1 if ys else 0
 
-                for dep in sort_dependents:
-                    if dep in y:
-                        continue
-                    else:
-                        y[dep] = (
-                            y[tg] + self.height_node * (len(dependents[tg]) - 1) / 2
-                        )
+                while (x, y) in locations:  # avoid collisions by moving up
+                    y += 1
 
-                if (x[tg], y[tg]) in collision:
+                locations.add((x, y))
 
-                    old_x, old_y = x[tg], y[tg]
-                    x[tg], y[tg] = collision[(x[tg], y[tg])]
-
-                    y[tg] += self.height_node * scale
-                    collision[old_x, old_y] = (x[tg], y[tg])
-                else:
-                    collision[(x[tg], y[tg])] = (x[tg], y[tg])
+                xs[tg], ys[tg] = x, y
 
                 # info neded for node layout to coulmn data source
                 nodes_layout[tg] = {}
-                nodes_layout[tg]["x"] = x[tg]
-                nodes_layout[tg]["y"] = y[tg]
+                nodes_layout[tg]["x"] = xs[tg]
+                nodes_layout[tg]["y"] = ys[tg]
 
                 # info needed for arrow layout
                 arrows_layout[tg] = {}
@@ -1976,7 +1963,7 @@ class TGroupGraph(DashboardComponent):
             "x": [],
             "y": [],
             "name": [],
-            "name_short": [],
+            # "name_short": [],
             "color": [],
             "tot_tasks": [],
             "x_start": [],
@@ -1985,8 +1972,8 @@ class TGroupGraph(DashboardComponent):
             "y_end": [],
             "x_end_progress": [],
             "progress": [],
-            "x_label": [],
-            "y_label": [],
+            # "x_label": [],
+            # "y_label": [],
             "mem_alpha": [],
             "node_line_width": [],
             "xc_pbar": [],
@@ -2021,12 +2008,12 @@ class TGroupGraph(DashboardComponent):
 
             name = tg.prefix.name
             nodes_data["name"].append(name)
-            nodes_data["name_short"].append(
-                name if len(name) <= 15 else name[:12] + "..."
-            )  # This needs to be different
+            # nodes_data["name_short"].append(
+            #     name if len(name) <= 15 else name[:12] + "..."
+            # )  # This needs to be different
 
-            nodes_data["x_label"].append(x - self.width_node / 2 + 0.2)
-            nodes_data["y_label"].append(y + self.height_node / 2 - 0.2)
+            # nodes_data["x_label"].append(x - self.width_node / 2 + 0.2)
+            # nodes_data["y_label"].append(y + self.height_node / 2 - 0.2)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
             nodes_data["tot_tasks"].append(tot_tasks)
@@ -2047,8 +2034,7 @@ class TGroupGraph(DashboardComponent):
             nodes_data["x_start"].append(x - self.width_node / 2)
             nodes_data["x_end"].append(x - self.width_node / 2 + Lbar)
 
-            # Hbar = self.height_node * 0.3
-            Hbar = 3
+            Hbar = self.height_node * 0.4
             nodes_data["y_start"].append(y - self.height_node / 2)
             nodes_data["y_end"].append(y - self.height_node / 2 + Hbar)
 
@@ -2102,8 +2088,8 @@ class TGroupGraph(DashboardComponent):
             nodes_data["x_logo"].append(x + self.width_node / 3)
             nodes_data["y_logo"].append(y + self.height_node / 3)
 
-            nodes_data["h_logo"].append(self.height_node * 0.25)
-            nodes_data["w_logo"].append(self.width_node * 0.25 / ratio)
+            nodes_data["h_logo"].append(self.height_node * 0.3)
+            nodes_data["w_logo"].append(self.width_node * 0.3 / ratio)
 
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
