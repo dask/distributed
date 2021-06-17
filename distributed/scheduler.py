@@ -729,11 +729,15 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<WorkerState %r, name: %s, memory: %d, processing: %d>" % (
-            self._address,
-            self._name,
-            len(self._has_what),
-            len(self._processing),
+        return (
+            "<WorkerState %r, name: %s, memory: %d, processing: %d, occupancy: %s>"
+            % (
+                self._address,
+                self._name,
+                len(self._has_what),
+                len(self._processing),
+                format_time(self.occupancy),
+            )
         )
 
     def _repr_html_(self):
