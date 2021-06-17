@@ -7476,16 +7476,28 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+    N_RANDOM_WORKERS: Py_ssize_t = 20
+
     ws: WorkerState = None
     wws: WorkerState
     dts: TaskState
     deps: set = ts._dependencies
+    random_workers_set: set = (
+        valid_workers if valid_workers is not None else all_workers
+    )
     candidates: set
     assert all([dts._who_has for dts in deps])
     if ts._actor:
         candidates = set(all_workers)
     else:
-        candidates = {wws for dts in deps for wws in dts._who_has}
+        if len(random_workers_set) <= N_RANDOM_WORKERS:
+            candidates = random_workers_set
+        else:
+            candidates = {wws for dts in deps for wws in dts._who_has}
+            # TODO the ordering of this set is likely not actually random.
+            # Ideally it would be ordered by occupancy (but that's more work than we want to do).
+            # Can we at least ensure idle workers come first? And that it's reasonably random after that?
+            candidates.update(itertools.islice(random_workers_set, N_RANDOM_WORKERS))
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
