@@ -135,13 +135,11 @@ async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c
     root = await client.scatter(1)
     assert sum(root.key in worker.data for worker in [a, b, c]) == 1
 
-    start = time()
-    tasks = client.map(sleep, [root] * 6, pure=False)
+    tasks = client.map(inc, [root] * 6, pure=False)
     await wait(tasks)
-    elapsed = time() - start
 
-    assert elapsed <= 4
     assert all(root.key in worker.data for worker in [a, b, c])
+    assert len(a.data) == len(b.data) == len(c.data) == 3
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
