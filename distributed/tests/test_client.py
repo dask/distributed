@@ -66,7 +66,14 @@ from distributed.scheduler import (
     Scheduler,
 )
 from distributed.sizeof import sizeof
-from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
+from distributed.utils import (
+    import_term,
+    is_valid_xml,
+    mp_context,
+    sync,
+    tmp_text,
+    tmpfile,
+)
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     async_wait_for,
@@ -1560,12 +1567,12 @@ async def test_upload_file(c, s, a, b):
 @gen_cluster(client=True)
 async def test_upload_file_refresh_delayed(c, s, a, b):
     with save_sys_modules():
-        for value in [123, 456]:
-            with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
+        for i, value in enumerate([123, 456]):
+            with tmp_text(f"myfile{i}.py", f"def f():\n    return {value}") as fn:
                 await c.upload_file(fn)
 
             sys.path.append(os.path.dirname(fn))
-            from myfile import f
+            f = import_term(f"myfile{i}.f")
 
             b = delayed(f)()
             bb = c.compute(b, sync=False)
@@ -4693,8 +4700,7 @@ async def test_recreate_error_delayed(c, s, a, b):
     error_f = await c._get_errored_future(f)
     function, args, kwargs = await c._get_components_from_future(error_f)
     assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
+    assert args == ((div, 1, 0),)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4713,8 +4719,7 @@ async def test_recreate_error_futures(c, s, a, b):
     error_f = await c._get_errored_future(f)
     function, args, kwargs = await c._get_components_from_future(error_f)
     assert f.status == "error"
-    assert function.__name__ == "div"
-    assert args == (1, 0)
+    assert args == ((div, 1, 0),)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -4801,8 +4806,7 @@ async def test_recreate_task_delayed(c, s, a, b):
 
     function, args, kwargs = await c._get_components_from_future(f)
     assert f.status == "finished"
-    assert function.__name__ == "sum"
-    assert args == ([1, 1],)
+    assert args == ((sum, [1, 1]),)
     assert function(*args, **kwargs) == 2
 
 
@@ -4819,8 +4823,7 @@ async def test_recreate_task_futures(c, s, a, b):
 
     function, args, kwargs = await c._get_components_from_future(f)
     assert f.status == "finished"
-    assert function.__name__ == "sum"
-    assert args == ([1, 1],)
+    assert args == ((sum, [1, 1]),)
     assert function(*args, **kwargs) == 2
 
 
@@ -5619,7 +5622,7 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
     assert "2.00 MB" in text or "1.91 MiB" in text
     assert "large" in text
     assert "..." in text
-    assert "'000" in text
+    assert "... 000" in text
     assert "000'" in text
     assert len(text) < 2000
 

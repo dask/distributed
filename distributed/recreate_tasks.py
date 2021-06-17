@@ -2,10 +2,11 @@ import logging
 
 from dask.utils import stringify
 
+from distributed.protocol.computation import PickledTask
+
 from .client import futures_of, wait
 from .utils import sync
 from .utils_comm import pack_data
-from .worker import _deserialize
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,9 @@ class ReplayTaskClient:
             key = future.key
         spec = await self.scheduler.get_runspec(key=key)
         deps, task = spec["deps"], spec["task"]
-        if isinstance(task, dict):
-            function, args, kwargs = _deserialize(**task)
-            return (function, args, kwargs, deps)
-        else:
-            function, args, kwargs = _deserialize(task=task)
-            return (function, args, kwargs, deps)
+        assert isinstance(task, PickledTask)
+        function, args, kwargs = task.get_computation()
+        return (function, args, kwargs, deps)
 
     async def _prepare_raw_components(self, raw_components):
         """

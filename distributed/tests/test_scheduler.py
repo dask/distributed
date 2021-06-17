@@ -17,7 +17,6 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -475,22 +474,6 @@ def test_dumps_function():
 
     c = dumps_function(dec)
     assert a != c
-
-
-def test_dumps_task():
-    d = dumps_task((inc, 1))
-    assert set(d) == {"function", "args"}
-
-    f = lambda x, y=2: x + y
-    d = dumps_task((apply, f, (1,), {"y": 10}))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
-
-    d = dumps_task((apply, f, (1,)))
-    assert cloudpickle.loads(d["function"])(1, 2) == 3
-    assert cloudpickle.loads(d["args"]) == (1,)
-    assert set(d) == {"function", "args"}
 
 
 @gen_cluster()

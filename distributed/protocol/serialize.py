@@ -12,6 +12,7 @@ from dask.base import normalize_token
 from ..utils import ensure_bytes, has_keyword, typename
 from . import pickle
 from .compression import decompress, maybe_compress
+from .computation import Data, PickledCallable, PickledObject, PickledTask
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
 
 lazy_registrations = {}
@@ -118,13 +119,17 @@ def msgpack_decode_default(obj):
     if "__Set__" in obj:
         return set(obj["as-list"])
 
-    if "__Serialized__" in obj:
-        # Notice, the data here is marked a Serialized rather than deserialized. This
-        # is because deserialization requires Pickle which the Scheduler cannot run
-        # because of security reasons.
-        # By marking it Serialized, the data is passed through to the workers that
-        # eventually will deserialize it.
-        return Serialized(*obj["data"])
+    if "__PickledTask__" in obj:
+        return PickledTask(obj["value"])
+
+    if "__PickledCallable__" in obj:
+        return PickledCallable(obj["value"])
+
+    if "__PickledObject__" in obj:
+        return PickledObject(obj["value"])
+
+    if "__Data__" in obj:
+        return Data(obj["value"])
 
     return obj
 
@@ -147,6 +152,18 @@ def msgpack_encode_default(obj):
 
     if isinstance(obj, set):
         return {"__Set__": True, "as-list": list(obj)}
+
+    if isinstance(obj, PickledTask):
+        return {"__PickledTask__": True, "value": obj.value}
+
+    if isinstance(obj, PickledCallable):
+        return {"__PickledCallable__": True, "value": obj.value}
+
+    if isinstance(obj, PickledObject):
+        return {"__PickledObject__": True, "value": obj.value}
+
+    if isinstance(obj, Data):
+        return {"__Data__": True, "value": obj.value}
 
     return obj
 

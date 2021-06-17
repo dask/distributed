@@ -58,6 +58,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
+from .protocol.computation import Computation
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -393,7 +394,7 @@ class WorkerState:
     .. attribute:: processing: {TaskState: cost}
 
        A dictionary of tasks that have been submitted to this worker.
-       Each task state is asssociated with the expected cost in seconds
+       Each task state is associated with the expected cost in seconds
        of running that task, summing both the task's expected computation
        time and the expected communication time of its result.
 
@@ -408,7 +409,7 @@ class WorkerState:
     .. attribute:: executing: {TaskState: duration}
 
        A dictionary of tasks that are currently being run on this worker.
-       Each task state is asssociated with the duration in seconds which
+       Each task state is associated with the duration in seconds which
        the task has been running.
 
     .. attribute:: has_what: {TaskState}
@@ -7386,11 +7387,15 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
     if duration < 0:
         duration = state.get_task_duration(ts)
 
+    run_spec = ts._run_spec
+    assert run_spec is None or isinstance(run_spec, Computation)
+
     msg: dict = {
         "op": "compute-task",
         "key": ts._key,
         "priority": ts._priority,
         "duration": duration,
+        "runspec": run_spec,
     }
     if ts._resource_restrictions:
         msg["resource_restrictions"] = ts._resource_restrictions
@@ -7406,12 +7411,6 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
 
         if state._validate:
             assert all(msg["who_has"].values())
-
-    task = ts._run_spec
-    if type(task) is dict:
-        msg.update(task)
-    else:
-        msg["task"] = task
 
     if ts._annotations:
         msg["annotations"] = ts._annotations

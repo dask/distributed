@@ -10,7 +10,7 @@ import sys
 import threading
 import warnings
 import weakref
-from collections import defaultdict, deque, namedtuple
+from collections import defaultdict, deque
 from collections.abc import MutableMapping
 from contextlib import suppress
 from datetime import timedelta
@@ -25,7 +25,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
-from dask.utils import apply, format_bytes, funcname
+from dask.utils import format_bytes, funcname
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -47,7 +47,9 @@ from .http import get_handlers
 from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
-from .protocol import pickle, to_serialize
+from .protocol import pickle
+from .protocol.computation import Computation, PickledTask, Task
+from .protocol.serialize import to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
@@ -56,7 +58,6 @@ from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
     LRU,
     TimeoutError,
-    _maybe_complex,
     deprecated,
     get_ip,
     has_arg,
@@ -99,8 +100,6 @@ DEFAULT_STARTUP_INFORMATION = {}
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
 )
-
-SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
 class TaskState:
@@ -155,15 +154,14 @@ class TaskState:
     Parameters
     ----------
     key: str
-    runspec: SerializedTask
-        A named tuple containing the ``function``, ``args``, ``kwargs`` and
-        ``task`` associated with this `TaskState` instance. This defaults to
+    runspec: Computation
+        This defaults to
         ``None`` and can remain empty if it is a dependency that this worker
         will receive from another worker.
 
     """
 
-    def __init__(self, key, runspec=None):
+    def __init__(self, key, runspec: Computation = None):
         assert key is not None
         self.key = key
         self.runspec = runspec
@@ -416,7 +414,7 @@ class Worker(ServerNode):
         lifetime_restart=None,
         **kwargs,
     ):
-        self.tasks = dict()
+        self.tasks: Dict[str, TaskState] = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -1555,10 +1553,7 @@ class Worker(ServerNode):
     def add_task(
         self,
         key,
-        function=None,
-        args=None,
-        kwargs=None,
-        task=no_value,
+        runspec: Computation = None,
         who_has=None,
         nbytes=None,
         priority=None,
@@ -1569,7 +1564,6 @@ class Worker(ServerNode):
         **kwargs2,
     ):
         try:
-            runspec = SerializedTask(function, args, kwargs, task)
             if key in self.tasks:
                 ts = self.tasks[key]
                 ts.scheduler_holds_ref = True
@@ -1592,9 +1586,7 @@ class Worker(ServerNode):
                     self.transition(ts, "waiting", runspec=runspec)
             else:
                 self.log.append((key, "new"))
-                self.tasks[key] = ts = TaskState(
-                    key=key, runspec=SerializedTask(function, args, kwargs, task)
-                )
+                self.tasks[key] = ts = TaskState(key=key, runspec=runspec)
                 self.transition(ts, "waiting")
             # TODO: move transition of `ts` to end of `add_task`
             # This will require a chained recommendation transition system like
@@ -2870,31 +2862,32 @@ class Worker(ServerNode):
 
         return True
 
-    async def _maybe_deserialize_task(self, ts):
-        if not isinstance(ts.runspec, SerializedTask):
-            return ts.runspec
-        try:
-            start = time()
-            # Offload deserializing large tasks
-            if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
-                function, args, kwargs = await offload(_deserialize, *ts.runspec)
-            else:
-                function, args, kwargs = _deserialize(*ts.runspec)
-            stop = time()
+    async def _maybe_deserialize_task(self, ts: TaskState) -> Computation:
+        if isinstance(ts.runspec, PickledTask):
+            try:
+                start = time()
+                # Offload deserializing large tasks
+                if sizeof(ts.runspec) > OFFLOAD_THRESHOLD:
+                    runspec = await offload(_deserialize, ts.runspec)
+                else:
+                    runspec = _deserialize(ts.runspec)
+                stop = time()
 
-            if stop - start > 0.010:
-                ts.startstops.append(
-                    {"action": "deserialize", "start": start, "stop": stop}
-                )
-            return function, args, kwargs
-        except Exception as e:
-            logger.warning("Could not deserialize task", exc_info=True)
-            emsg = error_message(e)
-            emsg["key"] = ts.key
-            emsg["op"] = "task-erred"
-            self.batched_stream.send(emsg)
-            self.log.append((ts.key, "deserialize-error"))
-            raise
+                if stop - start > 0.010:
+                    ts.startstops.append(
+                        {"action": "deserialize", "start": start, "stop": stop}
+                    )
+                return runspec
+            except Exception as e:
+                logger.warning("Could not deserialize task", exc_info=True)
+                emsg = error_message(e)
+                emsg["key"] = ts.key
+                emsg["op"] = "task-erred"
+                self.batched_stream.send(emsg)
+                self.log.append((ts.key, "deserialize-error"))
+                raise
+        else:
+            return ts.runspec
 
     async def ensure_computing(self):
         if self.paused:
@@ -2962,7 +2955,7 @@ class Worker(ServerNode):
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
 
-            function, args, kwargs = ts.runspec
+            function, args, kwargs = ts.runspec.get_computation()
 
             start = time()
             data = {}
@@ -3772,21 +3765,9 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-def _deserialize(function=None, args=None, kwargs=None, task=no_value):
-    """Deserialize task inputs and regularize to func, args, kwargs"""
-    if function is not None:
-        function = loads_function(function)
-    if args and isinstance(args, bytes):
-        args = pickle.loads(args)
-    if kwargs and isinstance(kwargs, bytes):
-        kwargs = pickle.loads(kwargs)
-
-    if task is not no_value:
-        assert not function and not args and not kwargs
-        function = execute_task
-        args = (task,)
-
-    return function, args or (), kwargs or {}
+def _deserialize(runspec: PickledTask) -> Task:
+    """Deserialize computation"""
+    return runspec.get_task()
 
 
 def execute_task(task):
@@ -3828,59 +3809,10 @@ def dumps_function(func):
 
 
 def dumps_task(task):
-    """Serialize a dask task
+    from .protocol.computation import typeset_computation
 
-    Returns a dict of bytestrings that can each be loaded with ``loads``
-
-    Examples
-    --------
-    Either returns a task as a function, args, kwargs dict
-
-    >>> from operator import add
-    >>> dumps_task((add, 1))  # doctest: +SKIP
-    {'function': b'\x80\x04\x95\x00\x8c\t_operator\x94\x8c\x03add\x94\x93\x94.'
-     'args': b'\x80\x04\x95\x07\x00\x00\x00K\x01K\x02\x86\x94.'}
-
-    Or as a single task blob if it can't easily decompose the result.  This
-    happens either if the task is highly nested, or if it isn't a task at all
-
-    >>> dumps_task(1)  # doctest: +SKIP
-    {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
-    """
-    if istask(task):
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
-            return d
-        elif not any(map(_maybe_complex, task[1:])):
-            return {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
-    return to_serialize(task)
-
-
-_warn_dumps_warned = [False]
-
-
-def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
-    """Dump an object to bytes, warn if those bytes are large"""
-    b = dumps(obj, protocol=4)
-    if not _warn_dumps_warned[0] and len(b) > limit:
-        _warn_dumps_warned[0] = True
-        s = str(obj)
-        if len(s) > 70:
-            s = s[:50] + " ... " + s[-15:]
-        warnings.warn(
-            "Large object of size %s detected in task graph: \n"
-            "  %s\n"
-            "Consider scattering large objects ahead of time\n"
-            "with client.scatter to reduce scheduler burden and \n"
-            "keep data on workers\n\n"
-            "    future = client.submit(func, big_data)    # bad\n\n"
-            "    big_future = client.scatter(big_data)     # good\n"
-            "    future = client.submit(func, big_future)  # good"
-            % (format_bytes(len(b)), s)
-        )
-    return b
+    # TODO: replace all calls to dumps_task() with calls to typeset_computation()
+    return typeset_computation(task)
 
 
 def apply_function(
