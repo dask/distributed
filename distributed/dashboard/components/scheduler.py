@@ -1757,6 +1757,11 @@ class TGroupGraph(DashboardComponent):
                 "xc_pbar": [],
                 "yc_pbar": [],
                 "comp_tasks": [],
+                "url_logo": [],
+                "x_logo": [],
+                "y_logo": [],
+                "w_logo": [],
+                "h_logo": [],
             }
         )
 
@@ -1778,6 +1783,17 @@ class TGroupGraph(DashboardComponent):
             fill_alpha="mem_alpha",
             line_color="black",
             line_width="node_line_width",
+            source=self.nodes_source,
+        )
+
+        ####plot tg log
+        self.root.image_url(
+            url="url_logo",
+            x="x_logo",
+            y="y_logo",
+            w="w_logo",
+            h="h_logo",
+            anchor="center",
             source=self.nodes_source,
         )
 
@@ -1969,6 +1985,11 @@ class TGroupGraph(DashboardComponent):
             "xc_pbar": [],
             "yc_pbar": [],
             "comp_tasks": [],
+            "url_logo": [],
+            "x_logo": [],
+            "y_logo": [],
+            "w_logo": [],
+            "h_logo": [],
         }
 
         arrows_data = {
@@ -1977,7 +1998,7 @@ class TGroupGraph(DashboardComponent):
             "xe": [],
             "ye": [],
         }
-
+        # visited = []
         for key, tg in self.scheduler.task_groups.items():
             x = self.nodes_layout[key]["x"]
             y = self.nodes_layout[key]["y"]
@@ -2019,6 +2040,7 @@ class TGroupGraph(DashboardComponent):
             nodes_data["x_start"].append(x - self.width_node / 2)
             nodes_data["x_end"].append(x - self.width_node / 2 + Lbar)
 
+            # Hbar = self.height_node * 0.3
             Hbar = 3
             nodes_data["y_start"].append(y - self.height_node / 2)
             nodes_data["y_end"].append(y - self.height_node / 2 + Hbar)
@@ -2051,6 +2073,40 @@ class TGroupGraph(DashboardComponent):
             arrows_data["ye"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
             ]
+            # LOGOS (it seems svg not supported? can't display this for example
+            #  https://numpy.org/images/logos/numpy.svg)
+
+            logos_dict = {
+                "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",
+                "pandas": "https://static.bokeh.org/logos/logo.png",
+                "builtins": "https://logos-download.com/wp-content/uploads/2016/10/Python_logo_icon.png",
+            }
+
+            # if key in visited:
+            #     continue
+            # else:
+            if len(tg.types) == 1:
+                tg_dtype = tg.types.copy()
+                logo_type = tg_dtype.pop().split(".")[0]
+                try:
+                    url_logo = logos_dict[logo_type]
+                    # visited.append(key)
+                except KeyError:
+                    url_logo = ""
+                    # visited.append(key)
+            else:
+                url_logo = ""
+                # visited.append(key)
+
+            nodes_data["url_logo"].append(url_logo)
+
+            ratio = self.width_node / self.height_node
+
+            nodes_data["x_logo"].append(x + self.width_node / 3)
+            nodes_data["y_logo"].append(y + self.height_node / 3)
+
+            nodes_data["h_logo"].append(self.height_node * 0.25)
+            nodes_data["w_logo"].append(self.width_node * 0.25 / ratio)
 
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
