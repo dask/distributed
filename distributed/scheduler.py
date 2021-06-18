@@ -7500,9 +7500,7 @@ def decide_worker(
         if len(candidates) < len(worker_pool):
             sample_from = idle_workers or worker_pool
             candidates.update(
-                random_choices_iter(sample_from, 10)
-                if len(sample_from) > 10
-                else sample_from
+                random.choices(list(sample_from), k=min(10, len(sample_from)))
             )
     if valid_workers is None:
         if not candidates:
@@ -7525,11 +7523,6 @@ def decide_worker(
     else:
         ws = min(candidates, key=objective)
     return ws
-
-
-def random_choices_iter(xs: Iterable, k: int) -> Iterable:
-    "Randomly choose between 0 and *k* items from *xs*"
-    return itertools.islice(itertools.takewhile(lambda _: random.random() < 0.5, xs), k)
 
 
 def validate_task_state(ts: TaskState):
