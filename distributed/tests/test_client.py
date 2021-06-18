@@ -66,14 +66,7 @@ from distributed.scheduler import (
     Scheduler,
 )
 from distributed.sizeof import sizeof
-from distributed.utils import (
-    import_term,
-    is_valid_xml,
-    mp_context,
-    sync,
-    tmp_text,
-    tmpfile,
-)
+from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     async_wait_for,
@@ -1567,12 +1560,12 @@ async def test_upload_file(c, s, a, b):
 @gen_cluster(client=True)
 async def test_upload_file_refresh_delayed(c, s, a, b):
     with save_sys_modules():
-        for i, value in enumerate([123, 456]):
-            with tmp_text(f"myfile{i}.py", f"def f():\n    return {value}") as fn:
+        for value in [123, 456]:
+            with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
                 await c.upload_file(fn)
 
             sys.path.append(os.path.dirname(fn))
-            f = import_term(f"myfile{i}.f")
+            from myfile import f
 
             b = delayed(f)()
             bb = c.compute(b, sync=False)

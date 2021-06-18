@@ -23,7 +23,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
-from dask.core import istask
 from dask.system import CPU_COUNT
 from dask.utils import format_bytes, funcname
 
@@ -48,7 +47,7 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle
-from .protocol.computation import Computation, PickledComputation
+from .protocol.computation import Computation, PickledCallable, PickledComputation
 from .protocol.serialize import to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
@@ -1062,7 +1061,7 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
-                cache_loads.data.clear()
+                PickledCallable.cache_loads.clear()
             except Exception as e:
                 logger.exception(e)
                 raise e
@@ -3751,42 +3750,9 @@ async def get_data_from_worker(
 job_counter = [0]
 
 
-cache_loads = LRU(maxsize=100)
-
-
-def loads_function(bytes_object):
-    """Load a function from bytes, cache bytes"""
-    if len(bytes_object) < 100000:
-        try:
-            result = cache_loads[bytes_object]
-        except KeyError:
-            result = pickle.loads(bytes_object)
-            cache_loads[bytes_object] = result
-        return result
-    return pickle.loads(bytes_object)
-
-
 def _deserialize(runspec: PickledComputation) -> Computation:
     """Deserialize computation"""
     return runspec.get_computation()
-
-
-def execute_task(task):
-    """Evaluate a nested task
-
-    >>> inc = lambda x: x + 1
-    >>> execute_task((inc, 1))
-    2
-    >>> execute_task((sum, [1, 2, (inc, 3)]))
-    7
-    """
-    if istask(task):
-        func, args = task[0], task[1:]
-        return func(*map(execute_task, args))
-    elif isinstance(task, list):
-        return list(map(execute_task, task))
-    else:
-        return task
 
 
 cache_dumps = LRU(maxsize=100)
