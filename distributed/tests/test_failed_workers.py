@@ -620,3 +620,51 @@ async def test_forget_data_not_supposed_to_have(s, a, b):
     assert a.data
     while a.data:
         await asyncio.sleep(0.001)
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1) for _ in range(3)],
+    config={"distributed.comm.timeouts.connect": "1s"},
+    Worker=Nanny,
+)
+async def test_failing_worker_with_additional_replicas_on_cluster(c, s, *workers):
+    """
+    If a worker detects a missing dependency, the scheduler is notified. If no
+    other replica is available, the dependency is rescheduled. A reschedule
+    typically causes a lot of state to be reset. However, if another replica is
+    available, we'll need to ensure that the worker can detect outdated state
+    and correct its state.
+    """
+
+    def slow_transfer(x, delay=0.1):
+        return SlowTransmitData(x, delay=delay)
+
+    def dummy(*args, **kwargs):
+        return
+
+    import psutil
+
+    proc = psutil.Process(workers[1].pid)
+    f1 = c.submit(
+        slow_transfer,
+        1,
+        key="f1",
+        workers=[workers[0].worker_address],
+    )
+    # We'll schedule tasks on two workers, s.t. f1 is replicated. We will
+    # suspend one of the workers and kill the origin worker of f1 such that a
+    # comm failure causes the worker to handle a missing dependency. It will ask
+    # the schedule such that it knows that a replica is available on f2 and
+    # reschedules the fetch
+    f2 = c.submit(dummy, f1, pure=False, key="f2", workers=[workers[1].worker_address])
+    f3 = c.submit(dummy, f1, pure=False, key="f3", workers=[workers[2].worker_address])
+
+    await wait(f1)
+    proc.suspend()
+
+    await wait(f3)
+    await workers[0].close()
+
+    proc.resume()
+    await c.gather([f1, f2, f3])

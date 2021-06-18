@@ -2532,7 +2532,7 @@ class Worker(ServerNode):
                     logger.debug("New workers found for %s", dep.key)
                     self.log.append((dep.key, "new workers found"))
                     for dependent in dep.dependents:
-                        if dependent.key in dep.waiting_for_data:
+                        if dep.key in dependent.waiting_for_data:
                             self.data_needed.append(dependent.key)
             if still_missing:
                 logger.debug(
