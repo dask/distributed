@@ -1747,7 +1747,6 @@ class TGroupGraph(DashboardComponent):
                 "x": [],
                 "y": [],
                 "name": [],
-                # "name_short": [],
                 "tot_tasks": [],
                 "color": [],
                 "x_start": [],
@@ -1756,8 +1755,6 @@ class TGroupGraph(DashboardComponent):
                 "y_end": [],
                 "x_end_progress": [],
                 "progress": [],
-                # "x_label": [],
-                # "y_label": [],
                 "mem_alpha": [],
                 "node_line_width": [],
                 "xc_pbar": [],
@@ -1768,6 +1765,10 @@ class TGroupGraph(DashboardComponent):
                 "y_logo": [],
                 "w_logo": [],
                 "h_logo": [],
+                "in_processing": [],
+                "in_memory": [],
+                "in_released": [],
+                "in_erred": [],
             }
         )
 
@@ -1810,7 +1811,7 @@ class TGroupGraph(DashboardComponent):
             right="x_end",
             bottom="y_start",
             top="y_end",
-            color="white",
+            color=None,  # "white",
             line_color="black",
             source=self.nodes_source,
         )
@@ -1840,31 +1841,18 @@ class TGroupGraph(DashboardComponent):
         )
         self.root.add_layout(self.arrows)
 
-        # top left title
-        # self.labels = LabelSet(
-        #     x="x_label",
-        #     y="y_label",
-        #     text="name_short",
+        # display completed / total tasks
+        # self.task_comp_labels = LabelSet(
+        #     x="xc_pbar",
+        #     y="yc_pbar",
+        #     text="comp_tasks",
         #     text_font_size="1vmin",
-        #     text_align="left",
-        #     text_baseline="top",
+        #     text_align="center",
+        #     text_baseline="middle",
         #     source=self.nodes_source,
         #     background_fill_color=None,
         # )
-        # self.root.add_layout(self.labels)
-
-        # display completed / total tasks
-        self.task_comp_labels = LabelSet(
-            x="xc_pbar",
-            y="yc_pbar",
-            text="comp_tasks",
-            text_font_size="1vmin",
-            text_align="center",
-            text_baseline="middle",
-            source=self.nodes_source,
-            background_fill_color=None,
-        )
-        self.root.add_layout(self.task_comp_labels)
+        # self.root.add_layout(self.task_comp_labels)
 
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -1872,19 +1860,47 @@ class TGroupGraph(DashboardComponent):
         self.root.y_range.range_padding = 0.5
 
         hover = HoverTool(
-            point_policy="snap_to_data",
-            tooltips=[("tg", "@name"), ("num_task", "@tot_tasks")],
+            point_policy="follow_mouse",
+            tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Name:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">All:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Comp / All:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;"> % Completed:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@progress</span>
+                            </div>
+
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Processing:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_processing</span>
+                            </div>
+
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">In memory:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Erred:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_erred</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Released:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_released</span>
+                            </div>
+                            """,
             renderers=[rect],
         )
 
-        hover_progress = HoverTool(
-            point_policy="follow_mouse",
-            tooltips=[("% completed", "@progress")],
-            renderers=[pbar],
-        )
-
         self.root.add_tools(hover)
-        self.root.add_tools(hover_progress)
 
     @without_property_validation
     def update_layout(self):
@@ -1958,7 +1974,6 @@ class TGroupGraph(DashboardComponent):
             "x": [],
             "y": [],
             "name": [],
-            # "name_short": [],
             "color": [],
             "tot_tasks": [],
             "x_start": [],
@@ -1967,8 +1982,6 @@ class TGroupGraph(DashboardComponent):
             "y_end": [],
             "x_end_progress": [],
             "progress": [],
-            # "x_label": [],
-            # "y_label": [],
             "mem_alpha": [],
             "node_line_width": [],
             "xc_pbar": [],
@@ -1979,6 +1992,10 @@ class TGroupGraph(DashboardComponent):
             "y_logo": [],
             "w_logo": [],
             "h_logo": [],
+            "in_processing": [],
+            "in_memory": [],
+            "in_released": [],
+            "in_erred": [],
         }
 
         arrows_data = {
@@ -2003,12 +2020,6 @@ class TGroupGraph(DashboardComponent):
 
             name = tg.prefix.name
             nodes_data["name"].append(name)
-            # nodes_data["name_short"].append(
-            #     name if len(name) <= 15 else name[:12] + "..."
-            # )  # This needs to be different
-
-            # nodes_data["x_label"].append(x - self.width_node / 2 + 0.2)
-            # nodes_data["y_label"].append(y + self.height_node / 2 - 0.2)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
             nodes_data["tot_tasks"].append(tot_tasks)
@@ -2085,6 +2096,12 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["h_logo"].append(self.height_node * 0.3)
             nodes_data["w_logo"].append(self.width_node * 0.3 / ratio)
+
+            # Add some status to hover
+            nodes_data["in_processing"].append(tg.states["processing"])
+            nodes_data["in_memory"].append(tg.states["memory"])
+            nodes_data["in_released"].append(tg.states["released"])
+            nodes_data["in_erred"].append(tg.states["erred"])
 
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
