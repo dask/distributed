@@ -100,7 +100,7 @@ async def test_recompute_released_results(c, s, a, b):
     assert result == 1
 
 
-@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "1mb"})
+@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "1Mb"})
 async def test_decide_worker_with_many_independent_leaves(c, s, a, b):
     # Make data large to penalize scheduling dependent tasks on other workers
     ballast = b"\0" * int(s.bandwidth)
