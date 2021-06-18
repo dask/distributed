@@ -255,10 +255,14 @@ def typeset_computation(computation) -> Computation:
 
     computation = serialize_callables(computation)
     if contain_tasks[0]:
+        # We found a task thus this is a (nested) task
         return PickledComputation.serialize(computation, is_a_task=True)
     elif contain_pickled[0]:
+        # We didn't find a task but it contains pickled objects
         return PickledComputation.serialize(computation, is_a_task=False)
     else:
+        # No tasks or pickled objects. Still, it might contain non-msgpack
+        # serializable objects thus we wrap it in `Serialize`
         return Computation(Serialize(computation), is_a_task=False)
 
 
