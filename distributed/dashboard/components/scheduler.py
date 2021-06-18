@@ -71,7 +71,6 @@ from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
-from distributed.diagnostics.tg_graph_utils import toposort_layers
 from distributed.metrics import time
 from distributed.utils import format_time, log_errors, parse_timedelta
 
