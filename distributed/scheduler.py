@@ -7470,7 +7470,7 @@ def decide_worker(
     Decide which worker should take task *ts*.
 
     We consider all workers which hold dependencies of *ts*,
-    plus a sample of up to 20 random workers (with preference for idle ones).
+    plus a sample of up to 10 random workers (with preference for idle ones).
 
     From those, we choose the worker where the *objective* function is minimized.
 
