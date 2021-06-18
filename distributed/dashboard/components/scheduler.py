@@ -2169,7 +2169,12 @@ class SchedulerLogs:
         if start is not None:
             logs = [log for log in logs if log[0] > start]
 
-        logs_html = Logs(logs)._repr_html_()
+        if not logs:
+            logs_html = (
+                '<p style="font-family: monospace; margin: 0;">No logs to report</p>'
+            )
+        else:
+            logs_html = Logs(logs)._repr_html_()
 
         self.root = Div(text=logs_html)
 
