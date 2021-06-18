@@ -97,6 +97,12 @@ class PickledObject:
     def deserialize(self):
         return pickle.loads(self._value)
 
+    def __eq__(self, other):
+        return isinstance(other, PickledObject) and self._value == other._value
+
+    def __ne__(self, other):
+        return not (self == other)
+
 
 class PickledCallable(PickledObject):
     cache_dumps: MutableMapping[int, bytes] = LRU(maxsize=100)

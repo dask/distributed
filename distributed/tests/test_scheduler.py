@@ -23,7 +23,7 @@ from distributed.comm import Comm
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
-from distributed.protocol.computation import typeset_dask_graph
+from distributed.protocol.computation import PickledCallable, typeset_dask_graph
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
 from distributed.utils import TimeoutError, tmpfile, typename
@@ -299,7 +299,9 @@ async def test_blocked_handlers_are_respected(s, a, b):
         return dumps(dict(scheduler.worker_info))
 
     comm = await connect(s.address)
-    await comm.write({"op": "feed", "function": dumps(func), "interval": 0.01})
+    await comm.write(
+        {"op": "feed", "function": PickledCallable.serialize(func), "interval": 0.01}
+    )
 
     response = await comm.read()
 
@@ -324,7 +326,9 @@ async def test_feed(s, a, b):
         return dumps(dict(scheduler.worker_info))
 
     comm = await connect(s.address)
-    await comm.write({"op": "feed", "function": dumps(func), "interval": 0.01})
+    await comm.write(
+        {"op": "feed", "function": PickledCallable.serialize(func), "interval": 0.01}
+    )
 
     for i in range(5):
         response = await comm.read()
@@ -350,9 +354,9 @@ async def test_feed_setup_teardown(s, a, b):
     await comm.write(
         {
             "op": "feed",
-            "function": dumps(func),
-            "setup": dumps(setup),
-            "teardown": dumps(teardown),
+            "function": PickledCallable.serialize(func),
+            "setup": PickledCallable.serialize(setup),
+            "teardown": PickledCallable.serialize(teardown),
             "interval": 0.01,
         }
     )
@@ -379,7 +383,9 @@ async def test_feed_large_bytestring(s, a, b):
         return True
 
     comm = await connect(s.address)
-    await comm.write({"op": "feed", "function": dumps(func), "interval": 0.05})
+    await comm.write(
+        {"op": "feed", "function": PickledCallable.serialize(func), "interval": 0.05}
+    )
 
     for i in range(5):
         response = await comm.read()

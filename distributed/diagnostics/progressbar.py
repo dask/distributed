@@ -10,7 +10,7 @@ from tornado.ioloop import IOLoop
 
 from ..client import default_client, futures_of
 from ..core import CommClosedError, coerce_to_address, connect
-from ..protocol.pickle import dumps
+from ..protocol.computation import PickledCallable
 from ..utils import LoopRunner, is_kernel, key_split, parse_timedelta
 from .progress import MultiProgress, Progress, format_time
 
@@ -69,8 +69,8 @@ class ProgressBar:
         await self.comm.write(
             {
                 "op": "feed",
-                "setup": dumps(setup),
-                "function": dumps(function),
+                "setup": PickledCallable.serialize(setup),
+                "function": PickledCallable.serialize(function),
                 "interval": self.interval,
             },
             serializers=self.client()._serializers if self.client else None,
@@ -261,8 +261,8 @@ class MultiProgressBar:
         await self.comm.write(
             {
                 "op": "feed",
-                "setup": dumps(setup),
-                "function": dumps(function),
+                "setup": PickledCallable.serialize(setup),
+                "function": PickledCallable.serialize(function),
                 "interval": self.interval,
             }
         )
