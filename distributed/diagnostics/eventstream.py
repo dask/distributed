@@ -1,7 +1,7 @@
 import logging
 
 from ..core import coerce_to_address, connect
-from ..worker import dumps_function
+from ..protocol.computation import PickledCallable
 from .plugin import SchedulerPlugin
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,10 @@ async def eventstream(address, interval):
     await comm.write(
         {
             "op": "feed",
-            "setup": dumps_function(EventStream),
-            "function": dumps_function(swap_buffer),
+            "setup": PickledCallable.serialize(EventStream),
+            "function": PickledCallable.serialize(swap_buffer),
             "interval": interval,
-            "teardown": dumps_function(teardown),
+            "teardown": PickledCallable.serialize(teardown),
         }
     )
     return comm

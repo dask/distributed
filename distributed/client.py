@@ -54,7 +54,8 @@ from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_nam
 from .metrics import time
 from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
-from .protocol.pickle import dumps, loads
+from .protocol.computation import PickledObject
+from .protocol.pickle import dumps
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
 from .security import Security
@@ -1314,7 +1315,7 @@ class Client:
         if state is not None:
             if type and not state.type:  # Type exists and not yet set
                 try:
-                    type = loads(type)
+                    type = PickledObject.deserialize(type)
                 except Exception:
                     type = None
                 # Here, `type` may be a str if actual type failed

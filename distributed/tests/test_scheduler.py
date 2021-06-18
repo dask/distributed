@@ -42,7 +42,6 @@ from distributed.utils_test import (
     tls_only_security,
     varying,
 )
-from distributed.worker import dumps_function
 
 if sys.version_info < (3, 8):
     try:
@@ -466,17 +465,6 @@ async def test_filtered_communication(s, a, b):
     (msg,) = await f.read()
     assert msg["op"] == "key-in-memory"
     assert msg["key"] == "z"
-
-
-def test_dumps_function():
-    a = dumps_function(inc)
-    assert cloudpickle.loads(a)(10) == 11
-
-    b = dumps_function(inc)
-    assert a is b
-
-    c = dumps_function(dec)
-    assert a != c
 
 
 @gen_cluster()

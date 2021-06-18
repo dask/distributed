@@ -6399,12 +6399,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         interval = parse_timedelta(interval)
         with log_errors():
-            if function:
-                function = pickle.loads(function)
-            if setup:
-                setup = pickle.loads(setup)
-            if teardown:
-                teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
             if inspect.isawaitable(state):
                 state = await state

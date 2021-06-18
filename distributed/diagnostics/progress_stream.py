@@ -3,9 +3,9 @@ import logging
 from tlz import merge, valmap
 
 from ..core import coerce_to_address, connect
+from ..protocol.computation import PickledCallable
 from ..scheduler import Scheduler
 from ..utils import color_of, key_split
-from ..worker import dumps_function
 from .progress import AllProgress
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,10 @@ async def progress_stream(address, interval):
     await comm.write(
         {
             "op": "feed",
-            "setup": dumps_function(AllProgress),
-            "function": dumps_function(counts),
+            "setup": PickledCallable.serialize(AllProgress),
+            "function": PickledCallable.serialize(counts),
             "interval": interval,
-            "teardown": dumps_function(remove_plugin),
+            "teardown": PickledCallable.serialize(remove_plugin),
         }
     )
     return comm

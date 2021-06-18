@@ -47,7 +47,12 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle
-from .protocol.computation import Computation, PickledCallable, PickledComputation
+from .protocol.computation import (
+    Computation,
+    PickledCallable,
+    PickledComputation,
+    PickledObject,
+)
 from .protocol.serialize import to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
@@ -55,7 +60,6 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .threadpoolexecutor import secede as tpe_secede
 from .utils import (
-    LRU,
     TimeoutError,
     deprecated,
     get_ip,
@@ -153,9 +157,8 @@ class TaskState:
     Parameters
     ----------
     key: str
-    runspec: Computation
-        This defaults to
-        ``None`` and can remain empty if it is a dependency that this worker
+    runspec: Computation, optional
+        This defaults to ``None`` and can remain empty if it is a dependency that this worker
         will receive from another worker.
 
     """
@@ -2188,7 +2191,7 @@ class Worker(ServerNode):
                 typ = ts.type = type(value)
                 del value
             try:
-                typ_serialized = dumps_function(typ)
+                typ_serialized = PickledObject.serialize(typ)
             except PicklingError:
                 # Some types fail pickling (example: _thread.lock objects),
                 # send their name as a best effort.
@@ -3753,26 +3756,6 @@ job_counter = [0]
 def _deserialize(runspec: PickledComputation) -> Computation:
     """Deserialize computation"""
     return runspec.get_computation()
-
-
-cache_dumps = LRU(maxsize=100)
-
-_cache_lock = threading.Lock()
-
-
-def dumps_function(func):
-    """Dump a function to bytes, cache functions"""
-    try:
-        with _cache_lock:
-            result = cache_dumps[func]
-    except KeyError:
-        result = pickle.dumps(func, protocol=4)
-        if len(result) < 100000:
-            with _cache_lock:
-                cache_dumps[func] = result
-    except TypeError:  # Unhashable function
-        result = pickle.dumps(func, protocol=4)
-    return result
 
 
 def apply_function(
