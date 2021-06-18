@@ -87,13 +87,17 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, comm=None, n=None):
+    def get_logs(self, comm=None, n=None, timestamps=False):
         deque_handler = self._deque_handler
         if n is None:
             L = list(deque_handler.deque)
         else:
             L = deque_handler.deque
             L = [L[-i] for i in range(min(n, len(L)))]
+        if timestamps:
+            return [
+                (msg.created, msg.levelname, deque_handler.format(msg)) for msg in L
+            ]
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
 
     def start_http_server(

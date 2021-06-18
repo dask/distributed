@@ -35,6 +35,8 @@ try:
 except ImportError:
     resource = None
 
+from datetime import datetime
+
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -1279,10 +1281,22 @@ class Log(tuple):
     }
 
     def _repr_html_(self):
-        level, message = self
+        if len(self) == 3:
+            time, level, message = self
+            time = datetime.fromtimestamp(time).strftime("%H:%M:%S.%f")
+        else:
+            level, message = self
+            time = None
 
         style = "font-family: monospace; margin: 0;"
         style += self.level_styles.get(level, "")
+
+        if time is not None:
+            return '<p style="{style}">{time} - {message}</p>'.format(
+                time=html.escape(time),
+                style=html.escape(style),
+                message=html.escape(message),
+            )
 
         return '<p style="{style}">{message}</p>'.format(
             style=html.escape(style),

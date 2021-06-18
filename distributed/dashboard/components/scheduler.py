@@ -2165,7 +2165,7 @@ class WorkerTable(DashboardComponent):
 
 class SchedulerLogs:
     def __init__(self, scheduler):
-        logs = Logs(scheduler.get_logs())._repr_html_()
+        logs = Logs(scheduler.get_logs(timestamps=True))._repr_html_()
 
         self.root = Div(text=logs)
 
