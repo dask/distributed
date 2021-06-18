@@ -18,7 +18,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional, Union
+from typing import Optional
 
 import psutil
 import sortedcontainers
@@ -2324,8 +2324,8 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self._workers_dv,
-                self._idle_dv,
+                self._workers.values(),
+                self._idle.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
@@ -7461,8 +7461,8 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 @exceptval(check=False)
 def decide_worker(
     ts: TaskState,
-    all_workers: dict,
-    idle_workers: dict,
+    all_workers: sortedcontainers.SortedValuesView,
+    idle_workers: sortedcontainers.SortedValuesView,
     valid_workers: set,
     objective,
 ) -> WorkerState:
@@ -7489,20 +7489,21 @@ def decide_worker(
     candidates: set
     assert all([dts._who_has for dts in deps])
     if ts._actor:
-        candidates = set(all_workers.values())
+        candidates = set(all_workers)
     else:
         # Select all workers holding deps of this task
         candidates = {wws for dts in deps for wws in dts._who_has}
-
-        worker_pool = valid_workers if valid_workers is not None else all_workers
-        if len(candidates) < len(worker_pool):
-            # Add up to 10 random workers into `candidates`, preferring idle ones.
-            candidates.update(
-                random_choices_dict_set(idle_workers or worker_pool, k=10)
-            )
+        # Add up to 10 random workers into `candidates`, preferring idle ones.
+        sample_from = (
+            list(valid_workers)
+            if valid_workers is not None
+            else idle_workers or all_workers
+        )
+        candidates.update(random.sample(sample_from, min(10, len(sample_from))))
+        # ^ NOTE: `min` because `random.sample` errors if `len(sample) < k`
     if valid_workers is None:
         if not candidates:
-            candidates = set(all_workers.values())
+            candidates = set(all_workers)
     else:
         candidates &= valid_workers
         if not candidates:
@@ -7521,17 +7522,6 @@ def decide_worker(
     else:
         ws = min(candidates, key=objective)
     return ws
-
-
-def random_choices_dict_set(population: Union[set, dict], k: int) -> Iterator:
-    "Randomly choose *k* items with replacement from the set or values of the dict *population*"
-    if k < len(population):
-        yield from population if isinstance(population, set) else population.values()
-    elif isinstance(population, set):
-        yield from random.choices(list(population), k=k)
-    else:
-        for key in random.choices(list(population), k=k):
-            yield population[key]
 
 
 def validate_task_state(ts: TaskState):
