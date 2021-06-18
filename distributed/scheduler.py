@@ -7482,9 +7482,6 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
-    # TODO should it be a bounded fraction of `len(all_workers)`?
-    N_RANDOM_WORKERS: Py_ssize_t = 20
-
     ws: WorkerState = None
     wws: WorkerState
     dts: TaskState
@@ -7497,6 +7494,7 @@ def decide_worker(
         candidates = {wws for dts in deps for wws in dts._who_has}
         # Add some random workers to into `candidates`, starting with idle ones
         # TODO shuffle to prevent hotspots?
+        N_RANDOM_WORKERS: Py_ssize_t = 20
         candidates.update(idle_workers[:N_RANDOM_WORKERS])
         if len(idle_workers) < N_RANDOM_WORKERS:
             sample_from = (
