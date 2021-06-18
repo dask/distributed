@@ -2164,10 +2164,14 @@ class WorkerTable(DashboardComponent):
 
 
 class SchedulerLogs:
-    def __init__(self, scheduler):
-        logs = Logs(scheduler.get_logs(timestamps=True))._repr_html_()
+    def __init__(self, scheduler, start=None):
+        logs = scheduler.get_logs(timestamps=True)
+        if start is not None:
+            logs = [log for log in logs if log[0] > start]
 
-        self.root = Div(text=logs)
+        logs_html = Logs(logs)._repr_html_()
+
+        self.root = Div(text=logs_html)
 
 
 def systemmonitor_doc(scheduler, extra, doc):

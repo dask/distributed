@@ -1308,6 +1308,8 @@ class Logs(list):
     """A container for a list of log entries"""
 
     def _repr_html_(self):
+        if not self:
+            return '<p style="font-family: monospace">No logs to report</p>'
         return "\n".join(Log(entry)._repr_html_() for entry in self)
 
 
