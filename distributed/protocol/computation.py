@@ -225,7 +225,7 @@ class PickledComputation(Computation):
 
 
 def typeset_computation(computation) -> Computation:
-    from .serialize import Serialize, Serialized
+    from .serialize import Serialize, Serialized, to_serialize
 
     if isinstance(computation, Computation):
         return computation  # Already a computation
@@ -258,12 +258,12 @@ def typeset_computation(computation) -> Computation:
         # We found a task thus this is a (nested) task
         return PickledComputation.serialize(computation, is_a_task=True)
     elif contain_pickled[0]:
-        # We didn't find a task but it contains pickled objects
+        # We found no tasks but it contains pickled objects
         return PickledComputation.serialize(computation, is_a_task=False)
     else:
-        # No tasks or pickled objects. Still, it might contain non-msgpack
-        # serializable objects thus we wrap it in `Serialize`
-        return Computation(Serialize(computation), is_a_task=False)
+        # No tasks or pickled objects found. Still, it might contain non-msgpack
+        # serializable objects thus we wrap it in a `to_serialize`
+        return Computation(to_serialize(computation), is_a_task=False)
 
 
 def typeset_dask_graph(dsk: Mapping[str, Any]) -> Dict[str, Computation]:
