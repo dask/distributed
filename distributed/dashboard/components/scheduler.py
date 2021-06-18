@@ -1746,6 +1746,8 @@ class TGroupGraph(DashboardComponent):
             {
                 "x": [],
                 "y": [],
+                "w_box": [],
+                "h_box": [],
                 "name": [],
                 "tot_tasks": [],
                 "color": [],
@@ -1778,15 +1780,15 @@ class TGroupGraph(DashboardComponent):
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
-        # main box
+        # main box values when no durations and nbytes
         self.width_node = 0.5
         self.height_node = self.width_node / 2
 
         rect = self.root.rect(
             x="x",
             y="y",
-            width=self.width_node,
-            height=self.height_node,
+            width="w_box",
+            height="h_box",
             color="color",
             fill_alpha="mem_alpha",
             line_color="black",
@@ -1973,6 +1975,8 @@ class TGroupGraph(DashboardComponent):
         nodes_data = {
             "x": [],
             "y": [],
+            "w_box": [],
+            "h_box": [],
             "name": [],
             "color": [],
             "tot_tasks": [],
@@ -2009,14 +2013,47 @@ class TGroupGraph(DashboardComponent):
             x = self.nodes_layout[key]["x"]
             y = self.nodes_layout[key]["y"]
 
+            # main boxes layout
+            nodes_data["x"].append(x)
+            nodes_data["y"].append(y)
+
             comp_tasks = (
                 tg.states["released"] + tg.states["memory"] + tg.states["erred"]
             )
             tot_tasks = sum(tg.states.values())
 
-            # main boxes layout
-            nodes_data["x"].append(x)
-            nodes_data["y"].append(y)
+            # compute width and height of boxes
+            if tg.duration and tg.nbytes_total:
+                # get tasks that are contributing to this duration
+                # is this comp_tasks
+                import numpy as np
+
+                # Extrapolated duration and nbytes total (not scaled)
+                # need magic numbers for proper scaling of width and height in log
+                mn_width = 1
+                mn_height = 1
+                w_temp = np.log10(mn_width * tg.duration / comp_tasks * tot_tasks)
+                h_temp = np.log10(mn_height * tg.nbytes_total / comp_tasks * tot_tasks)
+
+                # Move this function somewhere else once we finish tweaking
+                def tanh_scale(x):
+                    start = 0.5
+                    end = 0.9
+                    # magic number: how abrupt are the changes needs tweaking
+                    mn_tan = 0.05
+                    y = (np.tanh(0.05 * x) + 1) / 2 * (end - start) + start
+                    return y
+
+                # need to scale width
+                width_box = tanh_scale(w_temp)
+                height_box = tanh_scale(h_temp)
+
+            else:
+                width_box = self.width_node
+                height_box = self.height_node
+
+            nodes_data["w_box"].append(width_box)
+            nodes_data["h_box"].append(height_box)
 
             name = tg.prefix.name
             nodes_data["name"].append(name)
@@ -2036,37 +2073,35 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["node_line_width"].append(1)
 
             # progress bar data update
-            Lbar = self.width_node
-            nodes_data["x_start"].append(x - self.width_node / 2)
-            nodes_data["x_end"].append(x - self.width_node / 2 + Lbar)
+            Lbar = width_box
+            nodes_data["x_start"].append(x - width_box / 2)
+            nodes_data["x_end"].append(x - width_box / 2 + Lbar)
 
-            Hbar = self.height_node * 0.4
-            nodes_data["y_start"].append(y - self.height_node / 2)
-            nodes_data["y_end"].append(y - self.height_node / 2 + Hbar)
+            Hbar = height_box * 0.4
+            nodes_data["y_start"].append(y - height_box / 2)
+            nodes_data["y_end"].append(y - height_box / 2 + Hbar)
 
             completed = comp_tasks / tot_tasks
 
             nodes_data["progress"].append(completed * 100)
-            nodes_data["x_end_progress"].append(
-                x - self.width_node / 2 + Lbar * completed
-            )
+            nodes_data["x_end_progress"].append(x - width_box / 2 + Lbar * completed)
 
             # comp/tot label
             nodes_data["xc_pbar"].append(x)
-            nodes_data["yc_pbar"].append(y - self.height_node / 2 + Hbar / 2)
+            nodes_data["yc_pbar"].append(y - height_box / 2 + Hbar / 2)
 
             nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks}")
 
             # arrows
             arrows_data["xs"] += [
-                self.nodes_layout[k]["x"] + self.width_node / 2
+                self.nodes_layout[k]["x"] + width_box / 2
                 for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["ys"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["xe"] += [
-                self.nodes_layout[k]["x"] - self.width_node / 2
+                self.nodes_layout[k]["x"] - width_box / 2
                 for k in self.arrows_layout[key]["nend"]
             ]
             arrows_data["ye"] += [
@@ -2089,13 +2124,13 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["url_logo"].append(url_logo)
 
-            ratio = self.width_node / self.height_node
+            ratio = width_box / height_box
 
-            nodes_data["x_logo"].append(x + self.width_node / 3)
-            nodes_data["y_logo"].append(y + self.height_node / 3)
+            nodes_data["x_logo"].append(x + width_box / 3)
+            nodes_data["y_logo"].append(y + height_box / 3)
 
-            nodes_data["h_logo"].append(self.height_node * 0.3)
-            nodes_data["w_logo"].append(self.width_node * 0.3 / ratio)
+            nodes_data["h_logo"].append(height_box * 0.3)
+            nodes_data["w_logo"].append(width_box * 0.3 / ratio)
 
             # Add some status to hover
             nodes_data["in_processing"].append(tg.states["processing"])
