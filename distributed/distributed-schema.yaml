@@ -797,6 +797,17 @@ properties:
                   can cause establishing endpoints to be very slow, this is particularly noticeable in
                   clusters of more than a few dozen workers.
 
+      diagnostics:
+        type: object
+        properties:
+          nvml:
+            type: boolean
+            description: |
+              If ``True``, enables GPU diagnostics with NVML. Generally leaving it enabled is
+              not a problem and will be automatically disabled if no GPUs are found in the
+              system, but in certain cases it may be desirable to completely disable NVML
+              diagnostics.
+
       dashboard:
         type: object
         properties:

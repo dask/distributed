@@ -1999,14 +1999,14 @@ def test_repr(loop):
             for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
-                assert "threads=3" in text or "Cores: </b>3" in text
+                assert "threads=3" in text or "Total threads: </strong>" in text
                 assert "6.00 GB" in text or "5.59 GiB" in text
                 if "<table" not in text:
                     assert len(text) < 80
 
         for func in funcs:
             text = func(c)
-            assert "not connected" in text
+            assert "No scheduler connected" in text
 
 
 @gen_cluster(client=True)
@@ -6374,6 +6374,7 @@ async def test_performance_report(c, s, a, b):
     assert "Dask Performance Report" in data
     assert "x = da.random" in data
     assert "Threads: 4" in data
+    assert "distributed.scheduler - INFO - Clear task state" in data
     assert dask.__version__ in data
 
     # Stacklevel two captures code two frames back -- which in this case

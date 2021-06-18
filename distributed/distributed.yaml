@@ -203,6 +203,8 @@ distributed:
         key: null
         cert: null
 
+  diagnostics:
+    nvml: True
 
   ###################
   # Bokeh dashboard #
