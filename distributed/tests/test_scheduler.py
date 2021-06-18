@@ -17,7 +17,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply
+from dask.utils import apply, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -2795,3 +2795,38 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
         a: (large_future.key,),
         b: tuple(f.key for f in small_futures),
     }
+
+
+@gen_cluster(
+    client=True,
+    ncores=[("127.0.0.1", 1)] * 5,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_coschedule_order_neighbors(c, s, *workers):
+    """Ensure that similar tasks end up on similar nodes"""
+
+    da = pytest.importorskip("dask.array")
+
+    x = da.random.random((100, 100), chunks=(10, 10))
+    xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
+    await xsum
+
+    for i, keys in enumerate(x.__dask_keys__()):
+        # One worker has most of the keys
+        assert any(sum(stringify(k) in w.data for k in keys) >= 5 for w in workers)
+        # We might have split between two, but at most two
+        assert sum(sum(stringify(k) in w.data for k in keys) >= 1 for w in workers) <= 2
+
+    x = da.random.random((100, 100), chunks=(10, 10))
+    xx, xsum = dask.persist(x, x.sum(axis=0, split_every=20))
+    await xsum
+
+    for i, keys in enumerate(zip(*x.__dask_keys__())):
+
+        # One worker has most of the keys
+        assert any(sum(stringify(k) in w.data for k in keys) >= 5 for w in workers)
+        # We might have split between two, but at most two
+        assert sum(sum(stringify(k) in w.data for k in keys) >= 1 for w in workers) <= 2
+
+    # There were very few transfers
+    assert sum(len(w.incoming_transfer_log) for w in workers) < 5

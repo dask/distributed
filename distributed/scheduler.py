@@ -729,11 +729,15 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<WorkerState %r, name: %s, memory: %d, processing: %d>" % (
-            self._address,
-            self._name,
-            len(self._has_what),
-            len(self._processing),
+        return (
+            "<WorkerState %r, name: %s, memory: %d, processing: %d, occupancy: %s>"
+            % (
+                self._address,
+                self._name,
+                len(self._has_what),
+                len(self._processing),
+                format_time(self.occupancy),
+            )
         )
 
     def _repr_html_(self):
@@ -940,6 +944,7 @@ class TaskGroup:
     _start: double
     _stop: double
     _all_durations: object
+    _last_scheduled_worker: WorkerState
 
     def __init__(self, name: str):
         self._name = name
@@ -953,6 +958,7 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
+        self._last_scheduled_worker = None
 
     @property
     def name(self):
@@ -2321,12 +2327,18 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
-        if ts._dependencies or valid_workers is not None:
+        if (
+            ts._dependencies
+            or valid_workers is not None
+            or len(ts._group) > self.total_nthreads * 2
+        ):
             ws = decide_worker(
-                ts,
-                self._workers_dv.values(),
-                valid_workers,
-                partial(self.worker_objective, ts),
+                ts=ts,
+                all_workers=self._workers_dv.values(),
+                valid_workers=valid_workers,
+                objective=partial(self.worker_objective, ts),
+                nthreads=self.total_nthreads,
+                unknown_task_duration=self.UNKNOWN_TASK_DURATION,
             )
         else:
             worker_pool = self._idle or self._workers
@@ -7459,7 +7471,12 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 @cfunc
 @exceptval(check=False)
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: set, objective
+    ts: TaskState,
+    all_workers,
+    valid_workers: set,
+    objective,
+    nthreads: int,
+    unknown_task_duration: float,
 ) -> WorkerState:
     """
     Decide which worker should take task *ts*.
@@ -7495,7 +7512,14 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    ws = decide_worker(ts, all_workers, None, objective)
+                    ws = decide_worker(
+                        ts=ts,
+                        all_workers=all_workers,
+                        valid_workers=None,
+                        objective=objective,
+                        nthreads=nthreads,
+                        unknown_task_duration=unknown_task_duration,
+                    )
                 return ws
 
     ncandidates: Py_ssize_t = len(candidates)
@@ -7506,6 +7530,35 @@ def decide_worker(
             break
     else:
         ws = min(candidates, key=objective)
+
+    # If our group is large with few dependencies
+    # Then assign sequential tasks to similar workers, even if occupancy isn't ideal
+    if len(ts._group) > nthreads * 2 and sum(map(len, ts._group._dependencies)) < 5:
+        if ts._group._last_scheduled_worker is None:  # First time
+            if (
+                ts._group.states["released"] > len(ts._group) / 2
+            ):  # many tasks to be scheduled
+                ts._group._last_scheduled_worker = ws
+        else:
+            duration = ts._prefix.duration_average
+            if duration < 0.0:
+                duration = unknown_task_duration
+
+            alternate = ts._group._last_scheduled_worker
+            ratio = math.ceil(len(ts._group) / nthreads)
+
+            # Allow a few tasks to pile up before moving to the next worker
+            if (
+                alternate.occupancy < ws.occupancy + duration * ratio
+                and alternate in all_workers
+            ):
+                ws = alternate
+            else:
+                ts._group._last_scheduled_worker = ws
+
+            if ts._group.states["released"] == 0:  # all done, reset
+                ts._group._last_scheduled_worker = None
+
     return ws
 
 
