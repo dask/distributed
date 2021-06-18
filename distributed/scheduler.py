@@ -18,7 +18,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
+from typing import Optional, ValuesView
 
 import psutil
 import sortedcontainers
@@ -2324,8 +2324,8 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self._workers.values(),
-                self._idle.values(),
+                self._workers_dv.values(),
+                self._idle_dv.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
@@ -7461,8 +7461,8 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 @exceptval(check=False)
 def decide_worker(
     ts: TaskState,
-    all_workers: sortedcontainers.SortedValuesView,
-    idle_workers: sortedcontainers.SortedValuesView,
+    all_workers: ValuesView,
+    idle_workers: ValuesView,
     valid_workers: set,
     objective,
 ) -> WorkerState:
@@ -7482,6 +7482,8 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+    # NOTE: `all_workers` and `idle_workers` must be plain `dict_values` objects,
+    # not a `SortedValuesView`, which is much slower to iterate over.
     ws: WorkerState = None
     wws: WorkerState
     dts: TaskState
@@ -7494,13 +7496,14 @@ def decide_worker(
         # Select all workers holding deps of this task
         candidates = {wws for dts in deps for wws in dts._who_has}
         # Add up to 10 random workers into `candidates`, preferring idle ones.
-        sample_from = (
-            list(valid_workers)
-            if valid_workers is not None
-            else idle_workers or all_workers
-        )
-        candidates.update(random.sample(sample_from, min(10, len(sample_from))))
-        # ^ NOTE: `min` because `random.sample` errors if `len(sample) < k`
+        worker_pool = valid_workers if valid_workers is not None else all_workers
+        if len(candidates) < len(worker_pool):
+            sample_from = idle_workers or worker_pool
+            candidates.update(
+                random_choices_iter(sample_from, 10)
+                if len(sample_from) > 10
+                else sample_from
+            )
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
@@ -7522,6 +7525,11 @@ def decide_worker(
     else:
         ws = min(candidates, key=objective)
     return ws
+
+
+def random_choices_iter(xs: Iterable, k: int) -> Iterable:
+    "Randomly choose between 0 and *k* items from *xs*"
+    return itertools.islice(itertools.takewhile(lambda _: random.random() < 0.5, xs), k)
 
 
 def validate_task_state(ts: TaskState):
