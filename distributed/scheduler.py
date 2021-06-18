@@ -2324,8 +2324,8 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self._workers_dv.values(),
-                self._idle_dv.values(),
+                self._workers.values(),
+                self._idle.values(),
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
