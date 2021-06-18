@@ -134,13 +134,19 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     config={"distributed.scheduler.work-stealing": False},
 )
 async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c):
+    await client.submit(slowinc, 10, delay=0.1)  # learn that slowinc is slow
     root = await client.scatter(1)
     assert sum(root.key in worker.data for worker in [a, b, c]) == 1
 
-    tasks = client.map(inc, [root] * 6, pure=False)
+    start = time()
+    tasks = client.map(slowinc, [root] * 6, delay=0.1, pure=False)
     await wait(tasks)
+    elapsed = time() - start
 
-    assert all(root.key in worker.data for worker in [a, b, c])
+    assert elapsed <= 4
+    assert all(root.key in worker.data for worker in [a, b, c]), [
+        list(worker.data.keys()) for worker in [a, b, c]
+    ]
     assert len(a.data) == len(b.data) == len(c.data) == 3
 
 
