@@ -12,7 +12,7 @@ from dask.base import normalize_token
 from ..utils import ensure_bytes, has_keyword, typename
 from . import pickle
 from .compression import decompress, maybe_compress
-from .computation import Data, PickledCallable, PickledObject, PickledTask
+from .computation import Computation, PickledCallable, PickledComputation, PickledObject
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
 
 lazy_registrations = {}
@@ -119,17 +119,17 @@ def msgpack_decode_default(obj):
     if "__Set__" in obj:
         return set(obj["as-list"])
 
-    if "__PickledTask__" in obj:
-        return PickledTask(obj["value"])
-
     if "__PickledCallable__" in obj:
-        return PickledCallable(obj["value"])
+        return PickledCallable.msgpack_decode(obj)
 
     if "__PickledObject__" in obj:
-        return PickledObject(obj["value"])
+        return PickledObject.msgpack_decode(obj)
 
-    if "__Data__" in obj:
-        return Data(obj["value"])
+    if "__PickledComputation__" in obj:
+        return PickledComputation.msgpack_decode(obj)
+
+    if "__Computation__" in obj:
+        return Computation.msgpack_decode(obj)
 
     return obj
 
@@ -153,17 +153,8 @@ def msgpack_encode_default(obj):
     if isinstance(obj, set):
         return {"__Set__": True, "as-list": list(obj)}
 
-    if isinstance(obj, PickledTask):
-        return {"__PickledTask__": True, "value": obj.value}
-
-    if isinstance(obj, PickledCallable):
-        return {"__PickledCallable__": True, "value": obj.value}
-
-    if isinstance(obj, PickledObject):
-        return {"__PickledObject__": True, "value": obj.value}
-
-    if isinstance(obj, Data):
-        return {"__Data__": True, "value": obj.value}
+    if isinstance(obj, (PickledObject, Computation)):
+        return obj.msgpack_encode()
 
     return obj
 
@@ -556,32 +547,21 @@ def nested_deserialize(x):
     {'op': 'update', 'data': 123}
     """
 
-    def replace_inner(x):
-        if type(x) is dict:
-            x = x.copy()
-            for k, v in x.items():
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
-        elif type(x) is list:
-            x = list(x)
-            for k, v in enumerate(x):
-                typ = type(v)
-                if typ is dict or typ is list:
-                    x[k] = replace_inner(v)
-                elif typ is Serialize:
-                    x[k] = v.data
-                elif typ is Serialized:
-                    x[k] = deserialize(v.header, v.frames)
-
+    typ = type(x)
+    if typ is dict:
+        return {k: nested_deserialize(v) for k, v in x.items()}
+    elif typ is list or typ is tuple:
+        return typ(nested_deserialize(o) for o in x)
+    elif typ is Serialize:
+        return x.data
+    elif typ is Serialized:
+        return deserialize(x.header, x.frames)
+    elif isinstance(x, Computation):
+        x = x.get_computation()
+        x._value = nested_deserialize(x._value)
         return x
-
-    return replace_inner(x)
+    else:
+        return x
 
 
 def serialize_bytelist(x, **kwargs):

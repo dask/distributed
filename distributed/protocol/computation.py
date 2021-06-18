@@ -17,14 +17,13 @@ Notable Classes
   containing them. It is automatically de-serialized by the Worker before execution.
 
 - `Computation` - A computation that the Worker can execute. The Scheduler sees
-  this as a black box.
+  this as a black box. A computation **cannot** contain pickled objects but it may
+  contain `Serialize` and/or `Serialized` objects, which will be de-serialize when
+  arriving on the Worker automatically.
 
-  - `Data(Computation)` - De-serialized data that does **not** contain any tasks or
-    `PickledObject`.
-
-  - `Task(Computation)` - A de-serialized task ready for execution, possible nested.
-    - `PickledTask(Task)` - A task serialized using `protocol.pickle` and can contain
-      `PickledObject`.
+- `PickledComputation` - A computation that are serialized using `protocol.pickle`.
+  The class is derived from `Computation` but can contain pickled objects. Itself
+  and contained pickled objects will be de-serialize by the Worker before execution.
 
 Notable Functions
 -----------------
@@ -80,9 +79,15 @@ class PickledObject:
     def __reduce__(self):
         return (type(self), (self._value,))
 
-    @property
-    def value(self):
-        return self._value
+    @classmethod
+    def msgpack_decode(cls, state: Mapping):
+        return cls(state["value"])
+
+    def msgpack_encode(self) -> dict:
+        return {
+            f"__{type(self).__name__}__": True,
+            "value": self._value,
+        }
 
     @classmethod
     def serialize(cls, obj) -> "PickledObject":
@@ -141,38 +146,39 @@ class PickledCallable(PickledObject):
 
 
 class Computation:
-    def __init__(self, value):
+    def __init__(self, value, is_a_task: bool):
         self._value = value
+        self._is_a_task = is_a_task
 
-    @property
-    def value(self):
-        return self._value
+    @classmethod
+    def msgpack_decode(cls, state: Mapping):
+        return cls(state["value"], state["is_a_task"])
 
-    def get_computation(self) -> Tuple[Callable, Iterable, Mapping]:
-        assert False, self._value
+    def msgpack_encode(self) -> dict:
+        return {
+            f"__{type(self).__name__}__": True,
+            "value": self._value,
+            "is_a_task": self._is_a_task,
+        }
+
+    def get_func_and_args(self) -> Tuple[Callable, Iterable, Mapping]:
+        if self._is_a_task:
+            return (execute_task, (self._value,), {})
+        else:
+            return (identity, (self._value,), {})
+
+    def get_computation(self) -> "Computation":
+        return self
 
 
-class Data(Computation):
-    def get_computation(self) -> Tuple[Callable, Iterable, Mapping]:
-        return (identity, (self._value,), {})
-
-
-class Task(Computation):
-    def get_computation(self) -> Tuple[Callable, Iterable, Mapping]:
-        return (execute_task, (self._value,), {})
-
-
-class PickledTask(Task):
+class PickledComputation(Computation):
     _size_warning_triggered: bool = False
     _size_warning_limit: int = 1_000_000
 
-    def __init__(self, serialized_data: bytes):
-        self._value: bytes = serialized_data
-
     @classmethod
-    def serialize(cls, value) -> "PickledTask":
+    def serialize(cls, value, is_a_task: bool):
         data = pickle.dumps(value)
-        ret = cls(data)
+        ret = cls(data, is_a_task)
         if not cls._size_warning_triggered and len(data) > cls._size_warning_limit:
             cls._size_warning_triggered = True
             s = str(value)
@@ -204,11 +210,11 @@ class PickledTask(Task):
 
         return inner_deserialize(pickle.loads(self._value))
 
-    def get_task(self):
-        return Task(self.deserialize())
+    def get_computation(self) -> Computation:
+        return Computation(self.deserialize(), self._is_a_task)
 
-    def get_computation(self) -> Tuple[Callable, Iterable, Mapping]:
-        return self.get_task().get_computation()
+    def get_func_and_args(self) -> Tuple[Callable, Iterable, Mapping]:
+        return self.get_computation().get_func_and_args()
 
 
 def typeset_computation(computation) -> Computation:
@@ -217,6 +223,7 @@ def typeset_computation(computation) -> Computation:
     if isinstance(computation, Computation):
         return computation  # Already a computation
 
+    contain_pickled = [False]
     contain_tasks = [False]
 
     def serialize_callables(obj):
@@ -232,15 +239,20 @@ def typeset_computation(computation) -> Computation:
                 return (PickledCallable.serialize(obj[0]),) + tuple(
                     map(serialize_callables, obj[1:])
                 )
+        elif isinstance(obj, PickledObject):
+            contain_pickled[0] = True
+            return obj
         else:
-            assert not isinstance(obj, (Serialize, Serialized))
+            assert not isinstance(obj, (Serialize, Serialized)), obj
             return obj
 
     computation = serialize_callables(computation)
     if contain_tasks[0]:
-        return PickledTask.serialize(computation)
+        return PickledComputation.serialize(computation, is_a_task=True)
+    elif contain_pickled[0]:
+        return PickledComputation.serialize(computation, is_a_task=False)
     else:
-        return Data(Serialize(computation))
+        return Computation(Serialize(computation), is_a_task=False)
 
 
 def typeset_dask_graph(dsk: Mapping[str, Any]) -> Dict[str, Computation]:

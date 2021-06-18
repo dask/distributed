@@ -48,7 +48,7 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle
-from .protocol.computation import Computation, PickledTask, Task
+from .protocol.computation import Computation, PickledComputation
 from .protocol.serialize import to_serialize
 from .pubsub import PubSubWorkerExtension
 from .security import Security
@@ -2863,7 +2863,7 @@ class Worker(ServerNode):
         return True
 
     async def _maybe_deserialize_task(self, ts: TaskState) -> Computation:
-        if isinstance(ts.runspec, PickledTask):
+        if isinstance(ts.runspec, PickledComputation):
             try:
                 start = time()
                 # Offload deserializing large tasks
@@ -2887,6 +2887,7 @@ class Worker(ServerNode):
                 self.log.append((ts.key, "deserialize-error"))
                 raise
         else:
+            assert isinstance(ts.runspec, Computation), ts.runspec
             return ts.runspec
 
     async def ensure_computing(self):
@@ -2955,7 +2956,7 @@ class Worker(ServerNode):
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
 
-            function, args, kwargs = ts.runspec.get_computation()
+            function, args, kwargs = ts.runspec.get_func_and_args()
 
             start = time()
             data = {}
@@ -3765,9 +3766,9 @@ def loads_function(bytes_object):
     return pickle.loads(bytes_object)
 
 
-def _deserialize(runspec: PickledTask) -> Task:
+def _deserialize(runspec: PickledComputation) -> Computation:
     """Deserialize computation"""
-    return runspec.get_task()
+    return runspec.get_computation()
 
 
 def execute_task(task):
