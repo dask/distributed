@@ -1913,12 +1913,8 @@ class TGroupGraph(DashboardComponent):
             arrows_layout = {}
             for tg in ordered:
                 if dependencies[tg]:
-                    x = (
-                        max(xs[dep] for dep in dependencies[tg]) + 1
-                    )  # just to the right
-                    y = max(
-                        ys[dep] for dep in dependencies[tg]
-                    )  # always move up and to the right
+                    x = max(xs[dep] for dep in dependencies[tg]) + 1
+                    y = max(ys[dep] for dep in dependencies[tg])
                     if (
                         len(dependencies[tg]) > 1
                         and len({ys[dep] for dep in dependencies[tg]}) == 1
