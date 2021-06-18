@@ -13,8 +13,9 @@ Notable Classes
 ---------------
 
 - `PickledObject` - An object that are serialized using `protocol.pickle`.
-  This object isn't a computation by itself instead users can build computations
-  containing them. It is automatically de-serialized by the Worker before execution.
+  This object isn't a computation by itself instead users can build pickled
+  computations that contains pickled objects. This object is automatically
+  de-serialized by the Worker before execution.
 
 - `Computation` - A computation that the Worker can execute. The Scheduler sees
   this as a black box. A computation **cannot** contain pickled objects but it may
@@ -22,8 +23,8 @@ Notable Classes
   arriving on the Worker automatically.
 
 - `PickledComputation` - A computation that are serialized using `protocol.pickle`.
-  The class is derived from `Computation` but can contain pickled objects. Itself
-  and contained pickled objects will be de-serialize by the Worker before execution.
+  The class is derived from `Computation` but **can** contain pickled objects.
+  Pickled objects and itself will be de-serialize by the Worker before execution.
 
 Notable Functions
 -----------------
