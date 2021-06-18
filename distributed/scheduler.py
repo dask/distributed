@@ -7470,7 +7470,7 @@ def decide_worker(
     Decide which worker should take task *ts*.
 
     We consider all workers which hold dependencies of *ts*,
-    plus a sample of 20 random workers (with preference for idle ones).
+    plus a sample of up to 20 random workers (with preference for idle ones).
 
     From those, we choose the worker where the *objective* function is minimized.
 
@@ -7491,19 +7491,16 @@ def decide_worker(
     if ts._actor:
         candidates = set(all_workers)
     else:
+        # Select all workers holding deps of this task
         candidates = {wws for dts in deps for wws in dts._who_has}
-        # Add some random workers to into `candidates`, starting with idle ones
-        # TODO shuffle to prevent hotspots?
-        N_RANDOM_WORKERS: Py_ssize_t = 20
-        candidates.update(idle_workers[:N_RANDOM_WORKERS])
-        if len(idle_workers) < N_RANDOM_WORKERS:
-            sample_from = (
-                list(valid_workers) if valid_workers is not None else all_workers
-            )
-            candidates.update(
-                random.sample(sample_from, min(N_RANDOM_WORKERS, len(sample_from)))
-                # ^ NOTE: `min` because `random.sample` errors if `len(sample) < k`
-            )
+        # Add up to 10 random workers into `candidates`, preferring idle ones.
+        sample_from = (
+            list(valid_workers)
+            if valid_workers is not None
+            else idle_workers or all_workers
+        )
+        candidates.update(random.sample(sample_from, min(10, len(sample_from))))
+        # ^ NOTE: `min` because `random.sample` errors if `len(sample) < k`
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
