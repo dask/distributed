@@ -515,7 +515,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 30
+        assert time() < start + 10
 
 
 @gen_cluster(
@@ -564,6 +564,61 @@ async def test_waiter(c, s, a, b):
     await waiter.set()
 
     await c.gather(futures)
+
+
+@gen_cluster(client=True, client_kwargs=dict(set_as_default=False))
+# ^ NOTE: without `set_as_default=False`, `get_client()` within worker would return
+# the same client instance the test is using (because it's all one process).
+# Even with this, both workers will share the same client instance.
+async def test_worker_actor_handle_is_weakref(c, s, a, b):
+    counter = c.submit(Counter, actor=True, workers=[a.address])
+
+    await c.submit(lambda _: None, counter, workers=[b.address])
+
+    del counter
+
+    start = time()
+    while a.actors or b.data:
+        await asyncio.sleep(0.1)
+        assert time() < start + 10
+
+
+def test_worker_actor_handle_is_weakref_sync(client):
+    workers = list(client.run(lambda: None))
+    counter = client.submit(Counter, actor=True, workers=[workers[0]])
+
+    client.submit(lambda _: None, counter, workers=[workers[1]]).result()
+
+    del counter
+
+    def check(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(check).values()):
+        sleep(0.01)
+        assert time() < start + 10
+
+
+def test_worker_actor_handle_is_weakref_from_compute_sync(client):
+    workers = list(client.run(lambda: None))
+
+    with dask.annotate(workers=workers[0]):
+        counter = dask.delayed(Counter)()
+    with dask.annotate(workers=workers[1]):
+        intermediate = dask.delayed(lambda c: None)(counter)
+    with dask.annotate(workers=workers[0]):
+        final = dask.delayed(lambda x, c: x)(intermediate, counter)
+
+    final.compute(actors=counter, optimize_graph=False)
+
+    def worker_tasks_running(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(worker_tasks_running).values()):
+        sleep(0.01)
+        assert time() < start + 10
 
 
 def test_one_thread_deadlock():
