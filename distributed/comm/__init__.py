@@ -10,7 +10,7 @@ from .addressing import (
     unparse_host_port,
 )
 from .core import Comm, CommClosedError, connect, listen
-from .utils import get_tcp_server_address
+from .utils import get_tcp_server_address, get_tcp_server_addresses
 
 
 def _register_transports():

@@ -85,7 +85,7 @@ class QueueExtension:
 
     async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
         def process(record):
-            """ Add task status if known """
+            """Add task status if known"""
             if record["type"] == "Future":
                 record = record.copy()
                 key = record["value"]
@@ -244,7 +244,7 @@ class Queue:
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):
-        """ Current number of elements in the queue """
+        """Current number of elements in the queue"""
         return self.client.sync(self._qsize, **kwargs)
 
     async def _get(self, timeout=None, batch=False):

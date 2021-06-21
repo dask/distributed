@@ -84,16 +84,7 @@ from distributed.diagnostics.progressbar import (
     ProgressWidget,
     progress,
 )
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    dec,
-    gen_cluster,
-    gen_tls_cluster,
-    inc,
-    loop,
-    throws,
-)
+from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
 from distributed.worker import dumps_task
 
 

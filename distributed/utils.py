@@ -24,6 +24,8 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
+from typing import Any as AnyType
+from typing import Dict, List
 
 import click
 import tblib.pickling_support
@@ -200,23 +202,6 @@ def get_ip_interface(ifname):
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
 
 
-# FIXME: this breaks if changed to async def...
-@gen.coroutine
-def ignore_exceptions(coroutines, *exceptions):
-    """Process list of coroutines, ignoring certain exceptions
-
-    >>> coroutines = [cor(...) for ...]  # doctest: +SKIP
-    >>> x = yield ignore_exceptions(coroutines, TypeError)  # doctest: +SKIP
-    """
-    wait_iterator = gen.WaitIterator(*coroutines)
-    results = []
-    while not wait_iterator.done():
-        with suppress(*exceptions):
-            result = yield wait_iterator.next()
-            results.append(result)
-    raise gen.Return(results)
-
-
 async def All(args, quiet_exceptions=()):
     """Wait on many tasks at the same time
 
@@ -334,7 +319,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
-        except Exception as exc:
+        except Exception:
             error[0] = sys.exc_info()
         finally:
             assert thread_state.asynchronous > 0
@@ -550,11 +535,6 @@ def tmp_text(filename, text):
             os.remove(fn)
 
 
-def clear_queue(q):
-    while not q.empty():
-        q.get_nowait()
-
-
 def is_kernel():
     """Determine if we're running within an IPython kernel
 
@@ -640,7 +620,9 @@ def key_split_group(x):
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
     >>> key_split_group('x')
+    'x'
     >>> key_split_group('x-1')
+    'x'
     """
     typ = type(x)
     if typ is tuple:
@@ -742,7 +724,7 @@ def get_traceback():
 
 
 def truncate_exception(e, n=10000):
-    """ Truncate exception to be about a certain length """
+    """Truncate exception to be about a certain length"""
     if len(str(e)) > n:
         try:
             return type(e)("Long error message", str(e)[:n])
@@ -760,7 +742,7 @@ def validate_key(k):
 
 
 def _maybe_complex(task):
-    """ Possibly contains a nested task """
+    """Possibly contains a nested task"""
     return (
         istask(task)
         or type(task) is list
@@ -915,34 +897,6 @@ def ensure_bytes(s):
             ) from e
 
 
-def divide_n_among_bins(n, bins):
-    """
-    >>> divide_n_among_bins(12, [1, 1])
-    [6, 6]
-    >>> divide_n_among_bins(12, [1, 2])
-    [4, 8]
-    >>> divide_n_among_bins(12, [1, 2, 1])
-    [3, 6, 3]
-    >>> divide_n_among_bins(11, [1, 2, 1])
-    [2, 6, 3]
-    >>> divide_n_among_bins(11, [.1, .2, .1])
-    [2, 6, 3]
-    """
-    total = sum(bins)
-    acc = 0.0
-    out = []
-    for b in bins:
-        now = n / total * b + acc
-        now, acc = divmod(now, 1)
-        out.append(int(now))
-    return out
-
-
-def mean(seq):
-    seq = list(seq)
-    return sum(seq) / len(seq)
-
-
 def open_port(host=""):
     """Return a probably-open port
 
@@ -959,7 +913,7 @@ def open_port(host=""):
 
 
 def import_file(path):
-    """ Loads modules for a file (.py, .zip, .egg) """
+    """Loads modules for a file (.py, .zip, .egg)"""
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
     names_to_import = []
@@ -996,29 +950,6 @@ def import_file(path):
     return loaded
 
 
-class itemgetter:
-    """A picklable itemgetter.
-
-    Examples
-    --------
-    >>> data = [0, 1, 2]
-    >>> get_1 = itemgetter(1)
-    >>> get_1(data)
-    1
-    """
-
-    __slots__ = ("index",)
-
-    def __init__(self, index):
-        self.index = index
-
-    def __call__(self, x):
-        return x[self.index]
-
-    def __reduce__(self):
-        return (itemgetter, (self.index,))
-
-
 def asciitable(columns, rows):
     """Formats an ascii table for given columns and rows.
 
@@ -1041,7 +972,7 @@ def asciitable(columns, rows):
 
 
 def nbytes(frame, _bytes_like=(bytes, bytearray)):
-    """ Number of bytes of a frame or memoryview """
+    """Number of bytes of a frame or memoryview"""
     if isinstance(frame, _bytes_like):
         return len(frame)
     else:
@@ -1049,28 +980,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return frame.nbytes
         except AttributeError:
             return len(frame)
-
-
-def is_writeable(frame):
-    """
-    Check whether frame is writeable
-
-    Will return ``True`` if writeable, ``False`` if readonly, and
-    ``None`` if undetermined.
-    """
-    try:
-        return not memoryview(frame).readonly
-    except TypeError:
-        return None
-
-
-@contextmanager
-def time_warn(duration, text):
-    start = time()
-    yield
-    end = time()
-    if end - start > duration:
-        print("TIME WARNING", text, end - start)
 
 
 def deprecated(*, version_removed: str = None):
@@ -1102,7 +1011,7 @@ def deprecated(*, version_removed: str = None):
 
 
 def json_load_robust(fn, load=json.load):
-    """ Reads a JSON file from disk that may be being written as we read """
+    """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
         sleep(0.01)
     for i in range(10):
@@ -1117,7 +1026,7 @@ def json_load_robust(fn, load=json.load):
 
 
 class DequeHandler(logging.Handler):
-    """ A logging.Handler that records records into a deque """
+    """A logging.Handler that records records into a deque"""
 
     _instances = weakref.WeakSet()
 
@@ -1319,24 +1228,24 @@ def parse_ports(port):
     A single port can be specified using an integer:
 
     >>> parse_ports(8787)
-    >>> [8787]
+    [8787]
 
     or a string:
 
     >>> parse_ports("8787")
-    >>> [8787]
+    [8787]
 
     A sequential range of ports can be specified by a string which indicates
     the first and last ports which should be included in the sequence of ports:
 
     >>> parse_ports("8787:8790")
-    >>> [8787, 8788, 8789, 8790]
+    [8787, 8788, 8789, 8790]
 
     An input of ``None`` is also valid and can be used to indicate that no port
     has been specified:
 
     >>> parse_ports(None)
-    >>> [None]
+    [None]
 
     """
     if isinstance(port, str) and ":" not in port:
@@ -1360,25 +1269,44 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(str):
-    """ A container for logs """
+class Log(tuple):
+    """A container for a single log entry"""
+
+    level_styles = {
+        "WARNING": "font-weight: bold; color: orange;",
+        "CRITICAL": "font-weight: bold; color: orangered;",
+        "ERROR": "font-weight: bold; color: crimson;",
+    }
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(
-            log=html.escape(self.rstrip())
+        level, message = self
+
+        style = "font-family: monospace; margin: 0;"
+        style += self.level_styles.get(level, "")
+
+        return '<p style="{style}">{message}</p>'.format(
+            style=html.escape(style),
+            message=html.escape(message),
         )
 
 
-class Logs(dict):
-    """ A container for multiple logs """
+class Logs(list):
+    """A container for a list of log entries"""
+
+    def _repr_html_(self):
+        return "\n".join(Log(entry)._repr_html_() for entry in self)
+
+
+class MultiLogs(dict):
+    """A container for a dict mapping strings to lists of log entries"""
 
     def _repr_html_(self):
         summaries = [
             "<details>\n"
             "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
+            "{logs}\n"
+            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
+            for title, entries in sorted(self.items())
         ]
         return "\n".join(summaries)
 
@@ -1451,7 +1379,7 @@ def import_term(name: str):
 
     Examples
     --------
-    >>> import_term("math.sin")
+    >>> import_term("math.sin") # doctest: +SKIP
     <function math.sin(x, /)>
     """
     try:
@@ -1504,42 +1432,54 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addr, default_listen_ip=""):
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
     """
     Examples
     --------
     >>> clean_dashboard_address(8787)
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address(":8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("8787")
-    {'address': '', 'port': 8787}
+    [{'address': '', 'port': 8787}]
     >>> clean_dashboard_address("foo:8787")
-    {'address': 'foo', 'port': 8787}
+    [{'address': 'foo', 'port': 8787}]
+    >>> clean_dashboard_address([8787, 8887])
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
+    >>> clean_dashboard_address(":8787,:8887")
+    [{'address': '', 'port': 8787}, {'address': '', 'port': 8887}]
     """
 
     if default_listen_ip == "0.0.0.0":
         default_listen_ip = ""  # for IPV6
 
-    try:
-        addr = int(addr)
-    except (TypeError, ValueError):
-        pass
+    if isinstance(addrs, str):
+        addrs = addrs.split(",")
+    if not isinstance(addrs, list):
+        addrs = [addrs]
 
-    if isinstance(addr, str):
-        addr = addr.split(":")
+    addresses = []
+    for addr in addrs:
+        try:
+            addr = int(addr)
+        except (TypeError, ValueError):
+            pass
 
-    if isinstance(addr, (tuple, list)):
-        if len(addr) == 2:
-            host, port = (addr[0], int(addr[1]))
-        elif len(addr) == 1:
-            [host], port = addr, 0
-        else:
-            raise ValueError(addr)
-    elif isinstance(addr, int):
-        host = default_listen_ip
-        port = addr
+        if isinstance(addr, str):
+            addr = addr.split(":")
 
-    return {"address": host, "port": port}
+        if isinstance(addr, (tuple, list)):
+            if len(addr) == 2:
+                host, port = (addr[0], int(addr[1]))
+            elif len(addr) == 1:
+                [host], port = addr, 0
+            else:
+                raise ValueError(addr)
+        elif isinstance(addr, int):
+            host = default_listen_ip
+            port = addr
+
+        addresses.append({"address": host, "port": port})
+    return addresses

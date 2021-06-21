@@ -24,6 +24,8 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from time import sleep
 
+from distributed.scheduler import Scheduler
+
 try:
     import ssl
 except ImportError:
@@ -78,7 +80,7 @@ logging_levels = {
     if isinstance(logger, logging.Logger)
 }
 
-
+_TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
 
@@ -551,6 +553,10 @@ def client(loop, cluster_fixture):
         yield client
 
 
+# Compatibility. A lot of tests simply use `c` as fixture name
+c = client
+
+
 @pytest.fixture
 def client_secondary(loop, cluster_fixture):
     scheduler, workers = cluster_fixture
@@ -750,7 +756,7 @@ async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
     await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
 
 
-def gen_test(timeout=10):
+def gen_test(timeout=_TEST_TIMEOUT):
     """Coroutine test
 
     @gen_test(timeout=5)
@@ -770,10 +776,6 @@ def gen_test(timeout=10):
         return test_func
 
     return _
-
-
-from .scheduler import Scheduler
-from .worker import Worker
 
 
 async def start_cluster(
@@ -839,7 +841,7 @@ def gen_cluster(
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
     ncores=None,
     scheduler="127.0.0.1",
-    timeout=30,
+    timeout=_TEST_TIMEOUT,
     security=None,
     Worker=Worker,
     client=False,
@@ -1422,7 +1424,7 @@ def save_sys_modules():
 
 @contextmanager
 def check_thread_leak():
-    """ Context manager to ensure we haven't leaked any threads """
+    """Context manager to ensure we haven't leaked any threads"""
     active_threads_start = threading.enumerate()
 
     yield
@@ -1479,6 +1481,7 @@ def check_instances():
     Worker._instances.clear()
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
+    Worker._initialized_clients.clear()
     # assert all(n.status == "closed" for n in Nanny._instances), {
     #     n: n.status for n in Nanny._instances
     # }
@@ -1501,6 +1504,12 @@ def check_instances():
             if w.status == Status.running:
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
+
+    start = time()
+    while any(c.status != "closed" for c in Worker._initialized_clients):
+        sleep(0.1)
+        assert time() < start + 10
+    Worker._initialized_clients.clear()
 
     for i in range(5):
         if all(c.closed() for c in Comm._instances):

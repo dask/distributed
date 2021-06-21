@@ -16,20 +16,14 @@ from dask.utils import format_bytes
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
 from distributed.dashboard.utils import update, without_property_validation
+from distributed.diagnostics import nvml
 from distributed.utils import log_errors
 
-try:
-    import pynvml
-
-    pynvml.nvmlInit()
-
-    NVML_ENABLED = True
-except Exception:
-    NVML_ENABLED = False
+NVML_ENABLED = nvml.device_get_count() > 0
 
 
 class GPUCurrentLoad(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():

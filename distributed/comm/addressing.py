@@ -5,8 +5,6 @@ import dask
 from ..utils import get_ip_interface
 from . import registry
 
-DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
-
 
 def parse_address(addr, strict=False):
     """
@@ -28,7 +26,7 @@ def parse_address(addr, strict=False):
         )
         raise ValueError(msg)
     if not sep:
-        scheme = DEFAULT_SCHEME
+        scheme = dask.config.get("distributed.comm.default-scheme")
     return scheme, loc
 
 
@@ -264,7 +262,7 @@ def address_from_user_args(
     security=None,
     default_port=0,
 ) -> str:
-    """ Get an address to listen on from common user provided arguments """
+    """Get an address to listen on from common user provided arguments"""
 
     if security and security.require_encryption and not protocol:
         protocol = "tls"

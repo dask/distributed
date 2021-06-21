@@ -1,4 +1,6 @@
 import asyncio
+import heapq
+import html
 import inspect
 import itertools
 import json
@@ -11,11 +13,12 @@ import sys
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Mapping, Set
+from collections.abc import Hashable, Iterable, Iterator, Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
+from typing import Optional
 
 import psutil
 import sortedcontainers
@@ -58,7 +61,7 @@ from .proctitle import setproctitle
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
-from .recreate_exceptions import ReplayExceptionScheduler
+from .recreate_tasks import ReplayTaskScheduler
 from .security import Security
 from .semaphore import SemaphoreExtension
 from .stealing import WorkStealing
@@ -160,20 +163,12 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
-UNKNOWN_TASK_DURATION = declare(
-    double,
-    parse_timedelta(dask.config.get("distributed.scheduler.unknown-task-duration")),
-)
-MEMORY_RECENT_TO_OLD_TIME = declare(
-    double,
-    parse_timedelta(dask.config.get("distributed.worker.memory.recent_to_old_time")),
-)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
     MultiLockExtension,
     PublishExtension,
-    ReplayExceptionScheduler,
+    ReplayTaskScheduler,
     QueueExtension,
     VariableExtension,
     PubSubSchedulerExtension,
@@ -291,7 +286,7 @@ class MemoryState:
 
     unmanaged_old
         Minimum of the 'unmanaged' measures over the last
-        ``distributed.memory.recent_to_old_time`` seconds
+        ``distributed.memory.recent-to-old-time`` seconds
     unmanaged_recent
         unmanaged - unmanaged_old; in other words process memory that has been recently
         allocated but is not accounted for by dask; hopefully it's mostly a temporary
@@ -418,7 +413,7 @@ class WorkerState:
 
     .. attribute:: has_what: {TaskState}
 
-       The set of tasks which currently reside on this worker.
+       An insertion-sorted set-like of tasks which currently reside on this worker.
        All the tasks here are in the "memory" state.
 
        This is the reverse mapping of :class:`TaskState.who_has`.
@@ -478,7 +473,9 @@ class WorkerState:
     _bandwidth: double
     _executing: dict
     _extra: dict
-    _has_what: set
+    # _has_what is a dict with all values set to None as rebalance() relies on the
+    # property of Python >=3.7 dicts to be insertion-sorted.
+    _has_what: dict
     _hash: Py_hash_t
     _last_seen: double
     _local_directory: str
@@ -566,7 +563,7 @@ class WorkerState:
         )
 
         self._actors = set()
-        self._has_what = set()
+        self._has_what = {}
         self._processing = {}
         self._executing = {}
         self._resources = {}
@@ -607,8 +604,8 @@ class WorkerState:
         return self._extra
 
     @property
-    def has_what(self):
-        return self._has_what
+    def has_what(self) -> "Set[TaskState]":
+        return self._has_what.keys()
 
     @property
     def host(self):
@@ -714,7 +711,7 @@ class WorkerState:
 
     @ccall
     def clean(self):
-        """ Return a version of this object that is appropriate for serialization """
+        """Return a version of this object that is appropriate for serialization"""
         ws: WorkerState = WorkerState(
             address=self._address,
             pid=self._pid,
@@ -732,12 +729,21 @@ class WorkerState:
         return ws
 
     def __repr__(self):
-        return "<Worker %r, name: %s, memory: %d, processing: %d>" % (
+        return "<WorkerState %r, name: %s, memory: %d, processing: %d>" % (
             self._address,
             self._name,
             len(self._has_what),
             len(self._processing),
         )
+
+    def _repr_html_(self):
+        text = (
+            f"<b>WorkerState: </b> {html.escape(self._address)} "
+            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
+            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        )
+        return text
 
     @ccall
     @exceptval(check=False)
@@ -867,11 +873,6 @@ class TaskPrefix:
         )
 
     @property
-    def nbytes_in_memory(self):
-        tg: TaskGroup
-        return sum([tg._nbytes_in_memory for tg in self._groups])
-
-    @property
     def nbytes_total(self):
         tg: TaskGroup
         return sum([tg._nbytes_total for tg in self._groups])
@@ -916,10 +917,6 @@ class TaskGroup:
 
        The total number of bytes that this task group has produced
 
-    .. attribute:: nbytes_in_memory: int
-
-       The number of bytes currently stored by this TaskGroup
-
     .. attribute:: duration: float
 
        The total amount of time spent on all tasks in this TaskGroup
@@ -938,7 +935,6 @@ class TaskGroup:
     _states: dict
     _dependencies: set
     _nbytes_total: Py_ssize_t
-    _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
     _start: double
@@ -952,7 +948,6 @@ class TaskGroup:
         self._states["forgotten"] = 0
         self._dependencies = set()
         self._nbytes_total = 0
-        self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
         self._start = 0.0
@@ -978,10 +973,6 @@ class TaskGroup:
     @property
     def nbytes_total(self):
         return self._nbytes_total
-
-    @property
-    def nbytes_in_memory(self):
-        return self._nbytes_in_memory
 
     @property
     def duration(self):
@@ -1199,6 +1190,10 @@ class TaskState:
        failed task is stored here (possibly itself).  Otherwise this
        is ``None``.
 
+    .. attribute:: erred_on: set(str)
+
+        Worker addresses on which errors appeared causing this task to be in an error state.
+
     .. attribute:: suspicious: int
 
        The number of times this task has been involved in a worker death.
@@ -1287,6 +1282,7 @@ class TaskState:
     _exception: object
     _traceback: object
     _exception_blame: object
+    _erred_on: set
     _suspicious: Py_ssize_t
     _host_restrictions: set
     _worker_restrictions: set
@@ -1337,6 +1333,7 @@ class TaskState:
         "_who_wants",
         "_exception",
         "_traceback",
+        "_erred_on",
         "_exception_blame",
         "_suspicious",
         "_retries",
@@ -1375,6 +1372,7 @@ class TaskState:
         self._group = None
         self._metadata = {}
         self._annotations = {}
+        self._erred_on = set()
 
     def __hash__(self):
         return self._hash
@@ -1522,9 +1520,13 @@ class TaskState:
     def prefix_key(self):
         return self._prefix._name
 
+    @property
+    def erred_on(self):
+        return self._erred_on
+
     @ccall
     def add_dependency(self, other: "TaskState"):
-        """ Add another task as a dependency of this task """
+        """Add another task as a dependency of this task"""
         self._dependencies.add(other)
         self._group._dependencies.add(other._group)
         other._dependents.add(self)
@@ -1542,14 +1544,25 @@ class TaskState:
         if old_nbytes >= 0:
             diff -= old_nbytes
         self._group._nbytes_total += diff
-        self._group._nbytes_in_memory += diff
         ws: WorkerState
         for ws in self._who_has:
             ws._nbytes += diff
         self._nbytes = nbytes
 
     def __repr__(self):
-        return "<Task %r %s>" % (self._key, self._state)
+        return "<TaskState %r %s>" % (self._key, self._state)
+
+    def _repr_html_(self):
+        color = (
+            "var(--jp-error-color0, red)"
+            if self._state == "erred"
+            else "var(--jp-ui-font-color0, black)"
+        )
+        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
+        if self._state == "memory":
+            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
+        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
+        return text
 
     @ccall
     def validate(self):
@@ -1757,6 +1770,15 @@ class SchedulerState:
     _validate: bint
     _workers: object
     _workers_dv: dict
+    _transition_counter: Py_ssize_t
+
+    # Variables from dask.config, cached by __init__ for performance
+    UNKNOWN_TASK_DURATION: double
+    MEMORY_RECENT_TO_OLD_TIME: double
+    MEMORY_REBALANCE_MEASURE: str
+    MEMORY_REBALANCE_SENDER_MIN: double
+    MEMORY_REBALANCE_RECIPIENT_MAX: double
+    MEMORY_REBALANCE_HALF_GAP: double
 
     def __init__(
         self,
@@ -1816,7 +1838,6 @@ class SchedulerState:
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
-            ("erred", "forgotten"): self.transition_released_forgotten,
             ("erred", "released"): self.transition_erred_released,
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
@@ -1832,6 +1853,29 @@ class SchedulerState:
         else:
             self._workers = sortedcontainers.SortedDict()
         self._workers_dv: dict = cast(dict, self._workers)
+
+        # Variables from dask.config, cached by __init__ for performance
+        self.UNKNOWN_TASK_DURATION = parse_timedelta(
+            dask.config.get("distributed.scheduler.unknown-task-duration")
+        )
+        self.MEMORY_RECENT_TO_OLD_TIME = parse_timedelta(
+            dask.config.get("distributed.worker.memory.recent-to-old-time")
+        )
+        self.MEMORY_REBALANCE_MEASURE = dask.config.get(
+            "distributed.worker.memory.rebalance.measure"
+        )
+        self.MEMORY_REBALANCE_SENDER_MIN = dask.config.get(
+            "distributed.worker.memory.rebalance.sender-min"
+        )
+        self.MEMORY_REBALANCE_RECIPIENT_MAX = dask.config.get(
+            "distributed.worker.memory.rebalance.recipient-max"
+        )
+        self.MEMORY_REBALANCE_HALF_GAP = (
+            dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
+            / 2.0
+        )
+        self._transition_counter = 0
+
         super().__init__(**kwargs)
 
     @property
@@ -1899,6 +1943,10 @@ class SchedulerState:
         self._total_occupancy = v
 
     @property
+    def transition_counter(self):
+        return self._transition_counter
+
+    @property
     def unknown_durations(self):
         return self._unknown_durations
 
@@ -1947,7 +1995,7 @@ class SchedulerState:
     @ccall
     @exceptval(check=False)
     def new_task(self, key: str, spec: object, state: str) -> TaskState:
-        """ Create a new task, and associated states """
+        """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
         ts._state = state
 
@@ -2023,6 +2071,7 @@ class SchedulerState:
             func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
+                self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 assert not args and not kwargs
@@ -2110,7 +2159,7 @@ class SchedulerState:
                     del parent._task_groups[tg._name]
 
             return recommendations, client_msgs, worker_msgs
-        except Exception as e:
+        except Exception:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
             if LOG_PDB:
                 import pdb
@@ -2581,14 +2630,13 @@ class SchedulerState:
             # XXX factor this out?
             ts_nbytes: Py_ssize_t = ts.get_nbytes()
             worker_msg = {
-                "op": "delete-data",
+                "op": "free-keys",
                 "keys": [key],
-                "report": False,
+                "reason": f"Memory->Released {key}",
             }
             for ws in ts._who_has:
-                ws._has_what.remove(ts)
+                del ws._has_what[ts]
                 ws._nbytes -= ts_nbytes
-                ts._group._nbytes_in_memory -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
 
             ts._who_has.clear()
@@ -2674,7 +2722,6 @@ class SchedulerState:
 
             if self._validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert all([dts._state != "erred" for dts in ts._dependencies])
                     assert ts._exception_blame
                     assert not ts._who_has
                     assert not ts._waiting_on
@@ -2687,6 +2734,11 @@ class SchedulerState:
             for dts in ts._dependents:
                 if dts._state == "erred":
                     recommendations[dts._key] = "waiting"
+
+            w_msg = {"op": "free-keys", "keys": [key], "reason": "Erred->Released"}
+            for ws_addr in ts._erred_on:
+                worker_msgs[ws_addr] = [w_msg]
+            ts._erred_on.clear()
 
             report_msg = {"op": "task-retried", "key": key}
             cs: ClientState
@@ -2757,7 +2809,9 @@ class SchedulerState:
 
             w: str = _remove_from_processing(self, ts)
             if w:
-                worker_msgs[w] = [{"op": "release-task", "key": key}]
+                worker_msgs[w] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Processing->Released"}
+                ]
 
             ts.state = "released"
 
@@ -2787,7 +2841,7 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, **kwargs
+        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
     ):
         ws: WorkerState
         try:
@@ -2808,8 +2862,9 @@ class SchedulerState:
                 ws = ts._processing_on
                 ws._actors.remove(ts)
 
-            _remove_from_processing(self, ts)
+            w = _remove_from_processing(self, ts)
 
+            ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
             if traceback is not None:
@@ -3039,7 +3094,7 @@ class SchedulerState:
         on the given worker.
         """
         dts: TaskState
-        deps: set = ts._dependencies - ws._has_what
+        deps: set = ts._dependencies.difference(ws._has_what)
         nbytes: Py_ssize_t = 0
         for dts in deps:
             nbytes += dts._nbytes
@@ -3052,18 +3107,14 @@ class SchedulerState:
         (not including any communication cost).
         """
         duration: double = ts._prefix._duration_average
-        if duration < 0:
-            s: set = self._unknown_durations.get(ts._prefix._name)
-            if s is None:
-                self._unknown_durations[ts._prefix._name] = s = set()
-            s.add(ts)
+        if duration >= 0:
+            return duration
 
-            if default < 0:
-                duration = UNKNOWN_TASK_DURATION
-            else:
-                duration = default
-
-        return duration
+        s: set = self._unknown_durations.get(ts._prefix._name)
+        if s is None:
+            self._unknown_durations[ts._prefix._name] = s = set()
+        s.add(ts)
+        return default if default >= 0 else self.UNKNOWN_TASK_DURATION
 
     @ccall
     @exceptval(check=False)
@@ -3579,14 +3630,25 @@ class Scheduler(SchedulerState, ServerNode):
 
     def __repr__(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        return '<Scheduler: "%s" processes: %d cores: %d>' % (
+        return '<Scheduler: "%s" workers: %d cores: %d, tasks: %d>' % (
             self.address,
-            len(parent._workers),
+            len(parent._workers_dv),
             parent._total_nthreads,
+            len(parent._tasks),
         )
 
+    def _repr_html_(self):
+        parent: SchedulerState = cast(SchedulerState, self)
+        text = (
+            f"<b>Scheduler: </b>{html.escape(self.address)} "
+            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
+            f'<font color="gray">cores: </font>{parent._total_nthreads} '
+            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        )
+        return text
+
     def identity(self, comm=None):
-        """ Basic information about ourselves and our cluster """
+        """Basic information about ourselves and our cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         d = {
             "type": type(self).__name__,
@@ -3595,7 +3657,8 @@ class Scheduler(SchedulerState, ServerNode):
             "services": {key: v.port for (key, v) in self.services.items()},
             "started": self.time_started,
             "workers": {
-                worker.address: worker.identity() for worker in parent._workers.values()
+                worker.address: worker.identity()
+                for worker in parent._workers_dv.values()
             },
         }
         return d
@@ -3615,7 +3678,7 @@ class Scheduler(SchedulerState, ServerNode):
             or just a (host, port) pair
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers[worker]
+        ws: WorkerState = parent._workers_dv[worker]
         port = ws._services.get(service_name)
         if port is None:
             return None
@@ -3629,7 +3692,7 @@ class Scheduler(SchedulerState, ServerNode):
             return ws.host, port
 
     async def start(self):
-        """ Clear out old state and restart all running coroutines """
+        """Clear out old state and restart all running coroutines"""
         await super().start()
         assert self.status != Status.running
 
@@ -3710,10 +3773,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
-            for worker in parent._workers:
+            for worker in parent._workers_dv:
                 self.worker_send(worker, {"op": "close"})
             for i in range(20):  # wait a second for send signals to clear
-                if parent._workers:
+                if parent._workers_dv:
                     await asyncio.sleep(0.05)
                 else:
                     break
@@ -3761,14 +3824,10 @@ class Scheduler(SchedulerState, ServerNode):
         signal to the worker to shut down.  This works regardless of whether or
         not the worker has a nanny process restarting it
         """
-        parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            ws: WorkerState = parent._workers[worker]
-            nanny_addr = ws._nanny
-            address = nanny_addr or worker
-
+            # FIXME: This does not handly nannys
             self.worker_send(worker, {"op": "close", "report": False})
             await self.remove_worker(address=worker, safe=safe)
 
@@ -3791,7 +3850,7 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        ws: WorkerState = parent._workers.get(address)
+        ws: WorkerState = parent._workers_dv.get(address)
         if ws is None:
             return {"status": "missing"}
 
@@ -3802,7 +3861,7 @@ class Scheduler(SchedulerState, ServerNode):
         dh: dict = parent._host_info.setdefault(host, {})
         dh["last-seen"] = local_now
 
-        frac = 1 / len(parent._workers)
+        frac = 1 / len(parent._workers_dv)
         parent._bandwidth = (
             parent._bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
         )
@@ -3833,7 +3892,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Calculate RSS - dask keys, separating "old" and "new" usage
         # See MemoryState for details
-        max_memory_unmanaged_old_hist_age = local_now - MEMORY_RECENT_TO_OLD_TIME
+        max_memory_unmanaged_old_hist_age = local_now - parent.MEMORY_RECENT_TO_OLD_TIME
         memory_unmanaged_old = ws._memory_unmanaged_old
         while ws._memory_other_history:
             timestamp, size = ws._memory_other_history[0]
@@ -3874,7 +3933,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {
             "status": "OK",
             "time": local_now,
-            "heartbeat-interval": heartbeat_interval(len(parent._workers)),
+            "heartbeat-interval": heartbeat_interval(len(parent._workers_dv)),
         }
 
     async def add_worker(
@@ -3899,14 +3958,14 @@ class Scheduler(SchedulerState, ServerNode):
         nanny=None,
         extra=None,
     ):
-        """ Add a new worker to the cluster """
+        """Add a new worker to the cluster"""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
             host = get_address_host(address)
 
-            ws: WorkerState = parent._workers.get(address)
+            ws: WorkerState = parent._workers_dv.get(address)
             if ws is not None:
                 raise ValueError("Worker already exists %s" % ws)
 
@@ -4015,7 +4074,7 @@ class Scheduler(SchedulerState, ServerNode):
             msg = {
                 "status": "OK",
                 "time": time(),
-                "heartbeat-interval": heartbeat_interval(len(parent._workers)),
+                "heartbeat-interval": heartbeat_interval(len(parent._workers_dv)),
                 "worker-plugins": self.worker_plugins,
             }
 
@@ -4023,7 +4082,7 @@ class Scheduler(SchedulerState, ServerNode):
             version_warning = version_module.error_message(
                 version_module.get_versions(),
                 merge(
-                    {w: ws._versions for w, ws in parent._workers.items()},
+                    {w: ws._versions for w, ws in parent._workers_dv.items()},
                     {
                         c: cs._versions
                         for c, cs in parent._clients.items()
@@ -4054,9 +4113,8 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
-        annotations=None,
     ):
-        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg, annotations)
+        unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
         dependencies = unpacked_graph["deps"]
         annotations = unpacked_graph["annotations"]
@@ -4296,6 +4354,9 @@ class Scheduler(SchedulerState, ServerNode):
                     continue
                 ts._host_restrictions = set()
                 ts._worker_restrictions = set()
+                # Make sure `v` is a collection and not a single worker name / address
+                if not isinstance(v, (list, tuple, set)):
+                    v = [v]
                 for w in v:
                     try:
                         w = self.coerce_address(w)
@@ -4372,7 +4433,7 @@ class Scheduler(SchedulerState, ServerNode):
         # TODO: balance workers
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
-        """ Mark that a task has finished execution on a particular worker """
+        """Mark that a task has finished execution on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task finished %s, %s", key, worker)
 
@@ -4402,14 +4463,16 @@ class Scheduler(SchedulerState, ServerNode):
                 ts._who_has,
             )
             if ws not in ts._who_has:
-                worker_msgs[worker] = [{"op": "release-task", "key": key}]
+                worker_msgs[worker] = [
+                    {"op": "free-keys", "keys": [key], "reason": "Stimulus Finished"}
+                ]
 
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
         self, key=None, worker=None, exception=None, traceback=None, **kwargs
     ):
-        """ Mark that a task has erred on a particular worker """
+        """Mark that a task has erred on a particular worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
@@ -4444,7 +4507,7 @@ class Scheduler(SchedulerState, ServerNode):
     def stimulus_missing_data(
         self, cause=None, key=None, worker=None, ensure=True, **kwargs
     ):
-        """ Mark that certain keys have gone missing.  Recover. """
+        """Mark that certain keys have gone missing.  Recover."""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
             logger.debug("Stimulus missing data %s, %s", key, worker)
@@ -4462,7 +4525,7 @@ class Scheduler(SchedulerState, ServerNode):
                 ws: WorkerState
                 cts_nbytes: Py_ssize_t = cts.get_nbytes()
                 for ws in cts._who_has:  # TODO: this behavior is extreme
-                    ws._has_what.remove(cts)
+                    del ws._has_what[ts]
                     ws._nbytes -= cts_nbytes
                 cts._who_has.clear()
                 recommendations[cause] = "released"
@@ -4631,7 +4694,7 @@ class Scheduler(SchedulerState, ServerNode):
         return "OK"
 
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
-        """ Stop execution on a list of keys """
+        """Stop execution on a list of keys"""
         logger.info("Client %s requests to cancel %d keys", client, len(keys))
         if client:
             self.log_event(
@@ -4641,7 +4704,7 @@ class Scheduler(SchedulerState, ServerNode):
             self.cancel_key(key, client, force=force)
 
     def cancel_key(self, key, client, retries=5, force=False):
-        """ Cancel a particular key and all dependents """
+        """Cancel a particular key and all dependents"""
         # TODO: this should be converted to use the transition mechanism
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks.get(key)
@@ -4684,7 +4747,7 @@ class Scheduler(SchedulerState, ServerNode):
                 self.report_on_key(ts=ts, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
-        """ Remove keys from client desired list """
+        """Remove keys from client desired list"""
 
         parent: SchedulerState = cast(SchedulerState, self)
         if not isinstance(keys, list):
@@ -4696,7 +4759,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.transitions(recommendations)
 
     def client_heartbeat(self, client=None):
-        """ Handle heartbeats from Client """
+        """Handle heartbeats from Client"""
         parent: SchedulerState = cast(SchedulerState, self)
         cs: ClientState = parent._clients[client]
         cs._last_seen = time()
@@ -4941,7 +5004,7 @@ class Scheduler(SchedulerState, ServerNode):
                 pass
 
     def remove_client(self, client=None):
-        """ Remove client from network """
+        """Remove client from network"""
         parent: SchedulerState = cast(SchedulerState, self)
         if self.status == Status.running:
             logger.info("Remove client %s", client)
@@ -4975,7 +5038,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.loop.call_later(cleanup_delay, remove_client_from_events)
 
     def send_task_to_worker(self, worker, ts: TaskState, duration: double = -1):
-        """ Send a single computational task to a worker """
+        """Send a single computational task to a worker"""
         parent: SchedulerState = cast(SchedulerState, self)
         try:
             msg: dict = _task_to_msg(parent, ts, duration)
@@ -5048,7 +5111,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv.get(errant_worker)
         if ws is not None and ws in ts._who_has:
             ts._who_has.remove(ws)
-            ws._has_what.remove(ts)
+            del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
         if not ts._who_has:
             if ts._run_spec:
@@ -5059,13 +5122,13 @@ class Scheduler(SchedulerState, ServerNode):
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv[worker]
-        tasks: set = {parent._tasks[k] for k in keys}
-        removed_tasks: set = tasks & ws._has_what
-        ws._has_what -= removed_tasks
+        tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
+        removed_tasks: set = tasks.intersection(ws._has_what)
 
         ts: TaskState
         recommendations: dict = {}
         for ts in removed_tasks:
+            del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
             wh: set = ts._who_has
             wh.remove(ws)
@@ -5144,7 +5207,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.plugins.append(plugin)
 
     def remove_plugin(self, plugin):
-        """ Remove external plugin from scheduler """
+        """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
 
     def worker_send(self, worker, msg):
@@ -5248,7 +5311,7 @@ class Scheduler(SchedulerState, ServerNode):
         return keys
 
     async def gather(self, comm=None, keys=None, serializers=None):
-        """ Collect data in from workers """
+        """Collect data in from workers"""
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         keys = list(keys)
@@ -5306,7 +5369,7 @@ class Scheduler(SchedulerState, ServerNode):
                     for worker in workers:
                         ws = parent._workers_dv.get(worker)
                         if ws is not None and ts in ws._has_what:
-                            ws._has_what.remove(ts)
+                            del ws._has_what[ts]
                             ts._who_has.remove(ws)
                             ws._nbytes -= ts_nbytes
                             parent._transitions(
@@ -5325,7 +5388,7 @@ class Scheduler(SchedulerState, ServerNode):
             collection.clear()
 
     async def restart(self, client=None, timeout=3):
-        """ Restart all workers.  Reset local state. """
+        """Restart all workers.  Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
 
@@ -5347,7 +5410,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # Ask the worker to close if it doesn't have a nanny,
                     # otherwise the nanny will kill it anyway
                     await self.remove_worker(address=addr, close=addr not in nannies)
-                except Exception as e:
+                except Exception:
                     logger.info(
                         "Exception while restarting.  This is normal", exc_info=True
                     )
@@ -5413,7 +5476,7 @@ class Scheduler(SchedulerState, ServerNode):
         nanny=False,
         serializers=None,
     ):
-        """ Broadcast message to workers, return all results """
+        """Broadcast message to workers, return all results"""
         parent: SchedulerState = cast(SchedulerState, self)
         if workers is None or workers is True:
             if hosts is None:
@@ -5448,7 +5511,7 @@ class Scheduler(SchedulerState, ServerNode):
         return dict(zip(workers, results))
 
     async def proxy(self, comm=None, msg=None, worker=None, serializers=None):
-        """ Proxy a communication through the scheduler to some other worker """
+        """Proxy a communication through the scheduler to some other worker"""
         d = await self.broadcast(
             comm=comm, msg=msg, workers=[worker], serializers=serializers
         )
@@ -5465,151 +5528,382 @@ class Scheduler(SchedulerState, ServerNode):
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
+
         await retry_operation(
-            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+            self.rpc(addr=worker_address).free_keys,
+            keys=list(keys),
+            reason="rebalance/replicate",
         )
 
         ws: WorkerState = parent._workers_dv[worker_address]
         ts: TaskState
         tasks: set = {parent._tasks[key] for key in keys}
-        ws._has_what -= tasks
         for ts in tasks:
+            del ws._has_what[ts]
             ts._who_has.remove(ws)
             ws._nbytes -= ts.get_nbytes()
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
-    async def rebalance(self, comm=None, keys=None, workers=None):
-        """Rebalance keys so that each worker stores roughly equal bytes
+    async def rebalance(
+        self,
+        comm=None,
+        keys: "Iterable[Hashable]" = None,
+        workers: "Iterable[str]" = None,
+    ) -> dict:
+        """Rebalance keys so that each worker ends up with roughly the same process
+        memory (managed+unmanaged).
 
-        **Policy**
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
-        This orders the workers by what fraction of bytes of the existing keys
-        they have.  It walks down this list from most-to-least.  At each worker
-        it sends the largest results it can find and sends them to the least
-        occupied worker until either the sender or the recipient are at the
-        average expected load.
+        **Algorithm**
+
+        #. Find the mean occupancy of the cluster, defined as data managed by dask +
+           unmanaged process memory that has been there for at least 30 seconds
+           (``distributed.worker.memory.recent-to-old-time``).
+           This lets us ignore temporary spikes caused by task heap usage.
+
+           Alternatively, you may change how memory is measured both for the individual
+           workers as well as to calculate the mean through
+           ``distributed.worker.memory.rebalance.measure``. Namely, this can be useful
+           to disregard inaccurate OS memory measurements.
+
+        #. Discard workers whose occupancy is within 5% of the mean cluster occupancy
+           (``distributed.worker.memory.rebalance.sender-recipient-gap`` / 2).
+           This helps avoid data from bouncing around the cluster repeatedly.
+        #. Workers above the mean are senders; those below are recipients.
+        #. Discard senders whose absolute occupancy is below 30%
+           (``distributed.worker.memory.rebalance.sender-min``). In other words, no data
+           is moved regardless of imbalancing as long as all workers are below 30%.
+        #. Discard recipients whose absolute occupancy is above 60%
+           (``distributed.worker.memory.rebalance.recipient-max``).
+           Note that this threshold by default is the same as
+           ``distributed.worker.memory.target`` to prevent workers from accepting data
+           and immediately spilling it out to disk.
+        #. Iteratively pick the sender and recipient that are farthest from the mean and
+           move the *least recently inserted* key between the two, until either all
+           senders or all recipients fall within 5% of the mean.
+
+           A recipient will be skipped if it already has a copy of the data. In other
+           words, this method does not degrade replication.
+           A key will be skipped if there are no recipients available with enough memory
+           to accept the key and that don't already hold a copy.
+
+        The least recently insertd (LRI) policy is a greedy choice with the advantage of
+        being O(1), trivial to implement (it relies on python dict insertion-sorting)
+        and hopefully good enough in most cases. Discarded alternative policies were:
+
+        - Largest first. O(n*log(n)) save for non-trivial additional data structures and
+          risks causing the largest chunks of data to repeatedly move around the
+          cluster like pinballs.
+        - Least recently used (LRU). This information is currently available on the
+          workers only and not trivial to replicate on the scheduler; transmitting it
+          over the network would be very expensive. Also, note that dask will go out of
+          its way to minimise the amount of time intermediate keys are held in memory,
+          so in such a case LRI is a close approximation of LRU.
+
+        Parameters
+        ----------
+        keys: optional
+            whitelist of dask keys that should be considered for moving. All other keys
+            will be ignored. Note that this offers no guarantee that a key will actually
+            be moved (e.g. because it is unnecessary or because there are no viable
+            recipient workers for it).
+        workers: optional
+            whitelist of workers addresses to be considered as senders or recipients.
+            All other workers will be ignored. The mean cluster occupancy will be
+            calculated only using the whitelisted workers.
         """
-        parent: SchedulerState = cast(SchedulerState, self)
-        ts: TaskState
+        parent: SchedulerState = self
+
         with log_errors():
-            async with self._lock:
-                if keys:
-                    tasks = {parent._tasks[k] for k in keys}
-                    missing_data = [ts._key for ts in tasks if not ts._who_has]
-                    if missing_data:
-                        return {"status": "missing-data", "keys": missing_data}
-                else:
-                    tasks = set(parent._tasks.values())
-
-                if workers:
-                    workers = {parent._workers_dv[w] for w in workers}
-                    workers_by_task = {ts: ts._who_has & workers for ts in tasks}
-                else:
-                    workers = set(parent._workers_dv.values())
-                    workers_by_task = {ts: ts._who_has for ts in tasks}
-
-                ws: WorkerState
-                tasks_by_worker = {ws: set() for ws in workers}
-
-                for k, v in workers_by_task.items():
-                    for vv in v:
-                        tasks_by_worker[vv].add(k)
-
-                worker_bytes = {
-                    ws: sum(ts.get_nbytes() for ts in v)
-                    for ws, v in tasks_by_worker.items()
-                }
-
-                avg = sum(worker_bytes.values()) / len(worker_bytes)
-
-                sorted_workers = list(
-                    map(first, sorted(worker_bytes.items(), key=second, reverse=True))
-                )
-
-                recipients = reversed(sorted_workers)
-                recipient = next(recipients)
-                msgs = []  # (sender, recipient, key)
-                for sender in sorted_workers[: len(workers) // 2]:
-                    sender_keys = {
-                        ts: ts.get_nbytes() for ts in tasks_by_worker[sender]
-                    }
-                    sender_keys = iter(
-                        sorted(sender_keys.items(), key=second, reverse=True)
-                    )
-
-                    try:
-                        while avg < worker_bytes[sender]:
-                            while worker_bytes[recipient] < avg < worker_bytes[sender]:
-                                ts, nb = next(sender_keys)
-                                if ts not in tasks_by_worker[recipient]:
-                                    tasks_by_worker[recipient].add(ts)
-                                    # tasks_by_worker[sender].remove(ts)
-                                    msgs.append((sender, recipient, ts))
-                                    worker_bytes[sender] -= nb
-                                    worker_bytes[recipient] += nb
-                            if avg < worker_bytes[sender]:
-                                recipient = next(recipients)
-                    except StopIteration:
-                        break
-
-                to_recipients = defaultdict(lambda: defaultdict(list))
-                to_senders = defaultdict(list)
-                for sender, recipient, ts in msgs:
-                    to_recipients[recipient.address][ts._key].append(sender.address)
-                    to_senders[sender.address].append(ts._key)
-
-                result = await asyncio.gather(
-                    *(
-                        retry_operation(self.rpc(addr=r).gather, who_has=v)
-                        for r, v in to_recipients.items()
-                    )
-                )
-                for r, v in to_recipients.items():
-                    self.log_event(r, {"action": "rebalance", "who_has": v})
-
-                self.log_event(
-                    "all",
-                    {
-                        "action": "rebalance",
-                        "total-keys": len(tasks),
-                        "senders": valmap(len, to_senders),
-                        "recipients": valmap(len, to_recipients),
-                        "moved_keys": len(msgs),
-                    },
-                )
-
-                if any(r["status"] != "OK" for r in result):
-                    return {
-                        "status": "missing-data",
-                        "keys": tuple(
-                            concat(
-                                r["keys"].keys()
-                                for r in result
-                                if r["status"] == "missing-data"
-                            )
-                        ),
-                    }
-
-                for sender, recipient, ts in msgs:
-                    assert ts._state == "memory"
-                    ts._who_has.add(recipient)
-                    recipient.has_what.add(ts)
-                    recipient.nbytes += ts.get_nbytes()
-                    self.log.append(
-                        (
-                            "rebalance",
-                            ts._key,
-                            time(),
-                            sender.address,
-                            recipient.address,
-                        )
-                    )
-
-                await asyncio.gather(
-                    *(self._delete_worker_data(r, v) for r, v in to_senders.items())
-                )
-
+            if workers is not None:
+                workers = [parent._workers_dv[w] for w in workers]
+            else:
+                workers = parent._workers_dv.values()
+            if not workers:
                 return {"status": "OK"}
+
+            if keys is not None:
+                if not isinstance(keys, Set):
+                    keys = set(keys)  # unless already a set-like
+                if not keys:
+                    return {"status": "OK"}
+                missing_data = [
+                    k
+                    for k in keys
+                    if k not in parent._tasks or not parent._tasks[k].who_has
+                ]
+                if missing_data:
+                    return {"status": "missing-data", "keys": missing_data}
+
+            msgs = self._rebalance_find_msgs(keys, workers)
+            if not msgs:
+                return {"status": "OK"}
+
+            async with self._lock:
+                return await self._rebalance_move_data(msgs)
+
+    def _rebalance_find_msgs(
+        self: SchedulerState,
+        keys: "Optional[Set[Hashable]]",
+        workers: "Iterable[WorkerState]",
+    ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
+        """Identify workers that need to lose keys and those that can receive them,
+        together with how many bytes each needs to lose/receive. Then, pair a sender
+        worker with a recipient worker for each key, until the cluster is rebalanced.
+
+        This method only defines the work to be performed; it does not start any network
+        transfers itself.
+
+        The big-O complexity is O(wt + ke*log(we)), where
+
+        - wt is the total number of workers on the cluster (or the number of whitelisted
+          workers, if explicitly stated by the user)
+        - we is the number of workers that are eligible to be senders or recipients
+        - kt is the total number of keys on the cluster (or on the whitelisted workers)
+        - ke is the number of keys that need to be moved in order to achieve a balanced
+          cluster
+
+        There is a degenerate edge case O(wt + kt*log(we)) when kt is much greater than
+        the number of whitelisted keys, or when most keys are replicated or cannot be
+        moved for some other reason.
+
+        Returns list of tuples to feed into _rebalance_move_data:
+
+        - sender worker
+        - recipient worker
+        - task to be transferred
+        """
+        parent: SchedulerState = self
+        ts: TaskState
+        ws: WorkerState
+
+        # Heaps of workers, managed by the heapq module, that need to send/receive data,
+        # with how many bytes each needs to send/receive.
+        #
+        # Each element of the heap is a tuple constructed as follows:
+        # - snd_bytes_max/rec_bytes_max: maximum number of bytes to send or receive.
+        #   This number is negative, so that the workers farthest from the cluster mean
+        #   are at the top of the smallest-first heaps.
+        # - snd_bytes_min/rec_bytes_min: minimum number of bytes after sending/receiving
+        #   which the worker should not be considered anymore. This is also negative.
+        # - arbitrary unique number, there just to to make sure that WorkerState objects
+        #   are never used for sorting in the unlikely event that two processes have
+        #   exactly the same number of bytes allocated.
+        # - WorkerState
+        # - iterator of all tasks in memory on the worker (senders only), insertion
+        #   sorted (least recently inserted first).
+        #   Note that this iterator will typically *not* be exhausted. It will only be
+        #   exhausted if, after moving away from the worker all keys that can be moved,
+        #   is insufficient to drop snd_bytes_min above 0.
+        senders: "list[tuple[int, int, int, WorkerState, Iterator[TaskState]]]" = []
+        recipients: "list[tuple[int, int, int, WorkerState]]" = []
+
+        # Output: [(sender, recipient, task), ...]
+        msgs: "list[tuple[WorkerState, WorkerState, TaskState]]" = []
+
+        # By default, this is the optimistic memory, meaning total process memory minus
+        # unmanaged memory that appeared over the last 30 seconds
+        # (distributed.worker.memory.recent-to-old-time).
+        # This lets us ignore temporary spikes caused by task heap usage.
+        memory_by_worker = [
+            (ws, getattr(ws.memory, parent.MEMORY_REBALANCE_MEASURE)) for ws in workers
+        ]
+        mean_memory = sum(m for _, m in memory_by_worker) // len(memory_by_worker)
+
+        for ws, ws_memory in memory_by_worker:
+            if ws.memory_limit:
+                half_gap = int(parent.MEMORY_REBALANCE_HALF_GAP * ws.memory_limit)
+                sender_min = parent.MEMORY_REBALANCE_SENDER_MIN * ws.memory_limit
+                recipient_max = parent.MEMORY_REBALANCE_RECIPIENT_MAX * ws.memory_limit
+            else:
+                half_gap = 0
+                sender_min = 0.0
+                recipient_max = math.inf
+
+            if (
+                ws._has_what
+                and ws_memory >= mean_memory + half_gap
+                and ws_memory >= sender_min
+            ):
+                # This may send the worker below sender_min (by design)
+                snd_bytes_max = mean_memory - ws_memory  # negative
+                snd_bytes_min = snd_bytes_max + half_gap  # negative
+                # See definition of senders above
+                senders.append(
+                    (snd_bytes_max, snd_bytes_min, id(ws), ws, iter(ws._has_what))
+                )
+            elif ws_memory < mean_memory - half_gap and ws_memory < recipient_max:
+                # This may send the worker above recipient_max (by design)
+                rec_bytes_max = ws_memory - mean_memory  # negative
+                rec_bytes_min = rec_bytes_max + half_gap  # negative
+                # See definition of recipients above
+                recipients.append((rec_bytes_max, rec_bytes_min, id(ws), ws))
+
+        # Fast exit in case no transfers are necessary or possible
+        if not senders or not recipients:
+            self.log_event(
+                "all",
+                {
+                    "action": "rebalance",
+                    "senders": len(senders),
+                    "recipients": len(recipients),
+                    "moved_keys": 0,
+                },
+            )
+            return []
+
+        heapq.heapify(senders)
+        heapq.heapify(recipients)
+
+        snd_ws: WorkerState
+        rec_ws: WorkerState
+
+        while senders and recipients:
+            snd_bytes_max, snd_bytes_min, _, snd_ws, ts_iter = senders[0]
+
+            # Iterate through tasks in memory, least recently inserted first
+            for ts in ts_iter:
+                if keys is not None and ts.key not in keys:
+                    continue
+                nbytes = ts.nbytes
+                if nbytes + snd_bytes_max > 0:
+                    # Moving this task would cause the sender to go below mean and
+                    # potentially risk becoming a recipient, which would cause tasks to
+                    # bounce around. Move on to the next task of the same sender.
+                    continue
+
+                # Find the recipient, farthest from the mean, which
+                # 1. has enough available RAM for this task, and
+                # 2. doesn't hold a copy of this task already
+                # There may not be any that satisfies these conditions; in this case
+                # this task won't be moved.
+                skipped_recipients = []
+                use_recipient = False
+                while recipients and not use_recipient:
+                    rec_bytes_max, rec_bytes_min, _, rec_ws = recipients[0]
+                    if nbytes + rec_bytes_max > 0:
+                        # recipients are sorted by rec_bytes_max.
+                        # The next ones will be worse; no reason to continue iterating
+                        break
+                    use_recipient = ts not in rec_ws._has_what
+                    if not use_recipient:
+                        skipped_recipients.append(heapq.heappop(recipients))
+
+                for recipient in skipped_recipients:
+                    heapq.heappush(recipients, recipient)
+
+                if not use_recipient:
+                    # This task has no recipients available. Leave it on the sender and
+                    # move on to the next task of the same sender.
+                    continue
+
+                # Schedule task for transfer from sender to receiver
+                msgs.append((snd_ws, rec_ws, ts))
+
+                # *_bytes_max/min are all negative for heap sorting
+                snd_bytes_max += nbytes
+                snd_bytes_min += nbytes
+                rec_bytes_max += nbytes
+                rec_bytes_min += nbytes
+
+                # Stop iterating on the tasks of this sender for now and, if it still
+                # has bytes to lose, push it back into the senders heap; it may or may
+                # not come back on top again.
+                if snd_bytes_min < 0:
+                    # See definition of senders above
+                    heapq.heapreplace(
+                        senders,
+                        (snd_bytes_max, snd_bytes_min, id(snd_ws), snd_ws, ts_iter),
+                    )
+                else:
+                    heapq.heappop(senders)
+
+                # If receiver still has bytes to gain, push it back into the receivers
+                # heap; it may or may not come back on top again.
+                if rec_bytes_min < 0:
+                    # See definition of recipients above
+                    heapq.heapreplace(
+                        recipients,
+                        (rec_bytes_max, rec_bytes_min, id(rec_ws), rec_ws),
+                    )
+                else:
+                    heapq.heappop(recipients)
+
+                # Move to next sender with the most data to lose.
+                # It may or may not be the same sender again.
+                break
+
+            else:  # for ts in ts_iter
+                # Exhausted tasks on this sender
+                heapq.heappop(senders)
+
+        return msgs
+
+    async def _rebalance_move_data(
+        self, msgs: "list[tuple[WorkerState, WorkerState, TaskState]]"
+    ) -> dict:
+        """Perform the actual transfer of data across the network in rebalance().
+        Takes in input the output of _rebalance_find_msgs().
+
+        FIXME this method is not robust when the cluster is not idle.
+        """
+        ts: TaskState
+        snd_ws: WorkerState
+        rec_ws: WorkerState
+
+        to_recipients = defaultdict(lambda: defaultdict(list))
+        to_senders = defaultdict(list)
+        for sender, recipient, ts in msgs:
+            to_recipients[recipient.address][ts._key].append(sender.address)
+            to_senders[sender.address].append(ts._key)
+
+        result = await asyncio.gather(
+            *(
+                retry_operation(self.rpc(addr=r).gather, who_has=v)
+                for r, v in to_recipients.items()
+            )
+        )
+        for r, v in to_recipients.items():
+            self.log_event(r, {"action": "rebalance", "who_has": v})
+
+        self.log_event(
+            "all",
+            {
+                "action": "rebalance",
+                "senders": valmap(len, to_senders),
+                "recipients": valmap(len, to_recipients),
+                "moved_keys": len(msgs),
+            },
+        )
+
+        if any(r["status"] != "OK" for r in result):
+            return {
+                "status": "missing-data",
+                "keys": list(
+                    concat(
+                        r["keys"].keys()
+                        for r in result
+                        if r["status"] == "missing-data"
+                    )
+                ),
+            }
+
+        for snd_ws, rec_ws, ts in msgs:
+            assert ts._state == "memory"
+            ts._who_has.add(rec_ws)
+            rec_ws._has_what[ts] = None
+            rec_ws.nbytes += ts.get_nbytes()
+            self.log.append(
+                ("rebalance", ts._key, time(), snd_ws.address, rec_ws.address)
+            )
+
+        await asyncio.gather(
+            *(self._delete_worker_data(r, v) for r, v in to_senders.items())
+        )
+        return {"status": "OK"}
 
     async def replicate(
         self,
@@ -5940,7 +6234,7 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = set.union(*[w.has_what for w in workers])
+                keys = {k for w in workers for k in w.has_what}
                 keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
                 if keys:
@@ -5989,17 +6283,25 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return "not found"
         ws: WorkerState = parent._workers_dv[worker]
+        superfluous_data = []
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
                 if ts not in ws._has_what:
                     ws._nbytes += ts.get_nbytes()
-                    ws._has_what.add(ts)
+                    ws._has_what[ts] = None
                     ts._who_has.add(ws)
             else:
-                self.worker_send(
-                    worker, {"op": "delete-data", "keys": [key], "report": False}
-                )
+                superfluous_data.append(key)
+        if superfluous_data:
+            self.worker_send(
+                worker,
+                {
+                    "op": "superfluous-data",
+                    "keys": superfluous_data,
+                    "reason": f"Add keys which are not in-memory {superfluous_data}",
+                },
+            )
 
         return "OK"
 
@@ -6039,7 +6341,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ws: WorkerState = parent._workers_dv[w]
                     if ts not in ws._has_what:
                         ws._nbytes += ts_nbytes
-                        ws._has_what.add(ts)
+                        ws._has_what[ts] = None
                         ts._who_has.add(ws)
                 self.report(
                     {"op": "key-in-memory", "key": key, "workers": list(workers)}
@@ -6166,7 +6468,7 @@ class Scheduler(SchedulerState, ServerNode):
             }
         else:
             return {
-                w: [ts._key for ts in ws._has_what]
+                w: [ts._key for ts in ws.has_what]
                 for w, ws in parent._workers_dv.items()
             }
 
@@ -6242,6 +6544,13 @@ class Scheduler(SchedulerState, ServerNode):
         """
         from .worker import run
 
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot run function as the scheduler has been explicitly disallowed from "
+                "deserializing arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+
         self.log_event("all", {"action": "run-function", "function": function})
         return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
@@ -6254,7 +6563,7 @@ class Scheduler(SchedulerState, ServerNode):
                     metadata[key] = dict()
                 metadata = metadata[key]
             metadata[keys[-1]] = value
-        except Exception as e:
+        except Exception:
             import pdb
 
             pdb.set_trace()
@@ -6308,7 +6617,7 @@ class Scheduler(SchedulerState, ServerNode):
         return {"metadata": plugin.metadata, "state": plugin.state}
 
     async def register_worker_plugin(self, comm, plugin, name=None):
-        """ Registers a setup function, and call it on every worker """
+        """Registers a setup function, and call it on every worker"""
         self.worker_plugins[name] = plugin
 
         responses = await self.broadcast(
@@ -6317,9 +6626,9 @@ class Scheduler(SchedulerState, ServerNode):
         return responses
 
     async def unregister_worker_plugin(self, comm, name):
-        """ Unregisters a worker plugin"""
+        """Unregisters a worker plugin"""
         try:
-            worker_plugins = self.worker_plugins.pop(name)
+            self.worker_plugins.pop(name)
         except KeyError:
             raise ValueError(f"The worker plugin {name} does not exists")
 
@@ -6364,7 +6673,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.send_all(client_msgs, worker_msgs)
 
     def story(self, *keys):
-        """ Get all transitions that touch one of the input keys """
+        """Get all transitions that touch one of the input keys"""
         keys = {key.key if isinstance(key, TaskState) else key for key in keys}
         return [
             t for t in self.transition_log if t[0] in keys or keys.intersection(t[3])
@@ -6563,7 +6872,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None, code=""):
+    async def performance_report(self, comm=None, start=None, last_count=None, code=""):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
         # Profiles
@@ -6603,6 +6912,7 @@ class Scheduler(SchedulerState, ServerNode):
         source, task_stream = task_stream_figure(sizing_mode="stretch_both")
         source.data.update(rects)
 
+        # Bandwidth
         from distributed.dashboard.components.scheduler import (
             BandwidthTypes,
             BandwidthWorkers,
@@ -6612,6 +6922,17 @@ class Scheduler(SchedulerState, ServerNode):
         bandwidth_workers.update()
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
+
+        # System monitor
+        from distributed.dashboard.components.shared import SystemMonitor
+
+        sysmon = SystemMonitor(self, last_count=last_count, sizing_mode="stretch_both")
+        sysmon.update()
+
+        # Scheduler logs
+        from distributed.dashboard.components.scheduler import SchedulerLogs
+
+        logs = SchedulerLogs(self)
 
         from bokeh.models import Div, Panel, Tabs
 
@@ -6670,11 +6991,15 @@ class Scheduler(SchedulerState, ServerNode):
             child=bandwidth_workers.root, title="Bandwidth (Workers)"
         )
         bandwidth_types = Panel(child=bandwidth_types.root, title="Bandwidth (Types)")
+        system = Panel(child=sysmon.root, title="System")
+        logs = Panel(child=logs.root, title="Scheduler Logs")
 
         tabs = Tabs(
             tabs=[
                 html,
                 task_stream,
+                system,
+                logs,
                 compute,
                 workers,
                 scheduler,
@@ -6863,17 +7188,12 @@ class Scheduler(SchedulerState, ServerNode):
         if parent._unrunnable and not parent._workers_dv:
             cpu = max(1, cpu)
 
-        # Memory
-        limit_bytes = {
-            addr: ws._memory_limit for addr, ws in parent._workers_dv.items()
-        }
-        worker_bytes = [ws._nbytes for ws in parent._workers_dv.values()]
-        limit = sum(limit_bytes.values())
-        total = sum(worker_bytes)
-        if total > 0.6 * limit:
+        # add more workers if more than 60% of memory is used
+        limit = sum([ws._memory_limit for ws in parent._workers_dv.values()])
+        used = sum([ws._nbytes for ws in parent._workers_dv.values()])
+        memory = 0
+        if used > 0.6 * limit and limit > 0:
             memory = 2 * len(parent._workers_dv)
-        else:
-            memory = 0
 
         target = max(memory, cpu)
         if target >= len(parent._workers_dv):
@@ -6928,7 +7248,7 @@ def _add_to_memory(
         assert ts not in ws._has_what
 
     ts._who_has.add(ws)
-    ws._has_what.add(ts)
+    ws._has_what[ts] = None
     ws._nbytes += ts.get_nbytes()
 
     deps: list = list(ts._dependents)
@@ -7006,16 +7326,20 @@ def _propagate_forgotten(
     ts._waiting_on.clear()
 
     ts_nbytes: Py_ssize_t = ts.get_nbytes()
-    if ts._who_has:
-        ts._group._nbytes_in_memory -= ts_nbytes
 
     ws: WorkerState
     for ws in ts._who_has:
-        ws._has_what.remove(ts)
+        del ws._has_what[ts]
         ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
-            worker_msgs[w] = [{"op": "delete-data", "keys": [key], "report": False}]
+            worker_msgs[w] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "reason": f"propagate-forgotten {ts.key}",
+                }
+            ]
     ts._who_has.clear()
 
 
@@ -7024,7 +7348,7 @@ def _propagate_forgotten(
 def _client_releases_keys(
     state: SchedulerState, keys: list, cs: ClientState, recommendations: dict
 ):
-    """ Remove keys from client desired list """
+    """Remove keys from client desired list"""
     logger.debug("Client %s releases keys: %s", cs._client_key, keys)
     ts: TaskState
     for key in keys:
@@ -7043,7 +7367,7 @@ def _client_releases_keys(
 @cfunc
 @exceptval(check=False)
 def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) -> dict:
-    """ Convert a single computational task to a message """
+    """Convert a single computational task to a message"""
     ws: WorkerState
     dts: TaskState
 
@@ -7077,6 +7401,8 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
     else:
         msg["task"] = task
 
+    if ts._annotations:
+        msg["annotations"] = ts._annotations
     return msg
 
 
@@ -7113,7 +7439,7 @@ def _task_to_client_msgs(state: SchedulerState, ts: TaskState) -> dict:
 @cfunc
 @exceptval(check=False)
 def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
-    """ See reevaluate_occupancy """
+    """See reevaluate_occupancy"""
     old: double = ws._occupancy
     new: double = 0
     diff: double

@@ -37,9 +37,6 @@ class MyPlugin(WorkerPlugin):
     def release_key(self, key, state, cause, reason, report):
         self.observed_notifications.append({"key": key, "state": state})
 
-    def release_dep(self, dep, state, report):
-        self.observed_notifications.append({"dep": dep, "state": state})
-
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client(c, s):
@@ -134,6 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "error"},
+        {"key": "task", "state": "error"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -164,7 +162,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_release_dep_called(c, s, w):
+async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
@@ -210,3 +208,13 @@ async def test_empty_plugin(c, s, w):
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_default_name(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        pass
+
+    await c.register_worker_plugin(MyCustomPlugin())
+    assert len(w.plugins) == 1
+    assert next(iter(w.plugins)).startswith("MyCustomPlugin-")

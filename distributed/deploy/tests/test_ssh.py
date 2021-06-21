@@ -9,7 +9,6 @@ import dask
 from distributed import Client
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.deploy.ssh import SSHCluster
-from distributed.utils_test import loop  # noqa: F401
 
 pytestmark = [
     pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/issues/4543"),

@@ -59,7 +59,7 @@ class DashboardComponent:
         self.root = None
 
     def update(self, messages):
-        """ Reads from bokeh.distributed.messages and updates self.source """
+        """Reads from bokeh.distributed.messages and updates self.source"""
 
 
 def add_periodic_callback(doc, component, interval):

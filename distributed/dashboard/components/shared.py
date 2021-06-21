@@ -1,5 +1,6 @@
 import asyncio
 import weakref
+from statistics import mean
 
 import tlz as toolz
 from bokeh.layouts import column, row
@@ -8,6 +9,7 @@ from bokeh.models import (
     ColumnDataSource,
     DataRange1d,
     HoverTool,
+    LabelSet,
     NumeralTickFormatter,
     Range1d,
     Select,
@@ -455,12 +457,23 @@ class ProfileServer(DashboardComponent):
 
 
 class SystemMonitor(DashboardComponent):
-    def __init__(self, worker, height=150, **kwargs):
+    def __init__(self, worker, height=150, last_count=None, **kwargs):
         self.worker = worker
 
         names = worker.monitor.quantities
-        self.last = 0
+        self.last_count = 0
+        if last_count is not None:
+            names = worker.monitor.range_query(start=last_count)
+            self.last_count = last_count
         self.source = ColumnDataSource({name: [] for name in names})
+        self.label_source = ColumnDataSource(
+            {
+                "x": [5] * 3,
+                "y": [70, 55, 40],
+                "cpu": ["max: 45%", "min: 45%", "mean: 45%"],
+                "memory": ["max: 133.5MiB", "min: 23.6MiB", "mean: 115.4MiB"],
+            }
+        )
         update(self.source, self.get_data())
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
@@ -477,6 +490,18 @@ class SystemMonitor(DashboardComponent):
         )
         self.cpu.line(source=self.source, x="time", y="cpu")
         self.cpu.yaxis.axis_label = "Percentage"
+        self.cpu.add_layout(
+            LabelSet(
+                x="x",
+                y="y",
+                x_units="screen",
+                y_units="screen",
+                text="cpu",
+                text_font_size="1em",
+                render_mode="css",
+                source=self.label_source,
+            )
+        )
         self.mem = figure(
             title="Memory",
             x_axis_type="datetime",
@@ -487,6 +512,18 @@ class SystemMonitor(DashboardComponent):
         )
         self.mem.line(source=self.source, x="time", y="memory")
         self.mem.yaxis.axis_label = "Bytes"
+        self.mem.add_layout(
+            LabelSet(
+                x="x",
+                y="y",
+                x_units="screen",
+                y_units="screen",
+                text="memory",
+                text_font_size="1em",
+                render_mode="css",
+                source=self.label_source,
+            )
+        )
         self.bandwidth = figure(
             title="Bandwidth",
             x_axis_type="datetime",
@@ -533,12 +570,22 @@ class SystemMonitor(DashboardComponent):
         self.worker.monitor.update()
 
     def get_data(self):
-        d = self.worker.monitor.range_query(start=self.last)
+        d = self.worker.monitor.range_query(start=self.last_count)
         d["time"] = [x * 1000 for x in d["time"]]
-        self.last = self.worker.monitor.count
+        self.last_count = self.worker.monitor.count
         return d
 
     @without_property_validation
     def update(self):
         with log_errors():
             self.source.stream(self.get_data(), 1000)
+            self.label_source.data["cpu"] = list(
+                "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
+                for f in [min, max, mean]
+            )
+            self.label_source.data["memory"] = list(
+                "{}: {}".format(
+                    f.__name__, dask.utils.format_bytes(f(self.source.data["memory"]))
+                )
+                for f in [min, max, mean]
+            )

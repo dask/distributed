@@ -32,6 +32,7 @@ from bokeh.models import (
     value,
 )
 from bokeh.models.widgets import DataTable, TableColumn
+from bokeh.models.widgets.markups import Div
 from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
@@ -69,7 +70,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
-from distributed.utils import format_time, log_errors, parse_timedelta
+from distributed.utils import Logs, format_time, log_errors, parse_timedelta
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -92,7 +93,7 @@ XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
 class Occupancy(DashboardComponent):
-    """ Occupancy (in time) per worker """
+    """Occupancy (in time) per worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -176,7 +177,7 @@ class Occupancy(DashboardComponent):
 
 
 class ProcessingHistogram(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -290,9 +291,7 @@ class NBytesCluster(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            limit = sum(
-                getattr(ws, "memory_limit", 0) for ws in self.scheduler.workers.values()
-            )
+            limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
             meminfo = self.scheduler.memory
             color = _nbytes_color(meminfo.process, limit)
 
@@ -501,7 +500,7 @@ class NBytesHistogram(DashboardComponent):
 
 
 class BandwidthTypes(DashboardComponent):
-    """ Bar chart showing bandwidth per type """
+    """Bar chart showing bandwidth per type"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -567,7 +566,7 @@ class BandwidthTypes(DashboardComponent):
 
 
 class BandwidthWorkers(DashboardComponent):
-    """ How many tasks are on each worker """
+    """How many tasks are on each worker"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -672,7 +671,7 @@ class BandwidthWorkers(DashboardComponent):
 
 
 class ComputePerKey(DashboardComponent):
-    """ Bar chart showing time spend in action by key prefix"""
+    """Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -840,7 +839,7 @@ class ComputePerKey(DashboardComponent):
 
 
 class AggregateAction(DashboardComponent):
-    """ Bar chart showing time spend in action by key prefix"""
+    """Bar chart showing time spend in action by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -942,7 +941,7 @@ class AggregateAction(DashboardComponent):
 
 
 class MemoryByKey(DashboardComponent):
-    """ Bar chart showing memory use by key prefix"""
+    """Bar chart showing memory use by key prefix"""
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
@@ -1234,7 +1233,7 @@ class StealingEvents(DashboardComponent):
         )
 
     def convert(self, msgs):
-        """ Convert a log message to a glyph """
+        """Convert a log message to a glyph"""
         total_duration = 0
         for msg in msgs:
             time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
@@ -1723,7 +1722,7 @@ class TaskGraph(DashboardComponent):
 
 
 class TaskProgress(DashboardComponent):
-    """ Progress bars per task type """
+    """Progress bars per task type"""
 
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
@@ -2162,6 +2161,13 @@ class WorkerTable(DashboardComponent):
                 data[name].insert(0, None)
 
         self.source.data.update(data)
+
+
+class SchedulerLogs:
+    def __init__(self, scheduler):
+        logs = Logs(scheduler.get_logs())._repr_html_()
+
+        self.root = Div(text=logs)
 
 
 def systemmonitor_doc(scheduler, extra, doc):

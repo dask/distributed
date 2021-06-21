@@ -55,7 +55,7 @@ def identifier(frame):
 
 
 def repr_frame(frame):
-    """ Render a frame as a line for inclusion into a text traceback """
+    """Render a frame as a line for inclusion into a text traceback"""
     co = frame.f_code
     text = '  File "%s", line %s, in %s' % (co.co_filename, frame.f_lineno, co.co_name)
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
@@ -126,7 +126,7 @@ def process(frame, child, state, stop=None, omit=None):
 
 
 def merge(*args):
-    """ Merge multiple frame states together """
+    """Merge multiple frame states together"""
     if not args:
         return create()
     s = {arg["identifier"] for arg in args}
@@ -208,8 +208,6 @@ def plot_data(state, profile_interval=0.010):
         line_numbers.append(desc["line_number"])
         names.append(desc["name"])
 
-        ident = state["identifier"]
-
         try:
             fn = desc["filename"]
         except IndexError:
@@ -224,7 +222,7 @@ def plot_data(state, profile_interval=0.010):
 
         x = start
 
-        for name, child in state["children"].items():
+        for _, child in state["children"].items():
             width = child["count"] * delta
             traverse(child, x, x + width, height + 1)
             x += width
@@ -335,7 +333,6 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
     start : time
     stop : time
     """
-    now = time()
     if start is None:
         istart = 0
     else:
@@ -490,7 +487,7 @@ def llprocess(frames, child, state):
 
 
 def ll_get_stack(tid):
-    """ Collect low level stack information from thread id """
+    """Collect low level stack information from thread id"""
     from stacktrace import get_thread_stack
 
     frames = get_thread_stack(tid, show_python=False)

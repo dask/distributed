@@ -11,8 +11,6 @@ try:
 except ImportError:
     np = None
 
-from dask.utils_test import inc
-
 from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (

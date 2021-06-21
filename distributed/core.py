@@ -136,7 +136,6 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
-        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -238,8 +237,6 @@ class Server:
 
         self.__stopped = False
 
-        super().__init__(**kwargs)
-
     @property
     def status(self):
         return self._status
@@ -261,7 +258,7 @@ class Server:
             raise TypeError(f"expected Status or str, got {new_status}")
 
     async def finished(self):
-        """ Wait until the server has finished """
+        """Wait until the server has finished"""
         await self._event_finished.wait()
 
     def __await__(self):
@@ -528,6 +525,8 @@ class Server:
                             e,
                         )
                         break
+
+                self._comms[comm] = None
                 msg = result = None
                 if close_desired:
                     await comm.close()
@@ -548,7 +547,6 @@ class Server:
         extra = extra or {}
         logger.info("Starting established connection")
 
-        io_error = None
         closed = False
         try:
             while not closed:
@@ -581,8 +579,9 @@ class Server:
                     else:
                         func()
 
-        except (CommClosedError, EnvironmentError) as e:
-            io_error = e
+        except (CommClosedError, EnvironmentError):
+            # FIXME: This is silently ignored, is this intentional?
+            pass
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -598,15 +597,18 @@ class Server:
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
+        self.__stopped = True
         for listener in self.listeners:
             future = listener.stop()
             if inspect.isawaitable(future):
                 yield future
-        for i in range(20):  # let comms close naturally for a second
-            if not self._comms:
-                break
-            else:
+        for i in range(20):
+            # If there are still handlers running at this point, give them a
+            # second to finish gracefully themselves, otherwise...
+            if any(self._comms.values()):
                 yield asyncio.sleep(0.05)
+            else:
+                break
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
@@ -645,7 +647,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except EnvironmentError:
+    except (EnvironmentError, CommClosedError):
         # On communication errors, we should simply close the communication
         force_close = True
         raise
@@ -969,7 +971,7 @@ class ConnectionPool:
         )
 
     def __call__(self, addr=None, ip=None, port=None):
-        """ Cached rpc objects """
+        """Cached rpc objects"""
         addr = addr_from_args(addr=addr, ip=ip, port=port)
         return PooledRPCCall(
             addr, self, serializers=self.serializers, deserializers=self.deserializers

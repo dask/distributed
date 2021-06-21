@@ -24,17 +24,15 @@ from distributed.metrics import time
 from distributed.scheduler import COMPILED
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import TimeoutError, sync
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
     assert_cannot_connect,
     captured_logger,
     clean,
-    cleanup,
     gen_test,
     inc,
-    loop,
     slowinc,
     tls_only_security,
 )
@@ -627,7 +625,7 @@ def test_no_ipywidgets(loop, monkeypatch):
 
 
 def test_scale(loop):
-    """ Directly calling scale both up and down works as expected """
+    """Directly calling scale both up and down works as expected"""
     with LocalCluster(
         scheduler_port=0,
         silence_logs=False,
@@ -686,7 +684,7 @@ def test_adapt(loop):
 
 
 def test_adapt_then_manual(loop):
-    """ We can revert from adaptive, back to manual """
+    """We can revert from adaptive, back to manual"""
     with LocalCluster(
         scheduler_port=0,
         silence_logs=False,
@@ -1063,3 +1061,21 @@ async def test_cluster_names():
 
         async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster2:
             assert unnamed_cluster2 != unnamed_cluster
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", [True, False])
+async def test_local_cluster_redundant_kwarg(nanny):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        # Extra arguments are forwarded to the worker class. Depending on
+        # whether we use the nanny or not, the error treatment is quite
+        # different and we should assert that an exception is raised
+        async with await LocalCluster(
+            typo_kwarg="foo", processes=nanny, n_workers=1
+        ) as cluster:
+
+            # This will never work but is a reliable way to block without hard
+            # coding any sleep values
+            async with Client(cluster) as c:
+                f = c.submit(sleep, 0)
+                await f

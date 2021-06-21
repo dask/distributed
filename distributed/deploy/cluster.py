@@ -5,6 +5,7 @@ import threading
 import uuid
 import warnings
 from contextlib import suppress
+from inspect import isawaitable
 
 from tornado.ioloop import PeriodicCallback
 
@@ -12,9 +13,9 @@ import dask.config
 from dask.utils import format_bytes
 
 from ..core import Status
+from ..objects import SchedulerInfo
 from ..utils import (
-    Log,
-    Logs,
+    MultiLogs,
     format_dashboard_link,
     log_errors,
     parse_timedelta,
@@ -61,6 +62,7 @@ class Cluster:
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
+        self._adaptive = None
 
         if name is not None:
             self.name = name
@@ -71,7 +73,7 @@ class Cluster:
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
         await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = await comm.read()
+        self.scheduler_info = SchedulerInfo(await comm.read())
         self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
@@ -81,6 +83,9 @@ class Cluster:
     async def _close(self):
         if self.status == Status.closed:
             return
+
+        with suppress(AttributeError):
+            self._adaptive.stop()
 
         if self._watch_worker_status_comm:
             await self._watch_worker_status_comm.close()
@@ -114,7 +119,7 @@ class Cluster:
                 self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
+        """Listen to scheduler for updates on adding and removing workers"""
         while True:
             try:
                 msgs = await comm.read()
@@ -204,21 +209,19 @@ class Cluster:
             print(log)
 
     async def _get_logs(self, cluster=True, scheduler=True, workers=True):
-        logs = Logs()
+        logs = MultiLogs()
 
         if cluster:
-            logs["Cluster"] = Log(
-                "\n".join(line[1] for line in self._cluster_manager_logs)
-            )
+            logs["Cluster"] = self._cluster_manager_logs
 
         if scheduler:
             L = await self.scheduler_comm.get_logs()
-            logs["Scheduler"] = Log("\n".join(line for level, line in L))
+            logs["Scheduler"] = L
 
         if workers:
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
-                logs[k] = Log("\n".join(line for level, line in v))
+                logs[k] = v
 
         return logs
 
@@ -259,7 +262,11 @@ class Cluster:
             host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
-    def _widget_status(self):
+    def _scaling_status(self):
+        if self._adaptive and self._adaptive.periodic_callback:
+            mode = "Adaptive"
+        else:
+            mode = "Manual"
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
             requested = sum(
@@ -270,65 +277,40 @@ class Cluster:
             requested = len(self.workers)
         else:
             requested = workers
-        cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
-        memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
-        memory = format_bytes(memory)
-        text = """
-<div>
-  <style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
 
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-  </style>
-  <table style="text-align: right;">
-    <tr> <th>Workers</th> <td>%s</td></tr>
-    <tr> <th>Cores</th> <td>%d</td></tr>
-    <tr> <th>Memory</th> <td>%s</td></tr>
-  </table>
-</div>
-""" % (
-            workers if workers == requested else "%d / %d" % (workers, requested),
-            cores,
-            memory,
-        )
-        return text
+        worker_count = workers if workers == requested else f"{workers} / {requested}"
+        return f"""
+        <table>
+            <tr><td style="text-align: left;">Scaling mode: {mode}</td></tr>
+            <tr><td style="text-align: left;">Workers: {worker_count}</td></tr>
+        </table>
+        """
 
     def _widget(self):
-        """ Create IPython widget for display within a notebook """
+        """Create IPython widget for display within a notebook"""
         try:
             return self._cached_widget
         except AttributeError:
             pass
 
         try:
-            from ipywidgets import HTML, Accordion, Button, HBox, IntText, Layout, VBox
+            from ipywidgets import (
+                HTML,
+                Accordion,
+                Button,
+                HBox,
+                IntText,
+                Layout,
+                Tab,
+                VBox,
+            )
         except ImportError:
             self._cached_widget = None
             return None
 
         layout = Layout(width="150px")
 
-        if self.dashboard_link:
-            link = '<p><b>Dashboard: </b><a href="%s" target="_blank">%s</a></p>\n' % (
-                self.dashboard_link,
-                self.dashboard_link,
-            )
-        else:
-            link = ""
-
-        title = "<h2>%s</h2>" % self._cluster_class_name
-        title = HTML(title)
-        dashboard = HTML(link)
-
-        status = HTML(self._widget_status(), layout=Layout(min_width="150px"))
+        status = HTML(self._repr_html_())
 
         if self._supports_scaling:
             request = IntText(0, description="Workers", layout=layout)
@@ -364,12 +346,18 @@ class Cluster:
         else:
             accordion = HTML("")
 
-        box = VBox([title, HBox([status, accordion]), dashboard])
+        scale_status = HTML(self._scaling_status())
 
-        self._cached_widget = box
+        tab = Tab()
+        tab.children = [status, VBox([scale_status, accordion])]
+        tab.set_title(0, "Status")
+        tab.set_title(1, "Scaling")
+
+        self._cached_widget = tab
 
         def update():
-            status.value = self._widget_status()
+            status.value = self._repr_html_()
+            scale_status.value = self._scaling_status()
 
         cluster_repr_interval = parse_timedelta(
             dask.config.get("distributed.deploy.cluster-repr-interval", default="ms")
@@ -378,24 +366,58 @@ class Cluster:
         self.periodic_callbacks["cluster-repr"] = pc
         pc.start()
 
-        return box
+        return tab
 
-    def _repr_html_(self):
-        if self.dashboard_link:
-            dashboard = "<a href='{0}' target='_blank'>{0}</a>".format(
-                self.dashboard_link
-            )
-        else:
-            dashboard = "Not Available"
-        return (
-            "<div style='background-color: #f2f2f2; display: inline-block; "
-            "padding: 10px; border: 1px solid #999999;'>\n"
-            "  <h3>{cls}</h3>\n"
-            "  <ul>\n"
-            "    <li><b>Dashboard: </b>{dashboard}\n"
-            "  </ul>\n"
-            "</div>\n"
-        ).format(cls=self._cluster_class_name, dashboard=dashboard)
+    def _repr_html_(self, cluster_status=None):
+
+        if not cluster_status:
+            cluster_status = ""
+
+        cluster_status += f"""
+            <tr>
+                <td style="text-align: left;">
+                    <strong>Dashboard:</strong> <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                </td>
+                <td style="text-align: left;"><strong>Workers:</strong> {len(self.scheduler_info["workers"])}</td>
+            </tr>
+            <tr>
+                <td style="text-align: left;">
+                    <strong>Total threads:</strong>
+                    {sum([w["nthreads"] for w in self.scheduler_info["workers"].values()])}
+                </td>
+                <td style="text-align: left;">
+                    <strong>Total memory:</strong>
+                    {format_bytes(sum([w["memory_limit"] for w in self.scheduler_info["workers"].values()]))}
+                </td>
+            </tr>
+        """
+        try:
+            scheduler_info_repr = self.scheduler_info._repr_html_()
+        except AttributeError:
+            scheduler_info_repr = "Scheduler not started yet."
+
+        return f"""
+            <div class="jp-RenderedHTMLCommon jp-RenderedHTML jp-mod-trusted jp-OutputArea-output">
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background-color: #e1e1e1;
+                    border: 3px solid #9D9D9D;
+                    border-radius: 5px;
+                    position: absolute;"> </div>
+                <div style="margin-left: 48px;">
+                    <h3 style="margin-bottom: 0px; margin-top: 0px;">{type(self).__name__}</h3>
+                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.name}</p>
+                    <table style="width: 100%; text-align: left;">
+                    {cluster_status}
+                    </table>
+                    <details>
+                    <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
+                    {scheduler_info_repr}
+                    </details>
+                </div>
+            </div>
+        """
 
     def _ipython_display_(self, **kwargs):
         widget = self._widget()
@@ -418,10 +440,14 @@ class Cluster:
         return self
 
     async def __aexit__(self, typ, value, traceback):
-        await self.close()
+        f = self.close()
+        if isawaitable(f):
+            await f
 
     @property
-    def scheduler_address(self):
+    def scheduler_address(self) -> str:
+        if not self.scheduler_comm:
+            return "<Not Connected>"
         return self.scheduler_comm.address
 
     @property
@@ -457,7 +483,7 @@ class Cluster:
         return {d["name"] for d in self.scheduler_info["workers"].values()}
 
     def __eq__(self, other):
-        return self.name == other.name
+        return type(other) == type(self) and self.name == other.name
 
     def __hash__(self):
         return id(self)

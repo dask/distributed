@@ -14,13 +14,11 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
-from distributed.compatibility import MACOS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
-from distributed.utils_test import cleanup  # noqa: F401
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
@@ -367,7 +365,7 @@ async def test_scheduler_address_config(c, s):
 
 
 @pytest.mark.slow
-@gen_test(timeout=20)
+@gen_test()
 async def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")
@@ -479,7 +477,7 @@ async def test_lifetime(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_nanny_closes_cleanly(cleanup):
+async def test_nanny_closes_cleanly_2(cleanup):
     async with Scheduler() as s:
         async with Nanny(s.address) as n:
             async with Client(s.address, asynchronous=True) as client:
@@ -565,10 +563,19 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:
     with pytest.raises(StartException):
         async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
             await n.start()
+
+
+@pytest.mark.asyncio
+async def test_failure_during_worker_initialization(cleanup):
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        async with Scheduler() as s:
+            with pytest.raises(Exception):
+                async with Nanny(s.address, foo="bar") as n:
+                    await n
+        assert "Restarting worker" not in logs.getvalue()
