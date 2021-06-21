@@ -208,8 +208,6 @@ def plot_data(state, profile_interval=0.010):
         line_numbers.append(desc["line_number"])
         names.append(desc["name"])
 
-        ident = state["identifier"]
-
         try:
             fn = desc["filename"]
         except IndexError:
@@ -224,7 +222,7 @@ def plot_data(state, profile_interval=0.010):
 
         x = start
 
-        for name, child in state["children"].items():
+        for _, child in state["children"].items():
             width = child["count"] * delta
             traverse(child, x, x + width, height + 1)
             x += width
@@ -335,7 +333,6 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
     start : time
     stop : time
     """
-    now = time()
     if start is None:
         istart = 0
     else:

@@ -54,7 +54,7 @@ class WorkDir:
                     with workspace._global_lock():
                         self._lock_file = locket.lock_file(self._lock_path)
                         self._lock_file.acquire()
-                except OSError as e:
+                except OSError:
                     logger.exception(
                         "Could not acquire workspace lock on "
                         "path: %s ."

@@ -547,7 +547,6 @@ class Server:
         extra = extra or {}
         logger.info("Starting established connection")
 
-        io_error = None
         closed = False
         try:
             while not closed:
@@ -580,8 +579,9 @@ class Server:
                     else:
                         func()
 
-        except (CommClosedError, EnvironmentError) as e:
-            io_error = e
+        except (CommClosedError, EnvironmentError):
+            # FIXME: This is silently ignored, is this intentional?
+            pass
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

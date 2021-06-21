@@ -99,9 +99,7 @@ class GraphLayout(SchedulerPlugin):
             task = self.scheduler.tasks[key]
             for dep in task.dependents:
                 edge = (key, dep.key)
-                self.visible_edge_updates.append(
-                    (self.index_edge.pop((key, dep.key)), "False")
-                )
+                self.visible_edge_updates.append((self.index_edge.pop(edge), "False"))
             for dep in task.dependencies:
                 self.visible_edge_updates.append(
                     (self.index_edge.pop((dep.key, key)), "False")

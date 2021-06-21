@@ -1,6 +1,47 @@
 Changelog
 =========
 
+2021.06.1
+---------
+
+Released on June 18, 2021
+
+- Fix deadlock in ``handle_missing_dep`` if additional replicas are available (:pr:`4929`) `Florian Jetter`_
+- Add configuration to enable/disable NVML diagnostics (:pr:`4893`) `Peter Andreas Entschev`_
+- Add scheduler log tab to performance reports (:pr:`4909`) `Charles Blackmon-Luca`_
+- Add HTML repr to ``scheduler_info`` and incorporate into client and cluster reprs (:pr:`4857`) `Jacob Tomlinson`_
+- Fix error state typo (:pr:`4898`) `James Bourbeau`_
+- Allow actor exceptions to propagate (:pr:`4232`) `Martin Durant`_
+- Remove importing ``apply`` from ``dask.compatibility`` (:pr:`4913`) `Elliott Sales de Andrade`_
+- Use more informative default name for ``WorkerPlugin`` s (:pr:`4908`) `James Bourbeau`_
+- Removed unused utility functions (:pr:`4911`) `James Bourbeau`_
+- Locally rerun successfully completed futures (:pr:`4813`) `ArtinSarraf`_
+- Forget erred tasks and fix deadlocks on worker (:pr:`4784`) `Florian Jetter`_
+- Handle ``HTTPClientError`` in websocket connector (:pr:`4900`) `Marcos Moyano`_
+- Update ``dask_cuda`` usage in ``SSHCluster`` docstring (:pr:`4894`) `James Bourbeau`_
+- Remove tests for ``process_time`` and ``thread_time`` (:pr:`4895`) `James Bourbeau`_
+- Flake8 config cleanup (:pr:`4888`) `Florian Jetter`_
+- Don't strip scheduler protocol when determining host (:pr:`4883`) `James Bourbeau`_
+- Add more documentation on memory management (:pr:`4874`) `crusaderky`_
+- Add ``range_query`` tests to NVML test suite (:pr:`4879`) `Charles Blackmon-Luca`_
+- No longer cancel result future in async process when using timeouts (:pr:`4882`) `Florian Jetter`_
+
+
+2021.06.0
+---------
+
+Released on June 4, 2021
+
+- Multiple worker executors (:pr:`4869`) `Mads R. B. Kristensen`_
+- Ensure PyNVML works correctly when installed with no GPUs (:pr:`4873`) `Peter Andreas Entschev`_
+- Show more in test summary (:pr:`4875`) `James Bourbeau`_
+- Move ``SystemMonitor`` s GPU initialization back to constructor (:pr:`4866`) `Peter Andreas Entschev`_
+- Mark ``test_server_comms_mark_active_handlers`` with ``pytest.mark.asyncio`` (:pr:`4876`) `James Bourbeau`_
+- Who has has what html reprs v2 (:pr:`4865`) `Jacob Tomlinson`_
+- O(1) rebalance (:pr:`4774`) `crusaderky`_
+- Ensure repr and eq for cluster always works (:pr:`4799`) `Florian Jetter`_
+
+
 2021.05.1
 ---------
 
@@ -2391,3 +2432,4 @@ significantly without many new features.
 .. _`Naty Clementi`: https://github.com/ncclementi
 .. _`Nathan Danielsen`: https://github.com/ndanielsen
 .. _`Torsten Wörtwein`: https://github.com/twoertwein
+.. _`ArtinSarraf`: https://github.com/ArtinSarraf

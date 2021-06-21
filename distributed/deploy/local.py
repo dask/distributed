@@ -120,7 +120,7 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         if ip is not None:
             # In the future we should warn users about this move
@@ -247,6 +247,17 @@ class LocalCluster(SpecCluster):
             "The `cluster.start_worker` function has been removed. "
             "Please see the `cluster.scale` method instead."
         )
+
+    def _repr_html_(self, cluster_status=None):
+        if cluster_status is None:
+            cluster_status = ""
+        cluster_status += f"""
+            <tr>
+                <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
+                <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
+            </tr>
+        """
+        return super()._repr_html_(cluster_status=cluster_status)
 
 
 clusters_to_close = weakref.WeakSet()

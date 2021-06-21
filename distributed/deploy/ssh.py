@@ -302,7 +302,7 @@ def SSHCluster(
     ...     ["localhost", "hostwithgpus", "anothergpuhost"],
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module='dask_cuda.dask_cuda_worker')
+    ...     worker_module="dask_cuda.cli.dask_cuda_worker")
     >>> client = Client(cluster)
 
     See Also

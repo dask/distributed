@@ -8,13 +8,7 @@ import dask
 
 from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import cluster, gen_cluster
 
 
 class Counter:
@@ -587,3 +581,48 @@ async def test_async_deadlock(client, s, a, b):
     ac2 = await client.submit(UsesCounter, actor=True, workers=[ac._address])
 
     assert (await ac2.ado_inc(ac)) == 1
+
+
+def test_exception():
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    with cluster(nworkers=2) as (cl, w):
+        client = Client(cl["address"])
+        ac = client.submit(Broken, actor=True).result()
+        acfut = ac.method()
+        with pytest.raises(MyException):
+            acfut.result()
+
+        with pytest.raises(MyException):
+            ac.prop
+
+
+@gen_cluster(client=True)
+async def test_exception_async(client, s, a, b):
+    class MyException(Exception):
+        pass
+
+    class Broken:
+        def method(self):
+            raise MyException
+
+        @property
+        def prop(self):
+            raise MyException
+
+    ac = await client.submit(Broken, actor=True)
+    acfut = ac.method()
+    with pytest.raises(MyException):
+        await acfut
+
+    with pytest.raises(MyException):
+        await ac.prop

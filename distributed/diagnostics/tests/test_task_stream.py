@@ -8,15 +8,7 @@ from distributed import get_task_stream
 from distributed.client import wait
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    div,
-    gen_cluster,
-    inc,
-    loop,
-    slowinc,
-)
+from distributed.utils_test import div, gen_cluster, inc, slowinc
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)

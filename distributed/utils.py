@@ -24,7 +24,8 @@ from contextlib import contextmanager, suppress
 from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
-from typing import Any, Dict, List
+from typing import Any as AnyType
+from typing import Dict, List
 
 import click
 import tblib.pickling_support
@@ -201,23 +202,6 @@ def get_ip_interface(ifname):
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
 
 
-# FIXME: this breaks if changed to async def...
-@gen.coroutine
-def ignore_exceptions(coroutines, *exceptions):
-    """Process list of coroutines, ignoring certain exceptions
-
-    >>> coroutines = [cor(...) for ...]  # doctest: +SKIP
-    >>> x = yield ignore_exceptions(coroutines, TypeError)  # doctest: +SKIP
-    """
-    wait_iterator = gen.WaitIterator(*coroutines)
-    results = []
-    while not wait_iterator.done():
-        with suppress(*exceptions):
-            result = yield wait_iterator.next()
-            results.append(result)
-    raise gen.Return(results)
-
-
 async def All(args, quiet_exceptions=()):
     """Wait on many tasks at the same time
 
@@ -335,7 +319,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             if callback_timeout is not None:
                 future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
-        except Exception as exc:
+        except Exception:
             error[0] = sys.exc_info()
         finally:
             assert thread_state.asynchronous > 0
@@ -549,11 +533,6 @@ def tmp_text(filename, text):
     finally:
         if os.path.exists(fn):
             os.remove(fn)
-
-
-def clear_queue(q):
-    while not q.empty():
-        q.get_nowait()
 
 
 def is_kernel():
@@ -918,34 +897,6 @@ def ensure_bytes(s):
             ) from e
 
 
-def divide_n_among_bins(n, bins):
-    """
-    >>> divide_n_among_bins(12, [1, 1])
-    [6, 6]
-    >>> divide_n_among_bins(12, [1, 2])
-    [4, 8]
-    >>> divide_n_among_bins(12, [1, 2, 1])
-    [3, 6, 3]
-    >>> divide_n_among_bins(11, [1, 2, 1])
-    [2, 6, 3]
-    >>> divide_n_among_bins(11, [.1, .2, .1])
-    [2, 6, 3]
-    """
-    total = sum(bins)
-    acc = 0.0
-    out = []
-    for b in bins:
-        now = n / total * b + acc
-        now, acc = divmod(now, 1)
-        out.append(int(now))
-    return out
-
-
-def mean(seq):
-    seq = list(seq)
-    return sum(seq) / len(seq)
-
-
 def open_port(host=""):
     """Return a probably-open port
 
@@ -999,29 +950,6 @@ def import_file(path):
     return loaded
 
 
-class itemgetter:
-    """A picklable itemgetter.
-
-    Examples
-    --------
-    >>> data = [0, 1, 2]
-    >>> get_1 = itemgetter(1)
-    >>> get_1(data)
-    1
-    """
-
-    __slots__ = ("index",)
-
-    def __init__(self, index):
-        self.index = index
-
-    def __call__(self, x):
-        return x[self.index]
-
-    def __reduce__(self):
-        return (itemgetter, (self.index,))
-
-
 def asciitable(columns, rows):
     """Formats an ascii table for given columns and rows.
 
@@ -1052,28 +980,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return frame.nbytes
         except AttributeError:
             return len(frame)
-
-
-def is_writeable(frame):
-    """
-    Check whether frame is writeable
-
-    Will return ``True`` if writeable, ``False`` if readonly, and
-    ``None`` if undetermined.
-    """
-    try:
-        return not memoryview(frame).readonly
-    except TypeError:
-        return None
-
-
-@contextmanager
-def time_warn(duration, text):
-    start = time()
-    yield
-    end = time()
-    if end - start > duration:
-        print("TIME WARNING", text, end - start)
 
 
 def deprecated(*, version_removed: str = None):
@@ -1363,25 +1269,44 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(str):
-    """A container for logs"""
+class Log(tuple):
+    """A container for a single log entry"""
+
+    level_styles = {
+        "WARNING": "font-weight: bold; color: orange;",
+        "CRITICAL": "font-weight: bold; color: orangered;",
+        "ERROR": "font-weight: bold; color: crimson;",
+    }
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(
-            log=html.escape(self.rstrip())
+        level, message = self
+
+        style = "font-family: monospace; margin: 0;"
+        style += self.level_styles.get(level, "")
+
+        return '<p style="{style}">{message}</p>'.format(
+            style=html.escape(style),
+            message=html.escape(message),
         )
 
 
-class Logs(dict):
-    """A container for multiple logs"""
+class Logs(list):
+    """A container for a list of log entries"""
+
+    def _repr_html_(self):
+        return "\n".join(Log(entry)._repr_html_() for entry in self)
+
+
+class MultiLogs(dict):
+    """A container for a dict mapping strings to lists of log entries"""
 
     def _repr_html_(self):
         summaries = [
             "<details>\n"
             "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
+            "{logs}\n"
+            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
+            for title, entries in sorted(self.items())
         ]
         return "\n".join(summaries)
 
@@ -1507,7 +1432,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: Any, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
     """
     Examples
     --------

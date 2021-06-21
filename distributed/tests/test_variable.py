@@ -10,16 +10,7 @@ from tornado.ioloop import IOLoop
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    captured_logger,
-    client,
-    cluster_fixture,
-    div,
-    gen_cluster,
-    inc,
-    loop,
-    popen,
-)
+from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
 @gen_cluster(client=True)

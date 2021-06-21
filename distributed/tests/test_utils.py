@@ -19,9 +19,8 @@ from distributed.metrics import time
 from distributed.utils import (
     LRU,
     All,
-    Log,
-    Logs,
     LoopRunner,
+    MultiLogs,
     TimeoutError,
     _maybe_complex,
     deprecated,
@@ -47,16 +46,7 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import (  # noqa: F401
-    captured_logger,
-    div,
-    gen_test,
-    has_ipv6,
-    inc,
-    loop,
-    loop_in_thread,
-    throws,
-)
+from distributed.utils_test import captured_logger, div, gen_test, has_ipv6, inc, throws
 
 
 def test_All(loop):
@@ -559,7 +549,7 @@ def test_format_bytes_compat():
 
 
 def test_logs():
-    d = Logs({"123": Log("Hello"), "456": Log("World!")})
+    d = MultiLogs({"123": [("INFO", "Hello")], "456": [("INFO", "World!")]})
     text = d._repr_html_()
     assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text

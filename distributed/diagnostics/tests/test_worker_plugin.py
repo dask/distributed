@@ -131,6 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "error"},
+        {"key": "task", "state": "error"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -207,3 +208,13 @@ async def test_empty_plugin(c, s, w):
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_default_name(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        pass
+
+    await c.register_worker_plugin(MyCustomPlugin())
+    assert len(w.plugins) == 1
+    assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
