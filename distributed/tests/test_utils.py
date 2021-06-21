@@ -550,7 +550,10 @@ def test_format_bytes_compat():
 
 
 def test_logs():
-    d = Logs({"123": Log("Hello"), "456": Log("World!")})
+    log = Log("Hello")
+    assert isinstance(log, str)
+    d = Logs({"123": log, "456": Log("World!")})
+    assert isinstance(d, dict)
     text = d._repr_html_()
     assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text
