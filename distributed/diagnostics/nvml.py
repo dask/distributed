@@ -1,5 +1,7 @@
 import os
 
+import dask
+
 try:
     import pynvml
 except ImportError:
@@ -12,6 +14,11 @@ nvmlOwnerPID = None
 
 def init_once():
     global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
+
+    if dask.config.get("distributed.diagnostics.nvml") is False:
+        nvmlInitialized = False
+        return
+
     if pynvml is None or (nvmlInitialized is True and nvmlOwnerPID == os.getpid()):
         return
 

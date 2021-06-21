@@ -1895,7 +1895,6 @@ async def test_task_groups(c, s, a, b):
     # these must be true since in this simple case there is a 1to1 mapping
     # between prefix and group
     assert tg.duration == tp.duration
-    assert tg.nbytes_in_memory == tp.nbytes_in_memory
     assert tg.nbytes_total == tp.nbytes_total
     # It should map down to individual tasks
     assert tg.nbytes_total == sum(
@@ -1908,8 +1907,6 @@ async def test_task_groups(c, s, a, b):
             if ts.group is tg and ts.state == "memory"
         ]
     )
-    assert tg.nbytes_in_memory == in_memory_ts
-
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
 
@@ -1917,7 +1914,6 @@ async def test_task_groups(c, s, a, b):
 
     await c.replicate(y)
     # TODO: Are we supposed to track replicated memory here? See also Scheduler.add_keys
-    assert tg.nbytes_in_memory == y.nbytes
     assert "array" in str(tg.types)
     assert "array" in str(tp.types)
 
@@ -1926,7 +1922,6 @@ async def test_task_groups(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert tg.nbytes_in_memory == 0
     assert tg.states["forgotten"] == 5
     # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
