@@ -65,6 +65,13 @@ API
    performance_report
 
 
+**Utilities**
+
+.. autosummary::
+   distributed.utils.Log
+   distributed.utils.Logs
+
+
 Asynchronous methods
 --------------------
 
@@ -173,6 +180,13 @@ Other
    :members:
 .. autoclass:: Variable
    :members:
+
+
+Utilities
+---------
+
+.. autoclass:: distributed.utils.Log
+.. autoclass:: distributed.utils.Logs
 
 
 Adaptive
