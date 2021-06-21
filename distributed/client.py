@@ -30,7 +30,14 @@ from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
-from dask.utils import apply, ensure_dict, format_bytes, funcname, stringify
+from dask.utils import (
+    _deprecated,
+    apply,
+    ensure_dict,
+    format_bytes,
+    funcname,
+    stringify,
+)
 
 try:
     from dask.delayed import single_key
@@ -2538,6 +2545,7 @@ class Client:
         """
         return self.sync(self._run, function, *args, **kwargs)
 
+    @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
         """
         Spawn a coroutine on all workers.
@@ -2559,12 +2567,6 @@ class Client:
             Workers on which to run the function. Defaults to all known workers.
 
         """
-        warnings.warn(
-            "This method has been deprecated. "
-            "Instead use Client.run which detects async functions "
-            "automatically",
-            stacklevel=2,
-        )
         return self.run(function, *args, **kwargs)
 
     def _graph_to_futures(
