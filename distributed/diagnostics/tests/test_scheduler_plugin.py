@@ -133,23 +133,6 @@ async def test_register_scheduler_plugin(c, s, a, b):
         def start(self, scheduler):
             scheduler.foo = "bar"
 
-    class NeverRegistered(SchedulerPlugin):
-        def start(self, scheduler):
-            scheduler.baz = "foo"
-
     assert not hasattr(s, "foo")
     await c.register_scheduler_plugin(Dummy)
     assert s.foo == "bar"
-
-    d = Dummy()
-    start_n_plugins = len(s.plugins)
-    await c.register_scheduler_plugin(d)
-    middle_n_plugins = len(s.plugins)
-    await c.unregister_scheduler_plugin(d)
-    final_n_plugins = len(s.plugins)
-    assert final_n_plugins == start_n_plugins
-    assert middle_n_plugins == final_n_plugins + 1
-
-    with pytest.raises(KeyError):
-        never_registered = NeverRegistered()
-        await c.unregister_scheduler_plugin(never_registered)

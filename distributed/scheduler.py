@@ -3579,7 +3579,6 @@ class Scheduler(SchedulerState, ServerNode):
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
-            "unregister_scheduler_plugin": self.unregister_scheduler_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -5233,24 +5232,6 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 msg = error_message(e)
                 return msg
-
-    async def unregister_scheduler_plugin(self, comm, plugin):
-        """Unregister a plugin on the scheduler."""
-        if not dask.config.get("distributed.scheduler.pickle"):
-            raise ValueError(
-                "Cannot unregister a scheduler plugin as the scheduler "
-                "has been explicitly disallowed from deserializing "
-                "arbitrary bytestrings using pickle via the "
-                "'distributed.scheduler.pickle' configuration setting."
-            )
-        plugin = loads(plugin)
-
-        for p in self.plugins.copy():
-            if isinstance(p, type(plugin)):
-                self.plugins.remove(p)
-                return
-
-        raise KeyError(f"Plugin {plugin} not discovered in scheduler plugin list.")
 
     def worker_send(self, worker, msg):
         """Send message to worker
