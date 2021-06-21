@@ -2799,6 +2799,6 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
 
 @gen_cluster(client=True)
 async def test_transition_counter(c, s, a, b):
-    assert s._transition_counter == 0
+    assert s.transition_counter == 0
     await c.submit(inc, 1)
-    assert s._transition_counter > 1
+    assert s.transition_counter > 1

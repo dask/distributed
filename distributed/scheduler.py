@@ -1943,6 +1943,10 @@ class SchedulerState:
         self._total_occupancy = v
 
     @property
+    def transition_counter(self):
+        return self._transition_counter
+
+    @property
     def unknown_durations(self):
         return self._unknown_durations
 
