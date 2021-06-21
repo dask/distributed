@@ -1755,7 +1755,6 @@ class TGroupGraph(DashboardComponent):
                 "y_start": [],
                 "y_end": [],
                 "x_end_progress": [],
-                "progress": [],
                 "mem_alpha": [],
                 "node_line_width": [],
                 "comp_tasks": [],
@@ -1768,6 +1767,8 @@ class TGroupGraph(DashboardComponent):
                 "in_memory": [],
                 "in_released": [],
                 "in_erred": [],
+                "runtime": [],
+                "memory": [],
             }
         )
 
@@ -1852,17 +1853,24 @@ class TGroupGraph(DashboardComponent):
                                 <span style="font-size: 12px; font-weight: bold;">Name:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
                             </div>
+
                             <div>
-                                <span style="font-size: 12px; font-weight: bold;">All:</span>&nbsp;
+                                <span style="font-size: 12px; font-weight: bold;">Runtime:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@runtime</span>
+                            </div>
+
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Memory:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
+                            </div>
+
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Tasks:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
                             </div>
                             <div>
-                                <span style="font-size: 12px; font-weight: bold;">Comp / All:</span>&nbsp;
+                                <span style="font-size: 12px; font-weight: bold;">Completed:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
-                            </div>
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;"> % Completed:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@progress</span>
                             </div>
 
                             <div>
@@ -1969,7 +1977,6 @@ class TGroupGraph(DashboardComponent):
             "y_start": [],
             "y_end": [],
             "x_end_progress": [],
-            "progress": [],
             "mem_alpha": [],
             "node_line_width": [],
             "comp_tasks": [],
@@ -1982,6 +1989,8 @@ class TGroupGraph(DashboardComponent):
             "in_memory": [],
             "in_released": [],
             "in_erred": [],
+            "runtime": [],
+            "memory": [],
         }
 
         arrows_data = {
@@ -2006,13 +2015,7 @@ class TGroupGraph(DashboardComponent):
 
             # compute width and height of boxes
             if tg.duration and tg.nbytes_total:
-                # get tasks that are contributing to this duration
-                # is this comp_tasks
-                import numpy as np
-
                 # Extrapolated duration and nbytes total (not scaled)
-                # need magic numbers for proper scaling of width and height in log
-
                 w_temp = np.log10(tg.duration / comp_tasks * tot_tasks)
                 h_temp = np.log10(tg.nbytes_total / comp_tasks * tot_tasks)
 
@@ -2066,12 +2069,9 @@ class TGroupGraph(DashboardComponent):
             nodes_data["y_start"].append(y - height_box / 2)
             nodes_data["y_end"].append(y - height_box / 2 + Hbar)
 
-            completed = comp_tasks / tot_tasks
-
-            nodes_data["progress"].append(completed * 100)
-            nodes_data["x_end_progress"].append(x - width_box / 2 + Lbar * completed)
-
-            nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks}")
+            nodes_data["x_end_progress"].append(
+                x - width_box / 2 + Lbar * comp_tasks / tot_tasks
+            )
 
             # arrows
             arrows_data["xs"] += [
@@ -2117,11 +2117,31 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["h_logo"].append(height_box * 0.3 * ratio)
                 nodes_data["w_logo"].append(width_box * 0.3)
 
+            # runtime and memory
+            nodes_data["runtime"].append(format_time(tg.duration))
+            nodes_data["memory"].append(format_bytes(tg.nbytes_total))
+
             # Add some status to hover
-            nodes_data["in_processing"].append(tg.states["processing"])
-            nodes_data["in_memory"].append(tg.states["memory"])
-            nodes_data["in_released"].append(tg.states["released"])
-            nodes_data["in_erred"].append(tg.states["erred"])
+            tasks_processing = tg.states["processing"]
+            tasks_memory = tg.states["memory"]
+            tasks_relased = tg.states["released"]
+            tasks_erred = tg.states["erred"]
+
+            nodes_data["comp_tasks"].append(
+                f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_processing"].append(
+                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_memory"].append(
+                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_released"].append(
+                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_erred"].append(
+                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+            )
 
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
