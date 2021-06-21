@@ -408,22 +408,61 @@ async def test_gather(s, a, b):
     b.data["y"] = 2
     with rpc(a.address) as aa:
         resp = await aa.gather(who_has={"x": [b.address], "y": [b.address]})
-        assert resp["status"] == "OK"
 
-        assert a.data["x"] == b.data["x"]
-        assert a.data["y"] == b.data["y"]
+    assert resp == {"status": "OK"}
+    assert a.data["x"] == b.data["x"]
+    assert a.data["y"] == b.data["y"]
 
 
 @gen_cluster()
 async def test_gather_missing_keys(s, a, b):
     """A key is missing. Other keys are gathered successfully."""
-    raise NotImplementedError("TODO")
+    b.data["x"] = 1
+    with rpc(a.address) as aa:
+        resp = await aa.gather(who_has={"x": [b.address], "y": [b.address]})
+
+    assert resp == {"status": "missing-data", "keys": {"y": (b.address,)}}
+    assert a.data["x"] == b.data["x"]
 
 
-@gen_cluster()
+@gen_cluster(
+    worker_kwargs={"timeout": "100ms"},
+)
 async def test_gather_missing_workers(s, a, b):
-    """A worker is missing. Keys from other workers are gathered successfully."""
-    raise NotImplementedError("TODO")
+    """A worker owning the only copy of a key is missing.
+    Keys from other workers are gathered successfully.
+    """
+    assert b.address.startswith("tcp://127.0.0.1:")
+    c_addr = "tcp://127.0.0.1:12345"
+    b.data["x"] = 1
+
+    with rpc(a.address) as aa:
+        resp = await aa.gather(who_has={"x": [b.address], "y": [c_addr]})
+
+    assert resp == {"status": "missing-data", "keys": {"y": (c_addr,)}}
+    assert a.data["x"] == b.data["x"]
+
+
+@gen_cluster(
+    worker_kwargs={"timeout": "100ms"},
+)
+async def test_gather_missing_workers_replicated(s, a, b):
+    """A worker owning a redundant copy of a key is missing.
+    The key is successfully gathered from other workers.
+    """
+    assert b.address.startswith("tcp://127.0.0.1:")
+    c_addr = "tcp://127.0.0.1:12345"
+    b.data["x"] = 1
+    b.data["y"] = 2
+
+    with rpc(a.address) as aa:
+        # Order matters! Test both
+        resp = await aa.gather(
+            who_has={"x": [b.address, c_addr], "y": [c_addr, b.address]}
+        )
+    assert resp == {"status": "OK"}
+    assert a.data["x"] == b.data["x"]
+    assert a.data["y"] == b.data["y"]
 
 
 @pytest.mark.asyncio

@@ -5880,11 +5880,7 @@ class Scheduler(SchedulerState, ServerNode):
             return {
                 "status": "missing-data",
                 "keys": list(
-                    concat(
-                        r["keys"]
-                        for r in result
-                        if r["status"] == "missing-data"
-                    )
+                    concat(r["keys"] for r in result if r["status"] == "missing-data")
                 ),
             }
 

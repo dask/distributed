@@ -1083,6 +1083,7 @@ class Worker(ServerNode):
         result, missing_keys, missing_workers = await gather_from_workers(
             who_has, rpc=self.rpc, who=self.address
         )
+        self.update_data(data=result, report=False)
         if missing_keys:
             logger.warning(
                 "Could not find data: %s on workers: %s (who_has: %s)",
@@ -1092,7 +1093,6 @@ class Worker(ServerNode):
             )
             return {"status": "missing-data", "keys": missing_keys}
         else:
-            self.update_data(data=result, report=False)
             return {"status": "OK"}
 
     def get_monitor_info(self, comm=None, recent=False, start=0):
