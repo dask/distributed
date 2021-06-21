@@ -1869,25 +1869,28 @@ class TGroupGraph(DashboardComponent):
                                 <span style="font-size: 12px; font-weight: bold;">Tasks:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
                             </div>
-                            <div>
+
+                            <div style="margin-left: 2em;">
                                 <span style="font-size: 12px; font-weight: bold;">Completed:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
                             </div>
 
-                            <div>
+                            <div style="margin-left: 2em;">
                                 <span style="font-size: 12px; font-weight: bold;">Processing:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@in_processing</span>
                             </div>
 
-                            <div>
+                            <div style="margin-left: 2em;">
                                 <span style="font-size: 12px; font-weight: bold;">In memory:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
                             </div>
-                            <div>
+
+                            <div style="margin-left: 2em;">
                                 <span style="font-size: 12px; font-weight: bold;">Erred:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@in_erred</span>
                             </div>
-                            <div>
+
+                            <div style="margin-left: 2em;">
                                 <span style="font-size: 12px; font-weight: bold;">Released:</span>&nbsp;
                                 <span style="font-size: 10px; font-family: Monaco, monospace;">@in_released</span>
                             </div>
