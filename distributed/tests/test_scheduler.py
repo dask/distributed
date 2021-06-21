@@ -2795,3 +2795,56 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
         a: (large_future.key,),
         b: tuple(f.key for f in small_futures),
     }
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_rebalance_move_data_bad_sender(client, s, a, b, c):
+    """Sender disappears between _rebalance_find_msgs and _rebalance_move_data.
+    Tasks from different senders to the same recipient are rebalanced.
+    Tasks from different senders to different recipients are rebalanced.
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_rebalance_move_data_bad_recipient(client, s, a, b, c):
+    """Recipient disappears between _rebalance_find_msgs and _rebalance_move_data.
+    Tasks to the faulty recipient are not deleted from the sender.
+    Tasks to different recipients are rebalanced.
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_rebalance_move_data_bad_task(client, s, a, b, c):
+    """Task disappears between _rebalance_find_msgs and _rebalance_move_data.
+    Other tasks to the same recipient are rebalanced.
+    Other tasks to different recipients are rebalanced.
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_rebalance_move_data_duplicate_task(client, s, a, b, c):
+    """Race condition where the recipient worker receives the same task twice, once from
+    _rebalance_move_data and another from somewhere else.
+    The task is deleted from the sender.
+    The task is not double-counted on the recipient.
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True)
+async def test_delete_worker_data_bad_worker(c, s, a, b):
+    """_delete_worker_data gracefully handles a non-existing worker; e.g. a sender died
+    in the middle of rebalance()
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True)
+async def test_delete_worker_data_bad_task(c, s, a, b):
+    """_delete_worker_data gracefully handles a non-existing key; e.g. a task was stolen
+    by work stealing in the middle of a rebalance()
+    """
+    raise NotImplementedError("TODO")

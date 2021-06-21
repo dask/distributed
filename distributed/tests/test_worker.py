@@ -414,6 +414,18 @@ async def test_gather(s, a, b):
         assert a.data["y"] == b.data["y"]
 
 
+@gen_cluster()
+async def test_gather_missing_keys(s, a, b):
+    """A key is missing. Other keys are gathered successfully."""
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster()
+async def test_gather_missing_workers(s, a, b):
+    """A worker is missing. Keys from other workers are gathered successfully."""
+    raise NotImplementedError("TODO")
+
+
 @pytest.mark.asyncio
 async def test_io_loop(cleanup):
     async with Scheduler(port=0) as s:

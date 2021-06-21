@@ -5547,8 +5547,8 @@ class Scheduler(SchedulerState, ServerNode):
         memory (managed+unmanaged).
 
         .. warning::
-           This operation is not optimized against normal operation of the scheduler. It
-           is not recommended to use it while waiting on computations.
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         **Algorithm**
 
@@ -5844,6 +5844,8 @@ class Scheduler(SchedulerState, ServerNode):
         - sender worker
         - recipient worker
         - task to be transferred
+
+        FIXME this method is not robust when the cluster is not idle.
         """
         snd_ws: WorkerState
         rec_ws: WorkerState
