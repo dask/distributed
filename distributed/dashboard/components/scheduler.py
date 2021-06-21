@@ -2165,9 +2165,7 @@ class WorkerTable(DashboardComponent):
 
 class SchedulerLogs:
     def __init__(self, scheduler, start=None):
-        logs = scheduler.get_logs(timestamps=True)
-        if start is not None:
-            logs = [log for log in logs if log[0] > start]
+        logs = scheduler.get_logs(start=start, timestamps=True)
 
         if not logs:
             logs_html = (

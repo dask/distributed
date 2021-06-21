@@ -87,13 +87,31 @@ class ServerNode(Server):
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
-    def get_logs(self, comm=None, n=None, timestamps=False):
+    def get_logs(self, comm=None, start=None, n=None, timestamps=False):
+        """
+        Fetch log entries for this node
+
+        Parameters
+        ----------
+        start : float, optional
+            A time (in seconds) to begin filtering log entries from
+        n : int, optional
+            Maximum number of log entries to return from filtered results
+        timestamps : bool, default False
+            Do we want log entries to include the time they were generated?
+
+        Returns
+        -------
+        List of tuples containing the log level, message, and (optional) timestamp for each filtered entry
+        """
         deque_handler = self._deque_handler
-        if n is None:
+        if start is None:
             L = list(deque_handler.deque)
         else:
             L = deque_handler.deque
-            L = [L[-i] for i in range(min(n, len(L)))]
+            L = [msg for msg in L if msg.created > start]
+        if n is not None:
+            L = [L[-i - 1] for i in range(min(n, len(L)))]
         if timestamps:
             return [
                 (msg.created, msg.levelname, deque_handler.format(msg)) for msg in L
