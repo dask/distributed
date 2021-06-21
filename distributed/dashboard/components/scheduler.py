@@ -2030,23 +2030,28 @@ class TGroupGraph(DashboardComponent):
 
                 # Extrapolated duration and nbytes total (not scaled)
                 # need magic numbers for proper scaling of width and height in log
-                mn_width = 1
-                mn_height = 1
-                w_temp = np.log10(mn_width * tg.duration / comp_tasks * tot_tasks)
-                h_temp = np.log10(mn_height * tg.nbytes_total / comp_tasks * tot_tasks)
+
+                w_temp = np.log10(tg.duration / comp_tasks * tot_tasks)
+                h_temp = np.log10(tg.nbytes_total / comp_tasks * tot_tasks)
 
                 # Move this function somewhere else once we finish tweaking
-                def tanh_scale(x):
+                def tanh_scale(x, shift, stretch):
                     start = 0.5
                     end = 0.9
                     # magic number: how abrupt are the changes needs tweaking
                     mn_tan = 0.05
-                    y = (np.tanh(0.05 * x) + 1) / 2 * (end - start) + start
+                    y = (np.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (
+                        end - start
+                    ) + start
                     return y
 
-                # need to scale width
-                width_box = tanh_scale(w_temp)
-                height_box = tanh_scale(h_temp)
+                # scale duration (width)
+                # Choose middle to 1e2 -> shift 1e2, and try stretch = 0.7
+                width_box = tanh_scale(w_temp, shift=1e2, stretch=0.7)
+
+                # need to scale memory (height)
+                # Choose middle to 1e9 -> shift 1e9, and try stretch = 0.4
+                height_box = tanh_scale(h_temp, shift=1e9, stretch=0.4)
 
             else:
                 width_box = self.width_node
@@ -2124,13 +2129,17 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["url_logo"].append(url_logo)
 
-            ratio = width_box / height_box
-
             nodes_data["x_logo"].append(x + width_box / 3)
             nodes_data["y_logo"].append(y + height_box / 3)
 
-            nodes_data["h_logo"].append(height_box * 0.3)
-            nodes_data["w_logo"].append(width_box * 0.3 / ratio)
+            ratio = width_box / height_box
+
+            if ratio > 1:
+                nodes_data["h_logo"].append(height_box * 0.3)
+                nodes_data["w_logo"].append(width_box * 0.3 / ratio)
+            else:
+                nodes_data["h_logo"].append(height_box * 0.3 * ratio)
+                nodes_data["w_logo"].append(width_box * 0.3)
 
             # Add some status to hover
             nodes_data["in_processing"].append(tg.states["processing"])
