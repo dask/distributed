@@ -27,11 +27,17 @@ from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
-from dask.compatibility import apply
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
-from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from dask.utils import (
+    _deprecated,
+    apply,
+    ensure_dict,
+    format_bytes,
+    funcname,
+    stringify,
+)
 
 try:
     from dask.delayed import single_key
@@ -53,7 +59,7 @@ from .core import (
 )
 from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
-from .objects import HasWhat, WhoHas
+from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -530,7 +536,7 @@ class Client:
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
-        Claim this scheduler as the global dask scheduler
+        Use this Client as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
     security: Security or bool, optional
@@ -754,9 +760,9 @@ class Client:
         self.start(timeout=timeout)
         Client._instances.add(self)
 
-        from distributed.recreate_exceptions import ReplayExceptionClient
+        from distributed.recreate_tasks import ReplayTaskClient
 
-        ReplayExceptionClient(self)
+        ReplayTaskClient(self)
 
     @contextmanager
     def as_current(self):
@@ -828,7 +834,10 @@ class Client:
             return self.cluster.dashboard_link
         except AttributeError:
             scheduler, info = self._get_scheduler_info()
-            protocol, rest = scheduler.address.split("://")
+            if scheduler is None:
+                return None
+            else:
+                protocol, rest = scheduler.address.split("://")
 
             port = info["services"]["dashboard"]
             if protocol == "inproc":
@@ -875,7 +884,7 @@ class Client:
             info = self._scheduler_identity
             scheduler = self.scheduler
 
-        return scheduler, info
+        return scheduler, SchedulerInfo(info)
 
     def __repr__(self):
         # Note: avoid doing I/O here...
@@ -903,53 +912,83 @@ class Client:
                 self.scheduler.address,
             )
         else:
-            return "<%s: not connected>" % (self.__class__.__name__,)
+            return "<%s: No scheduler connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()
 
-        text = (
-            '<h3 style="text-align: left;">Client</h3>\n'
-            '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
-        )
-        if scheduler is not None:
-            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
+        if scheduler is None:
+            child_repr = """<p>No scheduler connected.</p>"""
+        elif self.cluster:
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Cluster Info</h3></summary>
+                {self.cluster._repr_html_()}
+                </details>
+                """
         else:
-            text += "  <li><b>Scheduler: not connected</b></li>\n"
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
+                {info._repr_html_()}
+                </details>
+                """
 
-        if info and "dashboard" in info["services"]:
-            text += (
-                "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a></li>\n"
-                % {"web": self.dashboard_link}
-            )
+        client_status = ""
 
-        text += "</ul>\n"
+        if not self.cluster and not self.scheduler_file:
+            client_status += """
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
-        if info:
-            workers = list(info["workers"].values())
-            cores = sum(w["nthreads"] for w in workers)
-            memory = [w["memory_limit"] for w in workers]
-            memory = format_bytes(sum(memory)) if all(memory) else ""
+        if self.cluster:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
+                    <td style="text-align: left;"><strong>Cluster type:</strong> {type(self.cluster).__name__}</td>
+                </tr>
+                """
+        elif self.scheduler_file:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
+                    <td style="text-align: left;"><strong>Scheduler file:</strong> {self.scheduler_file}</td>
+                </tr>
+                """
 
-            text2 = (
-                '<h3 style="text-align: left;">Cluster</h3>\n'
-                '<ul style="text-align: left; list-style:none; margin: 0; padding: 0;">\n'
-                "  <li><b>Workers: </b>%d</li>\n"
-                "  <li><b>Cores: </b>%d</li>\n"
-                "  <li><b>Memory: </b>%s</li>\n"
-                "</ul>\n"
-            ) % (len(workers), cores, memory)
+        if self.dashboard_link:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;">
+                        <strong>Dashboard: </strong>
+                        <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                    </td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
-            return (
-                '<table style="border: 2px solid white;">\n'
-                "<tr>\n"
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                "</tr>\n</table>"
-            ) % (text, text2)
-
-        else:
-            return text
+        return f"""
+            <div>
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background-color: #e1e1e1;
+                    border: 3px solid #9D9D9D;
+                    border-radius: 5px;
+                    position: absolute;"> </div>
+                <div style="margin-left: 48px;">
+                    <h3 style="margin-bottom: 0px;">Client</h3>
+                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.id}</p>
+                    <table style="width: 100%; text-align: left;">
+                    {client_status}
+                    </table>
+                    {child_repr}
+                </div>
+            </div>
+        """
 
     def start(self, **kwargs):
         """Start scheduler running in separate thread"""
@@ -1127,7 +1166,7 @@ class Client:
                     "versions": version_module.get_versions(),
                 }
             )
-        except Exception as e:
+        except Exception:
             if self.status == "closed":
                 return
             else:
@@ -1163,7 +1202,7 @@ class Client:
         if self.status not in ("running", "connecting"):
             return
         try:
-            self._scheduler_identity = await self.scheduler.identity()
+            self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
         except EnvironmentError:
             logger.debug("Not able to query scheduler for identity")
 
@@ -2506,6 +2545,7 @@ class Client:
         """
         return self.sync(self._run, function, *args, **kwargs)
 
+    @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
         """
         Spawn a coroutine on all workers.
@@ -2527,12 +2567,6 @@ class Client:
             Workers on which to run the function. Defaults to all known workers.
 
         """
-        warnings.warn(
-            "This method has been deprecated. "
-            "Instead use Client.run which detects async functions "
-            "automatically",
-            stacklevel=2,
-        )
         return self.run(function, *args, **kwargs)
 
     def _graph_to_futures(
@@ -3077,9 +3111,12 @@ class Client:
         either affects a subset of the keys/workers or the entire network,
         depending on keyword arguments.
 
-        This operation is generally not well tested against normal operation of
-        the scheduler.  It is not recommended to use it while waiting on
-        computations.
+        For details on the algorithm and configuration options, refer to the matching
+        scheduler-side method :meth:`~distributed.scheduler.Scheduler.rebalance`.
+
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         Parameters
         ----------
@@ -3997,7 +4034,6 @@ class Client:
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
-                typ = type(exc)
                 tb = response["traceback"]
                 raise exc.with_traceback(tb)
         return responses

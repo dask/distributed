@@ -11,16 +11,14 @@ from tlz import concat, sliding_window
 from dask import delayed
 
 from distributed import Client, Nanny, wait
-from distributed.client import wait
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All, CancelledError
-from distributed.utils_test import (  # noqa: F401
+from distributed.utils_test import (
     bump_rlimit,
     cluster,
     gen_cluster,
     inc,
-    loop,
     nodebug_setup_module,
     nodebug_teardown_module,
     slowadd,

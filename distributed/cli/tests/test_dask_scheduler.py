@@ -16,7 +16,6 @@ import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface, tmpfile
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
@@ -142,17 +141,6 @@ def test_dashboard_whitelist(loop):
                 print(f)
                 sleep(0.1)
                 assert time() < start + 20
-
-
-def test_multiple_workers(loop):
-    with popen(["dask-scheduler", "--no-dashboard"]) as s:
-        with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as a:
-            with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as b:
-                with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
-                    start = time()
-                    while len(c.nthreads()) < 2:
-                        sleep(0.1)
-                        assert time() < start + 10
 
 
 def test_interface(loop):
@@ -418,7 +406,7 @@ def test_idle_timeout(loop):
     assert 1 < stop - start < 10
 
 
-def test_multiple_workers(loop):
+def test_multiple_workers_2(loop):
     text = """
 def dask_setup(worker):
     worker.foo = 'setup'
@@ -441,3 +429,14 @@ def dask_setup(worker):
                 assert foo == "setup"
                 [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
                 assert foo == "setup"
+
+
+def test_multiple_workers(loop):
+    with popen(["dask-scheduler", "--no-dashboard"]) as s:
+        with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as a:
+            with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as b:
+                with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
+                    start = time()
+                    while len(c.nthreads()) < 2:
+                        sleep(0.1)
+                        assert time() < start + 10

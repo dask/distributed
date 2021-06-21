@@ -10,14 +10,7 @@ import pytest
 from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    inc,
-    loop,
-    throws,
-)
+from distributed.utils_test import gen_cluster, inc, throws
 
 
 @gen_cluster(client=True)

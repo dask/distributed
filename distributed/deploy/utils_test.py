@@ -17,7 +17,7 @@ class ClusterTest:
 
     @pytest.mark.xfail()
     def test_cores(self):
-        info = self.client.scheduler_info()
+        self.client.scheduler_info()
         assert len(self.client.nthreads()) == 2
 
     def test_submit(self):

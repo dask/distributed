@@ -18,14 +18,7 @@ from distributed import (
     worker_client,
 )
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    double,
-    gen_cluster,
-    inc,
-    loop,
-)
+from distributed.utils_test import double, gen_cluster, inc
 
 
 @gen_cluster(client=True)

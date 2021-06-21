@@ -73,6 +73,6 @@ def loads(x, *, buffers=()):
             return pickle.loads(x, buffers=buffers)
         else:
             return pickle.loads(x)
-    except Exception as e:
+    except Exception:
         logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
         raise
