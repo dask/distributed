@@ -5845,15 +5845,15 @@ class Scheduler(SchedulerState, ServerNode):
         - recipient worker
         - task to be transferred
         """
-        ts: TaskState
         snd_ws: WorkerState
         rec_ws: WorkerState
+        ts: TaskState
 
         to_recipients = defaultdict(lambda: defaultdict(list))
         to_senders = defaultdict(list)
-        for sender, recipient, ts in msgs:
-            to_recipients[recipient.address][ts._key].append(sender.address)
-            to_senders[sender.address].append(ts._key)
+        for snd_ws, rec_ws, ts in msgs:
+            to_recipients[rec_ws.address][ts._key].append(snd_ws.address)
+            to_senders[snd_ws.address].append(ts._key)
 
         result = await asyncio.gather(
             *(
