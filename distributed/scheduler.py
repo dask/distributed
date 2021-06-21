@@ -5547,8 +5547,8 @@ class Scheduler(SchedulerState, ServerNode):
         memory (managed+unmanaged).
 
         .. warning::
-           This operation is generally not well tested against normal operation of the
-           scheduler. It is not recommended to use it while waiting on computations.
+           This operation is not optimized against normal operation of the scheduler. It
+           is not recommended to use it while waiting on computations.
 
         **Algorithm**
 
@@ -5793,7 +5793,7 @@ class Scheduler(SchedulerState, ServerNode):
                     # move on to the next task of the same sender.
                     continue
 
-                # Schedule task for transfer from sender to receiver
+                # Schedule task for transfer from sender to recipient
                 msgs.append((snd_ws, rec_ws, ts))
 
                 # *_bytes_max/min are all negative for heap sorting
@@ -5814,7 +5814,7 @@ class Scheduler(SchedulerState, ServerNode):
                 else:
                     heapq.heappop(senders)
 
-                # If receiver still has bytes to gain, push it back into the receivers
+                # If recipient still has bytes to gain, push it back into the recipients
                 # heap; it may or may not come back on top again.
                 if rec_bytes_min < 0:
                     # See definition of recipients above
@@ -5840,8 +5840,6 @@ class Scheduler(SchedulerState, ServerNode):
     ) -> dict:
         """Perform the actual transfer of data across the network in rebalance().
         Takes in input the output of _rebalance_find_msgs().
-
-        FIXME this method is not robust when the cluster is not idle.
         """
         ts: TaskState
         snd_ws: WorkerState
@@ -5877,7 +5875,7 @@ class Scheduler(SchedulerState, ServerNode):
                 "status": "missing-data",
                 "keys": list(
                     concat(
-                        r["keys"].keys()
+                        r["keys"]
                         for r in result
                         if r["status"] == "missing-data"
                     )
