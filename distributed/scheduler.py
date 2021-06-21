@@ -5839,7 +5839,11 @@ class Scheduler(SchedulerState, ServerNode):
         self, msgs: "list[tuple[WorkerState, WorkerState, TaskState]]"
     ) -> dict:
         """Perform the actual transfer of data across the network in rebalance().
-        Takes in input the output of _rebalance_find_msgs().
+        Takes in input the output of _rebalance_find_msgs(), that is a list of tuples:
+
+        - sender worker
+        - recipient worker
+        - task to be transferred
         """
         ts: TaskState
         snd_ws: WorkerState
