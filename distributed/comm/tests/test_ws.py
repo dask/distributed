@@ -2,7 +2,6 @@ import os
 import tempfile
 import warnings
 
-import numpy as np
 import pytest
 
 import dask
@@ -199,6 +198,7 @@ async def test_quiet_close(cleanup):
     scheduler_kwargs={"protocol": "ws://"},
 )
 async def test_ws_roundtrip(c, s, a, b):
+    np = pytest.importorskip("numpy")
     x = np.arange(100)
     future = await c.scatter(x)
     y = await future
@@ -209,6 +209,7 @@ async def test_ws_roundtrip(c, s, a, b):
 @pytest.mark.asyncio
 async def test_wss_roundtrip(cleanup):
     pytest.importorskip("cryptography")
+    np = pytest.importorskip("numpy")
     security = Security.temporary()
     async with Scheduler(protocol="wss://", security=security) as s:
         async with Worker(s.address, security=security) as w:
