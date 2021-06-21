@@ -1758,8 +1758,6 @@ class TGroupGraph(DashboardComponent):
                 "progress": [],
                 "mem_alpha": [],
                 "node_line_width": [],
-                "xc_pbar": [],
-                "yc_pbar": [],
                 "comp_tasks": [],
                 "url_logo": [],
                 "x_logo": [],
@@ -1818,7 +1816,7 @@ class TGroupGraph(DashboardComponent):
         )
 
         # progress bar
-        pbar = self.root.quad(
+        self.root.quad(
             left="x_start",
             right="x_end_progress",
             bottom="y_start",
@@ -1841,19 +1839,6 @@ class TGroupGraph(DashboardComponent):
             source=self.arrows_source,
         )
         self.root.add_layout(self.arrows)
-
-        # display completed / total tasks
-        # self.task_comp_labels = LabelSet(
-        #     x="xc_pbar",
-        #     y="yc_pbar",
-        #     text="comp_tasks",
-        #     text_font_size="1vmin",
-        #     text_align="center",
-        #     text_baseline="middle",
-        #     source=self.nodes_source,
-        #     background_fill_color=None,
-        # )
-        # self.root.add_layout(self.task_comp_labels)
 
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -1987,8 +1972,6 @@ class TGroupGraph(DashboardComponent):
             "progress": [],
             "mem_alpha": [],
             "node_line_width": [],
-            "xc_pbar": [],
-            "yc_pbar": [],
             "comp_tasks": [],
             "url_logo": [],
             "x_logo": [],
@@ -2037,8 +2020,6 @@ class TGroupGraph(DashboardComponent):
                 def tanh_scale(x, shift, stretch):
                     start = 0.5
                     end = 0.9
-                    # magic number: how abrupt are the changes needs tweaking
-                    mn_tan = 0.05
                     y = (np.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (
                         end - start
                     ) + start
@@ -2089,10 +2070,6 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["progress"].append(completed * 100)
             nodes_data["x_end_progress"].append(x - width_box / 2 + Lbar * completed)
-
-            # comp/tot label
-            nodes_data["xc_pbar"].append(x)
-            nodes_data["yc_pbar"].append(y - height_box / 2 + Hbar / 2)
 
             nodes_data["comp_tasks"].append(f"{comp_tasks}/{tot_tasks}")
 
