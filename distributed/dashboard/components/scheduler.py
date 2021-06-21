@@ -1999,14 +1999,9 @@ class TGroupGraph(DashboardComponent):
             "xe": [],
             "ye": [],
         }
-        # visited = []
-        for key, tg in self.scheduler.task_groups.items():
-            x = self.nodes_layout[key]["x"]
-            y = self.nodes_layout[key]["y"]
 
-            # main boxes layout
-            nodes_data["x"].append(x)
-            nodes_data["y"].append(y)
+        box_dim = {}
+        for key, tg in self.scheduler.task_groups.items():
 
             comp_tasks = (
                 tg.states["released"] + tg.states["memory"] + tg.states["erred"]
@@ -2040,11 +2035,28 @@ class TGroupGraph(DashboardComponent):
                 width_box = self.width_node
                 height_box = self.height_node
 
-            nodes_data["w_box"].append(width_box)
-            nodes_data["h_box"].append(height_box)
+            box_dim[key] = {}
+            box_dim[key]["width"] = width_box
+            box_dim[key]["height"] = height_box
 
-            name = tg.prefix.name
-            nodes_data["name"].append(name)
+        for key, tg in self.scheduler.task_groups.items():
+            x = self.nodes_layout[key]["x"]
+            y = self.nodes_layout[key]["y"]
+            width = box_dim[key]["width"]
+            height = box_dim[key]["height"]
+
+            # main boxes layout
+            nodes_data["x"].append(x)
+            nodes_data["y"].append(y)
+            nodes_data["w_box"].append(width)
+            nodes_data["h_box"].append(height)
+
+            comp_tasks = (
+                tg.states["released"] + tg.states["memory"] + tg.states["erred"]
+            )
+            tot_tasks = sum(tg.states.values())
+
+            nodes_data["name"].append(tg.prefix.name)
 
             nodes_data["color"].append(color_of(tg.prefix.name))
             nodes_data["tot_tasks"].append(tot_tasks)
@@ -2061,28 +2073,28 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["node_line_width"].append(1)
 
             # progress bar data update
-            Lbar = width_box
-            nodes_data["x_start"].append(x - width_box / 2)
-            nodes_data["x_end"].append(x - width_box / 2 + Lbar)
+            Lbar = width
+            nodes_data["x_start"].append(x - width / 2)
+            nodes_data["x_end"].append(x - width / 2 + Lbar)
 
-            Hbar = height_box * 0.4
-            nodes_data["y_start"].append(y - height_box / 2)
-            nodes_data["y_end"].append(y - height_box / 2 + Hbar)
+            Hbar = height * 0.4
+            nodes_data["y_start"].append(y - height / 2)
+            nodes_data["y_end"].append(y - height / 2 + Hbar)
 
             nodes_data["x_end_progress"].append(
-                x - width_box / 2 + Lbar * comp_tasks / tot_tasks
+                x - width / 2 + Lbar * comp_tasks / tot_tasks
             )
 
             # arrows
             arrows_data["xs"] += [
-                self.nodes_layout[k]["x"] + self.width_node / 2
+                self.nodes_layout[k]["x"] + box_dim[k]["width"] / 2
                 for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["ys"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["xe"] += [
-                self.nodes_layout[k]["x"] - self.width_node / 2
+                self.nodes_layout[k]["x"] - box_dim[k]["width"] / 2
                 for k in self.arrows_layout[key]["nend"]
             ]
             arrows_data["ye"] += [
@@ -2105,17 +2117,17 @@ class TGroupGraph(DashboardComponent):
 
             nodes_data["url_logo"].append(url_logo)
 
-            nodes_data["x_logo"].append(x + width_box / 3)
-            nodes_data["y_logo"].append(y + height_box / 3)
+            nodes_data["x_logo"].append(x + width / 3)
+            nodes_data["y_logo"].append(y + height / 3)
 
-            ratio = width_box / height_box
+            ratio = width / height
 
             if ratio > 1:
-                nodes_data["h_logo"].append(height_box * 0.3)
-                nodes_data["w_logo"].append(width_box * 0.3 / ratio)
+                nodes_data["h_logo"].append(height * 0.3)
+                nodes_data["w_logo"].append(width * 0.3 / ratio)
             else:
-                nodes_data["h_logo"].append(height_box * 0.3 * ratio)
-                nodes_data["w_logo"].append(width_box * 0.3)
+                nodes_data["h_logo"].append(height * 0.3 * ratio)
+                nodes_data["w_logo"].append(width * 0.3)
 
             # runtime and memory
             nodes_data["runtime"].append(format_time(tg.duration))
