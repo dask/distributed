@@ -7501,6 +7501,8 @@ def decide_worker(
             sample_from = idle_workers or worker_pool
             candidates.update(
                 random.choices(list(sample_from), k=min(10, len(sample_from)))
+                if len(sample_from) > 10
+                else sample_from
             )
     if valid_workers is None:
         if not candidates:
