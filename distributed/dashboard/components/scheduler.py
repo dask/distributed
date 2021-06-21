@@ -19,7 +19,6 @@ from bokeh.models import (
     DataRange1d,
     GroupFilter,
     HoverTool,
-    LabelSet,
     NumberFormatter,
     NumeralTickFormatter,
     OpenURL,
@@ -95,7 +94,7 @@ XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
 logos_dict = {
-    "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",
+    "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",  # noqa: E501
     "pandas": "https://static.bokeh.org/logos/logo.png",  # this is a bokeh logo but haven't found a pandas png one
     "builtins": "https://logos-download.com/wp-content/uploads/2016/10/Python_logo_icon.png",
 }
@@ -2099,14 +2098,14 @@ class TGroupGraph(DashboardComponent):
 
             # arrows
             arrows_data["xs"] += [
-                self.nodes_layout[k]["x"] + width_box / 2
+                self.nodes_layout[k]["x"] + self.width_node / 2
                 for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["ys"] += [
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
             ]
             arrows_data["xe"] += [
-                self.nodes_layout[k]["x"] - width_box / 2
+                self.nodes_layout[k]["x"] - self.width_node / 2
                 for k in self.arrows_layout[key]["nend"]
             ]
             arrows_data["ye"] += [
