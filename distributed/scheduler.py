@@ -24,7 +24,6 @@ import psutil
 import sortedcontainers
 from tlz import (
     compose,
-    concat,
     first,
     groupby,
     merge,
@@ -5304,7 +5303,7 @@ class Scheduler(SchedulerState, ServerNode):
         return keys
 
     async def gather(self, comm=None, keys=None, serializers=None):
-        """Collect data in from workers"""
+        """Collect data from workers to the scheduler"""
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState
         keys = list(keys)
@@ -5372,6 +5371,59 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
+
+    async def _gather_on_workers(
+        self, transfers: "Mapping[str, Mapping[Hashable, list[str]]]"
+    ) -> "dict[str, set[Hashable]]":
+        """Peer-to-peer copy of keys between workers
+
+        Parameters
+        ----------
+        transfers :
+            {recipient address: {key: [sender address, sender address, ...], key: ...}}
+
+        Returns
+        -------
+        returns:
+            {recipient address: {failed key, failed key, ...}}
+        """
+        results = await asyncio.gather(
+            *(
+                retry_operation(self.rpc(addr=w).gather, who_has=who_has)
+                for w, who_has in transfers.items()
+            )
+        )
+
+        parent: SchedulerState = cast(SchedulerState, self)
+        recipient_to_keys_fail = {}  # {recipient address: {failed keys}}
+
+        for w, result in zip(transfers, results):
+            if result["status"] == "OK":
+                keys_fail = set()
+            elif result["status"] == "missing-data":
+                keys_fail = set(result["keys"])
+                logger.warning("Worker %s failed to acquire keys: %s", w, keys_fail)
+            else:
+                keys_fail = set(transfers[w])
+                logger.warning("Communication failed during replication: %s", result)
+
+            recipient_to_keys_fail[w] = keys_fail
+            keys_ok = transfers[w].keys() - keys_fail
+            ws: WorkerState = parent._workers_dv.get(w)
+            if ws is None:
+                logger.warning("Worker lost during replication: %s", w)
+                continue
+            for key in keys_ok:
+                ts: TaskState = parent._tasks.get(key)
+                if ts is None or ts._state != "memory":
+                    logger.warning("Key lost during replication: %s", key)
+                    continue
+                if ts not in ws._has_what:
+                    ws._nbytes += ts.get_nbytes()
+                    ws._has_what[ts] = None
+                    ts._who_has.add(ws)
+
+            return recipient_to_keys_fail
 
     def clear_task_state(self):
         # XXX what about nested state such as ClientState.wants_what
@@ -5852,20 +5904,20 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
 
         to_recipients = defaultdict(lambda: defaultdict(list))
-        to_senders = defaultdict(list)
         for snd_ws, rec_ws, ts in msgs:
             to_recipients[rec_ws.address][ts._key].append(snd_ws.address)
-            to_senders[snd_ws.address].append(ts._key)
+        failed_keys_by_recipient = await self._gather_on_workers(to_recipients)
 
-        result = await asyncio.gather(
-            *(
-                retry_operation(self.rpc(addr=r).gather, who_has=v)
-                for r, v in to_recipients.items()
-            )
+        to_senders = defaultdict(list)
+        for snd_ws, rec_ws, ts in msgs:
+            if ts._key not in failed_keys_by_recipient[rec_ws.address]:
+                to_senders[snd_ws.address].append(ts._key)
+        await asyncio.gather(
+            *(self._delete_worker_data(r, v) for r, v in to_senders.items())
         )
+
         for r, v in to_recipients.items():
             self.log_event(r, {"action": "rebalance", "who_has": v})
-
         self.log_event(
             "all",
             {
@@ -5876,27 +5928,13 @@ class Scheduler(SchedulerState, ServerNode):
             },
         )
 
-        if any(r["status"] != "OK" for r in result):
+        if any(failed_keys_by_recipient.values()):
             return {
                 "status": "missing-data",
-                "keys": list(
-                    concat(r["keys"] for r in result if r["status"] == "missing-data")
-                ),
+                "keys": list({k for r in failed_keys_by_recipient for k in r}),
             }
-
-        for snd_ws, rec_ws, ts in msgs:
-            assert ts._state == "memory"
-            ts._who_has.add(rec_ws)
-            rec_ws._has_what[ts] = None
-            rec_ws.nbytes += ts.get_nbytes()
-            self.log.append(
-                ("rebalance", ts._key, time(), snd_ws.address, rec_ws.address)
-            )
-
-        await asyncio.gather(
-            *(self._delete_worker_data(r, v) for r, v in to_senders.items())
-        )
-        return {"status": "OK"}
+        else:
+            return {"status": "OK"}
 
     async def replicate(
         self,
@@ -5989,19 +6027,9 @@ class Scheduler(SchedulerState, ServerNode):
                             wws._address for wws in ts._who_has
                         ]
 
-                results = await asyncio.gather(
-                    *(
-                        retry_operation(self.rpc(addr=w).gather, who_has=who_has)
-                        for w, who_has in gathers.items()
-                    )
-                )
-                for w, v in zip(gathers, results):
-                    if v["status"] == "OK":
-                        self.add_keys(worker=w, keys=list(gathers[w]))
-                    else:
-                        logger.warning("Communication failed during replication: %s", v)
-
-                    self.log_event(w, {"action": "replicate-add", "keys": gathers[w]})
+                await self._gather_on_workers(gathers)
+                for r, v in gathers.items():
+                    self.log_event(r, {"action": "replicate-add", "who_has": v})
 
             self.log_event(
                 "all",
