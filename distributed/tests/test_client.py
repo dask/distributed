@@ -2715,6 +2715,16 @@ def test_run_coroutine_sync(c, s, a, b):
     assert t2 - t1 <= 1.0
 
 
+@gen_cluster(client=True)
+async def test_run_coroutine_deprecated(c, s, a, b):
+    async def foo():
+        return "bar"
+
+    with pytest.warns(FutureWarning, match="Client.run "):
+        results = await c.run_coroutine(foo)
+    assert results == {a.address: "bar", b.address: "bar"}
+
+
 def test_run_exception(c):
     def raise_exception(exc_type, exc_msg):
         raise exc_type(exc_msg)
