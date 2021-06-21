@@ -115,7 +115,8 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
-
+        if not ts.dependencies:  # no dependencies fast path
+            return 0, 0
         split = ts.prefix.name
         if split in fast_tasks:
             return None, None
@@ -128,7 +129,8 @@ class WorkStealing(SchedulerPlugin):
         cost_multiplier = transfer_time / compute_time
 
         level = int(round(log2(cost_multiplier) + 6))
-
+        if level < 1:
+            level = 1
         level = min(len(self.cost_multipliers) - 1, level)
 
         return cost_multiplier, level
@@ -282,6 +284,7 @@ class WorkStealing(SchedulerPlugin):
             if occ_idl + cost_multiplier * duration <= occ_sat - duration / 2:
                 self.move_task_request(ts, sat, idl)
                 log.append(
+                    # The format of this message is tightly coupled to the dashboard
                     (
                         start,
                         level,
@@ -409,14 +412,14 @@ class WorkStealing(SchedulerPlugin):
             for dep in ts._dependencies:
                 who_has.update(dep.who_has)
 
-            thieves_with_data = who_has & set(thieves)
+            thieves_with_data = list(who_has & set(thieves))
 
             # If there are potential thieves with dependencies we
             # should prefer them and pick the one which works best.
             # Otherwise just random/round robin
             if thieves_with_data:
                 if len(thieves_with_data) > 10:
-                    thieves_with_data = random.sample(thieves_with_data, 10)
+                    thieves_with_data = random.choices(thieves_with_data, k=10)
                 return min(
                     thieves_with_data,
                     key=partial(self.scheduler.worker_objective, ts),
