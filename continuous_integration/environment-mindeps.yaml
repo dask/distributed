@@ -22,6 +22,7 @@ dependencies:
   - pytest-repeat
   - pytest-rerunfailures
   - pytest-timeout
+  - pip
   - pip:
     # Distributed depends on the latest version of Dask
     - git+https://github.com/dask/dask
