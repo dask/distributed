@@ -1768,7 +1768,7 @@ class TGroupGraph(DashboardComponent):
                 "in_memory": [],
                 "in_released": [],
                 "in_erred": [],
-                "runtime": [],
+                "compute_time": [],
                 "memory": [],
             }
         )
@@ -1856,8 +1856,8 @@ class TGroupGraph(DashboardComponent):
                             </div>
 
                             <div>
-                                <span style="font-size: 12px; font-weight: bold;">Runtime:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@runtime</span>
+                                <span style="font-size: 12px; font-weight: bold;">Compute time:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@compute_time</span>
                             </div>
 
                             <div>
@@ -1990,7 +1990,7 @@ class TGroupGraph(DashboardComponent):
             "in_memory": [],
             "in_released": [],
             "in_erred": [],
-            "runtime": [],
+            "compute_time": [],
             "memory": [],
         }
 
@@ -2130,8 +2130,8 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["h_logo"].append(height * 0.3 * ratio)
                 nodes_data["w_logo"].append(width * 0.3)
 
-            # runtime and memory
-            nodes_data["runtime"].append(format_time(tg.duration))
+            # compute_time and memory
+            nodes_data["compute_time"].append(format_time(tg.duration))
             nodes_data["memory"].append(format_bytes(tg.nbytes_total))
 
             # Add some status to hover
