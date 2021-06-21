@@ -2324,8 +2324,10 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self._workers_dv.values(),
-                self._idle_dv.values(),
+                self._workers_dv.values() if compiled else dict.values(self._workers),
+                self._idle_dv.values() if compiled else dict.values(self._workers),
+                # ^ NOTE: For performance, these must be actual `dict_values`, not `SortedDictValues`.
+                # In Cython, `_workers_dv` is a plain dict, but in plain Python, it's still a `SortedDict`.
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
