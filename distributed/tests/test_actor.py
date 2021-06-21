@@ -466,7 +466,7 @@ async def bench_param_server(c, s, *workers):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_cluster(client=True)
+@gen_cluster(client=True, timeout=10)
 async def test_compute(c, s, a, b):
     @dask.delayed
     def f(n, counter):
@@ -485,10 +485,8 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 30
 
 
 def test_compute_sync(client):
