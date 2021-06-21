@@ -147,7 +147,6 @@ async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c
     assert all(root.key in worker.data for worker in [a, b, c]), [
         list(worker.data.keys()) for worker in [a, b, c]
     ]
-    assert len(a.data) == len(b.data) == len(c.data) == 3
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
