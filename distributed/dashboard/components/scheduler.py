@@ -1144,7 +1144,11 @@ class StealingTimeSeries(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.source = ColumnDataSource(
-            {"time": [time(), time() + 1], "idle": [0, 0.1], "saturated": [0, 0.1]}
+            {
+                "time": [time() * 1000, time() * 1000 + 1],
+                "idle": [0, 0],
+                "saturated": [0, 0],
+            }
         )
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
@@ -1152,8 +1156,6 @@ class StealingTimeSeries(DashboardComponent):
         self.root = figure(
             title="Idle and Saturated Workers Over Time",
             x_axis_type="datetime",
-            y_range=[-0.1, len(scheduler.workers) + 0.1],
-            height=150,
             tools="",
             x_range=x_range,
             **kwargs,
@@ -1204,8 +1206,6 @@ class StealingEvents(DashboardComponent):
         self.root = figure(
             title="Stealing Events",
             x_axis_type="datetime",
-            y_axis_type="log",
-            height=250,
             tools="",
             x_range=x_range,
             **kwargs,
@@ -1214,12 +1214,12 @@ class StealingEvents(DashboardComponent):
         self.root.circle(
             source=self.source,
             x="time",
-            y="cost_factor",
+            y="level",
             color="color",
             size="radius",
             alpha=0.5,
         )
-        self.root.yaxis.axis_label = "Cost Multiplier"
+        self.root.yaxis.axis_label = "Level"
 
         hover = HoverTool()
         hover.tooltips = "Level: @level, Duration: @duration, Count: @count, Cost factor: @cost_factor"
@@ -1262,9 +1262,11 @@ class StealingEvents(DashboardComponent):
     def update(self):
         with log_errors():
             log = self.scheduler.get_events(topic="stealing")
-            n = self.steal.count - self.last
+            current = len(self.scheduler.events["stealing"])
+            n = current - self.last
+
             log = [log[-i][1] for i in range(1, n + 1) if isinstance(log[-i][1], list)]
-            self.last = self.steal.count
+            self.last = current
 
             if log:
                 new = pipe(
@@ -2186,9 +2188,9 @@ def systemmonitor_doc(scheduler, extra, doc):
 
 def stealing_doc(scheduler, extra, doc):
     with log_errors():
-        occupancy = Occupancy(scheduler, height=200, sizing_mode="scale_width")
-        stealing_ts = StealingTimeSeries(scheduler, sizing_mode="scale_width")
-        stealing_events = StealingEvents(scheduler, sizing_mode="scale_width")
+        occupancy = Occupancy(scheduler)
+        stealing_ts = StealingTimeSeries(scheduler)
+        stealing_events = StealingEvents(scheduler)
         stealing_events.root.x_range = stealing_ts.root.x_range
         doc.title = "Dask: Work Stealing"
         add_periodic_callback(doc, occupancy, 500)
@@ -2196,11 +2198,13 @@ def stealing_doc(scheduler, extra, doc):
         add_periodic_callback(doc, stealing_events, 500)
 
         doc.add_root(
-            column(
+            row(
                 occupancy.root,
-                stealing_ts.root,
-                stealing_events.root,
-                sizing_mode="scale_width",
+                column(
+                    stealing_ts.root,
+                    stealing_events.root,
+                    sizing_mode="stretch_both",
+                ),
             )
         )
 
