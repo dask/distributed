@@ -5229,7 +5229,6 @@ class Scheduler(SchedulerState, ServerNode):
                 "'distributed.scheduler.pickle' configuration setting."
             )
         plugin = loads(plugin)
-        self.add_plugin(plugin=plugin)
 
         if hasattr(plugin, "start"):
             try:
@@ -5239,6 +5238,8 @@ class Scheduler(SchedulerState, ServerNode):
             except Exception as e:
                 msg = error_message(e)
                 return msg
+
+        self.add_plugin(plugin=plugin)
 
     def worker_send(self, worker, msg):
         """Send message to worker
