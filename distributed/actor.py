@@ -59,6 +59,7 @@ class Actor(WrappedKey):
             self._client = None
         else:
             try:
+                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
