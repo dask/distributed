@@ -2015,14 +2015,14 @@ class TGroupGraph(DashboardComponent):
             # compute width and height of boxes
             if tg.duration and tg.nbytes_total:
                 # Extrapolated duration and nbytes total (not scaled)
-                w_temp = np.log10(tg.duration / comp_tasks * tot_tasks)
-                h_temp = np.log10(tg.nbytes_total / comp_tasks * tot_tasks)
+                w_temp = math.log10(tg.duration / comp_tasks * tot_tasks)
+                h_temp = math.log10(tg.nbytes_total / comp_tasks * tot_tasks)
 
                 # Move this function somewhere else once we finish tweaking
                 def tanh_scale(x, shift, stretch):
                     start = 0.5
                     end = 0.9
-                    y = (np.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (
+                    y = (math.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (
                         end - start
                     ) + start
                     return y
