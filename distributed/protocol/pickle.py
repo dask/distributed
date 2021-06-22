@@ -11,6 +11,7 @@ if sys.version_info < (3, 8):
 else:
     import pickle
 
+import dask
 
 HIGHEST_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
@@ -44,26 +45,30 @@ def dumps(x, *, buffer_callback=None, protocol=HIGHEST_PROTOCOL):
     dump_kwargs = {"protocol": protocol or HIGHEST_PROTOCOL}
     if dump_kwargs["protocol"] >= 5 and buffer_callback is not None:
         dump_kwargs["buffer_callback"] = buffers.append
-    try:
+    if dask.config.get("distributed.use-cloudpickle", False):
         buffers.clear()
-        result = pickle.dumps(x, **dump_kwargs)
-        if len(result) < 1000:
-            if b"__main__" in result:
-                buffers.clear()
-                result = cloudpickle.dumps(x, **dump_kwargs)
-        elif not _always_use_pickle_for(x) and b"__main__" in result:
-            buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
-    except Exception:
+        result = cloudpickle.dumps(x, **dump_kwargs)
+    else:
         try:
             buffers.clear()
-            result = cloudpickle.dumps(x, **dump_kwargs)
-        except Exception as e:
-            logger.info("Failed to serialize %s. Exception: %s", x, e)
-            raise
-    if buffer_callback is not None:
-        for b in buffers:
-            buffer_callback(b)
+            result = pickle.dumps(x, **dump_kwargs)
+            if len(result) < 1000:
+                if b"__main__" in result:
+                    buffers.clear()
+                    result = cloudpickle.dumps(x, **dump_kwargs)
+            elif not _always_use_pickle_for(x) and b"__main__" in result:
+                buffers.clear()
+                result = cloudpickle.dumps(x, **dump_kwargs)
+        except Exception:
+            try:
+                buffers.clear()
+                result = cloudpickle.dumps(x, **dump_kwargs)
+            except Exception as e:
+                logger.info("Failed to serialize %s. Exception: %s", x, e)
+                raise
+        if buffer_callback is not None:
+            for b in buffers:
+                buffer_callback(b)
     return result
 
 
