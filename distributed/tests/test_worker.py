@@ -1070,8 +1070,8 @@ async def test_scheduler_delay(c, s, a, b):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
-@gen_cluster(client=True)
-async def test_statistical_profiling(c, s, a, b):
+@gen_cluster(client=True, ncores=[("127.0.0.1", 1)])
+async def test_statistical_profiling(c, s, a):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
 
