@@ -45,20 +45,32 @@ async def test_gen_cluster(c, s, a, b):
     assert await c.submit(lambda: 123) == 123
 
 
-@pytest.mark.parametrize("foo", [True, False])
+@pytest.mark.parametrize("foo", [True])
 @gen_cluster(client=True)
 async def test_gen_cluster_parametrized(c, s, a, b, foo):
-    assert isinstance(foo, bool)
+    assert foo is True
     assert isinstance(c, Client)
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
 
 
-@pytest.mark.parametrize("foo", [True, False])
+@pytest.mark.parametrize("foo", [True])
+@pytest.mark.parametrize("bar", ["a", "b"])
+@gen_cluster(client=True)
+async def test_gen_cluster_multi_parametrized(c, s, a, b, foo, bar):
+    assert foo is True
+    assert bar in ("a", "b")
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+
+
+@pytest.mark.parametrize("foo", [True])
 @gen_cluster(client=True)
 async def test_gen_cluster_parametrized_variadic_workers(c, s, *workers, foo):
-    assert isinstance(foo, bool)
+    assert foo is True
     assert isinstance(c, Client)
     assert isinstance(s, Scheduler)
     for w in workers:
