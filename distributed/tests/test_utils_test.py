@@ -45,6 +45,18 @@ async def test_gen_cluster(c, s, a, b):
     assert await c.submit(lambda: 123) == 123
 
 
+@pytest.mark.parametrize("foo", [True, False])
+@gen_cluster(client=True)
+async def test_gen_cluster_parametrized(c, s, a, b, foo):
+    assert isinstance(foo, bool)
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
+    assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
+    assert await c.submit(lambda: 123) == 123
+
+
 @gen_cluster(
     client=True,
     Worker=Nanny,

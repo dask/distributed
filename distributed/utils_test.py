@@ -3,6 +3,7 @@ import collections
 import copy
 import functools
 import gc
+import inspect
 import io
 import itertools
 import logging
@@ -861,6 +862,11 @@ def gen_cluster(
     async def test_foo(scheduler, worker1, worker2):
         await ...  # use tornado coroutines
 
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, param):
+        await ...  # use tornado coroutines
+
     See also:
         start
         end
@@ -877,7 +883,7 @@ def gen_cluster(
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
-        def test_func():
+        def test_func(*outer_args, **kwargs):
             result = None
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
@@ -919,7 +925,7 @@ def gen_cluster(
                             )
                             args = [c] + args
                         try:
-                            future = func(*args)
+                            future = func(*args, *outer_args, **kwargs)
                             if timeout:
                                 future = asyncio.wait_for(future, timeout)
                             result = await future
@@ -978,6 +984,16 @@ def gen_cluster(
                     del w.data
 
             return result
+
+        # Patch the signature so pytest can inject fixtures
+        orig_sig = inspect.signature(func)
+        n_drop_args = 1 + len(nthreads)  # scheduler, *workers
+        if client:
+            n_drop_args += 1
+
+        test_func.__signature__ = orig_sig.replace(
+            parameters=list(orig_sig.parameters.values())[n_drop_args:]
+        )
 
         return test_func
 
