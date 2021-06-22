@@ -49,14 +49,7 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import (
-    CommClosedError,
-    Status,
-    clean_exception,
-    error_message,
-    rpc,
-    send_recv,
-)
+from .core import CommClosedError, Status, clean_exception, rpc, send_recv
 from .diagnostics.plugin import SchedulerPlugin
 from .event import EventExtension
 from .http import get_handlers
@@ -5231,13 +5224,9 @@ class Scheduler(SchedulerState, ServerNode):
         plugin = loads(plugin)
 
         if hasattr(plugin, "start"):
-            try:
-                result = plugin.start(self)
-                if inspect.isawaitable(result):
-                    result = await result
-            except Exception as e:
-                msg = error_message(e)
-                return msg
+            result = plugin.start(self)
+            if inspect.isawaitable(result):
+                result = await result
 
         self.add_plugin(plugin=plugin)
 

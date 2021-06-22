@@ -129,10 +129,20 @@ async def test_lifecycle(cleanup):
 
 @gen_cluster(client=True)
 async def test_register_scheduler_plugin(c, s, a, b):
-    class Dummy(SchedulerPlugin):
+    class Dummy1(SchedulerPlugin):
         def start(self, scheduler):
             scheduler.foo = "bar"
 
     assert not hasattr(s, "foo")
-    await c.register_scheduler_plugin(Dummy)
+    await c.register_scheduler_plugin(Dummy1)
     assert s.foo == "bar"
+
+    class Dummy2(SchedulerPlugin):
+        def start(self, scheduler):
+            raise RuntimeError("raising in start method")
+
+    n_plugins = len(s.plugins)
+    with pytest.raises(RuntimeError, match="raising in start method"):
+        await c.register_scheduler_plugin(Dummy2)
+    # total number of plugins should be unchanged
+    assert n_plugins == len(s.plugins)
