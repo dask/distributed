@@ -987,12 +987,17 @@ def gen_cluster(
 
         # Patch the signature so pytest can inject fixtures
         orig_sig = inspect.signature(func)
-        n_drop_args = 1 + len(nthreads)  # scheduler, *workers
+        args = [None] * (1 + len(nthreads))  # scheduler, *workers
         if client:
-            n_drop_args += 1
+            args.insert(0, None)
 
+        bound = orig_sig.bind_partial(*args)
         test_func.__signature__ = orig_sig.replace(
-            parameters=list(orig_sig.parameters.values())[n_drop_args:]
+            parameters=[
+                p
+                for name, p in orig_sig.parameters.items()
+                if name not in bound.arguments
+            ]
         )
 
         return test_func
