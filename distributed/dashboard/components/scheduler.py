@@ -95,9 +95,9 @@ XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
 
 
 logos_dict = {
-    "numpy": "https://github.com/numpy/numpy/raw/623bc1fae1d47df24e7f1e29321d0c0ba2771ce0/branding/logo/logomark/numpylogoicon.png",  # noqa: E501
-    "pandas": "https://avatars.githubusercontent.com/u/21206976?s=200&v=4",
-    "builtins": "https://logos-download.com/wp-content/uploads/2016/10/Python_logo_icon.png",
+    "numpy": "statics/images/numpy.png",
+    "pandas": "statics/images/pandas.png",
+    "builtins": "statics/images/python.png",
 }
 
 
