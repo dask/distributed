@@ -154,5 +154,7 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
         def start(self, scheduler):
             scheduler.foo = "bar"
 
+    n_plugins = len(s.plugins)
     with pytest.raises(ValueError):
         await c.register_scheduler_plugin(Dummy1)
+    assert n_plugins == len(s.plugins)
