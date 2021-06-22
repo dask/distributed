@@ -333,12 +333,15 @@ class NBytes(DashboardComponent):
                     "width": [],
                     "x": [],
                     "y": [],
-                    "memtype": [],
                     "color": [],
                     "alpha": [],
                     "proc_memory": [],
                     "worker": [],
                     "escaped_worker": [],
+                    "man_in_mem": [],
+                    "man_spilled": [],
+                    "unman_old": [],
+                    "unman_rec": [],
                 }
             )
 
@@ -377,9 +380,34 @@ class NBytes(DashboardComponent):
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
-            hover = HoverTool()
-            hover.tooltips = "@worker: @proc_memory{0.00 b} (@width{0.00 b} @memtype)"
-            hover.point_policy = "follow_mouse"
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">@worker:</span>&nbsp;
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Process memory (RSS):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory</span>
+                            </div>
+                            <div style="margin-left: 1.5em;">
+                                <span style="font-size: 12px; font-weight: bold;">In process memory:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem</span>
+                            </div>
+                            <div style="margin-left: 1.5em;">
+                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled</span>
+                            </div>
+                            <div style="margin-left: 1.5em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old</span>
+                            </div>
+                            <div style="margin-left: 1.5em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec</span>
+                            </div>
+                            """,
+            )
             self.root.add_tools(hover)
 
     @without_property_validation
@@ -398,6 +426,10 @@ class NBytes(DashboardComponent):
             color = []
             procmemory = []
             max_limit = 0
+            man_in_mem = []
+            man_spilled = []
+            unman_old = []
+            unman_rec = []
 
             for ws in workers:
                 meminfo = ws.memory
@@ -415,26 +447,31 @@ class NBytes(DashboardComponent):
                 ]
                 x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
                 color += [color_i, color_i, color_i, "grey"]
-                procmemory.append(meminfo.process)
+                procmemory.append(format_bytes(meminfo.process))
+
+                # managed
+                man_in_mem.append(format_bytes(meminfo.managed_in_memory))
+                man_spilled.append(format_bytes(meminfo.managed_spilled))
+
+                # unmanaged
+                unman_old.append(format_bytes(meminfo.unmanaged_old))
+                unman_rec.append(format_bytes(meminfo.unmanaged_recent))
 
             result = {
                 "width": width,
                 "x": x,
                 "color": color,
                 "alpha": [1, 0.7, 0.4, 1] * len(workers),
-                "memtype": [
-                    "managed (in memory)",
-                    "unmanaged",
-                    "unmanaged, recently increased",
-                    "managed (spilled to disk)",
-                ]
-                * len(workers),
                 "proc_memory": quadlist(procmemory),
                 "worker": quadlist(ws.address for ws in workers),
                 "escaped_worker": quadlist(
                     escape.url_escape(ws.address) for ws in workers
                 ),
                 "y": quadlist(range(len(workers))),
+                "man_in_mem": quadlist(man_in_mem),
+                "man_spilled": quadlist(man_spilled),
+                "unman_old": quadlist(unman_old),
+                "unman_rec": quadlist(unman_rec),
             }
             # Remove rectangles with width=0
             result = {
