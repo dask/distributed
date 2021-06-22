@@ -49,24 +49,22 @@ class Actor(WrappedKey):
     2
     """
 
-    def __init__(self, cls, address, key, worker=None):
+    def __init__(self, cls, address, key):
         self._cls = cls
         self._address = address
         self.key = key
         self._future = None
-        if worker:
-            self._worker = worker
-            self._client = None
-        else:
-            try:
-                self._worker = get_worker()
-            except ValueError:
-                self._worker = None
+        self._client = None
+        self._worker = None
+
+        try:
+            self._worker = get_worker()
+        except ValueError:
             try:
                 self._client = get_client()
-                self._future = Future(key, inform=self._worker is None)
+                self._future = Future(key)
             except ValueError:
-                self._client = None
+                pass
 
     def __repr__(self):
         return "<Actor: %s, key=%s>" % (self._cls.__name__, self.key)
