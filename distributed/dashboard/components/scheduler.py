@@ -384,27 +384,28 @@ class NBytes(DashboardComponent):
                 point_policy="follow_mouse",
                 tooltips="""
                             <div>
-                                <span style="font-size: 12px; font-weight: bold;">@worker:</span>&nbsp;
+                                <span style="font-size: 12px; font-weight: bold;">Worker:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@worker</span>
                             </div>
                             <div>
                                 <span style="font-size: 12px; font-weight: bold;">Process memory (RSS):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory{0.00 b}</span>
                             </div>
-                            <div style="margin-left: 1.5em;">
-                                <span style="font-size: 12px; font-weight: bold;">In process memory:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem</span>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem{0.00 b}</span>
                             </div>
-                            <div style="margin-left: 1.5em;">
-                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled</span>
-                            </div>
-                            <div style="margin-left: 1.5em;">
+                            <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old{0.00 b}</span>
                             </div>
-                            <div style="margin-left: 1.5em;">
+                            <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled{0.00 b}</span>
                             </div>
                             """,
             )
@@ -447,15 +448,15 @@ class NBytes(DashboardComponent):
                 ]
                 x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
                 color += [color_i, color_i, color_i, "grey"]
-                procmemory.append(format_bytes(meminfo.process))
+                procmemory.append(meminfo.process)
 
                 # managed
-                man_in_mem.append(format_bytes(meminfo.managed_in_memory))
-                man_spilled.append(format_bytes(meminfo.managed_spilled))
+                man_in_mem.append(meminfo.managed_in_memory)
+                man_spilled.append(meminfo.managed_spilled)
 
                 # unmanaged
-                unman_old.append(format_bytes(meminfo.unmanaged_old))
-                unman_rec.append(format_bytes(meminfo.unmanaged_recent))
+                unman_old.append(meminfo.unmanaged_old)
+                unman_rec.append(meminfo.unmanaged_recent)
 
             result = {
                 "width": width,
