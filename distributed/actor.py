@@ -110,7 +110,8 @@ class Actor(WrappedKey):
         if self._client:
             return self._client.sync(func, *args, **kwargs)
         else:
-            # TODO support sync operation by checking against thread ident of loop
+            if self._asynchronous:
+                return func(*args, **kwargs)
             return sync(self._worker.loop, func, *args, **kwargs)
 
     def __dir__(self):
