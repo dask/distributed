@@ -9,6 +9,7 @@ import pytest
 
 import dask
 
+from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
     Server,
@@ -612,6 +613,53 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+
+
+@pytest.mark.asyncio
+async def test_connection_pool_close_while_connecting(monkeypatch):
+    """
+    Ensure a closed connection pool guarantees to have no connections left open
+    even if it is closed mid-connecting
+    """
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    class SlowConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            await asyncio.sleep(0.1)
+            return await super().connect(
+                address, deserialize=deserialize, **connection_args
+            )
+
+    class SlowBackend(TCPBackend):
+        _connector_class = SlowConnector
+
+    monkeypatch.setitem(backends, "tcp", SlowBackend())
+
+    server = Server({})
+    await server.listen("tcp://")
+
+    pool = await ConnectionPool(limit=2)
+
+    async def connect_to_server():
+        comm = await pool.connect(server.address)
+        pool.reuse(server.address, comm)
+
+    tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
+
+    await asyncio.sleep(0)
+    assert pool._connecting
+    close_fut = asyncio.create_task(pool.close())
+
+    with pytest.raises(CommClosedError, match="ConnectionPool closed already"):
+        await asyncio.gather(*tasks)
+
+    await close_fut
+    assert not pool.open
+    assert not pool._n_connecting
+
+    for t in tasks:
+        t.cancel()
 
 
 @pytest.mark.asyncio
