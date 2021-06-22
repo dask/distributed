@@ -1742,6 +1742,8 @@ class TGroupGraph(DashboardComponent):
         self.nodes_layout = {}
         self.arrows_layout = {}
 
+        self.old_counter = -1
+
         self.nodes_source = ColumnDataSource(
             {
                 "x": [],
@@ -1959,6 +1961,11 @@ class TGroupGraph(DashboardComponent):
 
     @without_property_validation
     def update(self):
+
+        if self.scheduler.transition_counter == self.old_counter:
+            return
+        else:
+            self.old_counter = self.scheduler.transition_counter
 
         if not self.scheduler.task_groups:
             self.subtitle.text = "Scheduler is empty."
