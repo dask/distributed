@@ -1111,6 +1111,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
     np = pytest.importorskip("numpy")
     memory = psutil.Process().memory_info().rss
     a.memory_limit = memory / 0.7 + 400e6
+    print("memory limit:", format_bytes(a.memory_limit))
 
     class BadAccounting:
         def __init__(self, data):
@@ -1128,6 +1129,12 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
     start = time()
     while not a.data.disk:
+        print(
+            "RSS:",
+            format_bytes(psutil.Process().memory_info().rss),
+            "disk:",
+            list(a.data.disk),
+        )
         await asyncio.sleep(0.1)
         assert time() < start + 5
 
