@@ -2401,8 +2401,8 @@ class SchedulerState:
             # TODO repeated logic from `decide_worker`
             print(f"nodeps / no last worker fastpah - {ts.group_key} -> {ws.name}")
             ts._group._last_worker = ws
-            ts._group._last_worker_tasks_left = math.floor(
-                len(ts._group) / self._total_nthreads
+            ts._group._last_worker_tasks_left = (
+                math.floor(len(ts._group) / self._total_nthreads) - 1
             )
             ts._group._last_worker_priority = ts._priority
 
@@ -7667,7 +7667,7 @@ def decide_worker(
 
     if group._last_worker_priority is not None:
         group._last_worker = ws
-        group._last_worker_tasks_left = math.floor(group_tasks_per_worker)
+        group._last_worker_tasks_left = math.floor(group_tasks_per_worker) - 1
         group._last_worker_priority = ts.priority
     return ws
 
