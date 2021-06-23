@@ -5934,11 +5934,9 @@ class Scheduler(SchedulerState, ServerNode):
             },
         )
 
-        if any(failed_keys_by_recipient.values()):
-            return {
-                "status": "missing-data",
-                "keys": list({k for r in failed_keys_by_recipient.values() for k in r}),
-            }
+        missing_keys = {k for r in failed_keys_by_recipient.values() for k in r}
+        if missing_keys:
+            return {"status": "missing-data", "keys": list(missing_keys)}
         else:
             return {"status": "OK"}
 

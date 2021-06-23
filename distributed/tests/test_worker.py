@@ -443,26 +443,23 @@ async def test_gather_missing_workers(s, a, b):
     assert a.data["x"] == b.data["x"]
 
 
+@pytest.mark.parametrize("missing_first", [False, True])
 @gen_cluster(
     worker_kwargs={"timeout": "100ms"},
 )
-async def test_gather_missing_workers_replicated(s, a, b):
+async def test_gather_missing_workers_replicated(s, a, b, missing_first):
     """A worker owning a redundant copy of a key is missing.
     The key is successfully gathered from other workers.
     """
     assert b.address.startswith("tcp://127.0.0.1:")
-    c_addr = "tcp://127.0.0.1:12345"
     b.data["x"] = 1
-    b.data["y"] = 2
-
+    c_addr = "tcp://127.0.0.1:12345"
+    # Order matters! Test both
+    addrs = [c_addr, b.address] if missing_first else [b.address, c_addr]
     with rpc(a.address) as aa:
-        # Order matters! Test both
-        resp = await aa.gather(
-            who_has={"x": [b.address, c_addr], "y": [c_addr, b.address]}
-        )
+        resp = await aa.gather(who_has={"x": addrs})
     assert resp == {"status": "OK"}
     assert a.data["x"] == b.data["x"]
-    assert a.data["y"] == b.data["y"]
 
 
 @pytest.mark.asyncio

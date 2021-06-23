@@ -2514,6 +2514,13 @@ async def test_close_scheduler__close_workers_Nanny(s, a, b):
     assert "retry" not in log
 
 
+@gen_cluster(client=True)
+async def test_transition_counter(c, s, a, b):
+    assert s.transition_counter == 0
+    await c.submit(inc, 1)
+    assert s.transition_counter > 1
+
+
 async def assert_ndata(client, by_addr, total=None):
     """Test that the number of elements in Worker.data is as expected.
     To be used when the worker is wrapped by a nanny.
@@ -2797,10 +2804,46 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
 
 
 @gen_cluster(client=True)
-async def test_transition_counter(c, s, a, b):
-    assert s.transition_counter == 0
-    await c.submit(inc, 1)
-    assert s.transition_counter > 1
+async def test_gather_on_workers(c, s, a, b):
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True)
+async def test_gather_on_workers_bad_sender(c, s, a, b):
+    """The only sender for a key is missing"""
+    raise NotImplementedError("TODO")
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True)
+async def test_gather_on_workers_bad_sender_replicated(c, s, a, b, missing_first):
+    """One of the senders for a key is missing, but the key is available somewhere else"""
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True)
+async def test_gather_on_workers_key_not_on_sender(c, s, a, b):
+    """The only sender for a key does not actually hold it"""
+    raise NotImplementedError("TODO")
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True)
+async def test_gather_on_workers_key_not_on_sender_replicated(
+    c, s, a, b, missing_first
+):
+    """One of the senders for a key does not actually hold it, but the key is available
+    somewhere else
+    """
+    raise NotImplementedError("TODO")
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_gather_on_workers_duplicate_task(client, s, a, b, c):
+    """Race condition where the recipient worker receives the same task twice.
+    Test that the task is not double-counted on the recipient.
+    """
+    raise NotImplementedError("TODO")
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -2826,16 +2869,6 @@ async def test_rebalance_move_data_bad_task(client, s, a, b, c):
     """Task disappears between _rebalance_find_msgs and _rebalance_move_data.
     Other tasks to the same recipient are rebalanced.
     Other tasks to different recipients are rebalanced.
-    """
-    raise NotImplementedError("TODO")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_rebalance_move_data_duplicate_task(client, s, a, b, c):
-    """Race condition where the recipient worker receives the same task twice, once from
-    _rebalance_move_data and another from somewhere else.
-    The task is deleted from the sender.
-    The task is not double-counted on the recipient.
     """
     raise NotImplementedError("TODO")
 
