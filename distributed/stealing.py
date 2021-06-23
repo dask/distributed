@@ -452,4 +452,4 @@ def _can_steal(thief, ts, victim):
     return True
 
 
-fast_tasks = {"shuffle-split"}
+fast_tasks = {"split-shuffle"}
