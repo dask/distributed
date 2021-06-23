@@ -2401,8 +2401,9 @@ class SchedulerState:
             # TODO repeated logic from `decide_worker`
             print(f"nodeps / no last worker fastpah - {ts.group_key} -> {ws.name}")
             ts._group._last_worker = ws
+            group_tasks_per_thread = len(ts._group) / self._total_nthreads
             ts._group._last_worker_tasks_left = (
-                math.floor(len(ts._group) / self._total_nthreads) - 1
+                math.floor(group_tasks_per_thread * ws._nthreads) - 1
             )
             ts._group._last_worker_priority = ts._priority
 
@@ -7577,7 +7578,7 @@ def decide_worker(
     if valid_workers is not None:
         total_nthreads = sum(wws._nthreads for wws in valid_workers)
 
-    group_tasks_per_worker = len(group) / total_nthreads
+    group_tasks_per_thread = len(group) / total_nthreads
     ignore_deps_while_picking: bool = False
 
     # Try to schedule sibling root-like tasks on the same workers, so subsequent reduction tasks
@@ -7588,7 +7589,7 @@ def decide_worker(
         # `decide_worker` hasn't previously been called out of priority order
         and group._last_worker_priority is not None
         # group is larger than cluster
-        and group_tasks_per_worker > 1
+        and group_tasks_per_thread > 1
         # is a root-like task (task group is large, but depends on very few tasks)
         and sum(map(len, group._dependencies)) < 5  # TODO what number
     ):
@@ -7667,7 +7668,9 @@ def decide_worker(
 
     if group._last_worker_priority is not None:
         group._last_worker = ws
-        group._last_worker_tasks_left = math.floor(group_tasks_per_worker) - 1
+        group._last_worker_tasks_left = (
+            math.floor(group_tasks_per_thread * ws._nthreads) - 1
+        )
         group._last_worker_priority = ts.priority
     return ws
 
