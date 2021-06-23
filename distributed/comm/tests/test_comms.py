@@ -1275,5 +1275,9 @@ def test_register_backend_entrypoint():
         "udp", mod.__name__, attrs=["UDPBackend"], dist=dist
     )
 
+    # The require is disabled here since particularly unit tests may install
+    # dirty or dev versions which are conflicting with backend entrypoints if
+    # they are demanding for exact, stable versions. This should not fail the
+    # test
     result = get_backend("udp", require=False)
     assert result == 1
