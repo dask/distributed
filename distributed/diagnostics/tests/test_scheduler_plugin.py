@@ -154,14 +154,12 @@ async def test_register_scheduler_plugin_pickle_disabled(c, s, a, b):
         def start(self, scheduler):
             scheduler.foo = "bar"
 
-    raise_match = (
-        "Cannot register a scheduler plugin as the scheduler "
-        "has been explicitly disallowed from deserializing "
-        "arbitrary bytestrings using pickle via the "
-        "'distributed.scheduler.pickle' configuration setting."
-    )
-
     n_plugins = len(s.plugins)
-    with pytest.raises(ValueError, match=raise_match):
+    with pytest.raises(ValueError) as excinfo:
         await c.register_scheduler_plugin(Dummy1)
+
+    msg = str(excinfo.value)
+    assert "disallowed from deserializing" in msg
+    assert "distributed.scheduler.pickle" in msg
+
     assert n_plugins == len(s.plugins)
