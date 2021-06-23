@@ -17,7 +17,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, stringify
+from dask.utils import apply, deepmap, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -148,6 +148,7 @@ async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c
 
 
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
+@pytest.mark.parametrize("axis", [1, 0])
 @pytest.mark.parametrize(
     "nthreads",
     [
@@ -155,7 +156,7 @@ async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c
         [("127.0.0.1", 3), ("127.0.0.1", 2), ("127.0.0.1", 1)],
     ],
 )
-def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+def test_decide_worker_coschedule_order_neighbors(ndeps, axis, nthreads):
     @gen_cluster(
         client=True,
         nthreads=nthreads,
@@ -185,15 +186,18 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
                 **trivial_deps,
             )
 
-        xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
+        xx, xsum = dask.persist(x, x.sum(axis=axis, split_every=20))
         await xsum
 
         # Check that each chunk-row of the array is (mostly) stored on the same worker
         primary_worker_key_fractions = []
         secondary_worker_key_fractions = []
-        for i, keys in enumerate(x.__dask_keys__()):
+
+        for keys in np.moveaxis(
+            np.array(deepmap(stringify, x.__dask_keys__())), axis, 1
+        ):
             # Iterate along rows of the array.
-            keys = set(stringify(k) for k in keys)
+            keys = set(keys)
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
