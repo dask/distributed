@@ -1017,7 +1017,7 @@ class ConnectionPool:
         fut = None
         try:
             if self.status != Status.running:
-                raise CommClosedError("ConnectionPool closed already")
+                raise CommClosedError(f"ConnectionPool not running.  Status: {self.status}")
 
             fut = asyncio.ensure_future(
                 connect(
