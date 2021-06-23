@@ -5402,7 +5402,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
 
         parent: SchedulerState = cast(SchedulerState, self)
-        recipient_to_keys_fail = {}  # {recipient address: {failed keys}}
+        failed_keys_by_recipient = {}  # {recipient address: {failed keys}}
 
         for w, result in zip(transfers, results):
             if result["status"] == "OK":
@@ -5413,8 +5413,7 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 keys_fail = set(transfers[w])
                 logger.warning("Communication failed during replication: %s", result)
-
-            recipient_to_keys_fail[w] = keys_fail
+            failed_keys_by_recipient[w] = keys_fail
             keys_ok = transfers[w].keys() - keys_fail
             ws: WorkerState = parent._workers_dv.get(w)
             if ws is None:
@@ -5430,7 +5429,7 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what[ts] = None
                     ts._who_has.add(ws)
 
-            return recipient_to_keys_fail
+            return failed_keys_by_recipient
 
     def clear_task_state(self):
         # XXX what about nested state such as ClientState.wants_what
@@ -5938,7 +5937,7 @@ class Scheduler(SchedulerState, ServerNode):
         if any(failed_keys_by_recipient.values()):
             return {
                 "status": "missing-data",
-                "keys": list({k for r in failed_keys_by_recipient for k in r}),
+                "keys": list({k for r in failed_keys_by_recipient.values() for k in r}),
             }
         else:
             return {"status": "OK"}
