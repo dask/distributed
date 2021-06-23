@@ -103,15 +103,14 @@ async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:  # will steal soon
-        await asyncio.sleep(0.01)
-
+    await wait(futures)
     se.update()
-
     assert len(first(se.source.data.values()))
+    assert b.tasks
+    assert sum(se.source.data["count"]) >= len(b.tasks)
 
 
 @gen_cluster(client=True)
