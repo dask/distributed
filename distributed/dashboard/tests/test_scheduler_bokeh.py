@@ -35,9 +35,9 @@ from distributed.dashboard.components.scheduler import (
     StealingTimeSeries,
     SystemMonitor,
     TaskGraph,
+    TaskGroupGraph,
     TaskProgress,
     TaskStream,
-    TGroupGraph,
     WorkerTable,
 )
 from distributed.dashboard.components.worker import Counters
@@ -612,8 +612,8 @@ async def test_TaskGraph_order(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_TGroupGraph(c, s, a, b):
-    tgg = TGroupGraph(s)
+async def test_TaskGroupGraph(c, s, a, b):
+    tgg = TaskGroupGraph(s)
     futures = c.map(inc, range(10))
     await wait(futures)
 
@@ -644,8 +644,8 @@ async def test_TGroupGraph(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_TGroupGraph_arrows(c, s, a, b):
-    tgg = TGroupGraph(s)
+async def test_TaskGroupGraph_arrows(c, s, a, b):
+    tgg = TaskGroupGraph(s)
 
     futures = c.map(inc, range(10))
     await wait(futures)

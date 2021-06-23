@@ -1730,7 +1730,7 @@ class TaskGraph(DashboardComponent):
         self.scheduler.remove_plugin(self.layout)
 
 
-class TGroupGraph(DashboardComponent):
+class TaskGroupGraph(DashboardComponent):
     """
     Task Group Graph
 
@@ -2707,7 +2707,7 @@ def graph_doc(scheduler, extra, doc):
 
 def tg_graph_doc(scheduler, extra, doc):
     with log_errors():
-        tg_graph = TGroupGraph(scheduler, sizing_mode="stretch_both")
+        tg_graph = TaskGroupGraph(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Task Groups Graph"
         tg_graph.update()
         add_periodic_callback(doc, tg_graph, 200)
