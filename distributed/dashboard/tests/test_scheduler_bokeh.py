@@ -618,22 +618,19 @@ async def test_TaskGroupGraph(c, s, a, b):
     await wait(futures)
 
     tgg.update()
-    dnode = dict(tgg.nodes_source.data)
-    assert all(len(L) == 1 for L in dnode.values())
-    assert dnode["name"] == ["inc"]
-    assert dnode["tot_tasks"] == [10]
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
 
-    darr = dict(tgg.arrows_source.data)
-    assert all(len(L) == 0 for L in darr.values())
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
 
     futures2 = c.map(dec, range(5))
     await wait(futures2)
 
     tgg.update()
-    dnode = dict(tgg.nodes_source.data)
-    assert all(len(L) == 2 for L in dnode.values())
-    assert dnode["name"] == ["inc", "dec"]
-    assert dnode["tot_tasks"] == [10, 5]
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 5]
 
     del futures, futures2
     while s.task_groups:
@@ -651,25 +648,21 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     await wait(futures)
 
     tgg.update()
-    dnode = dict(tgg.nodes_source.data)
-    assert all(len(L) == 1 for L in dnode.values())
-    assert dnode["name"] == ["inc"]
-    assert dnode["tot_tasks"] == [10]
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
 
-    darr = dict(tgg.arrows_source.data)
-    assert all(len(L) == 0 for L in darr.values())
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
 
     futures2 = c.map(dec, futures)
     await wait(futures2)
 
     tgg.update()
-    dnode = dict(tgg.nodes_source.data)
-    assert all(len(L) == 2 for L in dnode.values())
-    assert dnode["name"] == ["inc", "dec"]
-    assert dnode["tot_tasks"] == [10, 10]
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 10]
 
-    darr = dict(tgg.arrows_source.data)
-    assert all(len(L) == 1 for L in darr.values())
+    assert all(len(L) == 1 for L in tgg.arrows_source.data.values())
 
     del futures, futures2
     while s.task_groups:
