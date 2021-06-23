@@ -1778,6 +1778,7 @@ class TGroupGraph(DashboardComponent):
         self.arrows_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
 
         self.root = figure(title="Task Groups Graph", match_aspect=True, **kwargs)
+        self.root.axis.visible = False
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
 
