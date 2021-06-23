@@ -2171,9 +2171,6 @@ class TGroupGraph(DashboardComponent):
         self.arrows_source.data.update(arrows_data)
 
 
-##########Task Group Graph #########
-
-
 class TaskProgress(DashboardComponent):
     """Progress bars per task type"""
 
