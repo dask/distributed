@@ -58,6 +58,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
+from .protocol.pickle import loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -3575,6 +3576,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
@@ -5209,6 +5211,24 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_plugin(self, plugin):
         """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
+
+    async def register_scheduler_plugin(self, comm=None, plugin=None):
+        """Register a plugin on the scheduler."""
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot register a scheduler plugin as the scheduler "
+                "has been explicitly disallowed from deserializing "
+                "arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+        plugin = loads(plugin)
+
+        if hasattr(plugin, "start"):
+            result = plugin.start(self)
+            if inspect.isawaitable(result):
+                result = await result
+
+        self.add_plugin(plugin=plugin)
 
     def worker_send(self, worker, msg):
         """Send message to worker

@@ -4007,6 +4007,34 @@ class Client:
         else:
             return msgs
 
+    async def _register_scheduler_plugin(self, plugin, **kwargs):
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
+        return await self.scheduler.register_scheduler_plugin(
+            plugin=dumps(plugin, protocol=4)
+        )
+
+    def register_scheduler_plugin(self, plugin, **kwargs):
+        """Register a scheduler plugin.
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+
+        Parameters
+        ----------
+        plugin : SchedulerPlugin
+            Plugin class or object to pass to the scheduler.
+        **kwargs : Any
+            Arguments passed to the Plugin class (if Plugin is an
+            instance kwargs are unused).
+
+        """
+        return self.sync(
+            self._register_scheduler_plugin,
+            plugin=plugin,
+            **kwargs,
+        )
+
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
