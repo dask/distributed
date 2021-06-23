@@ -2398,17 +2398,13 @@ class SchedulerState:
             else:  # dumb but fast in large case
                 ws = wp_vals[self._n_tasks % n_workers]
 
-            # TODO repeated logic from `decide_worker`
-            # print(f"nodeps / no last worker fastpah - {ts.group_key} -> {ws.name}")
             ts._group._last_worker = ws
-            if self._total_nthreads > 0:
-                group_tasks_per_thread = len(ts._group) / self._total_nthreads
-                ts._group._last_worker_tasks_left = (
-                    math.floor(group_tasks_per_thread * ws._nthreads) - 1
-                )
-            else:
-                # Note: negative would have been fine, except if this ever becomes Py_ssize_t
-                ts._group._last_worker_tasks_left = 0
+            group_tasks_per_thread = (
+                len(ts._group) / self._total_nthreads if self._total_nthreads > 0 else 0
+            )
+            ts._group._last_worker_tasks_left = (
+                math.floor(group_tasks_per_thread * ws._nthreads) - 1
+            )
             ts._group._last_worker_priority = ts._priority
 
         if self._validate:
@@ -7594,36 +7590,22 @@ def decide_worker(
     group_tasks_per_thread = (len(group) / total_nthreads) if total_nthreads > 0 else 0
     ignore_deps_while_picking: bool = False
 
-    # Try to schedule sibling root-like tasks on the same workers, so subsequent reduction tasks
-    # don't require data transfer. Assumes `decide_worker` is being called in priority order.
+    # Try to schedule sibling root-like tasks on the same workers.
     if (
-        # there is a previous worker
         ws is not None
-        # `decide_worker` hasn't previously been called out of priority order
         and group._last_worker_priority is not None
-        # group is larger than cluster
+        # ^ `decide_worker` hasn't previously been called out of priority order
         and group_tasks_per_thread > 1
-        # is a root-like task (task group is large, but depends on very few tasks)
         and sum(map(len, group._dependencies)) < 5  # TODO what number
     ):
         if group._last_worker_tasks_left > 0:
-            # Previous worker not fully assigned
             group._last_worker_tasks_left -= 1
             if group._last_worker_priority < ts.priority and (
                 valid_workers is None or ws in valid_workers
             ):
                 group._last_worker_priority = ts.priority
-                # print(f"reusing worker - {ts.group_key} -> {ws.name}")
-                assert ws in all_workers  # TODO just for tests right now; slow!
                 return ws
 
-            # print(
-            #     f"decide_worker called out of priority order: {group._last_worker_priority} >= {ts.priority}.\n"
-            #     f"{ts=}\n"
-            #     f"{group.last_worker=}\n"
-            #     f"{group.last_worker_tasks_left=}\n"
-            #     f"{group_tasks_per_worker=}\n"
-            # )
             # `decide_worker` called out of priority order, or the last used worker is not valid for this task.
             # This is probably not actually a root-ish task; disable root-ish mode in the future.
             group._last_worker = None
@@ -7631,18 +7613,8 @@ def decide_worker(
             group._last_worker_priority = None
 
         # Previous worker is fully assigned, so pick a new worker.
-        # Since this is a root-like task, we should ignore the placement of its dependencies while selecting workers.
-        # Every worker is going to end up running this type of task eventually, and any dependencies will have to be
-        # transferred to all workers, so there's no gain from only considering workers where the dependencies already live.
-        # Indeed, we _must_ consider all workers, otherwise we would keep picking the same "new" worker(s) every time,
-        # since there are only N workers to choose from that actually have the dependency (where N <= n_deps).
         ignore_deps_while_picking = True
-        # print(
-        #     f"{ts.group_key} is root-like but {ws.name} is full - picking a new worker"
-        # )
 
-    # Not a root-like task; pick the best worker among the valid workers
-    # that hold at least one dependency of this task.
     deps: set = ts._dependencies
     dts: TaskState
     candidates: set
@@ -7670,24 +7642,18 @@ def decide_worker(
 
     ncandidates: Py_ssize_t = len(candidates)
     if ncandidates == 0:
-        # print(f"no candidates - {ts.group_key}")
         pass
     elif ncandidates == 1:
         # NOTE: this is the ideal case: all the deps are already on the same worker.
-        # We did a good job in previous `decide_worker`s!
         for ws in candidates:
             break
-        # print(f"1 candidate - {ts.group_key} -> {ws.name}")
     else:
         ws = min(candidates, key=objective)
-        # print(f"picked worker - {ts.group_key} -> {ws.name}")
 
     if group._last_worker_priority is not None:
         group._last_worker = ws
         group._last_worker_tasks_left = (
             math.floor(group_tasks_per_thread * ws._nthreads) - 1
-            if group_tasks_per_thread > 0
-            else 0
         )
         group._last_worker_priority = ts.priority
     return ws
