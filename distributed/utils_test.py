@@ -867,6 +867,10 @@ def gen_cluster(
     async def test_foo(scheduler, worker1, worker2, param):
         await ...  # use tornado coroutines
 
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, pytest_fixture_a, pytest_fixture_b):
+        await ...  # use tornado coroutines
+
     See also:
         start
         end

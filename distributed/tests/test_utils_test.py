@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import socket
 import threading
 from contextlib import contextmanager
@@ -43,6 +44,15 @@ async def test_gen_cluster(c, s, a, b):
         assert isinstance(w, Worker)
     assert s.nthreads == {w.address: w.nthreads for w in [a, b]}
     assert await c.submit(lambda: 123) == 123
+
+
+@gen_cluster(client=True)
+async def test_gen_cluster_pytest_fixture(c, s, a, b, tmp_path):
+    assert isinstance(tmp_path, pathlib.Path)
+    assert isinstance(c, Client)
+    assert isinstance(s, Scheduler)
+    for w in [a, b]:
+        assert isinstance(w, Worker)
 
 
 @pytest.mark.parametrize("foo", [True])
