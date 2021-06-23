@@ -2716,20 +2716,16 @@ def graph_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-#####Using this for now, when adding progress bar we might need to move to status doc ####
 def tg_graph_doc(scheduler, extra, doc):
     with log_errors():
         tg_graph = TGroupGraph(scheduler, sizing_mode="stretch_both")
-        doc.title = "Dask: Task Group Graph"
+        doc.title = "Dask: Task Groups Graph"
         tg_graph.update()
         add_periodic_callback(doc, tg_graph, 200)
         doc.add_root(tg_graph.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME
-
-
-######
 
 
 def status_doc(scheduler, extra, doc):
