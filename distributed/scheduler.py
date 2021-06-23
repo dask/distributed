@@ -7609,9 +7609,12 @@ def decide_worker(
         if group._last_worker_tasks_left > 0:
             # Previous worker not fully assigned
             group._last_worker_tasks_left -= 1
-            if group._last_worker_priority < ts.priority:
+            if group._last_worker_priority < ts.priority and (
+                valid_workers is None or ws in valid_workers
+            ):
                 group._last_worker_priority = ts.priority
                 # print(f"reusing worker - {ts.group_key} -> {ws.name}")
+                assert ws in all_workers  # TODO just for tests right now; slow!
                 return ws
 
             # print(
@@ -7621,8 +7624,8 @@ def decide_worker(
             #     f"{group.last_worker_tasks_left=}\n"
             #     f"{group_tasks_per_worker=}\n"
             # )
-            # `decide_worker` called out of priority order---this is probably not actually a root-ish task;
-            # disable root-ish mode in the future.
+            # `decide_worker` called out of priority order, or the last used worker is not valid for this task.
+            # This is probably not actually a root-ish task; disable root-ish mode in the future.
             group._last_worker = None
             group._last_worker_tasks_left = 0
             group._last_worker_priority = None
