@@ -17,6 +17,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.system import CPU_COUNT
+from dask.utils import parse_timedelta
 
 from . import preloading
 from .comm import get_address_host, unparse_host_port
@@ -32,7 +33,6 @@ from .utils import (
     json_load_robust,
     mp_context,
     parse_ports,
-    parse_timedelta,
     silence_logging,
 )
 from .worker import Worker, parse_memory_limit, run

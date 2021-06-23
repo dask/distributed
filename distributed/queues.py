@@ -3,10 +3,10 @@ import logging
 import uuid
 from collections import defaultdict
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
 from .client import Client, Future
-from .utils import parse_timedelta, sync, thread_state
+from .utils import sync, thread_state
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)

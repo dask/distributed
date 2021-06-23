@@ -36,6 +36,7 @@ from dask.utils import (
     ensure_dict,
     format_bytes,
     funcname,
+    parse_timedelta,
     stringify,
 )
 
@@ -78,7 +79,6 @@ from .utils import (
     key_split,
     log_errors,
     no_default,
-    parse_timedelta,
     sync,
     thread_state,
 )

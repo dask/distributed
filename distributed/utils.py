@@ -41,19 +41,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
-
-# Import config serialization functions here for backward compatibility
-from dask.config import deserialize as deserialize_for_cli  # noqa
-from dask.config import serialize as serialize_for_cli  # noqa
-
-# provide format_bytes here for backwards compatibility
-from dask.utils import (  # noqa: F401
-    format_bytes,
-    format_time,
-    funcname,
-    parse_bytes,
-    parse_timedelta,
-)
+from dask.utils import parse_timedelta as _parse_timedelta
 
 try:
     from tornado.ioloop import PollIOLoop
@@ -286,7 +274,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = parse_timedelta(callback_timeout, "s")
+    callback_timeout = _parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -1150,7 +1138,7 @@ def warn_on_duration(duration, msg):
     start = time()
     yield
     stop = time()
-    if stop - start > parse_timedelta(duration):
+    if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
 
 
@@ -1455,3 +1443,29 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List
 
         addresses.append({"address": host, "port": port})
     return addresses
+
+
+_deprecations = {
+    "deserialize_for_cli": "dask.config.deserialize",
+    "serialize_for_cli": "dask.config.serialize",
+    "format_bytes": "dask.utils.format_bytes",
+    "format_time": "dask.utils.format_time",
+    "funcname": "dask.utils.funcname",
+    "parse_bytes": "dask.utils.parse_bytes",
+    "parse_timedelta": "dask.utils.parse_timedelta",
+}
+
+
+def __getattr__(name):
+    if name in _deprecations:
+        use_instead = _deprecations[name]
+
+        warnings.warn(
+            f"{name} is deprecated and will be removed in a future release. "
+            f"Please use {use_instead} instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return import_term(use_instead)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

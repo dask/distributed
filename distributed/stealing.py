@@ -7,11 +7,12 @@ from tlz import topk
 from tornado.ioloop import PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
 from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import log_errors, parse_timedelta
+from .utils import log_errors
 
 LATENCY = 10e-3
 
