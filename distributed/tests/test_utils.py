@@ -19,11 +19,11 @@ from distributed.metrics import time
 from distributed.utils import (
     LRU,
     All,
+    Log,
+    Logs,
     LoopRunner,
-    MultiLogs,
     TimeoutError,
     _maybe_complex,
-    deprecated,
     ensure_bytes,
     ensure_ip,
     format_dashboard_link,
@@ -549,7 +549,10 @@ def test_format_bytes_compat():
 
 
 def test_logs():
-    d = MultiLogs({"123": [("INFO", "Hello")], "456": [("INFO", "World!")]})
+    log = Log("Hello")
+    assert isinstance(log, str)
+    d = Logs({"123": log, "456": Log("World!")})
+    assert isinstance(d, dict)
     text = d._repr_html_()
     assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text
@@ -608,20 +611,3 @@ def test_lru():
 async def test_offload():
     assert (await offload(inc, 1)) == 2
     assert (await offload(lambda x, y: x + y, 1, y=2)) == 3
-
-
-def test_deprecated():
-    @deprecated()
-    def foo():
-        return "bar"
-
-    with pytest.warns(DeprecationWarning, match="foo is deprecated"):
-        assert foo() == "bar"
-
-    # Explicit version specified
-    @deprecated(version_removed="1.2.3")
-    def foo():
-        return "bar"
-
-    with pytest.warns(DeprecationWarning, match="removed in version 1.2.3"):
-        assert foo() == "bar"

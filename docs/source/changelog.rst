@@ -1,6 +1,43 @@
 Changelog
 =========
 
+2021.06.2
+---------
+
+Released on June 22, 2021
+
+- Revert refactor to ``utils.Log[s]`` and ``Cluster.get_logs`` (:pr:`4941`) `Charles Blackmon-Luca`_
+- Use deprecation utility from Dask (:pr:`4924`) `James Bourbeau`_
+- Add transition counter to ``Scheduler`` (:pr:`4934`) `Matthew Rocklin`_
+- Remove ``nbytes_in_memory`` (:pr:`4930`) `Matthew Rocklin`_
+
+
+2021.06.1
+---------
+
+Released on June 18, 2021
+
+- Fix deadlock in ``handle_missing_dep`` if additional replicas are available (:pr:`4929`) `Florian Jetter`_
+- Add configuration to enable/disable NVML diagnostics (:pr:`4893`) `Peter Andreas Entschev`_
+- Add scheduler log tab to performance reports (:pr:`4909`) `Charles Blackmon-Luca`_
+- Add HTML repr to ``scheduler_info`` and incorporate into client and cluster reprs (:pr:`4857`) `Jacob Tomlinson`_
+- Fix error state typo (:pr:`4898`) `James Bourbeau`_
+- Allow actor exceptions to propagate (:pr:`4232`) `Martin Durant`_
+- Remove importing ``apply`` from ``dask.compatibility`` (:pr:`4913`) `Elliott Sales de Andrade`_
+- Use more informative default name for ``WorkerPlugin`` s (:pr:`4908`) `James Bourbeau`_
+- Removed unused utility functions (:pr:`4911`) `James Bourbeau`_
+- Locally rerun successfully completed futures (:pr:`4813`) `ArtinSarraf`_
+- Forget erred tasks and fix deadlocks on worker (:pr:`4784`) `Florian Jetter`_
+- Handle ``HTTPClientError`` in websocket connector (:pr:`4900`) `Marcos Moyano`_
+- Update ``dask_cuda`` usage in ``SSHCluster`` docstring (:pr:`4894`) `James Bourbeau`_
+- Remove tests for ``process_time`` and ``thread_time`` (:pr:`4895`) `James Bourbeau`_
+- Flake8 config cleanup (:pr:`4888`) `Florian Jetter`_
+- Don't strip scheduler protocol when determining host (:pr:`4883`) `James Bourbeau`_
+- Add more documentation on memory management (:pr:`4874`) `crusaderky`_
+- Add ``range_query`` tests to NVML test suite (:pr:`4879`) `Charles Blackmon-Luca`_
+- No longer cancel result future in async process when using timeouts (:pr:`4882`) `Florian Jetter`_
+
+
 2021.06.0
 ---------
 
@@ -2406,3 +2443,4 @@ significantly without many new features.
 .. _`Naty Clementi`: https://github.com/ncclementi
 .. _`Nathan Danielsen`: https://github.com/ndanielsen
 .. _`Torsten Wörtwein`: https://github.com/twoertwein
+.. _`ArtinSarraf`: https://github.com/ArtinSarraf

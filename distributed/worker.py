@@ -57,7 +57,6 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
-    deprecated,
     get_ip,
     has_arg,
     import_file,
@@ -2532,7 +2531,7 @@ class Worker(ServerNode):
                     logger.debug("New workers found for %s", dep.key)
                     self.log.append((dep.key, "new workers found"))
                     for dependent in dep.dependents:
-                        if dependent.key in dep.waiting_for_data:
+                        if dep.key in dependent.waiting_for_data:
                             self.data_needed.append(dependent.key)
             if still_missing:
                 logger.debug(
@@ -4015,11 +4014,6 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
-
-
-@deprecated(version_removed="2021.06.0")
-def weight(k, v):
-    return sizeof(v)
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):

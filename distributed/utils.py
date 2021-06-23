@@ -35,8 +35,6 @@ try:
 except ImportError:
     resource = None
 
-from datetime import datetime
-
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -984,34 +982,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def deprecated(*, version_removed: str = None):
-    """Decorator to mark a function as deprecated
-
-    Parameters
-    ----------
-    version_removed : str, optional
-        If specified, include the version in which the deprecated function
-        will be removed. Defaults to "a future release".
-    """
-
-    def decorator(func):
-        nonlocal version_removed
-        msg = f"{funcname(func)} is deprecated and will be removed in"
-        if version_removed is not None:
-            msg += f" version {version_removed}"
-        else:
-            msg += " a future release"
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            warnings.warn(msg, DeprecationWarning, stacklevel=2)
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
@@ -1271,8 +1241,8 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(tuple):
-    """A container for a single log entry"""
+class Log(str):
+    """A container for newline-delimited string of log entries"""
 
     level_styles = {
         "WARNING": "font-weight: bold; color: orange;",
@@ -1281,46 +1251,34 @@ class Log(tuple):
     }
 
     def _repr_html_(self):
-        if len(self) == 3:
-            time, level, message = self
-            time = datetime.fromtimestamp(time).strftime("%H:%M:%S.%f")
-        else:
-            level, message = self
-            time = None
+        logs_html = []
+        for message in self.split("\n"):
+            style = "font-family: monospace; margin: 0;"
+            for level in self.level_styles:
+                if level in message:
+                    style += self.level_styles[level]
+                    break
 
-        style = "font-family: monospace; margin: 0;"
-        style += self.level_styles.get(level, "")
-
-        if time is not None:
-            return '<p style="{style}">{time} - {message}</p>'.format(
-                time=html.escape(time),
-                style=html.escape(style),
-                message=html.escape(message),
+            logs_html.append(
+                '<p style="{style}">{message}</p>'.format(
+                    style=html.escape(style),
+                    message=html.escape(message),
+                )
             )
 
-        return '<p style="{style}">{message}</p>'.format(
-            style=html.escape(style),
-            message=html.escape(message),
-        )
+        return "\n".join(logs_html)
 
 
-class Logs(list):
-    """A container for a list of log entries"""
-
-    def _repr_html_(self):
-        return "\n".join(Log(entry)._repr_html_() for entry in self)
-
-
-class MultiLogs(dict):
-    """A container for a dict mapping strings to lists of log entries"""
+class Logs(dict):
+    """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
         summaries = [
             "<details>\n"
             "<summary style='display:list-item'>{title}</summary>\n"
-            "{logs}\n"
-            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
-            for title, entries in sorted(self.items())
+            "{log}\n"
+            "</details>".format(title=title, log=log._repr_html_())
+            for title, log in sorted(self.items())
         ]
         return "\n".join(summaries)
 

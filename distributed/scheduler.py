@@ -873,11 +873,6 @@ class TaskPrefix:
         )
 
     @property
-    def nbytes_in_memory(self):
-        tg: TaskGroup
-        return sum([tg._nbytes_in_memory for tg in self._groups])
-
-    @property
     def nbytes_total(self):
         tg: TaskGroup
         return sum([tg._nbytes_total for tg in self._groups])
@@ -922,10 +917,6 @@ class TaskGroup:
 
        The total number of bytes that this task group has produced
 
-    .. attribute:: nbytes_in_memory: int
-
-       The number of bytes currently stored by this TaskGroup
-
     .. attribute:: duration: float
 
        The total amount of time spent on all tasks in this TaskGroup
@@ -944,7 +935,6 @@ class TaskGroup:
     _states: dict
     _dependencies: set
     _nbytes_total: Py_ssize_t
-    _nbytes_in_memory: Py_ssize_t
     _duration: double
     _types: set
     _start: double
@@ -958,7 +948,6 @@ class TaskGroup:
         self._states["forgotten"] = 0
         self._dependencies = set()
         self._nbytes_total = 0
-        self._nbytes_in_memory = 0
         self._duration = 0
         self._types = set()
         self._start = 0.0
@@ -984,10 +973,6 @@ class TaskGroup:
     @property
     def nbytes_total(self):
         return self._nbytes_total
-
-    @property
-    def nbytes_in_memory(self):
-        return self._nbytes_in_memory
 
     @property
     def duration(self):
@@ -1559,7 +1544,6 @@ class TaskState:
         if old_nbytes >= 0:
             diff -= old_nbytes
         self._group._nbytes_total += diff
-        self._group._nbytes_in_memory += diff
         ws: WorkerState
         for ws in self._who_has:
             ws._nbytes += diff
@@ -1786,6 +1770,7 @@ class SchedulerState:
     _validate: bint
     _workers: object
     _workers_dv: dict
+    _transition_counter: Py_ssize_t
 
     # Variables from dask.config, cached by __init__ for performance
     UNKNOWN_TASK_DURATION: double
@@ -1889,6 +1874,7 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
+        self._transition_counter = 0
 
         super().__init__(**kwargs)
 
@@ -1955,6 +1941,10 @@ class SchedulerState:
     @total_occupancy.setter
     def total_occupancy(self, v: double):
         self._total_occupancy = v
+
+    @property
+    def transition_counter(self):
+        return self._transition_counter
 
     @property
     def unknown_durations(self):
@@ -2081,6 +2071,7 @@ class SchedulerState:
             func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
+                self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 assert not args and not kwargs
@@ -2646,7 +2637,6 @@ class SchedulerState:
             for ws in ts._who_has:
                 del ws._has_what[ts]
                 ws._nbytes -= ts_nbytes
-                ts._group._nbytes_in_memory -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
 
             ts._who_has.clear()
@@ -7336,8 +7326,6 @@ def _propagate_forgotten(
     ts._waiting_on.clear()
 
     ts_nbytes: Py_ssize_t = ts.get_nbytes()
-    if ts._who_has:
-        ts._group._nbytes_in_memory -= ts_nbytes
 
     ws: WorkerState
     for ws in ts._who_has:

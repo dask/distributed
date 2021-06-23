@@ -49,7 +49,7 @@ from distributed.utils_test import (
     nodebug,
     slowinc,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit, weight
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
 
 @pytest.mark.asyncio
@@ -1839,11 +1839,6 @@ async def test_story_with_deps(c, s, a, b):
         (key, "put-in-memory"),
     ]
     assert story == expected_story
-
-
-def test_weight_deprecated():
-    with pytest.warns(DeprecationWarning):
-        weight("foo", "bar")
 
 
 @gen_cluster(client=True)
