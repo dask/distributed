@@ -1017,7 +1017,9 @@ class ConnectionPool:
         fut = None
         try:
             if self.status != Status.running:
-                raise CommClosedError(f"ConnectionPool not running.  Status: {self.status}")
+                raise CommClosedError(
+                    f"ConnectionPool not running.  Status: {self.status}"
+                )
 
             fut = asyncio.ensure_future(
                 connect(
@@ -1039,7 +1041,9 @@ class ConnectionPool:
             return comm
         except asyncio.CancelledError as exc:
             self.semaphore.release()
-            raise CommClosedError("ConnectionPool closed already") from exc
+            raise CommClosedError(
+                f"ConnectionPool not running.  Status: {self.status}"
+            ) from exc
         except Exception as exc:
             self.semaphore.release()
             raise exc
