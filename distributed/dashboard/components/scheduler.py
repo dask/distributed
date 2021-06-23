@@ -1733,6 +1733,14 @@ class TaskGraph(DashboardComponent):
 class TGroupGraph(DashboardComponent):
     """
     Task Group Graph
+
+    Creates a graph layout for the TaskGroups on the scheduler.  It assigns
+    (x, y) locations to all the Task Groups and lays them out by dependencies
+    information. The layout gets updated every time that new task groups are added.
+
+    Each task group node incodes information about progress, memory and type
+    into glyphs, as well as a hover tooltip with information on name, computation
+    time, memory and a breakdown on the tasks status.
     """
 
     def __init__(self, scheduler, **kwargs):
