@@ -3,6 +3,7 @@ import math
 import operator
 import os
 from collections import defaultdict
+from datetime import datetime
 from numbers import Number
 
 from bokeh.io import curdoc
@@ -2165,7 +2166,7 @@ class WorkerTable(DashboardComponent):
 
 class SchedulerLogs:
     def __init__(self, scheduler, start=None):
-        logs = scheduler.get_logs(start=None, timestamps=True)
+        logs = scheduler.get_logs(start=start, timestamps=True)
 
         if not logs:
             logs_html = (
@@ -2173,7 +2174,11 @@ class SchedulerLogs:
             )
         else:
             logs_html = Log(
-                "\n".join("%s - %s" % (time, line) for time, level, line in logs)
+                "\n".join(
+                    "%s - %s"
+                    % (datetime.fromtimestamp(time).strftime("%H:%M:%S.%f"), line)
+                    for time, level, line in logs
+                )
             )._repr_html_()
 
         self.root = Div(text=logs_html)
