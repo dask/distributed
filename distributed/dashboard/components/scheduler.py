@@ -2001,7 +2001,7 @@ class WorkerTable(DashboardComponent):
             "memory_limit": "limit",
             "memory_percent": "memory %",
             "memory_managed": "managed",
-            "memory_unmanaged_old": "unmanaged",
+            "memory_unmanaged_old": "unmanaged old",
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
