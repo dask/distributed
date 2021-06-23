@@ -19,6 +19,7 @@ from .components.scheduler import (
     MemoryByKey,
     NBytes,
     NBytesCluster,
+    Occupancy,
     SystemMonitor,
     TaskGraph,
     TaskProgress,
@@ -90,6 +91,7 @@ applications = {
     "/individual-nprocessing": individual_doc(
         CurrentLoad, 100, fig_attr="processing_figure"
     ),
+    "/individual-occupancy": individual_doc(Occupancy, 100),
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
