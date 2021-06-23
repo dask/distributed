@@ -1275,5 +1275,5 @@ def test_register_backend_entrypoint():
         "udp", mod.__name__, attrs=["UDPBackend"], dist=dist
     )
 
-    result = get_backend("udp")
+    result = get_backend("udp", require=False)
     assert result == 1
