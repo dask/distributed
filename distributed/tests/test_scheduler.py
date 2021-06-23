@@ -2791,10 +2791,9 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     await assert_ndata(c, {a: 11, b: 0})
     await s.rebalance()
     await assert_ndata(c, {a: 1, b: 10})
-    assert await c.has_what() == {
-        a: (large_future.key,),
-        b: tuple(f.key for f in small_futures),
-    }
+    has_what = await c.has_what()
+    assert has_what[a] == (large_future.key,)
+    assert sorted(has_what[b]) == sorted(f.key for f in small_futures)
 
 
 @gen_cluster(client=True)
