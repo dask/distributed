@@ -1730,7 +1730,6 @@ class TaskGraph(DashboardComponent):
         self.scheduler.remove_plugin(self.layout)
 
 
-##########Task Group Graph #########
 class TGroupGraph(DashboardComponent):
     """
     Task Group Graph
@@ -1853,51 +1852,43 @@ class TGroupGraph(DashboardComponent):
         hover = HoverTool(
             point_policy="follow_mouse",
             tooltips="""
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Name:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                            </div>
-
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Compute time:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@compute_time</span>
-                            </div>
-
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Memory:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
-                            </div>
-
-                            <div>
-                                <span style="font-size: 12px; font-weight: bold;">Tasks:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
-                            </div>
-
-                            <div style="margin-left: 2em;">
-                                <span style="font-size: 12px; font-weight: bold;">Completed:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
-                            </div>
-
-                            <div style="margin-left: 2em;">
-                                <span style="font-size: 12px; font-weight: bold;">Processing:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_processing</span>
-                            </div>
-
-                            <div style="margin-left: 2em;">
-                                <span style="font-size: 12px; font-weight: bold;">In memory:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
-                            </div>
-
-                            <div style="margin-left: 2em;">
-                                <span style="font-size: 12px; font-weight: bold;">Erred:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_erred</span>
-                            </div>
-
-                            <div style="margin-left: 2em;">
-                                <span style="font-size: 12px; font-weight: bold;">Released:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@in_released</span>
-                            </div>
-                            """,
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Compute time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@compute_time</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Memory:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Tasks:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Completed:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_processing</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">In memory:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Erred:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_erred</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Released:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_released</span>
+                </div>
+                """,
             renderers=[rect],
         )
 
@@ -1949,14 +1940,13 @@ class TGroupGraph(DashboardComponent):
                 xs[tg], ys[tg] = x, y
 
                 # info neded for node layout to coulmn data source
-                nodes_layout[tg] = {}
-                nodes_layout[tg]["x"] = xs[tg]
-                nodes_layout[tg]["y"] = ys[tg]
+                nodes_layout[tg] = {"x": xs[tg], "y": ys[tg]}
 
                 # info needed for arrow layout
-                arrows_layout[tg] = {}
-                arrows_layout[tg]["nstart"] = dependencies[tg]
-                arrows_layout[tg]["nend"] = [tg] * len(dependencies[tg])
+                arrows_layout[tg] = {
+                    "nstart": dependencies[tg],
+                    "nend": [tg] * len(dependencies[tg]),
+                }
 
             return nodes_layout, arrows_layout
 
@@ -2113,15 +2103,11 @@ class TGroupGraph(DashboardComponent):
                 self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
             ]
 
-            # LOGOS (it seems svg not supported? can't display this for example
-            #  https://numpy.org/images/logos/numpy.svg)
-
+            # LOGOS
             if len(tg.types) == 1:
                 logo_type = next(iter(tg.types)).split(".")[0]
                 try:
-                    url_logo = logos_dict[
-                        logo_type
-                    ]  # now plotting a bokeh logo when is a pandas tg
+                    url_logo = logos_dict[logo_type]
                 except KeyError:
                     url_logo = ""
             else:
