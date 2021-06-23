@@ -50,7 +50,7 @@ template_variables = {
         "system",
         "profile",
         "graph",
-        "tg-graph ",
+        "groups",
         "info",
     ]
 }
@@ -89,14 +89,14 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
-    "/tg-graph": tg_graph_doc,
+    "/groups": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(
         TaskStream, 100, n_rectangles=1000, clear_interval="10s"
     ),
     "/individual-progress": individual_doc(TaskProgress, 100, height=160),
     "/individual-graph": individual_doc(TaskGraph, 200),
-    "/individual-tg-graph": individual_doc(TGroupGraph, 200),
+    "/individual-groups": individual_doc(TGroupGraph, 200),
     "/individual-nbytes": individual_doc(NBytes, 100),
     "/individual-nbytes-cluster": individual_doc(NBytesCluster, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
