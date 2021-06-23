@@ -1253,7 +1253,7 @@ class StealingEvents(DashboardComponent):
             "color": color,
             "duration": total_duration,
             "radius": radius,
-            "cost_factor": min(10, self.steal.cost_multipliers[level]),
+            "cost_factor": self.steal.cost_multipliers[level],
         }
 
         return d
