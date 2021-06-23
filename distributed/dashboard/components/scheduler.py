@@ -1734,13 +1734,14 @@ class TaskGroupGraph(DashboardComponent):
     """
     Task Group Graph
 
-    Creates a graph layout for the TaskGroups on the scheduler.  It assigns
-    (x, y) locations to all the Task Groups and lays them out by dependencies
-    information. The layout gets updated every time that new task groups are added.
+    Creates a graph layout for TaskGroups on the scheduler.  It assigns
+    (x, y) locations to all the TaskGroups and lays them out by according
+    to their dependencies. The layout gets updated every time that new
+    TaskGroups are added.
 
-    Each task group node incodes information about progress, memory and type
-    into glyphs, as well as a hover tooltip with information on name, computation
-    time, memory and a breakdown on the tasks status.
+    Each task group node incodes information about task progress, memory, and output type
+    into glyphs, as well as a hover tooltip with more detailed information on name, computation
+    time, memory, and tasks status.
     """
 
     def __init__(self, scheduler, **kwargs):
@@ -1788,10 +1789,6 @@ class TaskGroupGraph(DashboardComponent):
         self.root.axis.visible = False
         self.subtitle = Title(text=" ", text_font_style="italic")
         self.root.add_layout(self.subtitle, "above")
-
-        # main box values when no durations and nbytes
-        self.width_node = 0.5
-        self.height_node = self.width_node / 2
 
         rect = self.root.rect(
             x="x",
@@ -1958,6 +1955,12 @@ class TaskGroupGraph(DashboardComponent):
 
             return nodes_layout, arrows_layout
 
+    def compute_size(self, x, shift, stretch):
+        start = 0.5
+        end = 0.9
+        y = (math.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (end - start) + start
+        return y
+
     @without_property_validation
     def update(self):
 
@@ -2019,31 +2022,21 @@ class TaskGroupGraph(DashboardComponent):
             tot_tasks = sum(tg.states.values())
 
             # compute width and height of boxes
-            if tg.duration and tg.nbytes_total:
+            if tg.duration and tg.nbytes_total and comp_tasks:
                 # Extrapolated duration and nbytes total (not scaled)
                 w_temp = math.log10(tg.duration / comp_tasks * tot_tasks)
                 h_temp = math.log10(tg.nbytes_total / comp_tasks * tot_tasks)
 
-                # Move this function somewhere else once we finish tweaking
-                def tanh_scale(x, shift, stretch):
-                    start = 0.5
-                    end = 0.9
-                    y = (math.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (
-                        end - start
-                    ) + start
-                    return y
-
                 # scale duration (width)
                 # Choose middle to 1e2 -> shift 1e2, and try stretch = 0.7
-                width_box = tanh_scale(w_temp, shift=1e2, stretch=0.7)
+                width_box = self.compute_size(w_temp, shift=1e2, stretch=0.7)
 
                 # need to scale memory (height)
                 # Choose middle to 1e9 -> shift 1e9, and try stretch = 0.4
-                height_box = tanh_scale(h_temp, shift=1e9, stretch=0.4)
-
+                height_box = self.compute_size(h_temp, shift=1e9, stretch=0.4)
             else:
-                width_box = self.width_node
-                height_box = self.height_node
+                width_box = 0.7
+                height_box = width_box / 2
 
             box_dim[key] = {}
             box_dim[key]["width"] = width_box
