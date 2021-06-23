@@ -1822,7 +1822,7 @@ class TGroupGraph(DashboardComponent):
             right="x_end",
             bottom="y_start",
             top="y_end",
-            color=None,  # "white",
+            color=None,
             line_color="black",
             source=self.nodes_source,
         )
@@ -2083,16 +2083,14 @@ class TGroupGraph(DashboardComponent):
                 nodes_data["node_line_width"].append(1)
 
             # progress bar data update
-            Lbar = width
             nodes_data["x_start"].append(x - width / 2)
-            nodes_data["x_end"].append(x - width / 2 + Lbar)
+            nodes_data["x_end"].append(x + width / 2)
 
-            Hbar = height * 0.4
             nodes_data["y_start"].append(y - height / 2)
-            nodes_data["y_end"].append(y - height / 2 + Hbar)
+            nodes_data["y_end"].append(y - height / 2 + height * 0.4)
 
             nodes_data["x_end_progress"].append(
-                x - width / 2 + Lbar * comp_tasks / tot_tasks
+                x - width / 2 + width * comp_tasks / tot_tasks
             )
 
             # arrows
