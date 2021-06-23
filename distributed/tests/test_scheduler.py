@@ -2797,6 +2797,13 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     }
 
 
+@gen_cluster(client=True)
+async def test_transition_counter(c, s, a, b):
+    assert s.transition_counter == 0
+    await c.submit(inc, 1)
+    assert s.transition_counter > 1
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_rebalance_move_data_bad_sender(client, s, a, b, c):
     """Sender disappears between _rebalance_find_msgs and _rebalance_move_data.

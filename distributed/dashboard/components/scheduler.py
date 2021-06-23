@@ -70,7 +70,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
-from distributed.utils import Logs, format_time, log_errors, parse_timedelta
+from distributed.utils import Log, format_time, log_errors, parse_timedelta
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -2165,7 +2165,9 @@ class WorkerTable(DashboardComponent):
 
 class SchedulerLogs:
     def __init__(self, scheduler):
-        logs = Logs(scheduler.get_logs())._repr_html_()
+        logs = Log(
+            "\n".join(line for level, line in scheduler.get_logs())
+        )._repr_html_()
 
         self.root = Div(text=logs)
 

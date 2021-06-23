@@ -1769,6 +1769,7 @@ class SchedulerState:
     _validate: bint
     _workers: object
     _workers_dv: dict
+    _transition_counter: Py_ssize_t
 
     # Variables from dask.config, cached by __init__ for performance
     UNKNOWN_TASK_DURATION: double
@@ -1872,6 +1873,7 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
+        self._transition_counter = 0
 
         super().__init__(**kwargs)
 
@@ -1938,6 +1940,10 @@ class SchedulerState:
     @total_occupancy.setter
     def total_occupancy(self, v: double):
         self._total_occupancy = v
+
+    @property
+    def transition_counter(self):
+        return self._transition_counter
 
     @property
     def unknown_durations(self):
@@ -2064,6 +2070,7 @@ class SchedulerState:
             func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
+                self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 assert not args and not kwargs

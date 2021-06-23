@@ -287,6 +287,8 @@ async def test_logs(cleanup):
         await cluster
 
         logs = await cluster.get_logs()
+        assert isinstance(logs, dict)
+        assert all(isinstance(log, str) for log in logs)
         assert is_valid_xml("<div>" + logs._repr_html_() + "</div>")
         assert "Scheduler" in logs
         for worker in cluster.scheduler.workers:
