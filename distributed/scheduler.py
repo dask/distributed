@@ -4716,6 +4716,9 @@ class Scheduler(SchedulerState, ServerNode):
                         recommendations[ts._key] = "released"
                     else:  # pure data
                         recommendations[ts._key] = "forgotten"
+                if ts._group._last_worker is ws:
+                    ts._group._last_worker = None
+                    ts._group._last_worker_tasks_left = 0
             ws._has_what.clear()
 
             self.transitions(recommendations)
@@ -6289,8 +6292,9 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = {k for w in workers for k in w.has_what}
-                keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
+                tasks = {ts for w in workers for ts in w.has_what}
+                keys = {ts._key for ts in tasks if ts._who_has.issubset(workers)}
+                groups = {ts._group for ts in tasks}
 
                 if keys:
                     other_workers = set(parent._workers_dv.values()) - workers
@@ -6304,6 +6308,11 @@ class Scheduler(SchedulerState, ServerNode):
                         delete=False,
                         lock=False,
                     )
+
+                for group in groups:
+                    if group._last_worker in workers:
+                        group._last_worker = None
+                        group._last_worker_tasks_left = 0
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers:
