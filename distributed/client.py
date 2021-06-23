@@ -4007,7 +4007,7 @@ class Client:
         else:
             return msgs
 
-    async def _register_scheduler_plugin(self, plugin=None, **kwargs):
+    async def _register_scheduler_plugin(self, plugin, **kwargs):
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
 
@@ -4015,7 +4015,7 @@ class Client:
             plugin=dumps(plugin, protocol=4)
         )
 
-    def register_scheduler_plugin(self, plugin=None, **kwargs):
+    def register_scheduler_plugin(self, plugin, **kwargs):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -4024,8 +4024,6 @@ class Client:
         ----------
         plugin : SchedulerPlugin
             Plugin class or object to pass to the scheduler.
-        idempotent : bool
-            If multiple registrations of the plugin induce no changes.
         **kwargs : Any
             Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).
