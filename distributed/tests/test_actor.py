@@ -515,7 +515,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 @gen_cluster(
@@ -580,7 +580,7 @@ async def test_worker_actor_handle_is_weakref(c, s, a, b):
     start = time()
     while a.actors or b.data:
         await asyncio.sleep(0.1)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_worker_actor_handle_is_weakref_sync(client):
@@ -597,7 +597,7 @@ def test_worker_actor_handle_is_weakref_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_worker_actor_handle_is_weakref_from_compute_sync(client):
@@ -618,7 +618,7 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
     start = time()
     while any(client.run(worker_tasks_running).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_one_thread_deadlock():
