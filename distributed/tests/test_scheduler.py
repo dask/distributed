@@ -2286,7 +2286,6 @@ def test_memorystate():
     assert m.unmanaged_recent == 17
     assert m.optimistic == 83
 
-    print(repr(m))
     assert (
         repr(m)
         == dedent(
