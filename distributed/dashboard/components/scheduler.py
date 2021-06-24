@@ -1739,9 +1739,9 @@ class TaskGroupGraph(DashboardComponent):
     to their dependencies. The layout gets updated every time that new
     TaskGroups are added.
 
-    Each task group node incodes information about task progress, memory, and output type
-    into glyphs, as well as a hover tooltip with more detailed information on name, computation
-    time, memory, and tasks status.
+    Each task group node incodes information about task progress, memory,
+    and output type into glyphs, as well as a hover tooltip with more detailed
+    information on name, computation time, memory, and tasks status.
     """
 
     def __init__(self, scheduler, **kwargs):
