@@ -59,6 +59,7 @@ Individual bokeh plots
 - ``/individual-nbytes-cluster``
 - ``/individual-cpu``
 - ``/individual-nprocessing``
+- ``/individual-occupancy``
 - ``/individual-workers``
 - ``/individual-bandwidth-types``
 - ``/individual-bandwidth-workers``
