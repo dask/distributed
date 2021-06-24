@@ -243,12 +243,10 @@ class NBytesCluster(DashboardComponent):
                     "proc_memory": [0] * 4,
                     "color": ["blue", "blue", "blue", "grey"],
                     "alpha": [1, 0.7, 0.4, 1],
-                    "memtype": [
-                        "managed (in memory)",
-                        "unmanaged",
-                        "unmanaged, recently increased",
-                        "managed (spilled to disk)",
-                    ],
+                    "man_in_mem": [0] * 4,
+                    "man_spilled": [0] * 4,
+                    "unman_old": [0] * 4,
+                    "unman_rec": [0] * 4,
                 }
             )
 
@@ -283,9 +281,31 @@ class NBytesCluster(DashboardComponent):
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
-            hover = HoverTool()
-            hover.tooltips = "@width{0.00 b} @memtype"
-            hover.point_policy = "follow_mouse"
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Process memory (RSS):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled{0.00 b}</span>
+                            </div>
+                            """,
+            )
             self.root.add_tools(hover)
 
     @without_property_validation
@@ -301,11 +321,16 @@ class NBytesCluster(DashboardComponent):
                 meminfo.unmanaged_recent,
                 meminfo.managed_spilled,
             ]
+
             result = {
                 "width": width,
                 "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
                 "color": [color, color, color, "grey"],
                 "proc_memory": [meminfo.process] * 4,
+                "man_in_mem": [meminfo.managed_in_memory] * 4,
+                "man_spilled": [meminfo.managed_spilled] * 4,
+                "unman_old": [meminfo.unmanaged_old] * 4,
+                "unman_rec": [meminfo.unmanaged_recent] * 4,
             }
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
