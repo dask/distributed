@@ -25,7 +25,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
-from dask.utils import apply, format_bytes, funcname
+from dask.utils import apply, format_bytes, funcname, parse_bytes, parse_timedelta
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -65,9 +65,7 @@ from .utils import (
     key_split,
     log_errors,
     offload,
-    parse_bytes,
     parse_ports,
-    parse_timedelta,
     silence_logging,
     thread_state,
     typename,

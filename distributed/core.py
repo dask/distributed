@@ -18,6 +18,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
 from . import profile, protocol
 from .comm import (
@@ -36,7 +37,6 @@ from .utils import (
     get_traceback,
     has_keyword,
     is_coroutine_function,
-    parse_timedelta,
     truncate_exception,
 )
 

@@ -5,9 +5,9 @@ from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import parse_timedelta
 
 from .core import CommClosedError
-from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
