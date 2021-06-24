@@ -1445,28 +1445,27 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List
     return addresses
 
 
-# TODO: Uncomment the code below before merging
-# _deprecations = {
-#     "deserialize_for_cli": "dask.config.deserialize",
-#     "serialize_for_cli": "dask.config.serialize",
-#     "format_bytes": "dask.utils.format_bytes",
-#     "format_time": "dask.utils.format_time",
-#     "funcname": "dask.utils.funcname",
-#     "parse_bytes": "dask.utils.parse_bytes",
-#     "parse_timedelta": "dask.utils.parse_timedelta",
-# }
+_deprecations = {
+    "deserialize_for_cli": "dask.config.deserialize",
+    "serialize_for_cli": "dask.config.serialize",
+    "format_bytes": "dask.utils.format_bytes",
+    "format_time": "dask.utils.format_time",
+    "funcname": "dask.utils.funcname",
+    "parse_bytes": "dask.utils.parse_bytes",
+    "parse_timedelta": "dask.utils.parse_timedelta",
+}
 
 
-# def __getattr__(name):
-#     if name in _deprecations:
-#         use_instead = _deprecations[name]
+def __getattr__(name):
+    if name in _deprecations:
+        use_instead = _deprecations[name]
 
-#         warnings.warn(
-#             f"{name} is deprecated and will be removed in a future release. "
-#             f"Please use {use_instead} instead.",
-#             category=FutureWarning,
-#             stacklevel=2,
-#         )
-#         return import_term(use_instead)
-#     else:
-#         raise AttributeError(f"module {__name__} has no attribute {name}")
+        warnings.warn(
+            f"{name} is deprecated and will be removed in a future release. "
+            f"Please use {use_instead} instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return import_term(use_instead)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")
