@@ -240,13 +240,13 @@ class NBytesCluster(DashboardComponent):
                     "width": [0] * 4,
                     "x": [0] * 4,
                     "y": [0] * 4,
-                    "proc_memory": [0] * 4,
                     "color": ["blue", "blue", "blue", "grey"],
                     "alpha": [1, 0.7, 0.4, 1],
-                    "man_in_mem": [0] * 4,
-                    "man_spilled": [0] * 4,
-                    "unman_old": [0] * 4,
-                    "unman_rec": [0] * 4,
+                    "proc_memory": [0] * 4,
+                    "managed": [0] * 4,
+                    "unmanaged_old": [0] * 4,
+                    "unmanaged_recent": [0] * 4,
+                    "spilled": [0] * 4,
                 }
             )
 
@@ -290,19 +290,19 @@ class NBytesCluster(DashboardComponent):
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@managed{0.00 b}</span>
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_old{0.00 b}</span>
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_recent{0.00 b}</span>
                             </div>
                             <div>
                                 <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@spilled{0.00 b}</span>
                             </div>
                             """,
             )
@@ -327,10 +327,10 @@ class NBytesCluster(DashboardComponent):
                 "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
                 "color": [color, color, color, "grey"],
                 "proc_memory": [meminfo.process] * 4,
-                "man_in_mem": [meminfo.managed_in_memory] * 4,
-                "man_spilled": [meminfo.managed_spilled] * 4,
-                "unman_old": [meminfo.unmanaged_old] * 4,
-                "unman_rec": [meminfo.unmanaged_recent] * 4,
+                "managed": [meminfo.managed_in_memory] * 4,
+                "unmanaged_old": [meminfo.unmanaged_old] * 4,
+                "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
+                "spilled": [meminfo.managed_spilled] * 4,
             }
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
@@ -360,13 +360,13 @@ class NBytes(DashboardComponent):
                     "y": [],
                     "color": [],
                     "alpha": [],
-                    "proc_memory": [],
                     "worker": [],
                     "escaped_worker": [],
-                    "man_in_mem": [],
-                    "man_spilled": [],
-                    "unman_old": [],
-                    "unman_rec": [],
+                    "proc_memory": [],
+                    "managed": [],
+                    "unmanaged_old": [],
+                    "unmanaged_recent": [],
+                    "spilled": [],
                 }
             )
 
@@ -418,19 +418,19 @@ class NBytes(DashboardComponent):
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_in_mem{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@managed{0.00 b}</span>
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_old{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_old{0.00 b}</span>
                             </div>
                             <div style="margin-left: 1em;">
                                 <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unman_rec{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_recent{0.00 b}</span>
                             </div>
                             <div>
                                 <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
-                                <span style="font-size: 10px; font-family: Monaco, monospace;">@man_spilled{0.00 b}</span>
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@spilled{0.00 b}</span>
                             </div>
                             """,
             )
@@ -450,12 +450,12 @@ class NBytes(DashboardComponent):
             width = []
             x = []
             color = []
-            procmemory = []
             max_limit = 0
-            man_in_mem = []
-            man_spilled = []
-            unman_old = []
-            unman_rec = []
+            procmemory = []
+            managed = []
+            spilled = []
+            unmanaged_old = []
+            unmanaged_recent = []
 
             for ws in workers:
                 meminfo = ws.memory
@@ -473,31 +473,29 @@ class NBytes(DashboardComponent):
                 ]
                 x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
                 color += [color_i, color_i, color_i, "grey"]
+
+                # memory info
                 procmemory.append(meminfo.process)
-
-                # managed
-                man_in_mem.append(meminfo.managed_in_memory)
-                man_spilled.append(meminfo.managed_spilled)
-
-                # unmanaged
-                unman_old.append(meminfo.unmanaged_old)
-                unman_rec.append(meminfo.unmanaged_recent)
+                managed.append(meminfo.managed_in_memory)
+                unmanaged_old.append(meminfo.unmanaged_old)
+                unmanaged_recent.append(meminfo.unmanaged_recent)
+                spilled.append(meminfo.managed_spilled)
 
             result = {
                 "width": width,
                 "x": x,
                 "color": color,
                 "alpha": [1, 0.7, 0.4, 1] * len(workers),
-                "proc_memory": quadlist(procmemory),
                 "worker": quadlist(ws.address for ws in workers),
                 "escaped_worker": quadlist(
                     escape.url_escape(ws.address) for ws in workers
                 ),
                 "y": quadlist(range(len(workers))),
-                "man_in_mem": quadlist(man_in_mem),
-                "man_spilled": quadlist(man_spilled),
-                "unman_old": quadlist(unman_old),
-                "unman_rec": quadlist(unman_rec),
+                "proc_memory": quadlist(procmemory),
+                "managed": quadlist(managed),
+                "unmanaged_old": quadlist(unmanaged_old),
+                "unmanaged_recent": quadlist(unmanaged_recent),
+                "spilled": quadlist(spilled),
             }
             # Remove rectangles with width=0
             result = {
