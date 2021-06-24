@@ -2335,40 +2335,28 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
-        total_nthreads: Py_ssize_t
-        if valid_workers is None:
-            total_nthreads = self._total_nthreads
-        else:
-            total_nthreads = 0
-            for ws in valid_workers:
-                total_nthreads += ws._nthreads
-
-        group_tasks_per_thread: double = (
-            (len(group) / total_nthreads) if total_nthreads > 0 else 0
-        )
-        if group_tasks_per_thread > 2 and sum(map(len, group._dependencies)) < 5:
-            # Group is larger than cluster with very few dependencies; minimize future data transfers.
-            ws = group._last_worker
-            if not (ws and valid_workers is not None and ws not in valid_workers):
-                if (
-                    ws
-                    and ws._occupancy / ws._nthreads / self.get_task_duration(ts)
-                    < group_tasks_per_thread
-                ):
-                    # Schedule sequential tasks onto the same worker until it's filled up.
-                    # Assumes `decide_worker` is being called in priority order.
-                    return ws
-
+        # Group is larger than cluster with few dependencies? Minimize future data transfers.
+        if (
+            valid_workers is None
+            and len(self._workers_dv) > 1
+            and len(group) > self._total_nthreads * 2
+            and sum(map(len, group._dependencies)) < 5
+        ):
+            last: WorkerState = group._last_worker
+            tasks_per_thread = len(group) / self._total_nthreads
+            if (
+                last
+                and last._occupancy / last._nthreads / self.get_task_duration(ts)
+                < tasks_per_thread
+            ):
+                # Schedule sequential tasks onto the same worker until it's filled up.
+                # Assumes `decide_worker` is being called in priority order.
+                return last
+            else:
                 # Pick a new worker for the next few tasks, considering all possible workers
-                worker_pool = (
-                    valid_workers
-                    if valid_workers is not None
-                    else (self._idle_dv or self._workers_dv).values()
-                )
                 ws = min(
-                    worker_pool,
+                    (self._idle_dv or self._workers_dv).values(),
                     key=partial(self.worker_objective, ts),
-                    default=None,
                 )
                 group._last_worker = ws
                 return ws
