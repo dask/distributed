@@ -2920,18 +2920,39 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     assert await client.has_what() == {a.address: [y.key], b.address: [x.key]}
 
 
-@gen_cluster(client=True)
-async def test_delete_worker_data_bad_worker(c, s, a, b):
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_double_delete(c, s, a):
+    """_delete_worker_data race condition where the same key is deleted twice.
+    WorkerState.nbytes is not double-decreased.
+    """
+    x, y = await c.scatter(["x", "y"])
+    await asyncio.gather(
+        s._delete_worker_data(a.address, [x.key]),
+        s._delete_worker_data(a.address, [x.key]),
+    )
+    assert a.data == {y.key: "y"}
+    a_ws = s.workers[a.address]
+    y_ts = s.tasks[y.key]
+    assert a_ws.nbytes == y_ts.nbytes
+
+
+@gen_cluster(worker_kwargs={"timeout": "10ms"})
+async def test_delete_worker_data_bad_worker(s, a, b):
     """_delete_worker_data gracefully handles a non-existing worker;
     e.g. a sender died in the middle of rebalance()
     """
-    raise NotImplementedError("TODO")
+    await a.close()
+    assert s.workers.keys() == {b.address}
+    await s._delete_worker_data(a.address, ["x"])
 
 
-@gen_cluster(client=True)
-async def test_delete_worker_data_bad_task(c, s, a, b):
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_bad_task(c, s, a):
     """_delete_worker_data gracefully handles a non-existing key;
     e.g. a task was stolen by work stealing in the middle of a rebalance().
     Other tasks on the same worker are deleted.
     """
-    raise NotImplementedError("TODO")
+    x, y = await c.scatter(["x", "y"])
+    await s._delete_worker_data(a.address, [x.key, "notexist"])
+    assert a.data == {y.key: "y"}
+    assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes

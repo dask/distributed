@@ -5607,9 +5607,10 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState
         tasks: set = {parent._tasks[key] for key in keys}
         for ts in tasks:
-            del ws._has_what[ts]
-            ts._who_has.remove(ws)
-            ws._nbytes -= ts.get_nbytes()
+            if ts in ws._has_what:
+                del ws._has_what[ts]
+                ts._who_has.remove(ws)
+                ws._nbytes -= ts.get_nbytes()
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
     async def rebalance(
