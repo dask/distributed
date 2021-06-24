@@ -1923,12 +1923,10 @@ async def test_task_groups(c, s, a, b):
         await asyncio.sleep(0.01)
 
     assert tg.states["forgotten"] == 5
-    # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
-    assert sys.getrefcount(tg) == 2
 
 
 @gen_cluster(client=True)
