@@ -784,13 +784,11 @@ class Computation:
     _start: double
     _groups: set
     _code: str
-    _recent: "Computation"
 
     def __init__(self):
         self._start = time()
         self._groups = set()
         self._code = ""
-        Computation._recent = self
 
     @property
     def code(self):
@@ -991,7 +989,7 @@ class TaskGroup:
     _stop: double
     _all_durations: object
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, computation: Computation = None):
         self._name = name
         self._prefix = None
         self._states = {state: 0 for state in ALL_TASK_STATES}
@@ -1003,7 +1001,8 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
-        Computation._recent.groups.add(self)
+        if computation is not None:
+            computation.groups.add(self)
 
     @property
     def name(self):
@@ -2051,7 +2050,9 @@ class SchedulerState:
 
     @ccall
     @exceptval(check=False)
-    def new_task(self, key: str, spec: object, state: str) -> TaskState:
+    def new_task(
+        self, key: str, spec: object, state: str, computation: Computation = None
+    ) -> TaskState:
         """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
         ts._state = state
@@ -2067,7 +2068,9 @@ class SchedulerState:
         group_key = ts._group_key
         tg = self._task_groups.get(group_key)
         if tg is None:
-            self._task_groups[group_key] = tg = TaskGroup(group_key)
+            self._task_groups[group_key] = tg = TaskGroup(
+                group_key, computation=computation
+            )
             tg._prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
@@ -4252,9 +4255,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        computation = Computation()
-        computation._code = code or ""
-        self._computations.append(computation)
+        if len(tasks) > 1:
+            computation = Computation()
+            computation._code = code or ""
+            self._computations.append(computation)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -4317,7 +4321,9 @@ class Scheduler(SchedulerState, ServerNode):
             # XXX Have a method get_task_state(self, k) ?
             ts = parent._tasks.get(k)
             if ts is None:
-                ts = parent.new_task(k, tasks.get(k), "released")
+                ts = parent.new_task(
+                    k, tasks.get(k), "released", computation=computation
+                )
             elif not ts._run_spec:
                 ts._run_spec = tasks.get(k)
 
