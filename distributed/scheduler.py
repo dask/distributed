@@ -2347,6 +2347,7 @@ class SchedulerState:
             tasks_per_thread = len(group) / self._total_nthreads
             if (
                 last
+                and last._address in self._workers_dv
                 and last._occupancy / last._nthreads / self.get_task_duration(ts)
                 < tasks_per_thread
             ):
@@ -4696,8 +4697,6 @@ class Scheduler(SchedulerState, ServerNode):
                         recommendations[ts._key] = "released"
                     else:  # pure data
                         recommendations[ts._key] = "forgotten"
-                if ts._group._last_worker is ws:
-                    ts._group._last_worker = None
             ws._has_what.clear()
 
             self.transitions(recommendations)
@@ -6271,9 +6270,8 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                tasks = {ts for w in workers for ts in w.has_what}
-                keys = {ts._key for ts in tasks if ts._who_has.issubset(workers)}
-                groups = {ts._group for ts in tasks}
+                keys = {k for w in workers for k in w.has_what}
+                keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
 
                 if keys:
                     other_workers = set(parent._workers_dv.values()) - workers
@@ -6287,10 +6285,6 @@ class Scheduler(SchedulerState, ServerNode):
                         delete=False,
                         lock=False,
                     )
-
-                for group in groups:
-                    if group._last_worker in workers:
-                        group._last_worker = None
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers:
