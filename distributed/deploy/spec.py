@@ -11,18 +11,12 @@ from inspect import isawaitable
 from tornado import gen
 
 import dask
+from dask.utils import parse_bytes, parse_timedelta
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import (
-    LoopRunner,
-    TimeoutError,
-    import_term,
-    parse_bytes,
-    parse_timedelta,
-    silence_logging,
-)
+from ..utils import LoopRunner, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 

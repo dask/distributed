@@ -10,8 +10,9 @@ import struct
 import weakref
 
 import dask
+from dask.utils import parse_bytes
 
-from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes, parse_bytes
+from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends

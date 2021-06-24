@@ -4,10 +4,12 @@ import threading
 import weakref
 from collections import defaultdict, deque
 
+from dask.utils import parse_timedelta
+
 from .core import CommClosedError
 from .metrics import time
 from .protocol.serialize import to_serialize
-from .utils import TimeoutError, parse_timedelta, sync
+from .utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 

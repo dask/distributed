@@ -6,8 +6,9 @@ from typing import Iterable
 import tlz as toolz
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from dask.utils import parse_timedelta
+
 from ..metrics import time
-from ..utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 

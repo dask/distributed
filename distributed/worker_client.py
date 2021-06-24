@@ -4,7 +4,6 @@ from contextlib import contextmanager
 import dask
 
 from .threadpoolexecutor import rejoin, secede
-from .utils import parse_timedelta
 from .worker import get_client, get_worker, thread_state
 
 
@@ -46,7 +45,7 @@ def worker_client(timeout=None, separate_thread=True):
     if timeout is None:
         timeout = dask.config.get("distributed.comm.timeouts.connect")
 
-    timeout = parse_timedelta(timeout, "s")
+    timeout = dask.utils.parse_timedelta(timeout, "s")
 
     worker = get_worker()
     client = get_client(timeout=timeout)

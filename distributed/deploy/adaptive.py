@@ -2,9 +2,10 @@ import logging
 from inspect import isawaitable
 
 import dask.config
+from dask.utils import parse_timedelta
 
 from ..protocol import pickle
-from ..utils import log_errors, parse_timedelta
+from ..utils import log_errors
 from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
