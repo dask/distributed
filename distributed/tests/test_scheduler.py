@@ -2821,6 +2821,17 @@ async def test_computations(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_computations_futures(c, s, a, b):
+    futures = [c.submit(inc, i) for i in range(10)]
+    total = c.submit(sum, futures)
+    await total
+
+    [computation] = s.computations
+    assert "sum" in str(computation.groups)
+    assert "inc" in str(computation.groups)
+
+
+@gen_cluster(client=True)
 async def test_transition_counter(c, s, a, b):
     assert s.transition_counter == 0
     await c.submit(inc, 1)

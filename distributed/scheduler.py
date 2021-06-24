@@ -784,11 +784,14 @@ class Computation:
     _start: double
     _groups: set
     _code: str
+    _last_touch: double
+    _recent: "Computation" = None
 
     def __init__(self):
-        self._start = time()
+        self._start = self._last_touch = time()
         self._groups = set()
         self._code = ""
+        Computation._recent = self
 
     @property
     def code(self):
@@ -4255,10 +4258,16 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if len(tasks) > 1:
+        if len(tasks) > 1 or Computation._recent is None:
+            # TODO: maybe reuse old computation based on time interval?
             computation = Computation()
             computation._code = code or ""
             self._computations.append(computation)
+        elif Computation._recent and Computation._recent._last_touch > start - 1:
+            computation = Computation._recent
+            computation._last_touch = start
+        else:
+            computation = None
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
