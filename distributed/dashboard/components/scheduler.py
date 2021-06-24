@@ -2019,15 +2019,9 @@ class TaskGroupGraph(DashboardComponent):
         nbytes = set()
         for key, tg in self.scheduler.task_groups.items():
 
-            # comp_tasks = (
-            #     tg.states["released"] + tg.states["memory"] + tg.states["erred"]
-            # )
-            # tot_tasks = sum(tg.states.values())
-
-            # compute width and height of boxes
-            if tg.duration and tg.nbytes_total:  # and comp_tasks:
-                durations.add(tg.duration)  # / comp_tasks * tot_tasks)
-                nbytes.add(tg.nbytes_total)  # / comp_tasks * tot_tasks)
+            if tg.duration and tg.nbytes_total:
+                durations.add(tg.duration)
+                nbytes.add(tg.nbytes_total)
 
         durations_min = min(durations, default=0)
         durations_max = max(durations, default=0)
