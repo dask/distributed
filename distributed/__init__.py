@@ -20,7 +20,7 @@ from .client import (
     wait,
 )
 from .core import Status, connect, rpc
-from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
+from .deploy import Adaptive, ElasticAdaptive, LocalCluster, SpecCluster, SSHCluster
 from .diagnostics.plugin import PipInstall, SchedulerPlugin, WorkerPlugin
 from .diagnostics.progressbar import progress
 from .event import Event

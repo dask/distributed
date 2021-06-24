@@ -1,6 +1,6 @@
 from contextlib import suppress
 
-from .adaptive import Adaptive
+from .adaptive import Adaptive, ElasticAdaptive
 from .cluster import Cluster
 from .local import LocalCluster
 from .spec import ProcessInterface, SpecCluster

@@ -2,10 +2,9 @@ import logging
 from inspect import isawaitable
 
 import dask.config
-from dask.utils import parse_timedelta
 
 from ..protocol import pickle
-from ..utils import log_errors
+from ..utils import log_errors, parse_timedelta
 from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
@@ -206,3 +205,137 @@ class Adaptive(AdaptiveCore):
     @property
     def loop(self):
         return self.cluster.loop
+
+
+class ElasticAdaptive(Adaptive):
+    """Subclass of Adaptive that works better with unknown task durations."""
+
+    def __init__(
+        self,
+        cluster=None,
+        interval=None,
+        minimum=None,
+        maximum=None,
+        wait_count=None,
+        worker_key=None,
+        **kwargs,
+    ):
+        """
+        Adaptively allocate workers based on the number of unblocked tasks.
+
+        Parameters
+        ----------
+        cluster: object
+            Must have scale and scale_down methods/coroutines
+        interval : timedelta or str, default "1000 ms"
+            Milliseconds between checks
+        wait_count: int, default 3
+            Number of consecutive times that a worker should be suggested for
+            removal before we remove it.
+        worker_key: Callable[WorkerState]
+            Function to group workers together when scaling down
+            See Scheduler.workers_to_close for more information
+        minimum: int
+            Minimum number of workers to keep around
+        maximum: int
+            Maximum number of workers to keep around
+        **kwargs:
+            Extra parameters to pass to Scheduler.workers_to_close
+        """
+        super().__init__(
+            cluster=cluster,
+            interval=interval,
+            minimum=minimum,
+            maximum=maximum,
+            wait_count=wait_count,
+            target_duration=None,
+            worker_key=worker_key,
+        )
+
+    async def recommendations(self, target: int) -> dict:
+        """
+        Make scale up/down recommendations based on current state and target
+        """
+        plan = self.plan
+
+        if target == len(plan):
+            self.close_counts.clear()
+            return {"status": "same"}
+
+        elif target > len(plan):
+            self.close_counts.clear()
+            return {"status": "up", "n": target}
+
+        elif target < len(plan):
+            to_close = set()
+
+            if target < len(plan) - len(to_close):
+                L = await self.workers_to_close(target=target)
+                to_close.update(L)
+
+            firmly_close = set()
+            for w in to_close:
+                self.close_counts[w] += 1
+                if self.close_counts[w] >= self.wait_count:
+                    firmly_close.add(w)
+
+            for k in list(self.close_counts):  # clear out unseen keys
+                if k in firmly_close or k not in to_close:
+                    del self.close_counts[k]
+
+            if firmly_close:
+                return {"status": "down", "workers": list(firmly_close)}
+            else:
+                return {"status": "same"}
+
+    async def target(self):
+        """
+        Determine target number of workers that should exist.
+
+        Notes
+        -----
+        ``Adaptive.target`` dispatches to Scheduler.adaptive_target(),
+        but may be overridden in subclasses.
+
+        Returns
+        -------
+        Target number of workers
+        """
+        # The target number of workers is the number of unblocked tasks
+        unblocked_tasks = [
+            task
+            for task in self.cluster.scheduler.tasks.values()
+            if (
+                task.state == "no-worker"
+                or task.state == "waiting"
+                or task.state == "processing"
+            )
+        ]
+        target = len(unblocked_tasks)
+
+        # Look ahead at future tasks in the DAG
+        future_pending_tasks = []
+        for task in unblocked_tasks:
+            future_pending_tasks.extend(task.dependents)
+
+        if len(future_pending_tasks) > 2 * len(self.cluster.scheduler.workers):
+            target *= 2
+
+        # Check if workers have enough memory to run tasks
+        limit_bytes = {
+            addr: ws._memory_limit
+            for addr, ws in self.cluster.scheduler.workers.items()
+        }
+        worker_bytes = [ws._nbytes for ws in self.cluster.scheduler.workers.values()]
+        limit = sum(limit_bytes.values())
+        used = sum(worker_bytes)
+        memory = 0
+        if used > 0.6 * limit and limit > 0:
+            memory = 2 * len(self.cluster.workers)
+
+        target = max(memory, target)
+
+        if target != len(self.cluster.scheduler.workers):
+            logger.debug(f"Target number of workers: {target}")
+
+        return target

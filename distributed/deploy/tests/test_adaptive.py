@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import logging
 import math
 from time import sleep
 
@@ -7,9 +8,23 @@ import pytest
 
 import dask
 
-from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
+from distributed import (
+    Adaptive,
+    Client,
+    ElasticAdaptive,
+    LocalCluster,
+    SpecCluster,
+    Worker,
+    wait,
+)
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
+from distributed.utils_test import (
+    async_wait_for,
+    captured_logger,
+    clean,
+    gen_test,
+    slowinc,
+)
 
 
 def test_adaptive_local_cluster(loop):
@@ -481,3 +496,72 @@ async def test_adaptive_stopped():
         pc = instance.periodic_callback
 
     await async_wait_for(lambda: not pc.is_running(), timeout=5)
+
+
+def test_elastic_local_cluster(loop):
+    with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        loop=loop,
+    ) as cluster:
+        with captured_logger("distributed.deploy.adaptive", level=logging.DEBUG) as log:
+            alc = cluster.adapt(interval="100 ms", Adaptive=ElasticAdaptive)
+            with Client(cluster, loop=loop) as c:
+                assert not c.nthreads()
+                future = c.submit(lambda x: x + 1, 1)
+                assert future.result() == 2
+                assert c.nthreads()
+                sleep(0.1)
+                assert c.nthreads()  # still there after some time
+
+                del future
+
+                start = time()
+                while cluster.scheduler.nthreads:
+                    sleep(0.01)
+                    assert time() < start + 5
+
+                assert not c.nthreads()
+        text = log.getvalue()
+        assert "Target number of workers: 1" in text
+
+
+@pytest.mark.asyncio
+async def test_elastic_multi_workers(cleanup):
+    async with SpecCluster(
+        workers={
+            "a": {"cls": Worker},
+            "b": {"cls": Worker},
+            "c": {"cls": Worker},
+            "d": {"cls": Worker},
+            "e": {"cls": Worker},
+        },
+        asynchronous=True,
+    ) as cluster:
+
+        with captured_logger("distributed.deploy.adaptive", level=logging.DEBUG) as log:
+            cluster.scheduler.allowed_failures = 1000
+
+            adapt = cluster.adapt(interval="10 ms", Adaptive=ElasticAdaptive)
+            async with Client(cluster, asynchronous=True) as c:
+                futures = []
+                for i in range(5):
+                    f = c.submit(slowinc, i)
+                    futures.append(f)
+
+                assert len(cluster.scheduler.workers) == 5
+
+                start = time()
+                while cluster.scheduler.workers:
+                    await asyncio.sleep(0.01)
+                    assert time() < start + 15, adapt.log
+
+                # no workers for a while
+                for i in range(10):
+                    assert not cluster.scheduler.workers
+                    await asyncio.sleep(0.05)
+
+        text = log.getvalue()
+        assert "Target number of workers: 5" in text
