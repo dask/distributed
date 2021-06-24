@@ -208,7 +208,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
 
         # A transfer at the very end to move aggregated results is fine (necessary with unbalanced workers in fact),
         # but generally there should be very very few transfers.
-        assert len(unexpected_transfers) <= 2, unexpected_transfers
+        assert len(unexpected_transfers) <= 3, unexpected_transfers
 
     test()
 
