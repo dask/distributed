@@ -164,7 +164,9 @@ DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
 
-RESOLVE_WORKER_HOSTNAME = dask.config.get("distributed.scheduler.resolve-worker-hostname")
+RESOLVE_WORKER_HOSTNAME = dask.config.get(
+    "distributed.scheduler.resolve-worker-hostname"
+)
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
