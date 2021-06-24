@@ -770,6 +770,55 @@ class WorkerState:
 
 @final
 @cclass
+class Computation:
+    """
+    Collection tracking a single compute or persist call
+
+    See also
+    --------
+    TaskPrefix
+    TaskGroup
+    TaskState
+    """
+
+    _start: double
+    _stop: double
+    _groups: set
+    _code: str
+    _recent: "Computation"
+
+    def __init__(self):
+        self._start = time()
+        self._stop = 0.0
+        self._groups = set()
+        self._code = ""
+        Computation._recent = self
+
+    @property
+    def code(self):
+        return self._code
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        return self._stop
+
+    @property
+    def groups(self):
+        return self._groups
+
+    def __repr__(self):
+        return (
+            f"Computation: {format_time(time() - self._start)} ago with {len(self.groups)} groups\n\n"
+            + self.code
+        )
+
+
+@final
+@cclass
 class TaskPrefix:
     """Collection tracking all tasks within a group
 
@@ -951,6 +1000,7 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
+        Computation._recent.groups.add(self)
 
     @property
     def name(self):
@@ -1749,6 +1799,7 @@ class SchedulerState:
     _aliases: dict
     _bandwidth: double
     _clients: dict
+    _computations: deque
     _extensions: dict
     _host_info: dict
     _idle: object
@@ -1819,6 +1870,7 @@ class SchedulerState:
             self._tasks = tasks
         else:
             self._tasks = dict()
+        self._computations = deque(maxlen=100)
         self._task_groups = dict()
         self._task_prefixes = dict()
         self._task_metadata = dict()
@@ -1887,6 +1939,10 @@ class SchedulerState:
     @property
     def clients(self):
         return self._clients
+
+    @property
+    def computations(self):
+        return self._computations
 
     @property
     def extensions(self):
@@ -4112,6 +4168,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        code=None,
     ):
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
@@ -4150,6 +4207,7 @@ class Scheduler(SchedulerState, ServerNode):
             actors,
             fifo_timeout,
             annotations,
+            code=code,
         )
 
     def update_graph(
@@ -4168,6 +4226,7 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         annotations=None,
+        code=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -4189,6 +4248,10 @@ class Scheduler(SchedulerState, ServerNode):
                 del tasks[k]
 
         dependencies = dependencies or {}
+
+        computation = Computation()
+        computation._code = code or ""
+        self._computations.append(computation)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps

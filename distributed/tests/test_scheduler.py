@@ -2798,6 +2798,26 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
 
 
 @gen_cluster(client=True)
+async def test_computations(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.ones(100, chunks=(10,))
+    y = (x + 1).persist()
+
+    z = (x - 2).persist()
+
+    await y
+    await z
+
+    assert len(s.computations) == 2
+    assert "add" in str(s.computations[0].groups)
+    assert "sub" in str(s.computations[1].groups)
+    assert "sub" not in str(s.computations[0].groups)
+
+    assert "x + 1" in repr(s.computations[1])
+
+
+@gen_cluster(client=True)
 async def test_transition_counter(c, s, a, b):
     assert s.transition_counter == 0
     await c.submit(inc, 1)

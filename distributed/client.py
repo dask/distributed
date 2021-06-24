@@ -2615,6 +2615,7 @@ class Client:
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
@@ -2624,6 +2625,7 @@ class Client:
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
+                    "code": inspect.getsource(sys._getframe(4)),
                 }
             )
             return futures
