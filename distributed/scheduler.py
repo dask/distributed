@@ -2321,6 +2321,9 @@ class SchedulerState:
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
+        if not self._workers_dv:
+            return None
+
         ws: WorkerState = None
         group: TaskGroup = ts._group
         valid_workers: set = self.valid_workers(ts)
@@ -2329,7 +2332,6 @@ class SchedulerState:
             valid_workers is not None
             and not valid_workers
             and not ts._loose_restrictions
-            and self._workers_dv
         ):
             self._unrunnable.add(ts)
             ts.state = "no-worker"
@@ -2338,7 +2340,6 @@ class SchedulerState:
         # Group is larger than cluster with few dependencies? Minimize future data transfers.
         if (
             valid_workers is None
-            and len(self._workers_dv) > 1
             and len(group) > self._total_nthreads * 2
             and sum(map(len, group._dependencies)) < 5
         ):
