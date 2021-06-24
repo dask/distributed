@@ -2335,11 +2335,14 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
-        total_nthreads: Py_ssize_t = (
-            self._total_nthreads
-            if valid_workers is None
-            else sum(wws._nthreads for wws in valid_workers)
-        )
+        total_nthreads: Py_ssize_t
+        if valid_workers is None:
+            total_nthreads = self._total_nthreads
+        else:
+            total_nthreads = 0
+            for ws in valid_workers:
+                total_nthreads += ws._nthreads
+
         group_tasks_per_thread: double = (
             (len(group) / total_nthreads) if total_nthreads > 0 else 0
         )
