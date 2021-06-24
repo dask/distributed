@@ -240,15 +240,13 @@ class NBytesCluster(DashboardComponent):
                     "width": [0] * 4,
                     "x": [0] * 4,
                     "y": [0] * 4,
-                    "proc_memory": [0] * 4,
                     "color": ["blue", "blue", "blue", "grey"],
                     "alpha": [1, 0.7, 0.4, 1],
-                    "memtype": [
-                        "managed (in memory)",
-                        "unmanaged",
-                        "unmanaged, recently increased",
-                        "managed (spilled to disk)",
-                    ],
+                    "proc_memory": [0] * 4,
+                    "managed": [0] * 4,
+                    "unmanaged_old": [0] * 4,
+                    "unmanaged_recent": [0] * 4,
+                    "spilled": [0] * 4,
                 }
             )
 
@@ -283,9 +281,31 @@ class NBytesCluster(DashboardComponent):
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
-            hover = HoverTool()
-            hover.tooltips = "@width{0.00 b} @memtype"
-            hover.point_policy = "follow_mouse"
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Process memory (RSS):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@managed{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_old{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_recent{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@spilled{0.00 b}</span>
+                            </div>
+                            """,
+            )
             self.root.add_tools(hover)
 
     @without_property_validation
@@ -301,11 +321,16 @@ class NBytesCluster(DashboardComponent):
                 meminfo.unmanaged_recent,
                 meminfo.managed_spilled,
             ]
+
             result = {
                 "width": width,
                 "x": [sum(width[:i]) + w / 2 for i, w in enumerate(width)],
                 "color": [color, color, color, "grey"],
                 "proc_memory": [meminfo.process] * 4,
+                "managed": [meminfo.managed_in_memory] * 4,
+                "unmanaged_old": [meminfo.unmanaged_old] * 4,
+                "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
+                "spilled": [meminfo.managed_spilled] * 4,
             }
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
@@ -333,12 +358,15 @@ class NBytes(DashboardComponent):
                     "width": [],
                     "x": [],
                     "y": [],
-                    "memtype": [],
                     "color": [],
                     "alpha": [],
-                    "proc_memory": [],
                     "worker": [],
                     "escaped_worker": [],
+                    "proc_memory": [],
+                    "managed": [],
+                    "unmanaged_old": [],
+                    "unmanaged_recent": [],
+                    "spilled": [],
                 }
             )
 
@@ -377,9 +405,35 @@ class NBytes(DashboardComponent):
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
-            hover = HoverTool()
-            hover.tooltips = "@worker: @proc_memory{0.00 b} (@width{0.00 b} @memtype)"
-            hover.point_policy = "follow_mouse"
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips="""
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Worker:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@worker</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Process memory (RSS):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@proc_memory{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Managed:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@managed{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (old):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_old{0.00 b}</span>
+                            </div>
+                            <div style="margin-left: 1em;">
+                                <span style="font-size: 12px; font-weight: bold;">Unmanaged (recent):</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@unmanaged_recent{0.00 b}</span>
+                            </div>
+                            <div>
+                                <span style="font-size: 12px; font-weight: bold;">Spilled to disk:</span>&nbsp;
+                                <span style="font-size: 10px; font-family: Monaco, monospace;">@spilled{0.00 b}</span>
+                            </div>
+                            """,
+            )
             self.root.add_tools(hover)
 
     @without_property_validation
@@ -396,8 +450,12 @@ class NBytes(DashboardComponent):
             width = []
             x = []
             color = []
-            procmemory = []
             max_limit = 0
+            procmemory = []
+            managed = []
+            spilled = []
+            unmanaged_old = []
+            unmanaged_recent = []
 
             for ws in workers:
                 meminfo = ws.memory
@@ -415,26 +473,29 @@ class NBytes(DashboardComponent):
                 ]
                 x += [sum(width[-4:i]) + width[i] / 2 for i in range(-4, 0)]
                 color += [color_i, color_i, color_i, "grey"]
+
+                # memory info
                 procmemory.append(meminfo.process)
+                managed.append(meminfo.managed_in_memory)
+                unmanaged_old.append(meminfo.unmanaged_old)
+                unmanaged_recent.append(meminfo.unmanaged_recent)
+                spilled.append(meminfo.managed_spilled)
 
             result = {
                 "width": width,
                 "x": x,
                 "color": color,
                 "alpha": [1, 0.7, 0.4, 1] * len(workers),
-                "memtype": [
-                    "managed (in memory)",
-                    "unmanaged",
-                    "unmanaged, recently increased",
-                    "managed (spilled to disk)",
-                ]
-                * len(workers),
-                "proc_memory": quadlist(procmemory),
                 "worker": quadlist(ws.address for ws in workers),
                 "escaped_worker": quadlist(
                     escape.url_escape(ws.address) for ws in workers
                 ),
                 "y": quadlist(range(len(workers))),
+                "proc_memory": quadlist(procmemory),
+                "managed": quadlist(managed),
+                "unmanaged_old": quadlist(unmanaged_old),
+                "unmanaged_recent": quadlist(unmanaged_recent),
+                "spilled": quadlist(spilled),
             }
             # Remove rectangles with width=0
             result = {
@@ -1965,7 +2026,7 @@ class WorkerTable(DashboardComponent):
             "memory_limit": "limit",
             "memory_percent": "memory %",
             "memory_managed": "managed",
-            "memory_unmanaged_old": "unmanaged",
+            "memory_unmanaged_old": "unmanaged old",
             "memory_unmanaged_recent": "unmanaged recent",
             "memory_spilled": "spilled",
             "num_fds": "# fds",
