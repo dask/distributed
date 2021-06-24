@@ -2038,9 +2038,7 @@ class TaskGroupGraph(DashboardComponent):
                 width_box = 0.7
                 height_box = width_box / 2
 
-            box_dim[key] = {}
-            box_dim[key]["width"] = width_box
-            box_dim[key]["height"] = height_box
+            box_dim[key] = {"width": width_box, "height": height_box}
 
         for key, tg in self.scheduler.task_groups.items():
             x = self.nodes_layout[key]["x"]
