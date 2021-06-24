@@ -43,7 +43,7 @@ from tornado import escape
 
 import dask
 from dask import config
-from dask.utils import format_bytes, key_split
+from dask.utils import format_bytes, format_time, key_split, parse_timedelta
 
 try:
     import numpy as np
@@ -70,7 +70,7 @@ from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of
 from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
-from distributed.utils import Log, format_time, log_errors, parse_timedelta
+from distributed.utils import Log, log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
