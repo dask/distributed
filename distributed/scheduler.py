@@ -941,6 +941,7 @@ class TaskGroup:
     _stop: double
     _all_durations: object
     _last_worker: WorkerState
+    _last_worker_tasks_left: Py_ssize_t
 
     def __init__(self, name: str):
         self._name = name
@@ -955,6 +956,7 @@ class TaskGroup:
         self._stop = 0.0
         self._all_durations = defaultdict(float)
         self._last_worker = None
+        self._last_worker_tasks_left = 0
 
     @property
     def name(self):
@@ -999,6 +1001,10 @@ class TaskGroup:
     @property
     def last_worker(self):
         return self._last_worker
+
+    @property
+    def last_worker_tasks_left(self):
+        return self._last_worker_tasks_left
 
     @ccall
     def add(self, o):
@@ -2344,24 +2350,24 @@ class SchedulerState:
             and sum(map(len, group._dependencies)) < 5
         ):
             ws: WorkerState = group._last_worker
-            tasks_per_thread = len(group) / self._total_nthreads
 
             if not (
-                ws
-                and ws._address in self._workers_dv
-                and ws._occupancy / ws._nthreads / self.get_task_duration(ts)
-                < tasks_per_thread
+                ws and group._last_worker_tasks_left and ws._address in self._workers_dv
             ):
                 # Last-used worker is full or unknown; pick a new worker for the next few tasks
                 ws = min(
                     (self._idle_dv or self._workers_dv).values(),
                     key=partial(self.worker_objective, ts),
                 )
+                group._last_worker_tasks_left = math.floor(
+                    (len(group) / self._total_nthreads) * ws._nthreads
+                )
 
             # Record `last_worker`, or clear it on the final task
             group._last_worker = (
                 ws if group.states["released"] + group.states["waiting"] > 1 else None
             )
+            group._last_worker_tasks_left -= 1
             return ws
 
         if ts._dependencies or valid_workers is not None:
