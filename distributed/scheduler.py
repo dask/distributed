@@ -2343,20 +2343,16 @@ class SchedulerState:
             and len(group) > self._total_nthreads * 2
             and sum(map(len, group._dependencies)) < 5
         ):
-            last: WorkerState = group._last_worker
+            ws: WorkerState = group._last_worker
             tasks_per_thread = len(group) / self._total_nthreads
 
-            if (
-                last
-                and last._address in self._workers_dv
-                and last._occupancy / last._nthreads / self.get_task_duration(ts)
+            if not (
+                ws
+                and ws._address in self._workers_dv
+                and ws._occupancy / ws._nthreads / self.get_task_duration(ts)
                 < tasks_per_thread
             ):
-                # Schedule sequential tasks onto the same worker until it's filled up.
-                # Assumes `decide_worker` is being called in priority order.
-                ws = last
-            else:
-                # Pick a new worker for the next few tasks, considering all possible workers
+                # Last-used worker is full or unknown; pick a new worker for the next few tasks
                 ws = min(
                     (self._idle_dv or self._workers_dv).values(),
                     key=partial(self.worker_objective, ts),
