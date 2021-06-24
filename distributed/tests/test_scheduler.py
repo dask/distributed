@@ -2803,10 +2803,9 @@ async def test_computations(c, s, a, b):
 
     x = da.ones(100, chunks=(10,))
     y = (x + 1).persist()
+    await y
 
     z = (x - 2).persist()
-
-    await y
     await z
 
     assert len(s.computations) == 2
@@ -2815,6 +2814,10 @@ async def test_computations(c, s, a, b):
     assert "sub" not in str(s.computations[0].groups)
 
     assert "x + 1" in repr(s.computations[1])
+
+    assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
+
+    assert s.computations[0].states["memory"] == y.npartitions
 
 
 @gen_cluster(client=True)

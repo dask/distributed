@@ -782,14 +782,12 @@ class Computation:
     """
 
     _start: double
-    _stop: double
     _groups: set
     _code: str
     _recent: "Computation"
 
     def __init__(self):
         self._start = time()
-        self._stop = 0.0
         self._groups = set()
         self._code = ""
         Computation._recent = self
@@ -804,7 +802,12 @@ class Computation:
 
     @property
     def stop(self):
-        return self._stop
+        return max(tg.stop for tg in self.groups)
+
+    @property
+    def states(self):
+        tg: TaskGroup
+        return merge_with(sum, [tg._states for tg in self._groups])
 
     @property
     def groups(self):
