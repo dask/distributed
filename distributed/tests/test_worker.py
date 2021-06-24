@@ -1587,14 +1587,18 @@ async def test_close_gracefully(c, s, a, b):
 @pytest.mark.asyncio
 async def test_lifetime(cleanup):
     async with Scheduler() as s:
-        async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
+        async with Worker(s.address, lifetime="1 seconds") as a, Worker(s.address) as b:
             async with Client(s.address, asynchronous=True) as c:
                 futures = c.map(slowinc, range(200), delay=0.1)
+                assert a.status == Status.running
                 await asyncio.sleep(1.5)
-                assert b.status != Status.running
-                await b.finished()
+                assert a.status != Status.running
+                await a.finished()
 
-                assert set(b.data).issubset(a.data)  # successfully moved data over
+                assert set(a.data).issubset(b.data), (
+                    list(a.data),
+                    list(b.data),
+                )  # successfully moved data over
 
 
 @gen_cluster(client=True, worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
