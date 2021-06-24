@@ -791,7 +791,7 @@ class Computation:
         self._start = self._last_touch = time()
         self._groups = set()
         self._code = ""
-        Computation._recent = self
+        Computation.recent = self
 
     @property
     def code(self):
