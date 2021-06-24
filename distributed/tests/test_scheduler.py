@@ -2895,44 +2895,43 @@ async def test_gather_on_workers_duplicate_task(client, s, a, b, c):
     assert c_ws.nbytes == b_ws.nbytes == a_ws.nbytes
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_rebalance_move_data_bad_sender(client, s, a, b, c):
-    """Sender disappears between _rebalance_find_msgs and _rebalance_move_data.
-    Tasks from different senders to the same recipient are rebalanced.
-    Tasks from different senders to different recipients are rebalanced.
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1)] * 3, worker_kwargs={"timeout": "10ms"}
+)
+async def test_rebalance_dead_recipient(client, s, a, b, c):
+    """A key fails to be rebalanced due to recipient failure.
+    The key is not deleted from the sender.
+    Unrelated, successful keys are deleted from the senders.
     """
-    raise NotImplementedError("TODO")
+    x, y = await client.scatter(["x", "y"], workers=[a.address])
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    c_ws = s.workers[c.address]
+    x_ts = s.tasks[x.key]
+    y_ts = s.tasks[y.key]
+    await c.close()
+    assert s.workers.keys() == {a.address, b.address}
 
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_rebalance_move_data_bad_recipient(client, s, a, b, c):
-    """Recipient disappears between _rebalance_find_msgs and _rebalance_move_data.
-    Tasks to the faulty recipient are not deleted from the sender.
-    Tasks to different recipients are rebalanced.
-    """
-    raise NotImplementedError("TODO")
-
-
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_rebalance_move_data_bad_task(client, s, a, b, c):
-    """Task disappears between _rebalance_find_msgs and _rebalance_move_data.
-    Other tasks to the same recipient are rebalanced.
-    Other tasks to different recipients are rebalanced.
-    """
-    raise NotImplementedError("TODO")
+    out = await s._rebalance_move_data([(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)])
+    # FIXME status code is misleading
+    assert out == {"status": "missing-data", "keys": [y.key]}
+    assert a.data == {y.key: "y"}
+    assert b.data == {x.key: "x"}
+    assert await client.has_what() == {a.address: [y.key], b.address: [x.key]}
 
 
 @gen_cluster(client=True)
 async def test_delete_worker_data_bad_worker(c, s, a, b):
-    """_delete_worker_data gracefully handles a non-existing worker; e.g. a sender died
-    in the middle of rebalance()
+    """_delete_worker_data gracefully handles a non-existing worker;
+    e.g. a sender died in the middle of rebalance()
     """
     raise NotImplementedError("TODO")
 
 
 @gen_cluster(client=True)
 async def test_delete_worker_data_bad_task(c, s, a, b):
-    """_delete_worker_data gracefully handles a non-existing key; e.g. a task was stolen
-    by work stealing in the middle of a rebalance()
+    """_delete_worker_data gracefully handles a non-existing key;
+    e.g. a task was stolen by work stealing in the middle of a rebalance().
+    Other tasks on the same worker are deleted.
     """
     raise NotImplementedError("TODO")
