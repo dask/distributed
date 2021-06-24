@@ -425,9 +425,7 @@ async def test_gather_missing_keys(s, a, b):
     assert a.data["x"] == b.data["x"]
 
 
-@gen_cluster(
-    worker_kwargs={"timeout": "100ms"},
-)
+@gen_cluster(worker_kwargs={"timeout": "10ms"})
 async def test_gather_missing_workers(s, a, b):
     """A worker owning the only copy of a key is missing.
     Keys from other workers are gathered successfully.
@@ -444,9 +442,7 @@ async def test_gather_missing_workers(s, a, b):
 
 
 @pytest.mark.parametrize("missing_first", [False, True])
-@gen_cluster(
-    worker_kwargs={"timeout": "100ms"},
-)
+@gen_cluster(worker_kwargs={"timeout": "10ms"})
 async def test_gather_missing_workers_replicated(s, a, b, missing_first):
     """A worker owning a redundant copy of a key is missing.
     The key is successfully gathered from other workers.
