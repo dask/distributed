@@ -940,6 +940,7 @@ class TaskGroup:
     _start: double
     _stop: double
     _all_durations: object
+    _last_worker: WorkerState
 
     def __init__(self, name: str):
         self._name = name
@@ -953,6 +954,7 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
+        self._last_worker = None
 
     @property
     def name(self):
@@ -993,6 +995,10 @@ class TaskGroup:
     @property
     def stop(self):
         return self._stop
+
+    @property
+    def last_worker(self):
+        return self._last_worker
 
     @ccall
     def add(self, o):
@@ -2316,6 +2322,7 @@ class SchedulerState:
         Decide on a worker for task *ts*.  Return a WorkerState.
         """
         ws: WorkerState = None
+        group: TaskGroup = ts._group
         valid_workers: set = self.valid_workers(ts)
 
         if (
@@ -2328,6 +2335,41 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
+        total_nthreads: Py_ssize_t = (
+            self._total_nthreads
+            if valid_workers is None
+            else sum(wws._nthreads for wws in valid_workers)
+        )
+        group_tasks_per_thread: double = (
+            (len(group) / total_nthreads) if total_nthreads > 0 else 0
+        )
+        if group_tasks_per_thread > 2 and sum(map(len, group._dependencies)) < 5:
+            # Group is larger than cluster with very few dependencies; minimize future data transfers.
+            ws = group._last_worker
+            if not (ws and valid_workers is not None and ws not in valid_workers):
+                if (
+                    ws
+                    and ws._occupancy / ws._nthreads / self.get_task_duration(ts)
+                    < group_tasks_per_thread
+                ):
+                    # Schedule sequential tasks onto the same worker until it's filled up.
+                    # Assumes `decide_worker` is being called in priority order.
+                    return ws
+
+                # Pick a new worker for the next few tasks, considering all possible workers
+                worker_pool = (
+                    valid_workers
+                    if valid_workers is not None
+                    else (self._idle_dv or self._workers_dv).values()
+                )
+                ws = min(
+                    worker_pool,
+                    key=partial(self.worker_objective, ts),
+                    default=None,
+                )
+                group._last_worker = ws
+                return ws
+
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
@@ -2336,6 +2378,7 @@ class SchedulerState:
                 partial(self.worker_objective, ts),
             )
         else:
+            # Fastpath when there are no related tasks or restrictions
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
             wp_vals = worker_pool.values()
@@ -4661,6 +4704,8 @@ class Scheduler(SchedulerState, ServerNode):
                         recommendations[ts._key] = "released"
                     else:  # pure data
                         recommendations[ts._key] = "forgotten"
+                if ts._group._last_worker is ws:
+                    ts._group._last_worker = None
             ws._has_what.clear()
 
             self.transitions(recommendations)
@@ -6234,8 +6279,9 @@ class Scheduler(SchedulerState, ServerNode):
                 logger.info("Retire workers %s", workers)
 
                 # Keys orphaned by retiring those workers
-                keys = {k for w in workers for k in w.has_what}
-                keys = {ts._key for ts in keys if ts._who_has.issubset(workers)}
+                tasks = {ts for w in workers for ts in w.has_what}
+                keys = {ts._key for ts in tasks if ts._who_has.issubset(workers)}
+                groups = {ts._group for ts in tasks}
 
                 if keys:
                     other_workers = set(parent._workers_dv.values()) - workers
@@ -6249,6 +6295,10 @@ class Scheduler(SchedulerState, ServerNode):
                         delete=False,
                         lock=False,
                     )
+
+                for group in groups:
+                    if group._last_worker in workers:
+                        group._last_worker = None
 
                 worker_keys = {ws._address: ws.identity() for ws in workers}
                 if close_workers:
