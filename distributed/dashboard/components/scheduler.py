@@ -1955,10 +1955,12 @@ class TaskGroupGraph(DashboardComponent):
 
             return nodes_layout, arrows_layout
 
-    def compute_size(self, x, shift, stretch):
-        start = 0.5
-        end = 0.9
-        y = (math.tanh(stretch * (x - np.log10(shift))) + 1) / 2 * (end - start) + start
+    def compute_size(self, x, min_box, max_box):
+        start = 0.4
+        end = 0.8
+
+        y = (end - start) / (max_box - min_box) * (x - min_box) + start
+
         return y
 
     @without_property_validation
@@ -2013,6 +2015,25 @@ class TaskGroupGraph(DashboardComponent):
             "ye": [],
         }
 
+        durations = set()
+        nbytes = set()
+        for key, tg in self.scheduler.task_groups.items():
+
+            # comp_tasks = (
+            #     tg.states["released"] + tg.states["memory"] + tg.states["erred"]
+            # )
+            # tot_tasks = sum(tg.states.values())
+
+            # compute width and height of boxes
+            if tg.duration and tg.nbytes_total:  # and comp_tasks:
+                durations.add(tg.duration)  # / comp_tasks * tot_tasks)
+                nbytes.add(tg.nbytes_total)  # / comp_tasks * tot_tasks)
+
+        durations_min = min(durations, default=0)
+        durations_max = max(durations, default=0)
+        nbytes_min = min(nbytes, default=0)
+        nbytes_max = max(nbytes, default=0)
+
         box_dim = {}
         for key, tg in self.scheduler.task_groups.items():
 
@@ -2022,20 +2043,30 @@ class TaskGroupGraph(DashboardComponent):
             tot_tasks = sum(tg.states.values())
 
             # compute width and height of boxes
-            if tg.duration and tg.nbytes_total and comp_tasks:
-                # Extrapolated duration and nbytes total (not scaled)
-                w_temp = math.log10(tg.duration / comp_tasks * tot_tasks)
-                h_temp = math.log10(tg.nbytes_total / comp_tasks * tot_tasks)
+            if (
+                tg.duration
+                and tg.nbytes_total
+                and comp_tasks
+                and len(durations) > 1
+                and len(nbytes) > 1
+            ):
 
                 # scale duration (width)
-                # Choose middle to 1e2 -> shift 1e2, and try stretch = 0.7
-                width_box = self.compute_size(w_temp, shift=1e2, stretch=0.7)
+                width_box = self.compute_size(
+                    tg.duration / comp_tasks * tot_tasks,
+                    min_box=durations_min / comp_tasks * tot_tasks,
+                    max_box=durations_max / comp_tasks * tot_tasks,
+                )
 
                 # need to scale memory (height)
-                # Choose middle to 1e9 -> shift 1e9, and try stretch = 0.4
-                height_box = self.compute_size(h_temp, shift=1e9, stretch=0.4)
+                height_box = self.compute_size(
+                    tg.nbytes_total / comp_tasks * tot_tasks,
+                    min_box=nbytes_min / comp_tasks * tot_tasks,
+                    max_box=nbytes_max / comp_tasks * tot_tasks,
+                )
+
             else:
-                width_box = 0.7
+                width_box = 0.6
                 height_box = width_box / 2
 
             box_dim[key] = {"width": width_box, "height": height_box}
