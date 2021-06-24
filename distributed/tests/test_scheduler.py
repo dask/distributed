@@ -2034,12 +2034,10 @@ async def test_task_groups(c, s, a, b):
         await asyncio.sleep(0.01)
 
     assert tg.states["forgotten"] == 5
-    # Ensure TaskGroup is removed once all tasks are in forgotten state
     assert tg.name not in s.task_groups
     assert tg.start > start
     assert tg.stop < stop
     assert "compute" in tg.all_durations
-    assert sys.getrefcount(tg) == 2
 
 
 @gen_cluster(client=True)
@@ -3093,6 +3091,41 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
+
+
+@gen_cluster(client=True)
+async def test_computations(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+
+    x = da.ones(100, chunks=(10,))
+    y = (x + 1).persist()
+    await y
+
+    z = (x - 2).persist()
+    await z
+
+    assert len(s.computations) == 2
+    assert "add" in str(s.computations[0].groups)
+    assert "sub" in str(s.computations[1].groups)
+    assert "sub" not in str(s.computations[0].groups)
+
+    assert isinstance(repr(s.computations[1]), str)
+    assert "x + 1" in s.computations[1]._repr_html_()
+
+    assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
+
+    assert s.computations[0].states["memory"] == y.npartitions
+
+
+@gen_cluster(client=True)
+async def test_computations_futures(c, s, a, b):
+    futures = [c.submit(inc, i) for i in range(10)]
+    total = c.submit(sum, futures)
+    await total
+
+    [computation] = s.computations
+    assert "sum" in str(computation.groups)
+    assert "inc" in str(computation.groups)
 
 
 @gen_cluster(client=True)
