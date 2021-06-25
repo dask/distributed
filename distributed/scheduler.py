@@ -5609,9 +5609,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         ws: WorkerState = parent._workers_dv[worker_address]
         ts: TaskState
-        tasks: set = {parent._tasks[key] for key in keys}
-        for ts in tasks:
-            if ts in ws._has_what:
+        for key in keys:
+            ts = parent._tasks.get(key)
+            if ts is not None and ts in ws._has_what:
                 del ws._has_what[ts]
                 ts._who_has.remove(ws)
                 ws._nbytes -= ts.get_nbytes()
