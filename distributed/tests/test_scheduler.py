@@ -2802,7 +2802,7 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
 
 
 @gen_cluster(client=True)
-async def test_gather_on_workers(c, s, a, b):
+async def test_gather_on_worker(c, s, a, b):
     x = await c.scatter("x", workers=[a.address])
     x_ts = s.tasks[x.key]
     a_ws = s.workers[a.address]
@@ -2814,8 +2814,8 @@ async def test_gather_on_workers(c, s, a, b):
     assert x_ts not in b_ws.has_what
     assert x_ts.who_has == {a_ws}
 
-    out = await s._gather_on_workers({b.address: {x.key: [a.address]}})
-    assert out == {b.address: set()}
+    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
 
@@ -2825,36 +2825,36 @@ async def test_gather_on_workers(c, s, a, b):
 
 
 @gen_cluster(client=True, worker_kwargs={"timeout": "10ms"})
-async def test_gather_on_workers_bad_sender(c, s, a, b):
+async def test_gather_on_worker_bad_sender(c, s, a, b):
     """The only sender for a key is missing"""
-    out = await s._gather_on_workers({a.address: {"x": ["tcp://127.0.0.1:12345"]}})
-    assert out == {a.address: {"x"}}
+    out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
+    assert out == {"x"}
 
 
 @pytest.mark.parametrize("missing_first", [False, True])
 @gen_cluster(client=True, worker_kwargs={"timeout": "10ms"})
-async def test_gather_on_workers_bad_sender_replicated(c, s, a, b, missing_first):
+async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first):
     """One of the senders for a key is missing, but the key is available somewhere else"""
     x = await c.scatter("x", workers=[a.address])
     bad_addr = "tcp://127.0.0.1:12345"
     # Order matters; test both
     addrs = [bad_addr, a.address] if missing_first else [a.address, bad_addr]
-    out = await s._gather_on_workers({b.address: {x.key: addrs}})
-    assert out == {b.address: set()}
+    out = await s._gather_on_worker(b.address, {x.key: addrs})
+    assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
 
 
 @gen_cluster(client=True)
-async def test_gather_on_workers_key_not_on_sender(c, s, a, b):
+async def test_gather_on_worker_key_not_on_sender(c, s, a, b):
     """The only sender for a key does not actually hold it"""
-    out = await s._gather_on_workers({a.address: {"x": [b.address]}})
-    assert out == {a.address: {"x"}}
+    out = await s._gather_on_worker(a.address, {"x": [b.address]})
+    assert out == {"x"}
 
 
 @pytest.mark.parametrize("missing_first", [False, True])
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_gather_on_workers_key_not_on_sender_replicated(
+async def test_gather_on_worker_key_not_on_sender_replicated(
     client, s, a, b, c, missing_first
 ):
     """One of the senders for a key does not actually hold it, but the key is available
@@ -2863,14 +2863,14 @@ async def test_gather_on_workers_key_not_on_sender_replicated(
     x = await client.scatter("x", workers=[a.address])
     # Order matters; test both
     addrs = [b.address, a.address] if missing_first else [a.address, b.address]
-    out = await s._gather_on_workers({c.address: {x.key: addrs}})
-    assert out == {c.address: set()}
+    out = await s._gather_on_worker(c.address, {x.key: addrs})
+    assert out == set()
     assert a.data[x.key] == "x"
     assert c.data[x.key] == "x"
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
-async def test_gather_on_workers_duplicate_task(client, s, a, b, c):
+async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
     """Race condition where the recipient worker receives the same task twice.
     Test that the task nbytes are not double-counted on the recipient.
     """
@@ -2880,10 +2880,10 @@ async def test_gather_on_workers_duplicate_task(client, s, a, b, c):
     assert x.key not in c.data
 
     out = await asyncio.gather(
-        s._gather_on_workers({c.address: {x.key: [a.address]}}),
-        s._gather_on_workers({c.address: {x.key: [b.address]}}),
+        s._gather_on_worker(c.address, {x.key: [a.address]}),
+        s._gather_on_worker(c.address, {x.key: [b.address]}),
     )
-    assert out == [{c.address: set()}, {c.address: set()}]
+    assert out == [set(), set()]
     assert c.data[x.key] == "x"
 
     a_ws = s.workers[a.address]

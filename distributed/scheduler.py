@@ -5394,58 +5394,6 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event("all", {"action": "gather", "count": len(keys)})
         return result
 
-    async def _gather_on_workers(
-        self, transfers: "Mapping[str, Mapping[Hashable, list[str]]]"
-    ) -> "dict[str, set[Hashable]]":
-        """Peer-to-peer copy of keys between workers
-
-        Parameters
-        ----------
-        transfers :
-            {recipient address: {key: [sender address, sender address, ...], key: ...}}
-
-        Returns
-        -------
-        returns:
-            {recipient address: {failed key, failed key, ...}}
-        """
-        results = await asyncio.gather(
-            *(
-                retry_operation(self.rpc(addr=w).gather, who_has=who_has)
-                for w, who_has in transfers.items()
-            )
-        )
-
-        parent: SchedulerState = cast(SchedulerState, self)
-        failed_keys_by_recipient = {}  # {recipient address: {failed keys}}
-
-        for w, result in zip(transfers, results):
-            if result["status"] == "OK":
-                keys_fail = set()
-            elif result["status"] == "missing-data":
-                keys_fail = set(result["keys"])
-                logger.warning("Worker %s failed to acquire keys: %s", w, keys_fail)
-            else:
-                keys_fail = set(transfers[w])
-                logger.warning("Communication failed during replication: %s", result)
-            failed_keys_by_recipient[w] = keys_fail
-            keys_ok = transfers[w].keys() - keys_fail
-            ws: WorkerState = parent._workers_dv.get(w)
-            if ws is None:
-                logger.warning("Worker lost during replication: %s", w)
-                continue
-            for key in keys_ok:
-                ts: TaskState = parent._tasks.get(key)
-                if ts is None or ts._state != "memory":
-                    logger.warning("Key lost during replication: %s", key)
-                    continue
-                if ts not in ws._has_what:
-                    ws._nbytes += ts.get_nbytes()
-                    ws._has_what[ts] = None
-                    ts._who_has.add(ws)
-
-            return failed_keys_by_recipient
-
     def clear_task_state(self):
         # XXX what about nested state such as ClientState.wants_what
         # (see also fire-and-forget...)
@@ -5583,14 +5531,72 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return d[worker]
 
-    async def _delete_worker_data(self, worker_address, keys):
+    async def _gather_on_worker(
+        self, worker_address: str, who_has: "dict[Hashable, list[str]]"
+    ) -> set:
+        """Peer-to-peer copy of keys from multiple workers to a single worker
+
+        Parameters
+        ----------
+        worker_address: str
+            Recipient worker address to copy keys to
+        who_has: dict[Hashable, list[str]]
+            {key: [sender address, sender address, ...], key: ...}
+
+        Returns
+        -------
+        returns:
+            set of keys that failed to be copied
+        """
+        result = await retry_operation(
+            self.rpc(addr=worker_address).gather, who_has=who_has
+        )
+
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv.get(worker_address)
+
+        if ws is None:
+            logger.warning("Worker %s lost during replication", worker_address)
+            return set(who_has)
+        elif result["status"] == "OK":
+            keys_failed = set()
+            keys_ok = who_has.keys()
+        elif result["status"] == "missing-data":
+            keys_failed = set(result["keys"])
+            keys_ok = who_has.keys() - keys_failed
+            logger.warning(
+                "Worker %s failed to acquire keys: %s",
+                worker_address,
+                result["keys"],
+            )
+        else:
+            logger.warning(
+                "Communication with worker %s failed during replication: %s",
+                worker_address,
+                result,
+            )
+            return set(who_has)
+
+        for key in keys_ok:
+            ts: TaskState = parent._tasks.get(key)
+            if ts is None or ts._state != "memory":
+                logger.warning("Key lost during replication: %s", key)
+                continue
+            if ts not in ws._has_what:
+                ws._nbytes += ts.get_nbytes()
+                ws._has_what[ts] = None
+                ts._who_has.add(ws)
+
+        return keys_failed
+
+    async def _delete_worker_data(self, worker_address: str, keys: "list[str]") -> None:
         """Delete data from a worker and update the corresponding worker/task states
 
         Parameters
         ----------
         worker_address: str
             Worker address to delete keys from
-        keys: List[str]
+        keys: list[str]
             List of keys to delete on the specified worker
         """
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5928,7 +5934,17 @@ class Scheduler(SchedulerState, ServerNode):
         to_recipients = defaultdict(lambda: defaultdict(list))
         for snd_ws, rec_ws, ts in msgs:
             to_recipients[rec_ws.address][ts._key].append(snd_ws.address)
-        failed_keys_by_recipient = await self._gather_on_workers(to_recipients)
+        failed_keys_by_recipient = dict(
+            zip(
+                to_recipients,
+                await asyncio.gather(
+                    *(
+                        self._gather_on_worker(w, who_has)
+                        for w, who_has in to_recipients.items()
+                    )
+                ),
+            )
+        )
 
         to_senders = defaultdict(list)
         for snd_ws, rec_ws, ts in msgs:
@@ -6047,7 +6063,12 @@ class Scheduler(SchedulerState, ServerNode):
                             wws._address for wws in ts._who_has
                         ]
 
-                await self._gather_on_workers(gathers)
+                await asyncio.gather(
+                    *(
+                        self._gather_on_worker(w, who_has)
+                        for w, who_has in gathers.items()
+                    )
+                )
                 for r, v in gathers.items():
                     self.log_event(r, {"action": "replicate-add", "who_has": v})
 
