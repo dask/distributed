@@ -2290,13 +2290,11 @@ def test_memorystate():
         repr(m)
         == dedent(
             """
-            Managed by Dask       : 80 B
-              - in process memory : 68 B
-              - spilled to disk   : 12 B
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
+            Spilled to disk       : 12 B
             """
         ).lstrip()
     )
@@ -2795,3 +2793,10 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
         a: (large_future.key,),
         b: tuple(f.key for f in small_futures),
     }
+
+
+@gen_cluster(client=True)
+async def test_transition_counter(c, s, a, b):
+    assert s.transition_counter == 0
+    await c.submit(inc, 1)
+    assert s.transition_counter > 1

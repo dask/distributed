@@ -38,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
+from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
 
 from . import preloading, profile
 from . import versions as version_module
@@ -58,6 +59,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
+from .protocol.pickle import loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -69,15 +71,11 @@ from .utils import (
     All,
     TimeoutError,
     empty_context,
-    format_bytes,
-    format_time,
     get_fileno_limit,
     key_split,
     key_split_group,
     log_errors,
     no_default,
-    parse_bytes,
-    parse_timedelta,
     tmpfile,
     validate_key,
 )
@@ -369,13 +367,11 @@ class MemoryState:
 
     def __repr__(self) -> str:
         return (
-            f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
             f"Process memory (RSS)  : {format_bytes(self._process)}\n"
             f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
             f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
+            f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
 
 
@@ -1770,6 +1766,7 @@ class SchedulerState:
     _validate: bint
     _workers: object
     _workers_dv: dict
+    _transition_counter: Py_ssize_t
 
     # Variables from dask.config, cached by __init__ for performance
     UNKNOWN_TASK_DURATION: double
@@ -1873,6 +1870,7 @@ class SchedulerState:
             dask.config.get("distributed.worker.memory.rebalance.sender-recipient-gap")
             / 2.0
         )
+        self._transition_counter = 0
 
         super().__init__(**kwargs)
 
@@ -1939,6 +1937,10 @@ class SchedulerState:
     @total_occupancy.setter
     def total_occupancy(self, v: double):
         self._total_occupancy = v
+
+    @property
+    def transition_counter(self):
+        return self._transition_counter
 
     @property
     def unknown_durations(self):
@@ -2065,6 +2067,7 @@ class SchedulerState:
             func = self._transitions_table.get(start_finish)
             if func is not None:
                 a: tuple = func(key, *args, **kwargs)
+                self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 assert not args and not kwargs
@@ -3568,6 +3571,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
@@ -5202,6 +5206,24 @@ class Scheduler(SchedulerState, ServerNode):
     def remove_plugin(self, plugin):
         """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
+
+    async def register_scheduler_plugin(self, comm=None, plugin=None):
+        """Register a plugin on the scheduler."""
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot register a scheduler plugin as the scheduler "
+                "has been explicitly disallowed from deserializing "
+                "arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+        plugin = loads(plugin)
+
+        if hasattr(plugin, "start"):
+            result = plugin.start(self)
+            if inspect.isawaitable(result):
+                result = await result
+
+        self.add_plugin(plugin=plugin)
 
     def worker_send(self, worker, msg):
         """Send message to worker

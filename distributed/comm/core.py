@@ -8,11 +8,12 @@ from abc import ABC, abstractmethod, abstractproperty
 from contextlib import suppress
 
 import dask
+from dask.utils import parse_timedelta
 
 from ..metrics import time
 from ..protocol import pickle
 from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError, parse_timedelta
+from ..utils import TimeoutError
 from . import registry
 from .addressing import parse_address
 

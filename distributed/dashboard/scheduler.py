@@ -18,8 +18,10 @@ from .components.scheduler import (
     ComputePerKey,
     CurrentLoad,
     MemoryByKey,
+    Occupancy,
     SystemMonitor,
     TaskGraph,
+    TaskGroupGraph,
     TaskProgress,
     TaskStream,
     WorkersMemory,
@@ -35,13 +37,23 @@ from .components.scheduler import (
     stealing_doc,
     systemmonitor_doc,
     tasks_doc,
+    tg_graph_doc,
     workers_doc,
 )
 from .core import BokehApplication
 from .worker import counters_doc
 
 template_variables = {
-    "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
+    "pages": [
+        "status",
+        "workers",
+        "tasks",
+        "system",
+        "profile",
+        "graph",
+        "groups",
+        "info",
+    ]
 }
 
 if NVML_ENABLED:
@@ -78,18 +90,21 @@ applications = {
     "/profile": profile_doc,
     "/profile-server": profile_server_doc,
     "/graph": graph_doc,
+    "/groups": tg_graph_doc,
     "/gpu": gpu_doc,
     "/individual-task-stream": individual_doc(
         TaskStream, 100, n_rectangles=1000, clear_interval="10s"
     ),
     "/individual-progress": individual_doc(TaskProgress, 100, height=160),
     "/individual-graph": individual_doc(TaskGraph, 200),
+    "/individual-groups": individual_doc(TaskGroupGraph, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
     "/individual-cluster-memory": individual_doc(ClusterMemory, 100),
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
     "/individual-nprocessing": individual_doc(
         CurrentLoad, 100, fig_attr="processing_figure"
     ),
+    "/individual-occupancy": individual_doc(Occupancy, 100),
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),

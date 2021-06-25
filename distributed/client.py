@@ -30,7 +30,15 @@ from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
-from dask.utils import apply, ensure_dict, format_bytes, funcname, stringify
+from dask.utils import (
+    _deprecated,
+    apply,
+    ensure_dict,
+    format_bytes,
+    funcname,
+    parse_timedelta,
+    stringify,
+)
 
 try:
     from dask.delayed import single_key
@@ -71,7 +79,6 @@ from .utils import (
     key_split,
     log_errors,
     no_default,
-    parse_timedelta,
     sync,
     thread_state,
 )
@@ -2538,6 +2545,7 @@ class Client:
         """
         return self.sync(self._run, function, *args, **kwargs)
 
+    @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
         """
         Spawn a coroutine on all workers.
@@ -2559,12 +2567,6 @@ class Client:
             Workers on which to run the function. Defaults to all known workers.
 
         """
-        warnings.warn(
-            "This method has been deprecated. "
-            "Instead use Client.run which detects async functions "
-            "automatically",
-            stacklevel=2,
-        )
         return self.run(function, *args, **kwargs)
 
     def _graph_to_futures(
@@ -4004,6 +4006,34 @@ class Client:
             return (msgs, figure)
         else:
             return msgs
+
+    async def _register_scheduler_plugin(self, plugin, **kwargs):
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
+        return await self.scheduler.register_scheduler_plugin(
+            plugin=dumps(plugin, protocol=4)
+        )
+
+    def register_scheduler_plugin(self, plugin, **kwargs):
+        """Register a scheduler plugin.
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+
+        Parameters
+        ----------
+        plugin : SchedulerPlugin
+            Plugin class or object to pass to the scheduler.
+        **kwargs : Any
+            Arguments passed to the Plugin class (if Plugin is an
+            instance kwargs are unused).
+
+        """
+        return self.sync(
+            self._register_scheduler_plugin,
+            plugin=plugin,
+            **kwargs,
+        )
 
     def register_worker_callbacks(self, setup=None):
         """

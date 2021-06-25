@@ -1,6 +1,17 @@
 Changelog
 =========
 
+2021.06.2
+---------
+
+Released on June 22, 2021
+
+- Revert refactor to ``utils.Log[s]`` and ``Cluster.get_logs`` (:pr:`4941`) `Charles Blackmon-Luca`_
+- Use deprecation utility from Dask (:pr:`4924`) `James Bourbeau`_
+- Add transition counter to ``Scheduler`` (:pr:`4934`) `Matthew Rocklin`_
+- Remove ``nbytes_in_memory`` (:pr:`4930`) `Matthew Rocklin`_
+
+
 2021.06.1
 ---------
 

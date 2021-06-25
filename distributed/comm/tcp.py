@@ -20,11 +20,12 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 import dask
+from dask.utils import parse_timedelta
 
 from ..protocol.utils import pack_frames_prelude, unpack_frames
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
 from .registry import Backend, backends

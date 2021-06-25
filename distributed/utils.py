@@ -41,19 +41,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
-
-# Import config serialization functions here for backward compatibility
-from dask.config import deserialize as deserialize_for_cli  # noqa
-from dask.config import serialize as serialize_for_cli  # noqa
-
-# provide format_bytes here for backwards compatibility
-from dask.utils import (  # noqa: F401
-    format_bytes,
-    format_time,
-    funcname,
-    parse_bytes,
-    parse_timedelta,
-)
+from dask.utils import parse_timedelta as _parse_timedelta
 
 try:
     from tornado.ioloop import PollIOLoop
@@ -286,7 +274,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = parse_timedelta(callback_timeout, "s")
+    callback_timeout = _parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -982,34 +970,6 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
             return len(frame)
 
 
-def deprecated(*, version_removed: str = None):
-    """Decorator to mark a function as deprecated
-
-    Parameters
-    ----------
-    version_removed : str, optional
-        If specified, include the version in which the deprecated function
-        will be removed. Defaults to "a future release".
-    """
-
-    def decorator(func):
-        nonlocal version_removed
-        msg = f"{funcname(func)} is deprecated and will be removed in"
-        if version_removed is not None:
-            msg += f" version {version_removed}"
-        else:
-            msg += " a future release"
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            warnings.warn(msg, DeprecationWarning, stacklevel=2)
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
     while not os.path.exists(fn):
@@ -1178,7 +1138,7 @@ def warn_on_duration(duration, msg):
     start = time()
     yield
     stop = time()
-    if stop - start > parse_timedelta(duration):
+    if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
 
 
@@ -1269,8 +1229,8 @@ def parse_ports(port):
 is_coroutine_function = iscoroutinefunction
 
 
-class Log(tuple):
-    """A container for a single log entry"""
+class Log(str):
+    """A container for newline-delimited string of log entries"""
 
     level_styles = {
         "WARNING": "font-weight: bold; color: orange;",
@@ -1279,34 +1239,34 @@ class Log(tuple):
     }
 
     def _repr_html_(self):
-        level, message = self
+        logs_html = []
+        for message in self.split("\n"):
+            style = "font-family: monospace; margin: 0;"
+            for level in self.level_styles:
+                if level in message:
+                    style += self.level_styles[level]
+                    break
 
-        style = "font-family: monospace; margin: 0;"
-        style += self.level_styles.get(level, "")
+            logs_html.append(
+                '<p style="{style}">{message}</p>'.format(
+                    style=html.escape(style),
+                    message=html.escape(message),
+                )
+            )
 
-        return '<p style="{style}">{message}</p>'.format(
-            style=html.escape(style),
-            message=html.escape(message),
-        )
-
-
-class Logs(list):
-    """A container for a list of log entries"""
-
-    def _repr_html_(self):
-        return "\n".join(Log(entry)._repr_html_() for entry in self)
+        return "\n".join(logs_html)
 
 
-class MultiLogs(dict):
-    """A container for a dict mapping strings to lists of log entries"""
+class Logs(dict):
+    """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
         summaries = [
             "<details>\n"
             "<summary style='display:list-item'>{title}</summary>\n"
-            "{logs}\n"
-            "</details>".format(title=title, logs=Logs(entries)._repr_html_())
-            for title, entries in sorted(self.items())
+            "{log}\n"
+            "</details>".format(title=title, log=log._repr_html_())
+            for title, log in sorted(self.items())
         ]
         return "\n".join(summaries)
 
@@ -1483,3 +1443,29 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List
 
         addresses.append({"address": host, "port": port})
     return addresses
+
+
+_deprecations = {
+    "deserialize_for_cli": "dask.config.deserialize",
+    "serialize_for_cli": "dask.config.serialize",
+    "format_bytes": "dask.utils.format_bytes",
+    "format_time": "dask.utils.format_time",
+    "funcname": "dask.utils.funcname",
+    "parse_bytes": "dask.utils.parse_bytes",
+    "parse_timedelta": "dask.utils.parse_timedelta",
+}
+
+
+def __getattr__(name):
+    if name in _deprecations:
+        use_instead = _deprecations[name]
+
+        warnings.warn(
+            f"{name} is deprecated and will be removed in a future release. "
+            f"Please use {use_instead} instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return import_term(use_instead)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

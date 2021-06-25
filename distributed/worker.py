@@ -25,7 +25,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
-from dask.utils import apply, format_bytes, funcname
+from dask.utils import apply, format_bytes, funcname, parse_bytes, parse_timedelta
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -57,7 +57,6 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
-    deprecated,
     get_ip,
     has_arg,
     import_file,
@@ -66,9 +65,7 @@ from .utils import (
     key_split,
     log_errors,
     offload,
-    parse_bytes,
     parse_ports,
-    parse_timedelta,
     silence_logging,
     thread_state,
     typename,
@@ -4015,11 +4012,6 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
-
-
-@deprecated(version_removed="2021.06.0")
-def weight(k, v):
-    return sizeof(v)
 
 
 async def run(server, comm, function, args=(), kwargs=None, is_coro=None, wait=True):
