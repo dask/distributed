@@ -9,6 +9,7 @@ from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
     AdaptiveTicker,
+    Arrow,
     BasicTicker,
     BoxSelectTool,
     BoxZoomTool,
@@ -28,6 +29,7 @@ from bokeh.models import (
     Tabs,
     TapTool,
     Title,
+    VeeHead,
     WheelZoomTool,
     value,
 )
@@ -90,6 +92,13 @@ env = Environment(
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
 TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]}
 XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
+
+
+logos_dict = {
+    "numpy": "statics/images/numpy.png",
+    "pandas": "statics/images/pandas.png",
+    "builtins": "statics/images/python.png",
+}
 
 
 class Occupancy(DashboardComponent):
@@ -1784,6 +1793,455 @@ class TaskGraph(DashboardComponent):
         self.scheduler.remove_plugin(self.layout)
 
 
+class TaskGroupGraph(DashboardComponent):
+    """
+    Task Group Graph
+
+    Creates a graph layout for TaskGroups on the scheduler.  It assigns
+    (x, y) locations to all the TaskGroups and lays them out by according
+    to their dependencies. The layout gets updated every time that new
+    TaskGroups are added.
+
+    Each task group node incodes information about task progress, memory,
+    and output type into glyphs, as well as a hover tooltip with more detailed
+    information on name, computation time, memory, and tasks status.
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+
+        self.nodes_layout = {}
+        self.arrows_layout = {}
+
+        self.old_counter = -1
+
+        self.nodes_source = ColumnDataSource(
+            {
+                "x": [],
+                "y": [],
+                "w_box": [],
+                "h_box": [],
+                "name": [],
+                "tot_tasks": [],
+                "color": [],
+                "x_start": [],
+                "x_end": [],
+                "y_start": [],
+                "y_end": [],
+                "x_end_progress": [],
+                "mem_alpha": [],
+                "node_line_width": [],
+                "comp_tasks": [],
+                "url_logo": [],
+                "x_logo": [],
+                "y_logo": [],
+                "w_logo": [],
+                "h_logo": [],
+                "in_processing": [],
+                "in_memory": [],
+                "in_released": [],
+                "in_erred": [],
+                "compute_time": [],
+                "memory": [],
+            }
+        )
+
+        self.arrows_source = ColumnDataSource({"xs": [], "ys": [], "xe": [], "ye": []})
+
+        self.root = figure(title="Task Groups Graph", match_aspect=True, **kwargs)
+        self.root.axis.visible = False
+        self.subtitle = Title(text=" ", text_font_style="italic")
+        self.root.add_layout(self.subtitle, "above")
+
+        rect = self.root.rect(
+            x="x",
+            y="y",
+            width="w_box",
+            height="h_box",
+            color="color",
+            fill_alpha="mem_alpha",
+            line_color="black",
+            line_width="node_line_width",
+            source=self.nodes_source,
+        )
+
+        ####plot tg log
+        self.root.image_url(
+            url="url_logo",
+            x="x_logo",
+            y="y_logo",
+            w="w_logo",
+            h="h_logo",
+            anchor="center",
+            source=self.nodes_source,
+        )
+
+        # progress bar plain box
+        self.root.quad(
+            left="x_start",
+            right="x_end",
+            bottom="y_start",
+            top="y_end",
+            color=None,
+            line_color="black",
+            source=self.nodes_source,
+        )
+
+        # progress bar
+        self.root.quad(
+            left="x_start",
+            right="x_end_progress",
+            bottom="y_start",
+            top="y_end",
+            color="color",
+            line_color=None,
+            fill_alpha=0.6,
+            source=self.nodes_source,
+        )
+
+        self.arrows = Arrow(
+            end=VeeHead(size=8),
+            line_color="black",
+            line_alpha=0.5,
+            line_width=1,
+            x_start="xs",
+            y_start="ys",
+            x_end="xe",
+            y_end="ye",
+            source=self.arrows_source,
+        )
+        self.root.add_layout(self.arrows)
+
+        self.root.xgrid.grid_line_color = None
+        self.root.ygrid.grid_line_color = None
+        self.root.x_range.range_padding = 0.5
+        self.root.y_range.range_padding = 0.5
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Compute time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@compute_time</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Memory:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
+                </div>
+                <div>
+                    <span style="font-size: 12px; font-weight: bold;">Tasks:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@tot_tasks</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Completed:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@comp_tasks</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Processing:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_processing</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">In memory:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Erred:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_erred</span>
+                </div>
+                <div style="margin-left: 2em;">
+                    <span style="font-size: 12px; font-weight: bold;">Released:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@in_released</span>
+                </div>
+                """,
+            renderers=[rect],
+        )
+
+        self.root.add_tools(hover)
+
+    @without_property_validation
+    def update_layout(self):
+
+        with log_errors():
+            # get dependecies per task group
+            # in some cases there are tg that have themeselves as dependencies, we remove those.
+            dependencies = {
+                k: {ds.name for ds in ts.dependencies if ds.name != k}
+                for k, ts in self.scheduler.task_groups.items()
+            }
+
+            import dask
+
+            order = dask.order.order(
+                dsk={group.name: 1 for k, group in self.scheduler.task_groups.items()},
+                dependencies=dependencies,
+            )
+
+            ordered = sorted(self.scheduler.task_groups, key=order.get)
+
+            xs = {}
+            ys = {}
+            locations = set()
+            nodes_layout = {}
+            arrows_layout = {}
+            for tg in ordered:
+                if dependencies[tg]:
+                    x = max(xs[dep] for dep in dependencies[tg]) + 1
+                    y = max(ys[dep] for dep in dependencies[tg])
+                    if (
+                        len(dependencies[tg]) > 1
+                        and len({ys[dep] for dep in dependencies[tg]}) == 1
+                    ):
+                        y += 1
+                else:
+                    x = 0
+                    y = max(ys.values()) + 1 if ys else 0
+
+                while (x, y) in locations:  # avoid collisions by moving up
+                    y += 1
+
+                locations.add((x, y))
+
+                xs[tg], ys[tg] = x, y
+
+                # info neded for node layout to coulmn data source
+                nodes_layout[tg] = {"x": xs[tg], "y": ys[tg]}
+
+                # info needed for arrow layout
+                arrows_layout[tg] = {
+                    "nstart": dependencies[tg],
+                    "nend": [tg] * len(dependencies[tg]),
+                }
+
+            return nodes_layout, arrows_layout
+
+    def compute_size(self, x, min_box, max_box):
+        start = 0.4
+        end = 0.8
+
+        y = (end - start) / (max_box - min_box) * (x - min_box) + start
+
+        return y
+
+    @without_property_validation
+    def update(self):
+
+        if self.scheduler.transition_counter == self.old_counter:
+            return
+        else:
+            self.old_counter = self.scheduler.transition_counter
+
+        if not self.scheduler.task_groups:
+            self.subtitle.text = "Scheduler is empty."
+        else:
+            self.subtitle.text = " "
+
+        if self.nodes_layout.keys() != self.scheduler.task_groups.keys():
+            self.nodes_layout, self.arrows_layout = self.update_layout()
+
+        nodes_data = {
+            "x": [],
+            "y": [],
+            "w_box": [],
+            "h_box": [],
+            "name": [],
+            "color": [],
+            "tot_tasks": [],
+            "x_start": [],
+            "x_end": [],
+            "y_start": [],
+            "y_end": [],
+            "x_end_progress": [],
+            "mem_alpha": [],
+            "node_line_width": [],
+            "comp_tasks": [],
+            "url_logo": [],
+            "x_logo": [],
+            "y_logo": [],
+            "w_logo": [],
+            "h_logo": [],
+            "in_processing": [],
+            "in_memory": [],
+            "in_released": [],
+            "in_erred": [],
+            "compute_time": [],
+            "memory": [],
+        }
+
+        arrows_data = {
+            "xs": [],
+            "ys": [],
+            "xe": [],
+            "ye": [],
+        }
+
+        durations = set()
+        nbytes = set()
+        for key, tg in self.scheduler.task_groups.items():
+
+            if tg.duration and tg.nbytes_total:
+                durations.add(tg.duration)
+                nbytes.add(tg.nbytes_total)
+
+        durations_min = min(durations, default=0)
+        durations_max = max(durations, default=0)
+        nbytes_min = min(nbytes, default=0)
+        nbytes_max = max(nbytes, default=0)
+
+        box_dim = {}
+        for key, tg in self.scheduler.task_groups.items():
+
+            comp_tasks = (
+                tg.states["released"] + tg.states["memory"] + tg.states["erred"]
+            )
+            tot_tasks = sum(tg.states.values())
+
+            # compute width and height of boxes
+            if (
+                tg.duration
+                and tg.nbytes_total
+                and comp_tasks
+                and len(durations) > 1
+                and len(nbytes) > 1
+            ):
+
+                # scale duration (width)
+                width_box = self.compute_size(
+                    tg.duration / comp_tasks * tot_tasks,
+                    min_box=durations_min / comp_tasks * tot_tasks,
+                    max_box=durations_max / comp_tasks * tot_tasks,
+                )
+
+                # need to scale memory (height)
+                height_box = self.compute_size(
+                    tg.nbytes_total / comp_tasks * tot_tasks,
+                    min_box=nbytes_min / comp_tasks * tot_tasks,
+                    max_box=nbytes_max / comp_tasks * tot_tasks,
+                )
+
+            else:
+                width_box = 0.6
+                height_box = width_box / 2
+
+            box_dim[key] = {"width": width_box, "height": height_box}
+
+        for key, tg in self.scheduler.task_groups.items():
+            x = self.nodes_layout[key]["x"]
+            y = self.nodes_layout[key]["y"]
+            width = box_dim[key]["width"]
+            height = box_dim[key]["height"]
+
+            # main boxes layout
+            nodes_data["x"].append(x)
+            nodes_data["y"].append(y)
+            nodes_data["w_box"].append(width)
+            nodes_data["h_box"].append(height)
+
+            comp_tasks = (
+                tg.states["released"] + tg.states["memory"] + tg.states["erred"]
+            )
+            tot_tasks = sum(tg.states.values())
+
+            nodes_data["name"].append(tg.prefix.name)
+
+            nodes_data["color"].append(color_of(tg.prefix.name))
+            nodes_data["tot_tasks"].append(tot_tasks)
+
+            # memory alpha factor by 0.4 if not get's too dark
+            nodes_data["mem_alpha"].append(
+                (tg.states["memory"] / sum(tg.states.values())) * 0.4
+            )
+
+            # main box line width
+            if tg.states["processing"]:
+                nodes_data["node_line_width"].append(5)
+            else:
+                nodes_data["node_line_width"].append(1)
+
+            # progress bar data update
+            nodes_data["x_start"].append(x - width / 2)
+            nodes_data["x_end"].append(x + width / 2)
+
+            nodes_data["y_start"].append(y - height / 2)
+            nodes_data["y_end"].append(y - height / 2 + height * 0.4)
+
+            nodes_data["x_end_progress"].append(
+                x - width / 2 + width * comp_tasks / tot_tasks
+            )
+
+            # arrows
+            arrows_data["xs"] += [
+                self.nodes_layout[k]["x"] + box_dim[k]["width"] / 2
+                for k in self.arrows_layout[key]["nstart"]
+            ]
+            arrows_data["ys"] += [
+                self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nstart"]
+            ]
+            arrows_data["xe"] += [
+                self.nodes_layout[k]["x"] - box_dim[k]["width"] / 2
+                for k in self.arrows_layout[key]["nend"]
+            ]
+            arrows_data["ye"] += [
+                self.nodes_layout[k]["y"] for k in self.arrows_layout[key]["nend"]
+            ]
+
+            # LOGOS
+            if len(tg.types) == 1:
+                logo_type = next(iter(tg.types)).split(".")[0]
+                try:
+                    url_logo = logos_dict[logo_type]
+                except KeyError:
+                    url_logo = ""
+            else:
+                url_logo = ""
+
+            nodes_data["url_logo"].append(url_logo)
+
+            nodes_data["x_logo"].append(x + width / 3)
+            nodes_data["y_logo"].append(y + height / 3)
+
+            ratio = width / height
+
+            if ratio > 1:
+                nodes_data["h_logo"].append(height * 0.3)
+                nodes_data["w_logo"].append(width * 0.3 / ratio)
+            else:
+                nodes_data["h_logo"].append(height * 0.3 * ratio)
+                nodes_data["w_logo"].append(width * 0.3)
+
+            # compute_time and memory
+            nodes_data["compute_time"].append(format_time(tg.duration))
+            nodes_data["memory"].append(format_bytes(tg.nbytes_total))
+
+            # Add some status to hover
+            tasks_processing = tg.states["processing"]
+            tasks_memory = tg.states["memory"]
+            tasks_relased = tg.states["released"]
+            tasks_erred = tg.states["erred"]
+
+            nodes_data["comp_tasks"].append(
+                f"{comp_tasks} ({comp_tasks / tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_processing"].append(
+                f"{tasks_processing} ({tasks_processing/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_memory"].append(
+                f"{tasks_memory} ({tasks_memory/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_released"].append(
+                f"{tasks_relased} ({tasks_relased/ tot_tasks * 100:.0f} %)"
+            )
+            nodes_data["in_erred"].append(
+                f"{ tasks_erred} ({tasks_erred/ tot_tasks * 100:.0f} %)"
+            )
+
+        self.nodes_source.data.update(nodes_data)
+        self.arrows_source.data.update(arrows_data)
+
+
 class TaskProgress(DashboardComponent):
     """Progress bars per task type"""
 
@@ -2325,6 +2783,18 @@ def graph_doc(scheduler, extra, doc):
         add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
 
+        doc.template = env.get_template("simple.html")
+        doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
+
+
+def tg_graph_doc(scheduler, extra, doc):
+    with log_errors():
+        tg_graph = TaskGroupGraph(scheduler, sizing_mode="stretch_both")
+        doc.title = "Dask: Task Groups Graph"
+        tg_graph.update()
+        add_periodic_callback(doc, tg_graph, 200)
+        doc.add_root(tg_graph.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
         doc.theme = BOKEH_THEME

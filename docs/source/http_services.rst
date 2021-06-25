@@ -18,7 +18,8 @@ others via a header navbar.
 - ``/tasks``: task block view with longer look-back than on /status
 - ``/system``: global stats for the cluster, CPU, memory, bandwidth, file descriptors
 - ``/profile``: flamegraph statistical profiling across the cluster
-- ``/graph``: currently processing graphs in a dependnecy tree view
+- ``/graph``: currently processing graphs in a dependency tree view
+- ``/groups``: graph layout for task groups (dependencies, memory, output type, progress, tasks status)
 - ``/info``: redirect to ``/info/main/workers.html``
 
 Scheduler HTTP
@@ -53,6 +54,7 @@ Individual bokeh plots
 - ``/individual-task-stream``
 - ``/individual-progress``
 - ``/individual-graph``
+- ``/individual-groups``
 - ``/individual-profile``
 - ``/individual-profile-server``
 - ``/individual-nbytes``
