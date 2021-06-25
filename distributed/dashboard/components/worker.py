@@ -20,7 +20,7 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from tlz import merge, partition_all
 
-from dask.utils import format_bytes
+from dask.utils import format_bytes, format_time
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -32,7 +32,7 @@ from distributed.dashboard.components.shared import (
 from distributed.dashboard.utils import transpose, update, without_property_validation
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
-from distributed.utils import format_time, key_split, log_errors
+from distributed.utils import key_split, log_errors
 
 logger = logging.getLogger(__name__)
 

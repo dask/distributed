@@ -2290,13 +2290,11 @@ def test_memorystate():
         repr(m)
         == dedent(
             """
-            Managed by Dask       : 80 B
-              - in process memory : 68 B
-              - spilled to disk   : 12 B
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
+            Spilled to disk       : 12 B
             """
         ).lstrip()
     )

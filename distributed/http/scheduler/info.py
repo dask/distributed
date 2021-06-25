@@ -8,11 +8,11 @@ from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
 
-from dask.utils import format_bytes
+from dask.utils import format_bytes, format_time
 
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time
-from ...utils import format_time, log_errors
+from ...utils import log_errors
 from ..utils import RequestHandler, redirect
 
 ns = {

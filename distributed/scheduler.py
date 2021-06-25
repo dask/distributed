@@ -366,13 +366,11 @@ class MemoryState:
 
     def __repr__(self) -> str:
         return (
-            f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
             f"Process memory (RSS)  : {format_bytes(self._process)}\n"
             f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
             f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
+            f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
 
 
