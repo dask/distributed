@@ -18,7 +18,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
+from typing import List, Optional
 
 import psutil
 import sortedcontainers
@@ -781,14 +781,13 @@ class Computation:
 
     _start: double
     _groups: set
-    _code: str
-    _last_touch: double
+    _code: List[str]
     _recent: "Computation" = None
 
     def __init__(self):
-        self._start = self._last_touch = time()
+        self._start = time()
         self._groups = set()
-        self._code = ""
+        self._code = []
         Computation.recent = self
 
     @property
@@ -815,7 +814,7 @@ class Computation:
     def __repr__(self):
         return (
             f"Computation: {format_time(time() - self._start)} ago with {len(self.groups)} groups\n\n"
-            + self.code
+            + "\n---------------------------\n".join(self.code)
         )
 
 
@@ -4256,16 +4255,15 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if len(tasks) > 1 or Computation._recent is None:
-            # TODO: maybe reuse old computation based on time interval?
-            computation = Computation()
-            computation._code = code or ""
-            self._computations.append(computation)
-        elif Computation._recent and Computation._recent._last_touch > start - 1:
+        if parent._total_occupancy > 1e-9:  # Still working on something
             computation = Computation._recent
-            computation._last_touch = start
         else:
-            computation = None
+            computation = Computation()
+            Computation._recent = computation
+            self._computations.append(computation)
+
+        if code and code not in computation._code:  # add new code blocks
+            computation._code.append(code)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
