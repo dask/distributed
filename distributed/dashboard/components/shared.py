@@ -28,7 +28,7 @@ from distributed.dashboard.utils import (
     update,
     without_property_validation,
 )
-from distributed.utils import log_errors, parse_timedelta
+from distributed.utils import log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -37,7 +37,7 @@ else:
 
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
-profile_interval = parse_timedelta(profile_interval, default="ms")
+profile_interval = dask.utils.parse_timedelta(profile_interval, default="ms")
 
 
 class Processing(DashboardComponent):
