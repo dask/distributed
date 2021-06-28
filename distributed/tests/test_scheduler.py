@@ -2904,7 +2904,7 @@ async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
 
 
 @gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1)] * 3, worker_kwargs={"timeout": "10ms"}
+    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "10ms"}
 )
 async def test_rebalance_dead_recipient(client, s, a, b, c):
     """A key fails to be rebalanced due to recipient failure.

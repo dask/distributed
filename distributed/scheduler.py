@@ -5548,15 +5548,24 @@ class Scheduler(SchedulerState, ServerNode):
         returns:
             set of keys that failed to be copied
         """
-        result = await retry_operation(
-            self.rpc(addr=worker_address).gather, who_has=who_has
-        )
+        try:
+            result = await retry_operation(
+                self.rpc(addr=worker_address).gather, who_has=who_has
+            )
+        except OSError as e:
+            # This can happen e.g. if the worker is going through controlled shutdown;
+            # it doesn't necessarily mean that it went unexpectedly missing
+            logger.warning(
+                f"Communication with worker {worker_address} failed during "
+                f"replication: {e.__class__.__name__}: {e}"
+            )
+            return set(who_has)
 
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker_address)
 
         if ws is None:
-            logger.warning("Worker %s lost during replication", worker_address)
+            logger.warning(f"Worker {worker_address} lost during replication")
             return set(who_has)
         elif result["status"] == "OK":
             keys_failed = set()
@@ -5565,22 +5574,15 @@ class Scheduler(SchedulerState, ServerNode):
             keys_failed = set(result["keys"])
             keys_ok = who_has.keys() - keys_failed
             logger.warning(
-                "Worker %s failed to acquire keys: %s",
-                worker_address,
-                result["keys"],
+                f"Worker {worker_address} failed to acquire keys: {result['keys']}"
             )
-        else:
-            logger.warning(
-                "Communication with worker %s failed during replication: %s",
-                worker_address,
-                result,
-            )
-            return set(who_has)
+        else:  # pragma: nocover
+            raise ValueError(f"Unexpected message from {worker_address}: {result}")
 
         for key in keys_ok:
             ts: TaskState = parent._tasks.get(key)
             if ts is None or ts._state != "memory":
-                logger.warning("Key lost during replication: %s", key)
+                logger.warning(f"Key lost during replication: {key}")
                 continue
             if ts not in ws._has_what:
                 ws._nbytes += ts.get_nbytes()
@@ -5601,11 +5603,20 @@ class Scheduler(SchedulerState, ServerNode):
         """
         parent: SchedulerState = cast(SchedulerState, self)
 
-        await retry_operation(
-            self.rpc(addr=worker_address).free_keys,
-            keys=list(keys),
-            reason="rebalance/replicate",
-        )
+        try:
+            await retry_operation(
+                self.rpc(addr=worker_address).free_keys,
+                keys=list(keys),
+                reason="rebalance/replicate",
+            )
+        except OSError as e:
+            # This can happen e.g. if the worker is going through controlled shutdown;
+            # it doesn't necessarily mean that it went unexpectedly missing
+            logger.warning(
+                f"Communication with worker {worker_address} failed during "
+                f"replication: {e.__class__.__name__}: {e}"
+            )
+            return
 
         ws: WorkerState = parent._workers_dv[worker_address]
         ts: TaskState
