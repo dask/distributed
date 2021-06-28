@@ -2325,7 +2325,16 @@ class SchedulerState:
     @exceptval(check=False)
     def decide_worker(self, ts: TaskState) -> WorkerState:
         """
-        Decide on a worker for task *ts*.  Return a WorkerState.
+        Decide on a worker for task *ts*. Return a WorkerState.
+
+        If it's a root or root-like task, we place it with its relatives to
+        reduce future data tansfer.
+
+        If it has dependencies or restrictions, we use
+        `decide_worker_from_deps_and_restrictions`.
+
+        Otherwise, we pick the least occupied worker, or pick from all workers
+        in a round-robin fashion.
         """
         if not self._workers_dv:
             return None
