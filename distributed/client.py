@@ -3099,10 +3099,13 @@ class Client:
             keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
-            raise KeyError(
-                f"During rebalance {len(result['keys'])} keys were found to be missing"
-            )
-        assert result["status"] == "OK"
+            # Only raise if the user explicitly asked for a set of keys to be
+            # rebalanced. Quietly ignore errors on a general rebalance caused e.g. by
+            # transitory keys or workers shutting down.
+            if futures:
+                raise KeyError(f"Could not rebalance keys: {result['keys']}")
+        else:
+            assert result["status"] == "OK", result  # pragma: nocover
 
     def rebalance(self, futures=None, workers=None, **kwargs):
         """Rebalance data within network

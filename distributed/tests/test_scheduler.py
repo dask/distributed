@@ -2925,7 +2925,7 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     assert out == {"status": "missing-data", "keys": [y.key]}
     assert a.data == {y.key: "y"}
     assert b.data == {x.key: "x"}
-    assert await client.has_what() == {a.address: (y.key, ), b.address: (x.key, )}
+    assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)

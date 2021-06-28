@@ -3012,8 +3012,19 @@ async def test_rebalance_unprepared(c, s, a, b):
     s.validate_state()
 
 
+@gen_cluster(client=True)
+async def test_rebalance_raises_on_explicit_missing_data(c, s, a, b):
+    """rebalance() raises KeyError if explicitly listed futures disappear"""
+    f = Future("x", client=c, state="memory")
+    with pytest.raises(KeyError, match="Could not rebalance keys:"):
+        await c.rebalance(futures=[f])
+
+
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance_raises_missing_data(c, s, *_):
+async def test_rebalance_does_not_raise_on_implicit_missing_data(c, s, *_):
+    """rebalance() does NOT raise KeyError if keys disappear but were not explicitly
+    listed
+    """
     a, b = s.workers
     futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
@@ -3021,12 +3032,11 @@ async def test_rebalance_raises_missing_data(c, s, *_):
     while s.memory.process < 2 ** 29:
         await asyncio.sleep(0.1)
 
-    # Descoping the futures enqueues a coroutine to release the data on the server
+    # Descoping the futures enqueues a coroutine to release the data on the server.
+    # During the synchronous part of rebalance, the futures still exist, but they
+    # will be (partially) gone by the time the actual transferring happens.
     del futures
-    with pytest.raises(KeyError, match="keys were found to be missing"):
-        # During the synchronous part of rebalance, the futures still exist, but they
-        # will be (partially) gone by the time the actual transferring happens.
-        await c.rebalance()
+    await c.rebalance()
 
 
 @gen_cluster(client=True)
