@@ -39,7 +39,9 @@
                 <div class="dropdown-content">
                     <ul>
                         {% for plot in plots %}
-                        <li><a href="{{ plot }}">{{ " ".join(plot.split("-")[1:]) | title }}</a></li>
+                        <li><a href="{{ plot }}">
+                                {{ " ".join(plot.split("-")[1:]).title().replace("Cpu", "CPU").replace("Gpu", "GPU") }}
+                            </a></li>
                         {% endfor %}
                     </ul>
                 </div>
