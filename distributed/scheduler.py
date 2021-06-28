@@ -5727,7 +5727,11 @@ class Scheduler(SchedulerState, ServerNode):
                 return {"status": "OK"}
 
             async with self._lock:
-                return await self._rebalance_move_data(msgs)
+                result = await self._rebalance_move_data(msgs)
+                if result["status"] == "missing-data" and keys is None:
+                    # Only return failed keys if the client explicitly asked for them
+                    result = {"status": "OK"}
+                return result
 
     def _rebalance_find_msgs(
         self: SchedulerState,
