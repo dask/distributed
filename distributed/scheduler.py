@@ -925,6 +925,16 @@ class TaskGroup:
 
        The result types of this TaskGroup
 
+    .. attribute:: last_worker: WorkerState
+
+       The worker most recently assigned a task from this group, or None when the group
+       is not identified to be root-like by `SchedulerState.decide_worker`.
+
+    .. attribute:: last_worker_tasks_left: int
+
+       If `last_worker` is not None, the number of times that worker should be assigned
+       subsequent tasks until a new worker is chosen.
+
     See also
     --------
     TaskPrefix
