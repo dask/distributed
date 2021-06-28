@@ -2371,7 +2371,7 @@ class SchedulerState:
             return ws
 
         if ts._dependencies or valid_workers is not None:
-            ws = decide_worker(
+            ws = decide_worker_from_deps_and_restrictions(
                 ts,
                 self._workers_dv.values(),
                 valid_workers,
@@ -7508,7 +7508,7 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 
 @cfunc
 @exceptval(check=False)
-def decide_worker(
+def decide_worker_from_deps_and_restrictions(
     ts: TaskState, all_workers, valid_workers: set, objective
 ) -> WorkerState:
     """
@@ -7545,7 +7545,9 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    ws = decide_worker(ts, all_workers, None, objective)
+                    ws = decide_worker_from_deps_and_restrictions(
+                        ts, all_workers, None, objective
+                    )
                 return ws
 
     ncandidates: Py_ssize_t = len(candidates)
