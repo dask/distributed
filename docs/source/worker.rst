@@ -225,9 +225,10 @@ usage then the worker will start dumping unused data to disk, even if internal
 Halt worker threads
 ~~~~~~~~~~~~~~~~~~~
 
-At 80% load, the worker's thread pool will stop accepting new tasks.  This
-gives time for the write-to-disk functionality to take effect even in the face
-of rapidly accumulating data.
+At 80% load, the worker's thread pool will stop starting computation on
+additional tasks in the worker's queue. This gives time for the write-to-disk
+functionality to take effect even in the face of rapidly accumulating data.
+Currently executing tasks continue to run.
 
 
 Kill Worker
