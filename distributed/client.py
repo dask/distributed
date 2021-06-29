@@ -659,7 +659,7 @@ class Client:
                 logger.info("Config value `scheduler-address` found: %s", address)
 
         if address is not None and kwargs:
-            raise ValueError(f"Unexpected keyword arguments: {str(sorted(kwargs))}")
+            raise ValueError(f"Unexpected keyword arguments: {sorted(kwargs)}")
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address

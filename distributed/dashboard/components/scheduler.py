@@ -165,10 +165,8 @@ class Occupancy(DashboardComponent):
 
             if total:
                 self.root.title.text = (
-                    "Occupancy -- total time: {}  wall time: {}".format(
-                        format_time(total),
-                        format_time(total / self.scheduler.total_nthreads),
-                    )
+                    f"Occupancy -- total time: {format_time(total)} "
+                    f"wall time: {format_time(total / self.scheduler.total_nthreads)}"
                 )
             else:
                 self.root.title.text = "Occupancy"
