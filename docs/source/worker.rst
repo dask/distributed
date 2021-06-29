@@ -379,6 +379,11 @@ On MacOS:
     conda install jemalloc
     DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask-worker <...>
 
+.. code-block:: bash
+
+    brew install jemalloc
+    DYLD_INSERT_LIBRARIES=$(brew --prefix jemalloc)/lib/libjemalloc.dylib dask-worker <...>
+
 `jemalloc`_ offers a wealth of configuration settings; please refer to its
 documentation.
 
