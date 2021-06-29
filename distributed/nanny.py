@@ -387,7 +387,7 @@ class Nanny(ServerNode):
     async def restart(self, comm=None, timeout=2, executor_wait=True):
         async def _():
             if self.process is not None:
-                await self.kill()
+                await self.kill(executor_wait=executor_wait)
                 await self.instantiate()
 
         try:
