@@ -87,7 +87,7 @@ def loads(frames, deserialize=True, deserializers=None):
                     frames[offset],
                     object_hook=msgpack_decode_default,
                     use_list=False,
-                    **msgpack_opts
+                    **msgpack_opts,
                 )
                 offset += 1
                 sub_frames = frames[offset : offset + sub_header["num-sub-frames"]]

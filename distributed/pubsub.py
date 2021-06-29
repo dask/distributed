@@ -350,7 +350,7 @@ class Pub:
         self.loop.add_callback(self._put, msg)
 
     def __repr__(self):
-        return "<Pub: {}>".format(self.name)
+        return f"<Pub: {self.name}>"
 
     __str__ = __repr__
 
@@ -462,6 +462,6 @@ class Sub:
             self.condition.notify()
 
     def __repr__(self):
-        return "<Sub: {}>".format(self.name)
+        return f"<Sub: {self.name}>"
 
     __str__ = __repr__

@@ -186,7 +186,7 @@ class TaskState:
         self.scheduler_holds_ref = False
 
     def __repr__(self):
-        return "<Task %r %s>" % (self.key, self.state)
+        return f"<Task {self.key!r} {self.state}>"
 
     def get_nbytes(self) -> int:
         nbytes = self.nbytes
@@ -931,13 +931,13 @@ class Worker(ServerNode):
                 self.scheduler_delay = response["time"] - middle
                 self.status = Status.running
                 break
-            except EnvironmentError:
+            except OSError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
                 await asyncio.sleep(0.1)
             except TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
-            raise ValueError("Unexpected response from register: %r" % (response,))
+            raise ValueError(f"Unexpected response from register: {response!r}")
         else:
             await asyncio.gather(
                 *[
@@ -1005,7 +1005,7 @@ class Worker(ServerNode):
             logger.warning("Heartbeat to scheduler failed")
             if not self.reconnect:
                 await self.close(report=False)
-        except IOError as e:
+        except OSError as e:
             # Scheduler is gone. Respect distributed.comm.timeouts.connect
             if "Timed out trying to connect" in str(e):
                 await self.close(report=False)
@@ -1187,12 +1187,12 @@ class Worker(ServerNode):
         try:
             listening_address = "%s%s:%d" % (self.listener.prefix, self.ip, self.port)
         except Exception:
-            listening_address = "%s%s" % (self.listener.prefix, self.ip)
+            listening_address = f"{self.listener.prefix}{self.ip}"
 
         logger.info("      Start worker at: %26s", self.address)
         logger.info("         Listening to: %26s", listening_address)
         for k, v in self.service_ports.items():
-            logger.info("  %16s at: %26s" % (k, self.ip + ":" + str(v)))
+            logger.info("  {:>16} at: {:>26}".format(k, self.ip + ":" + str(v)))
         logger.info("Waiting to connect to: %26s", self.scheduler.address)
         logger.info("-" * 49)
         logger.info("              Threads: %26d", self.nthreads)
@@ -1427,7 +1427,7 @@ class Worker(ServerNode):
             compressed = await comm.write(msg, serializers=serializers)
             response = await comm.read(deserializers=serializers)
             assert response == "OK", response
-        except EnvironmentError:
+        except OSError:
             logger.exception(
                 "failed during get data with %s -> %s", self.address, who, exc_info=True
             )
@@ -2004,7 +2004,7 @@ class Worker(ServerNode):
 
             return out
 
-        except EnvironmentError:
+        except OSError:
             logger.info("Comm closed")
         except Exception as e:
             logger.exception(e)
@@ -2392,7 +2392,7 @@ class Worker(ServerNode):
                 self.incoming_count += 1
 
                 self.log.append(("receive-dep", worker, list(response["data"])))
-            except EnvironmentError:
+            except OSError:
                 logger.exception("Worker stream died during communication: %s", worker)
                 has_what = self.has_what.pop(worker)
                 self.pending_data_per_worker.pop(worker)

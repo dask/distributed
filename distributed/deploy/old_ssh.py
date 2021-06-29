@@ -100,7 +100,7 @@ def async_ssh(cmd_dict):
             print(
                 "               "
                 + bcolors.FAIL
-                + "Retrying... (attempt {n}/{total})".format(n=retries, total=3)
+                + f"Retrying... (attempt {retries}/{3})"
                 + bcolors.ENDC
             )
 
@@ -152,7 +152,7 @@ def async_ssh(cmd_dict):
                 cmd_dict["output_queue"].put(
                     "[ {label} ] : ".format(label=cmd_dict["label"])
                     + bcolors.FAIL
-                    + "{output}".format(output=line)
+                    + f"{line}"
                     + bcolors.ENDC
                 )
                 line = stderr.readline()
@@ -215,18 +215,14 @@ def start_scheduler(
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
-        cmd = "mkdir -p {logdir} && ".format(logdir=logdir) + cmd
+        cmd = f"mkdir -p {logdir} && " + cmd
         cmd += "&> {logdir}/dask_scheduler_{addr}:{port}.log".format(
             addr=addr, port=port, logdir=logdir
         )
 
     # Format output labels we can prepend to each line of output, and create
     # a 'status' key to keep track of jobs that terminate prematurely.
-    label = (
-        bcolors.BOLD
-        + "scheduler {addr}:{port}".format(addr=addr, port=port)
-        + bcolors.ENDC
-    )
+    label = bcolors.BOLD + f"scheduler {addr}:{port}" + bcolors.ENDC
 
     # Create a command dictionary, which contains everything we need to run and
     # interact with this command.
@@ -309,12 +305,12 @@ def start_worker(
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
-        cmd = "mkdir -p {logdir} && ".format(logdir=logdir) + cmd
+        cmd = f"mkdir -p {logdir} && " + cmd
         cmd += "&> {logdir}/dask_scheduler_{addr}.log".format(
             addr=worker_addr, logdir=logdir
         )
 
-    label = "worker {addr}".format(addr=worker_addr)
+    label = f"worker {worker_addr}"
 
     # Create a command dictionary, which contains everything we need to run and
     # interact with this command.
