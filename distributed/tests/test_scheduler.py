@@ -141,7 +141,28 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         config={"distributed.scheduler.work-stealing": False},
     )
     async def test(c, s, *workers):
-        """Ensure that related tasks end up on the same node"""
+        r"""
+        Ensure that sibling root tasks are scheduled to the same node, reducing future data transfer.
+
+        We generate a wide layer of "root" tasks (random NumPy arrays). All of those tasks share 0-5
+        trivial dependencies. The ``ndeps=0`` and ``ndeps=1`` cases are most common in real-world use
+        (``ndeps=1`` is basically ``da.from_array(..., inline_array=False)`` or ``da.from_zarr``).
+        The graph is structured like this (though the number of tasks and workers is different):
+
+            |-W1-|  |-W2-| |-W3-|  |-W4-|   < ---- ideal task scheduling
+
+              q       r       s       t      < --- `sum-aggregate-`
+             / \     / \     / \     / \
+            i   j   k   l   m   n   o   p    < --- `sum-`
+            |   |   |   |   |   |   |   |
+            a   b   c   d   e   f   g   h    < --- `random-`
+            \   \   \   |   |   /   /   /
+                   TRIVIAL * 0..5
+
+        Neighboring `random-` tasks should be scheduled on the same worker. We test that generally,
+        only one worker holds each row of the array, that the `random-` tasks are never transferred,
+        and that there are few transfers overall.
+        """
         da = pytest.importorskip("dask.array")
         np = pytest.importorskip("numpy")
 
