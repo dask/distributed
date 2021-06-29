@@ -283,7 +283,6 @@ class NBytesCluster(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -346,9 +345,10 @@ class NBytesCluster(DashboardComponent):
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
             #       is spilled out
-            self.root.x_range.end = max(
-                limit, meminfo.process + meminfo.managed_spilled
-            )
+            x_end = max(limit, meminfo.process + meminfo.managed_spilled)
+            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)  # max(
+            #    limit, meminfo.process + meminfo.managed_spilled
+            # )
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -404,7 +404,6 @@ class NBytes(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -515,7 +514,7 @@ class NBytes(DashboardComponent):
             # FIXME https://github.com/dask/distributed/issues/4675
             #       This causes flickering after adding workers and when enough memory
             #       is spilled to disk
-            self.root.x_range.end = max_limit
+            self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
             update(self.source, result)
 
 
