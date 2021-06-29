@@ -1,0 +1,99 @@
+name: Tests GPU
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [self-hosted]
+        python-version: ["3.8"]
+
+        # Uncomment to stress-test the test suite for random failures
+        # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Run nvidia-smi
+        run: nvidia-smi
+
+      - name: Setup Conda Environment
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
+          use-mamba: true
+          channels: rapidsai,conda-forge
+          channel-priority: true
+          python-version: ${{ matrix.python-version }}
+          environment-file: continuous_integration/environment-${{ matrix.python-version }}-gpu.yaml
+          activate-environment: dask-distributed
+          auto-activate-base: false
+
+      - name: Install stacktrace
+        shell: bash -l {0}
+        # stacktrace for Python 3.8 has not been released at the moment of writing
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
+        run: mamba install -c conda-forge -c defaults -c numba libunwind stacktrace
+
+      - name: Hack around https://github.com/ipython/ipython/issues/12197
+        # This upstream issue causes an interpreter crash when running
+        # distributed/protocol/tests/test_serialize.py::test_profile_nested_sizeof
+        shell: bash -l {0}
+        if: ${{ matrix.os == 'windows-latest' && matrix.python-version == '3.9' }}
+        run: mamba uninstall ipython
+
+      - name: Install
+        shell: bash -l {0}
+        run: |
+          # Cythonize scheduler on Python 3.7 builds
+          if [[ "${{ matrix.python-version }}" = "3.7" ]]; then
+              python -m pip install -vv --no-deps --install-option="--with-cython" -e .
+              python -c "from distributed.scheduler import COMPILED; assert COMPILED"
+          else
+              python -m pip install --no-deps -e .
+              python -c "from distributed.scheduler import COMPILED; assert not COMPILED"
+          fi
+
+      - name: mamba list
+        shell: bash -l {0}
+        run: mamba list
+
+      - name: mamba env export
+        shell: bash -l {0}
+        run: |
+          echo -e "--\n--Conda Environment (re-create this with \`mamba env create --name <name> -f <output_file>\`)\n--"
+          mamba env export | grep -E -v '^prefix:.*$'
+
+      - name: Setup SSH
+        shell: bash -l {0}
+        # FIXME no SSH available on Windows
+        # https://github.com/dask/distributed/issues/4509
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: bash continuous_integration/scripts/setup_ssh.sh
+
+      - name: Test
+        shell: bash -l {0}
+        env:
+          PYTHONFAULTHANDLER: 1
+        run: |
+          if [[ "${{ matrix.os }}" = "ubuntu-latest" ]]; then
+              # FIXME ipv6-related failures on Ubuntu github actions CI
+              # https://github.com/dask/distributed/issues/4514
+              export DISABLE_IPV6=1
+          fi
+
+          source continuous_integration/scripts/set_ulimit.sh
+          pytest distributed -m "not avoid_ci" --runslow
+
+      # - name: Debug with tmate on failure
+      #   if: ${{ failure() }}
+      #   uses: mxschmitt/action-tmate@v3

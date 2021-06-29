@@ -1,0 +1,17 @@
+# Self-Hosted Github Action Runners on AWS via Cirun.io
+# Reference: https://docs.cirun.io/reference/yaml.html
+runners:
+  - name: gpu-runner
+    # Cloud Provider: AWS
+    cloud: aws
+    instance_type: g4dn.xlarge
+    # NVIDIA Deep Learning AMI from AWS Marketplace
+    # https://aws.amazon.com/marketplace/pp/prodview-e7zxdqduz4cbs
+    machine_image: ami-00ac0c28c01352e53
+    # preemptible instances seems quite less reliable.
+    preemptible: false
+    # Path of the relevant workflow file
+    workflow: .github/workflows/tests-gpu.yaml
+    # Number of runners to provision on every trigger on Actions job
+    # See .github/workflows/tests-gpu.yaml
+    count: 1
