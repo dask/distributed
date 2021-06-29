@@ -43,7 +43,7 @@ class Manager:
     def add_listener(self, addr, listener):
         with self.lock:
             if addr in self.listeners:
-                raise RuntimeError("already listening on %r" % (addr,))
+                raise RuntimeError(f"already listening on {addr!r}")
             self.listeners[addr] = listener
 
     def remove_listener(self, addr):
@@ -170,7 +170,7 @@ class InProc(Comm):
 
     def _get_finalizer(self):
         def finalize(write_q=self._write_q, write_loop=self._write_loop, r=repr(self)):
-            logger.warning("Closing dangling queue in %s" % (r,))
+            logger.warning(f"Closing dangling queue in {r}")
             write_loop.add_callback(write_q.put_nowait, _EOF)
 
         return finalize
@@ -296,7 +296,7 @@ class InProcConnector(Connector):
     async def connect(self, address, deserialize=True, **connection_args):
         listener = self.manager.get_listener_for(address)
         if listener is None:
-            raise IOError("no endpoint for inproc address %r" % (address,))
+            raise OSError(f"no endpoint for inproc address {address!r}")
 
         conn_req = ConnectionRequest(
             c2s_q=Queue(),

@@ -558,7 +558,7 @@ async def test_bokeh_kwargs(cleanup):
     ) as c:
         client = AsyncHTTPClient()
         response = await client.fetch(
-            "http://localhost:{}/foo/status".format(c.scheduler.http_server.port)
+            f"http://localhost:{c.scheduler.http_server.port}/foo/status"
         )
         assert "bokeh" in response.body.decode()
 

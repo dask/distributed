@@ -87,7 +87,7 @@ def get_tcp_server_addresses(tcp_server):
     """
     sockets = list(tcp_server._sockets.values())
     if not sockets:
-        raise RuntimeError("TCP Server %r not started yet?" % (tcp_server,))
+        raise RuntimeError(f"TCP Server {tcp_server!r} not started yet?")
 
     def _look_for_family(fam):
         socks = []

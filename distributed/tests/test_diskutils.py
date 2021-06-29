@@ -162,7 +162,7 @@ def test_workspace_rmtree_failure(tmpdir):
     # shutil.rmtree() may call its onerror callback several times
     assert lines
     for line in lines:
-        assert line.startswith("Failed to remove %r" % (a.dir_path,))
+        assert line.startswith(f"Failed to remove {a.dir_path!r}")
 
 
 def test_locking_disabled(tmpdir):

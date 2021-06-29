@@ -164,9 +164,11 @@ class Occupancy(DashboardComponent):
                     color.append("blue")
 
             if total:
-                self.root.title.text = "Occupancy -- total time: %s  wall time: %s" % (
-                    format_time(total),
-                    format_time(total / self.scheduler.total_nthreads),
+                self.root.title.text = (
+                    "Occupancy -- total time: {}  wall time: {}".format(
+                        format_time(total),
+                        format_time(total / self.scheduler.total_nthreads),
+                    )
                 )
             else:
                 self.root.title.text = "Occupancy"
@@ -2640,9 +2642,7 @@ class WorkerTable(DashboardComponent):
 
         for name in self.names + self.extra_names:
             if name == "name":
-                data[name].insert(
-                    0, "Total ({nworkers})".format(nworkers=len(data[name]))
-                )
+                data[name].insert(0, f"Total ({len(data[name])})")
                 continue
             try:
                 if len(self.scheduler.workers) == 0:

@@ -69,7 +69,7 @@ class Actor(WrappedKey):
                 self._client = None
 
     def __repr__(self):
-        return "<Actor: %s, key=%s>" % (self._cls.__name__, self.key)
+        return f"<Actor: {self._cls.__name__}, key={self.key}>"
 
     def __reduce__(self):
         return (Actor, (self._cls, self._address, self.key))

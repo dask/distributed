@@ -862,7 +862,7 @@ async def test_retry_connect(monkeypatch):
                 return await super().connect(address, deserialize, **connection_args)
             else:
                 self.failures += 1
-                raise IOError()
+                raise OSError()
 
     class UnreliableBackend(TCPBackend):
         _connector_class = UnreliableConnector
@@ -950,8 +950,8 @@ async def check_many_listeners(addr):
         listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
-    assert len(set(l.listen_address for l in listeners)) == N
-    assert len(set(l.contact_address for l in listeners)) == N
+    assert len({l.listen_address for l in listeners}) == N
+    assert len({l.contact_address for l in listeners}) == N
 
     for listener in listeners:
         listener.stop()

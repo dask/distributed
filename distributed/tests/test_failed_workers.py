@@ -344,7 +344,7 @@ async def test_broken_worker_during_computation(c, s, a, b):
         L = c.map(
             slowadd,
             *zip(*partition_all(2, L)),
-            key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)]
+            key=["add-%d-%d" % (i, j) for j in range(len(L) // 2)],
         )
 
     await asyncio.sleep(random.random() / 20)

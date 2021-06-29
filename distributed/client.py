@@ -7,7 +7,6 @@ import inspect
 import json
 import logging
 import os
-import socket
 import sys
 import threading
 import uuid
@@ -399,9 +398,9 @@ class Future(WrappedKey):
                 typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            return "<Future: %s, type: %s, key: %s>" % (self.status, typ, self.key)
+            return f"<Future: {self.status}, type: {typ}, key: {self.key}>"
         else:
-            return "<Future: %s, key: %s>" % (self.status, self.key)
+            return f"<Future: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
         text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
@@ -494,7 +493,7 @@ class FutureState:
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
-        return "<%s: %s>" % (self.__class__.__name__, self.status)
+        return f"<{self.__class__.__name__}: {self.status}>"
 
 
 async def done_callback(future, callback):
@@ -660,9 +659,7 @@ class Client:
                 logger.info("Config value `scheduler-address` found: %s", address)
 
         if address is not None and kwargs:
-            raise ValueError(
-                "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
-            )
+            raise ValueError(f"Unexpected keyword arguments: {str(sorted(kwargs))}")
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
@@ -907,12 +904,12 @@ class Client:
             return text
 
         elif self.scheduler is not None:
-            return "<%s: scheduler=%r>" % (
+            return "<{}: scheduler={!r}>".format(
                 self.__class__.__name__,
                 self.scheduler.address,
             )
         else:
-            return "<%s: No scheduler connected>" % (self.__class__.__name__,)
+            return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()
@@ -1073,7 +1070,7 @@ class Client:
                     asynchronous=self._asynchronous,
                     **self._startup_kwargs,
                 )
-            except (OSError, socket.error) as e:
+            except OSError as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
@@ -1123,7 +1120,7 @@ class Client:
                 try:
                     await self._ensure_connected(timeout=timeout)
                     break
-                except EnvironmentError:
+                except OSError:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
                     timeout = deadline - self.loop.time()
@@ -1203,7 +1200,7 @@ class Client:
             return
         try:
             self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
-        except EnvironmentError:
+        except OSError:
             logger.debug("Not able to query scheduler for identity")
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):

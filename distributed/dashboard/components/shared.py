@@ -57,7 +57,7 @@ class Processing(DashboardComponent):
             tools="",
             x_range=x_range,
             id="bk-processing-stacks-plot",
-            **kwargs
+            **kwargs,
         )
         fig.quad(
             source=self.source,
@@ -297,7 +297,7 @@ class ProfileTimePlot(DashboardComponent):
             ),
             self.profile_plot,
             self.ts_plot,
-            **kwargs
+            **kwargs,
         )
 
     @without_property_validation
@@ -434,7 +434,7 @@ class ProfileServer(DashboardComponent):
             row(self.reset_button, self.update_button, sizing_mode="scale_width"),
             self.profile_plot,
             self.ts_plot,
-            **kwargs
+            **kwargs,
         )
 
     @without_property_validation
@@ -486,7 +486,7 @@ class SystemMonitor(DashboardComponent):
             height=height,
             tools=tools,
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         self.cpu.line(source=self.source, x="time", y="cpu")
         self.cpu.yaxis.axis_label = "Percentage"
@@ -508,7 +508,7 @@ class SystemMonitor(DashboardComponent):
             height=height,
             tools=tools,
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         self.mem.line(source=self.source, x="time", y="memory")
         self.mem.yaxis.axis_label = "Bytes"
@@ -530,7 +530,7 @@ class SystemMonitor(DashboardComponent):
             height=height,
             x_range=x_range,
             tools=tools,
-            **kwargs
+            **kwargs,
         )
         self.bandwidth.line(source=self.source, x="time", y="read_bytes", color="red")
         self.bandwidth.line(source=self.source, x="time", y="write_bytes", color="blue")
@@ -549,7 +549,7 @@ class SystemMonitor(DashboardComponent):
                 height=height,
                 x_range=x_range,
                 tools=tools,
-                **kwargs
+                **kwargs,
             )
 
             self.num_fds.line(source=self.source, x="time", y="num_fds")
