@@ -221,7 +221,6 @@ async def test_remove_worker_from_scheduler(s, a, b):
     await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
-    s.validate_state()
 
 
 @gen_cluster()
@@ -230,7 +229,6 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
     assert await s.remove_worker(address=a.address) == "already-removed"
-    s.validate_state()
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -943,7 +941,6 @@ async def test_learn_occupancy_multiple_workers(c, s, a, b):
     await wait(x)
 
     assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
-    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -2565,7 +2562,6 @@ async def test_rebalance(c, s, *_):
     # rebalance() when there is nothing to do
     await s.rebalance()
     await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2597,15 +2593,12 @@ async def test_rebalance_workers_and_keys(client, s, *_):
     with pytest.raises(KeyError):
         await s.rebalance(workers=["notexist"])
 
-    s.validate_state()
-
 
 @gen_cluster()
 async def test_rebalance_missing_data1(s, a, b):
     """key never existed"""
     out = await s.rebalance(keys=["notexist"])
     assert out == {"status": "missing-data", "keys": ["notexist"]}
-    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -2618,7 +2611,6 @@ async def test_rebalance_missing_data2(c, s, a, b):
     out = await s.rebalance(keys=[f.key for f in futures])
     assert out["status"] == "missing-data"
     assert 8 <= len(out["keys"]) <= 10
-    s.validate_state()
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -2645,13 +2637,10 @@ async def test_rebalance_raises_missing_data3(c, s, *_, explicit):
         out = await s.rebalance()
         assert out == {"status": "OK"}
 
-    s.validate_state()
-
 
 @gen_cluster(nthreads=[])
 async def test_rebalance_no_workers(s):
     await s.rebalance()
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2679,7 +2668,6 @@ async def test_rebalance_managed_memory(c, s, *_):
     # We can expect an exact, stable result because we are completely bypassing the
     # unpredictability of unmanaged memory.
     await assert_ndata(c, {a: 62, b: 38})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2697,7 +2685,6 @@ async def test_rebalance_no_limit(c, s, a, b):
     await s.rebalance()
     # Disabling memory_limit made us ignore all % thresholds set in the config
     await assert_ndata(c, {a.address: 50, b.address: 50})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2723,7 +2710,6 @@ async def test_rebalance_no_recipients(c, s, *_):
     await assert_ndata(c, {a: 101, b: 1})
     await s.rebalance()
     await assert_ndata(c, {a: 101, b: 1})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2741,7 +2727,6 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
     await assert_ndata(client, {a.address: 10, b.address: 2, c.address: 2})
     await client.rebalance(futures[:2])
     await assert_ndata(client, {a.address: 8, b.address: 2, c.address: 4})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2757,7 +2742,6 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     await assert_ndata(c, {a.address: 10, b.address: 1})
     await c.rebalance(futures[:2])
     await assert_ndata(c, {a.address: 9, b.address: 2})
-    s.validate_state()
 
 
 @gen_cluster(
