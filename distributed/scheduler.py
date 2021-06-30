@@ -6420,7 +6420,7 @@ class Scheduler(SchedulerState, ServerNode):
                         response = function(self, state)
                     await comm.write(response)
                     await asyncio.sleep(interval)
-            except (OSError, CommClosedError):
+            except OSError:
                 pass
             finally:
                 if teardown:
