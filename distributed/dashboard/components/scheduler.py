@@ -2241,6 +2241,9 @@ class TaskGroupGraph(DashboardComponent):
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
 
+        self.root.x_range = DataRange1d()
+        self.root.y_range = DataRange1d()
+
 
 class TaskProgress(DashboardComponent):
     """Progress bars per task type"""
