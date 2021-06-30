@@ -342,13 +342,9 @@ class NBytesCluster(DashboardComponent):
                 "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
                 "spilled": [meminfo.managed_spilled] * 4,
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled out
+
             x_end = max(limit, meminfo.process + meminfo.managed_spilled)
-            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)  # max(
-            #    limit, meminfo.process + meminfo.managed_spilled
-            # )
+            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -511,9 +507,7 @@ class NBytes(DashboardComponent):
             result = {
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled to disk
+
             self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
             update(self.source, result)
 
