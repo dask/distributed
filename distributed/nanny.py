@@ -260,10 +260,8 @@ class Nanny(ServerNode):
         warnings.warn("The local_dir attribute has moved to local_directory")
         return self.local_directory
 
-    async def start(self):
+    async def _start(self):
         """Start nanny, start local process, start watching"""
-
-        await super().start()
 
         ports = parse_ports(self._start_port)
         for port in ports:

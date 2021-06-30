@@ -293,9 +293,12 @@ class Server:
 
         return _().__await__()
 
+    async def _start(self):
+        self.status = Status.running
+
     async def start(self):
         await self.rpc.start()
-        self.status = Status.running
+        await self._start()
 
     async def __aenter__(self):
         await self

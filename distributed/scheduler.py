@@ -3749,9 +3749,8 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             return ws.host, port
 
-    async def start(self):
+    async def _start(self):
         """Clear out old state and restart all running coroutines"""
-        await super().start()
 
         enable_gc_diagnosis()
 
@@ -3805,7 +3804,7 @@ class Scheduler(SchedulerState, ServerNode):
         await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
 
         self.start_periodic_callbacks()
-
+        self.status = Status.running
         setproctitle(f"dask-scheduler [{self.address}]")
         return self
 

@@ -1109,7 +1109,7 @@ class Worker(ServerNode):
     # Lifecycle #
     #############
 
-    async def start(self):
+    async def _start(self):
         if self.status and self.status in (
             Status.closed,
             Status.closing,
@@ -1117,8 +1117,6 @@ class Worker(ServerNode):
         ):
             return
         assert self.status is Status.undefined, self.status
-
-        await super().start()
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
