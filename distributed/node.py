@@ -63,7 +63,7 @@ class ServerNode(Server):
                 self.services[k] = service
             except Exception as e:
                 warnings.warn(
-                    "\nCould not launch service '%s' on port %s. " % (k, port)
+                    f"\nCould not launch service '{k}' on port {port}. "
                     + "Got the following message:\n\n"
                     + str(e),
                     stacklevel=3,

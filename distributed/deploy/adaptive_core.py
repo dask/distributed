@@ -171,7 +171,7 @@ class AdaptiveCore:
             not_yet_arrived = requested - observed
             to_close = set()
             if not_yet_arrived:
-                to_close.update((toolz.take(len(plan) - target, not_yet_arrived)))
+                to_close.update(toolz.take(len(plan) - target, not_yet_arrived))
 
             if target < len(plan) - len(to_close):
                 L = await self.workers_to_close(target=target)

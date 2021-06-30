@@ -786,7 +786,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
     def key(ws):
         return groups[ws.address]
 
-    assert set(s.workers_to_close(key=key)) == set(w.address for w in workers)
+    assert set(s.workers_to_close(key=key)) == {w.address for w in workers}
 
     # Assert that job in one worker blocks closure of group
     future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
@@ -2016,10 +2016,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):

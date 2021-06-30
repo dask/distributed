@@ -7,7 +7,7 @@ class GraphLayout(SchedulerPlugin):
     This assigns (x, y) locations to all tasks quickly and dynamically as new
     tasks are added.  This scales to a few thousand nodes.
 
-    It is commonly used with distributed/bokeh/scheduler.py::TaskGraph, which
+    It is commonly used with distributed/dashboard/components/scheduler.py::TaskGraph, which
     is rendered at /graph on the diagnostic dashboard.
     """
 

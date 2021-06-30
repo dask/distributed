@@ -59,7 +59,7 @@ def identifier(frame):
 def repr_frame(frame):
     """Render a frame as a line for inclusion into a text traceback"""
     co = frame.f_code
-    text = '  File "%s", line %s, in %s' % (co.co_filename, frame.f_lineno, co.co_name)
+    text = f'  File "{co.co_filename}", line {frame.f_lineno}, in {co.co_name}'
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
     return text + "\n\t" + line
 
@@ -230,7 +230,7 @@ def plot_data(state, profile_interval=0.010):
             x += width
 
     traverse(state, 0, 1, 0)
-    percentages = ["{:.1f}%".format(100 * w) for w in widths]
+    percentages = [f"{100 * w:.1f}%" for w in widths]
     return {
         "left": starts,
         "right": stops,

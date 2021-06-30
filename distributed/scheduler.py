@@ -1545,7 +1545,7 @@ class TaskState:
         self._nbytes = nbytes
 
     def __repr__(self):
-        return "<TaskState %r %s>" % (self._key, self._state)
+        return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
         color = (
@@ -1605,7 +1605,7 @@ class _StateLegacyMapping(Mapping):
         return self._accessor(self._states[key])
 
     def __repr__(self):
-        return "%s(%s)" % (self.__class__, dict(self))
+        return f"{self.__class__}({dict(self)})"
 
 
 class _OptionalStateLegacyMapping(_StateLegacyMapping):
@@ -1657,7 +1657,7 @@ class _StateLegacySet(Set):
         return st is not None and bool(self._accessor(st))
 
     def __repr__(self):
-        return "%s(%s)" % (self.__class__, set(self))
+        return f"{self.__class__}({set(self)})"
 
 
 def _legacy_task_key_set(tasks):
@@ -3745,7 +3745,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.start_periodic_callbacks()
 
-        setproctitle("dask-scheduler [%s]" % (self.address,))
+        setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
     async def close(self, comm=None, fast=False, close_workers=False):
@@ -6482,7 +6482,7 @@ class Scheduler(SchedulerState, ServerNode):
                         response = function(self, state)
                     await comm.write(response)
                     await asyncio.sleep(interval)
-            except (EnvironmentError, CommClosedError):
+            except (OSError, CommClosedError):
                 pass
             finally:
                 if teardown:
@@ -6821,7 +6821,7 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, str):
-            raise TypeError("addresses should be strings or tuples, got %r" % (addr,))
+            raise TypeError(f"addresses should be strings or tuples, got {addr!r}")
 
         if resolve:
             addr = resolve_address(addr)

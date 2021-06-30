@@ -1549,7 +1549,7 @@ async def test_upload_file(c, s, a, b):
 
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
+            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
                 await c.upload_file(fn)
 
             x = c.submit(g, pure=False)
@@ -1561,7 +1561,7 @@ async def test_upload_file(c, s, a, b):
 async def test_upload_file_refresh_delayed(c, s, a, b):
     with save_sys_modules():
         for value in [123, 456]:
-            with tmp_text("myfile.py", "def f():\n    return {}".format(value)) as fn:
+            with tmp_text("myfile.py", f"def f():\n    return {value}") as fn:
                 await c.upload_file(fn)
 
             sys.path.append(os.path.dirname(fn))
@@ -1590,7 +1590,7 @@ async def test_upload_file_zip(c, s, a, b):
         try:
             for value in [123, 456]:
                 with tmp_text(
-                    "myfile.py", "def f():\n    return {}".format(value)
+                    "myfile.py", f"def f():\n    return {value}"
                 ) as fn_my_file:
                     with zipfile.ZipFile("myfile.zip", "w") as z:
                         z.write(fn_my_file, arcname=os.path.basename(fn_my_file))
@@ -1635,13 +1635,13 @@ async def test_upload_file_egg(c, s, a, b):
                 package_1 = os.path.join(dirname, "package_1")
                 os.mkdir(package_1)
                 with open(os.path.join(package_1, "__init__.py"), "w") as f:
-                    f.write("a = {}\n".format(value))
+                    f.write(f"a = {value}\n")
 
                 # test multiple top-level packages
                 package_2 = os.path.join(dirname, "package_2")
                 os.mkdir(package_2)
                 with open(os.path.join(package_2, "__init__.py"), "w") as f:
-                    f.write("b = {}\n".format(value))
+                    f.write(f"b = {value}\n")
 
                 # compile these into an egg
                 subprocess.check_call(
@@ -1887,12 +1887,12 @@ async def test_allow_restrictions(c, s, a, b):
 def test_bad_address():
     try:
         Client("123.123.123.123:1234", timeout=0.1)
-    except (IOError, TimeoutError) as e:
+    except (OSError, TimeoutError) as e:
         assert "connect" in str(e).lower()
 
     try:
         Client("127.0.0.1:1234", timeout=0.1)
-    except (IOError, TimeoutError) as e:
+    except (OSError, TimeoutError) as e:
         assert "connect" in str(e).lower()
 
 
@@ -4647,7 +4647,7 @@ async def test_client_timeout():
     await asyncio.sleep(4)
     try:
         await s
-    except EnvironmentError:  # port in use
+    except OSError:  # port in use
         await c.close()
         return
 
@@ -5165,7 +5165,7 @@ def test_get_client_no_cluster():
     Worker._instances.clear()
 
     msg = "No global client found and no address provided"
-    with pytest.raises(ValueError, match=r"^{}$".format(msg)):
+    with pytest.raises(ValueError, match=fr"^{msg}$"):
         get_client()
 
 

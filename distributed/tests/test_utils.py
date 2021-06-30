@@ -146,10 +146,10 @@ def test_get_ip_interface():
     elif sys.platform.startswith("linux"):
         assert get_ip_interface("lo") == "127.0.0.1"
     else:
-        pytest.skip("test needs to be enhanced for platform %r" % (sys.platform,))
+        pytest.skip(f"test needs to be enhanced for platform {sys.platform!r}")
 
     non_existent_interface = "__non-existent-interface"
-    expected_error_message = "{!r}.+network interface.+".format(non_existent_interface)
+    expected_error_message = f"{non_existent_interface!r}.+network interface.+"
 
     if sys.platform == "darwin":
         expected_error_message += "'lo0'"

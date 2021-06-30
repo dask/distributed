@@ -46,7 +46,7 @@ class QueueExtension:
         self.scheduler.extensions["queues"] = self
 
     def create(self, comm=None, name=None, client=None, maxsize=0):
-        logger.debug("Queue name: {}".format(name))
+        logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1

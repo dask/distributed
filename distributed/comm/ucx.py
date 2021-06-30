@@ -373,7 +373,7 @@ class UCXListener(Listener):
         comm_handler: None,
         deserialize=False,
         allow_offload=True,
-        **connection_args
+        **connection_args,
     ):
         if not address.startswith("ucx"):
             address = "ucx://" + address
@@ -525,7 +525,7 @@ def _scrub_ucx_config():
     for k, v in options.items():
         if k not in valid_ucx_vars:
             logger.debug(
-                "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
+                f"Key: {k} with value: {v} not a valid UCX configuration option"
             )
 
     return options
