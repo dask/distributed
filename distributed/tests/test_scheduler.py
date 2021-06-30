@@ -17,7 +17,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply
+from dask.utils import apply, parse_timedelta
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -1843,6 +1843,34 @@ async def test_get_task_duration(c, s, a, b):
         assert s.get_task_duration(ts) == 0.5  # default
         assert len(s.unknown_durations) == 1
         assert len(s.unknown_durations["slowinc"]) == 1
+
+
+@gen_cluster(client=True)
+async def test_default_task_duration_splits(c, s, a, b):
+    """This test ensures that the default task durations for shuffle split tasks are, by default, aligned with the task names of dask.dask"""
+
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+
+    # We don't care about the actual computation here but we'll schedule one anyhow to verify that we're looking for the correct key
+    npart = 10
+    df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
+    graph = df.shuffle(
+        "A",
+        shuffle="tasks",
+        # If we don't have enough partitions, we'll fall back to a simple shuffle
+        max_branch=npart - 1,
+    ).sum()
+    fut = c.compute(graph)
+    await wait(fut)
+
+    split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
+    assert len(split_prefix) == 1
+    split_prefix = split_prefix[0]
+    default_time = parse_timedelta(
+        dask.config.get("distributed.scheduler.default-task-durations")[split_prefix]
+    )
+    assert default_time <= 1e-6
 
 
 @pytest.mark.asyncio
