@@ -5618,14 +5618,20 @@ class Scheduler(SchedulerState, ServerNode):
             )
             return
 
-        ws: WorkerState = parent._workers_dv[worker_address]
-        ts: TaskState
+        ws: WorkerState = parent._workers_dv.get(worker_address)
+        if ws is None:
+            return
+
         for key in keys:
-            ts = parent._tasks.get(key)
+            ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts in ws._has_what:
+                assert ts._state == "memory"
                 del ws._has_what[ts]
                 ts._who_has.remove(ws)
                 ws._nbytes -= ts.get_nbytes()
+                if not ts._who_has:
+                    # Last copy deleted
+                    del parent._tasks[key]
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
     async def rebalance(
@@ -7649,7 +7655,7 @@ def validate_task_state(ts: TaskState):
         assert dts._state != "forgotten"
 
     assert (ts._processing_on is not None) == (ts._state == "processing")
-    assert (not not ts._who_has) == (ts._state == "memory"), (ts, ts._who_has)
+    assert bool(ts._who_has) == (ts._state == "memory"), (ts, ts._who_has, ts._state)
 
     if ts._state == "processing":
         assert all([dts._who_has for dts in ts._dependencies]), (

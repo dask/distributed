@@ -11,7 +11,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import MutableMapping
+from collections.abc import Hashable, MutableMapping
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
@@ -1500,9 +1500,9 @@ class Worker(ServerNode):
         self.log.append(("free-keys", keys, reason))
         for key in keys:
             ts = self.tasks.get(key)
-            if ts:
+            if ts is not None:
                 ts.scheduler_holds_ref = False
-            self.release_key(key, report=False, reason=reason)
+                self.release_key(key, report=False, reason=reason)
 
     def handle_superfluous_data(self, keys=(), reason=None):
         """Stream handler notifying the worker that it might be holding unreferenced, superfluous data.
@@ -2607,15 +2607,12 @@ class Worker(ServerNode):
 
     def release_key(
         self,
-        key: str,
+        key: Hashable,
         cause: Optional[TaskState] = None,
         reason: Optional[str] = None,
         report: bool = True,
     ):
         try:
-
-            if self.validate:
-                assert isinstance(key, str)
             ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
@@ -2624,12 +2621,7 @@ class Worker(ServerNode):
             if ts is None or ts.scheduler_holds_ref:
                 return
             logger.debug(
-                "Release key %s",
-                {
-                    "key": key,
-                    "cause": cause,
-                    "reason": reason,
-                },
+                "Release key %s", {"key": key, "cause": cause, "reason": reason}
             )
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}, reason))

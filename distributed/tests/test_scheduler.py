@@ -2922,6 +2922,25 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}
 
 
+@gen_cluster(client=True)
+async def test_delete_worker_data(c, s, a, b):
+    # delete only copy of x
+    # delete one of the copies of y
+    # don't touch z
+    x, y, z = await c.scatter(["x", "y", "z"], workers=[a.address])
+    await c.replicate(y)
+
+    assert a.data == {x.key: "x", y.key: "y", z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key, z.key}
+
+    await s._delete_worker_data(a.address, [x.key, y.key])
+    assert a.data == {z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key, z.key}
+    assert s.workers[a.address].nbytes == s.tasks[z.key].nbytes
+
+
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_delete_worker_data_double_delete(c, s, a):
     """_delete_worker_data race condition where the same key is deleted twice.
@@ -2948,13 +2967,19 @@ async def test_delete_worker_data_bad_worker(s, a, b):
     await s._delete_worker_data(a.address, ["x"])
 
 
+@pytest.mark.parametrize("bad_first", [False, True])
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_delete_worker_data_bad_task(c, s, a):
+async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     """_delete_worker_data gracefully handles a non-existing key;
     e.g. a task was stolen by work stealing in the middle of a rebalance().
     Other tasks on the same worker are deleted.
     """
     x, y = await c.scatter(["x", "y"])
-    await s._delete_worker_data(a.address, [x.key, "notexist"])
+    assert a.data == {x.key: "x", y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key}
+
+    keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
+    await s._delete_worker_data(a.address, keys)
     assert a.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
