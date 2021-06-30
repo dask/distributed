@@ -17,7 +17,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, stringify
+from dask.utils import apply, parse_timedelta, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -894,7 +894,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
     def key(ws):
         return groups[ws.address]
 
-    assert set(s.workers_to_close(key=key)) == set(w.address for w in workers)
+    assert set(s.workers_to_close(key=key)) == {w.address for w in workers}
 
     # Assert that job in one worker blocks closure of group
     future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
@@ -1953,6 +1953,34 @@ async def test_get_task_duration(c, s, a, b):
         assert len(s.unknown_durations["slowinc"]) == 1
 
 
+@gen_cluster(client=True)
+async def test_default_task_duration_splits(c, s, a, b):
+    """This test ensures that the default task durations for shuffle split tasks are, by default, aligned with the task names of dask.dask"""
+
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+
+    # We don't care about the actual computation here but we'll schedule one anyhow to verify that we're looking for the correct key
+    npart = 10
+    df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
+    graph = df.shuffle(
+        "A",
+        shuffle="tasks",
+        # If we don't have enough partitions, we'll fall back to a simple shuffle
+        max_branch=npart - 1,
+    ).sum()
+    fut = c.compute(graph)
+    await wait(fut)
+
+    split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
+    assert len(split_prefix) == 1
+    split_prefix = split_prefix[0]
+    default_time = parse_timedelta(
+        dask.config.get("distributed.scheduler.default-task-durations")[split_prefix]
+    )
+    assert default_time <= 1e-6
+
+
 @pytest.mark.asyncio
 async def test_no_danglng_asyncio_tasks(cleanup):
     start = asyncio.all_tasks()
@@ -2124,10 +2152,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):
@@ -2398,13 +2426,11 @@ def test_memorystate():
         repr(m)
         == dedent(
             """
-            Managed by Dask       : 80 B
-              - in process memory : 68 B
-              - spilled to disk   : 12 B
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
+            Spilled to disk       : 12 B
             """
         ).lstrip()
     )

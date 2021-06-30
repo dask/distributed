@@ -38,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
+from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
 
 from . import preloading, profile
 from . import versions as version_module
@@ -58,6 +59,7 @@ from .metrics import time
 from .multi_lock import MultiLockExtension
 from .node import ServerNode
 from .proctitle import setproctitle
+from .protocol.pickle import loads
 from .publish import PublishExtension
 from .pubsub import PubSubSchedulerExtension
 from .queues import QueueExtension
@@ -69,15 +71,11 @@ from .utils import (
     All,
     TimeoutError,
     empty_context,
-    format_bytes,
-    format_time,
     get_fileno_limit,
     key_split,
     key_split_group,
     log_errors,
     no_default,
-    parse_bytes,
-    parse_timedelta,
     tmpfile,
     validate_key,
 )
@@ -369,13 +367,11 @@ class MemoryState:
 
     def __repr__(self) -> str:
         return (
-            f"Managed by Dask       : {format_bytes(self.managed)}\n"
-            f"  - in process memory : {format_bytes(self._managed_in_memory)}\n"
-            f"  - spilled to disk   : {format_bytes(self._managed_spilled)}\n"
             f"Process memory (RSS)  : {format_bytes(self._process)}\n"
             f"  - managed by Dask   : {format_bytes(self._managed_in_memory)}\n"
             f"  - unmanaged (old)   : {format_bytes(self._unmanaged_old)}\n"
             f"  - unmanaged (recent): {format_bytes(self.unmanaged_recent)}\n"
+            f"Spilled to disk       : {format_bytes(self._managed_spilled)}\n"
         )
 
 
@@ -1572,7 +1568,7 @@ class TaskState:
         self._nbytes = nbytes
 
     def __repr__(self):
-        return "<TaskState %r %s>" % (self._key, self._state)
+        return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
         color = (
@@ -1632,7 +1628,7 @@ class _StateLegacyMapping(Mapping):
         return self._accessor(self._states[key])
 
     def __repr__(self):
-        return "%s(%s)" % (self.__class__, dict(self))
+        return f"{self.__class__}({dict(self)})"
 
 
 class _OptionalStateLegacyMapping(_StateLegacyMapping):
@@ -1684,7 +1680,7 @@ class _StateLegacySet(Set):
         return st is not None and bool(self._accessor(st))
 
     def __repr__(self):
-        return "%s(%s)" % (self.__class__, set(self))
+        return f"{self.__class__}({set(self)})"
 
 
 def _legacy_task_key_set(tasks):
@@ -3637,6 +3633,7 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
+            "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
             "adaptive_target": self.adaptive_target,
@@ -3811,7 +3808,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.start_periodic_callbacks()
 
-        setproctitle("dask-scheduler [%s]" % (self.address,))
+        setproctitle(f"dask-scheduler [{self.address}]")
         return self
 
     async def close(self, comm=None, fast=False, close_workers=False):
@@ -5272,6 +5269,24 @@ class Scheduler(SchedulerState, ServerNode):
         """Remove external plugin from scheduler"""
         self.plugins.remove(plugin)
 
+    async def register_scheduler_plugin(self, comm=None, plugin=None):
+        """Register a plugin on the scheduler."""
+        if not dask.config.get("distributed.scheduler.pickle"):
+            raise ValueError(
+                "Cannot register a scheduler plugin as the scheduler "
+                "has been explicitly disallowed from deserializing "
+                "arbitrary bytestrings using pickle via the "
+                "'distributed.scheduler.pickle' configuration setting."
+            )
+        plugin = loads(plugin)
+
+        if hasattr(plugin, "start"):
+            result = plugin.start(self)
+            if inspect.isawaitable(result):
+                result = await result
+
+        self.add_plugin(plugin=plugin)
+
     def worker_send(self, worker, msg):
         """Send message to worker
 
@@ -6467,7 +6482,7 @@ class Scheduler(SchedulerState, ServerNode):
                         response = function(self, state)
                     await comm.write(response)
                     await asyncio.sleep(interval)
-            except (EnvironmentError, CommClosedError):
+            except (OSError, CommClosedError):
                 pass
             finally:
                 if teardown:
@@ -6806,7 +6821,7 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, str):
-            raise TypeError("addresses should be strings or tuples, got %r" % (addr,))
+            raise TypeError(f"addresses should be strings or tuples, got {addr!r}")
 
         if resolve:
             addr = resolve_address(addr)

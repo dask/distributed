@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # Dask.distributed documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  6 14:42:44 2015.
@@ -471,16 +470,14 @@ class AutoAutoSummary(Autosummary):
         if "methods" in self.options:
             _, methods = self.get_members(app, c, ["method"], ["__init__"])
             self.content = [
-                "%s.%s" % (class_name, method)
+                f"{class_name}.{method}"
                 for method in methods
                 if not method.startswith("_")
             ]
         if "attributes" in self.options:
             _, attribs = self.get_members(app, c, ["attribute", "property"])
             self.content = [
-                "~%s.%s" % (clazz, attrib)
-                for attrib in attribs
-                if not attrib.startswith("_")
+                f"~{clazz}.{attrib}" for attrib in attribs if not attrib.startswith("_")
             ]
         return super().run()
 

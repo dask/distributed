@@ -1,6 +1,5 @@
 """ utilities for package version introspection """
 
-from __future__ import absolute_import, division, print_function
 
 import importlib
 import os
@@ -25,9 +24,7 @@ optional_packages = [
 
 
 # only these scheduler packages will be checked for version mismatch
-scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
-    ["lz4", "blosc"]
-)
+scheduler_relevant_packages = {pkg for pkg, _ in required_packages} | {"lz4", "blosc"}
 
 
 # notes to be displayed for mismatch packages
@@ -135,12 +132,12 @@ def error_message(scheduler, workers, client, client_name="client"):
         )
         versions.add(client_version)
 
-        worker_versions = set(
+        worker_versions = {
             workers[w].get(pkg, "MISSING")
             if isinstance(workers[w], dict)
             else workers[w]
             for w in workers
-        )
+        }
         versions |= worker_versions
 
         if len(versions) <= 1:

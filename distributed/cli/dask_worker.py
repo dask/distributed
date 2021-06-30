@@ -265,7 +265,7 @@ def main(
     dashboard_address,
     worker_class,
     preload_nanny,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -419,7 +419,7 @@ def main(
             name=name
             if nprocs == 1 or name is None or name == ""
             else str(name) + "-" + str(i),
-            **kwargs
+            **kwargs,
         )
         for i in range(nprocs)
     ]

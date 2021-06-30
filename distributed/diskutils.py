@@ -23,7 +23,7 @@ def is_locking_enabled():
 def safe_unlink(path):
     try:
         os.unlink(path)
-    except EnvironmentError as e:
+    except OSError as e:
         # Perhaps it was removed by someone else?
         if e.errno != errno.ENOENT:
             logger.error("Failed to remove %r", str(e))
@@ -121,7 +121,7 @@ class WorkSpace:
     def _init_workspace(self):
         try:
             os.mkdir(self.base_dir)
-        except EnvironmentError as e:
+        except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
 
@@ -174,7 +174,7 @@ class WorkSpace:
         for p in glob.glob(os.path.join(self.base_dir, "*" + DIR_LOCK_EXT)):
             try:
                 st = os.stat(p)
-            except EnvironmentError:
+            except OSError:
                 # May have been removed in the meantime
                 pass
             else:

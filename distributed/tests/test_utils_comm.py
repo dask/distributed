@@ -56,10 +56,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class BrokenConnectionPool(ConnectionPool):

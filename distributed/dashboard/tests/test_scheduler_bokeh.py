@@ -35,6 +35,7 @@ from distributed.dashboard.components.scheduler import (
     StealingTimeSeries,
     SystemMonitor,
     TaskGraph,
+    TaskGroupGraph,
     TaskProgress,
     TaskStream,
     WorkerTable,
@@ -103,15 +104,14 @@ async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:  # will steal soon
-        await asyncio.sleep(0.01)
-
+    await wait(futures)
     se.update()
-
     assert len(first(se.source.data.values()))
+    assert b.tasks
+    assert sum(se.source.data["count"]) >= len(b.tasks)
 
 
 @gen_cluster(client=True)
@@ -608,6 +608,68 @@ async def test_TaskGraph_order(c, s, a, b):
     gp.update()
 
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"
+
+
+@gen_cluster(client=True)
+async def test_TaskGroupGraph(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, range(5))
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 5]
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()
+    assert not any(tgg.nodes_source.data.values())
+
+
+@gen_cluster(client=True)
+async def test_TaskGroupGraph_arrows(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, futures)
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 10]
+
+    assert all(len(L) == 1 for L in tgg.arrows_source.data.values())
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    assert not any(tgg.nodes_source.data.values())
+    assert not any(tgg.arrows_source.data.values())
 
 
 @gen_cluster(

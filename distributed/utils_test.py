@@ -3,6 +3,7 @@ import collections
 import copy
 import functools
 import gc
+import inspect
 import io
 import itertools
 import logging
@@ -861,6 +862,15 @@ def gen_cluster(
     async def test_foo(scheduler, worker1, worker2):
         await ...  # use tornado coroutines
 
+    @pytest.mark.parametrize("param", [1, 2, 3])
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, param):
+        await ...  # use tornado coroutines
+
+    @gen_cluster()
+    async def test_foo(scheduler, worker1, worker2, pytest_fixture_a, pytest_fixture_b):
+        await ...  # use tornado coroutines
+
     See also:
         start
         end
@@ -877,7 +887,7 @@ def gen_cluster(
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
-        def test_func():
+        def test_func(*outer_args, **kwargs):
             result = None
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
@@ -919,7 +929,7 @@ def gen_cluster(
                             )
                             args = [c] + args
                         try:
-                            future = func(*args)
+                            future = func(*args, *outer_args, **kwargs)
                             if timeout:
                                 future = asyncio.wait_for(future, timeout)
                             result = await future
@@ -971,13 +981,28 @@ def gen_cluster(
                 if getattr(w, "data", None):
                     try:
                         w.data.clear()
-                    except EnvironmentError:
+                    except OSError:
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
                     del w.data
 
             return result
+
+        # Patch the signature so pytest can inject fixtures
+        orig_sig = inspect.signature(func)
+        args = [None] * (1 + len(nthreads))  # scheduler, *workers
+        if client:
+            args.insert(0, None)
+
+        bound = orig_sig.bind_partial(*args)
+        test_func.__signature__ = orig_sig.replace(
+            parameters=[
+                p
+                for name, p in orig_sig.parameters.items()
+                if name not in bound.arguments
+            ]
+        )
 
         return test_func
 
@@ -1050,10 +1075,10 @@ def wait_for_port(address, timeout=5):
     while True:
         timeout = deadline - time()
         if timeout < 0:
-            raise RuntimeError("Failed to connect to %s" % (address,))
+            raise RuntimeError(f"Failed to connect to {address}")
         try:
             sock = socket.create_connection(address, timeout=timeout)
-        except EnvironmentError:
+        except OSError:
             pass
         else:
             sock.close()
@@ -1067,7 +1092,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1077,7 +1102,7 @@ async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 @memoize
@@ -1095,7 +1120,7 @@ def has_ipv6():
         serv.bind(("::", 0))
         serv.listen(5)
         cli = socket.create_connection(serv.getsockname()[:2])
-    except EnvironmentError:
+    except OSError:
         return False
     else:
         return True
@@ -1397,7 +1422,7 @@ def bump_rlimit(limit, desired):
         if soft < desired:
             resource.setrlimit(limit, (desired, max(hard, desired)))
     except Exception as e:
-        pytest.skip("rlimit too low (%s) and can't be increased: %s" % (soft, e))
+        pytest.skip(f"rlimit too low ({soft}) and can't be increased: {e}")
 
 
 def gen_tls_cluster(**kwargs):
