@@ -3020,25 +3020,6 @@ async def test_rebalance_raises_on_explicit_missing_data(c, s, a, b):
         await c.rebalance(futures=[f])
 
 
-@gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance_does_not_raise_on_implicit_missing_data(c, s, *_):
-    """rebalance() does NOT raise KeyError if keys disappear but were not explicitly
-    listed
-    """
-    a, b = s.workers
-    futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
-    await wait(futures)
-    # Wait for heartbeats
-    while s.memory.process < 2 ** 29:
-        await asyncio.sleep(0.1)
-
-    # Descoping the futures enqueues a coroutine to release the data on the server.
-    # During the synchronous part of rebalance, the futures still exist, but they
-    # will be (partially) gone by the time the actual transferring happens.
-    del futures
-    await c.rebalance()
-
-
 @gen_cluster(client=True)
 async def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])

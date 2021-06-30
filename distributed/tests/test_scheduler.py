@@ -2621,20 +2621,30 @@ async def test_rebalance_missing_data2(c, s, a, b):
     s.validate_state()
 
 
+@pytest.mark.parametrize("explicit", [False, True])
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance_raises_missing_data3(c, s, *_):
+async def test_rebalance_raises_missing_data3(c, s, *_, explicit):
     """keys exist when the sync part of rebalance runs, but are gone by the time the
-    actual data movement runs
+    actual data movement runs.
+    There is an error message only if the keys are explicitly listed in the API call.
     """
     a, _ = s.workers
     futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
-    del futures
-    out = await s.rebalance()
-    assert out["status"] == "missing-data"
-    assert 1 <= len(out["keys"]) <= 10
+
+    if explicit:
+        keys = [f.key for f in futures]
+        del futures
+        out = await s.rebalance(keys=keys)
+        assert out["status"] == "missing-data"
+        assert 1 <= len(out["keys"]) <= 10
+    else:
+        del futures
+        out = await s.rebalance()
+        assert out == {"status": "OK"}
+
     s.validate_state()
 
 
