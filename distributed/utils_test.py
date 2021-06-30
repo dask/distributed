@@ -981,7 +981,7 @@ def gen_cluster(
                 if getattr(w, "data", None):
                     try:
                         w.data.clear()
-                    except EnvironmentError:
+                    except OSError:
                         # zict backends can fail if their storage directory
                         # was already removed
                         pass
@@ -1075,10 +1075,10 @@ def wait_for_port(address, timeout=5):
     while True:
         timeout = deadline - time()
         if timeout < 0:
-            raise RuntimeError("Failed to connect to %s" % (address,))
+            raise RuntimeError(f"Failed to connect to {address}")
         try:
             sock = socket.create_connection(address, timeout=timeout)
-        except EnvironmentError:
+        except OSError:
             pass
         else:
             sock.close()
@@ -1092,7 +1092,7 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
@@ -1102,7 +1102,7 @@ async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
-            pytest.fail("condition not reached until %s seconds" % (timeout,))
+            pytest.fail(f"condition not reached until {timeout} seconds")
 
 
 @memoize
@@ -1120,7 +1120,7 @@ def has_ipv6():
         serv.bind(("::", 0))
         serv.listen(5)
         cli = socket.create_connection(serv.getsockname()[:2])
-    except EnvironmentError:
+    except OSError:
         return False
     else:
         return True
@@ -1422,7 +1422,7 @@ def bump_rlimit(limit, desired):
         if soft < desired:
             resource.setrlimit(limit, (desired, max(hard, desired)))
     except Exception as e:
-        pytest.skip("rlimit too low (%s) and can't be increased: %s" % (soft, e))
+        pytest.skip(f"rlimit too low ({soft}) and can't be increased: {e}")
 
 
 def gen_tls_cluster(**kwargs):

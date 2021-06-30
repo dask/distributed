@@ -406,7 +406,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         # test failure.
         try:
             readable = children_alive.poll(short_timeout)
-        except EnvironmentError:
+        except OSError:
             # Windows can raise BrokenPipeError. EnvironmentError is caught for
             # Python2/3 portability.
             assert sys.platform.startswith("win"), "should only raise on windows"
@@ -423,7 +423,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
             result = children_alive.recv()
         except EOFError:
             pass  # Test passes.
-        except EnvironmentError:
+        except OSError:
             # Windows can raise BrokenPipeError. EnvironmentError is caught for
             # Python2/3 portability.
             assert sys.platform.startswith("win"), "should only raise on windows"
@@ -432,7 +432,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
             # Oops, children_alive read something. It should be closed. If
             # something was read, it's a message from the child telling us they
             # are still alive!
-            raise RuntimeError("unreachable: {}".format(result))
+            raise RuntimeError(f"unreachable: {result}")
 
     finally:
         # Cleanup.

@@ -43,7 +43,7 @@ class Process(ProcessInterface):
         await super().close()
 
     def __repr__(self):
-        return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
+        return f"<SSH {type(self).__name__}: status={self.status}>"
 
 
 class Worker(Process):

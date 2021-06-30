@@ -451,7 +451,7 @@ class Nanny(ServerNode):
         ):
             try:
                 await self._unregister()
-            except (EnvironmentError, CommClosedError):
+            except (OSError, CommClosedError):
                 if not self.reconnect:
                     await self.close()
                     return

@@ -79,7 +79,7 @@ def test_ucx_specific():
     # 3. Test peer_address
     # 4. Test cleanup
     async def f():
-        address = "ucx://{}:{}".format(HOST, 0)
+        address = f"ucx://{HOST}:{0}"
 
         async def handle_comm(comm):
             msg = await comm.read()

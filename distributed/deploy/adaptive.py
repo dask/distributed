@@ -86,7 +86,7 @@ class Adaptive(AdaptiveCore):
         wait_count=None,
         target_duration=None,
         worker_key=None,
-        **kwargs
+        **kwargs,
     ):
         self.cluster = cluster
         self.worker_key = worker_key
@@ -178,7 +178,7 @@ class Adaptive(AdaptiveCore):
             target=target,
             key=pickle.dumps(self.worker_key) if self.worker_key else None,
             attribute="name",
-            **self._workers_to_close_kwargs
+            **self._workers_to_close_kwargs,
         )
 
     async def scale_down(self, workers):

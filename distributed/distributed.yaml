@@ -165,6 +165,7 @@ distributed:
          min: 1s  # the first non-zero delay between re-tries
          max: 20s  # the maximum delay between re-tries
     compression: auto
+    shard: 64MiB
     offload: 10MiB # Size after which we choose to offload serialization to another thread
     default-scheme: tcp
     socket-backlog: 2048

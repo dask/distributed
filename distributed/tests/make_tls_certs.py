@@ -120,9 +120,9 @@ def make_cert_key(hostname, sign=False):
             ]
             subprocess.check_call(["openssl"] + args)
 
-        with open(cert_file, "r") as f:
+        with open(cert_file) as f:
             cert = f.read()
-        with open(key_file, "r") as f:
+        with open(key_file) as f:
             key = f.read()
         return cert, key
     finally:
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     # For certificate matching tests
     make_ca()
-    with open("tls-ca-cert.pem", "r") as f:
+    with open("tls-ca-cert.pem") as f:
         ca_cert = f.read()
 
     cert, key = make_cert_key("localhost", sign=True)

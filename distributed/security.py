@@ -164,14 +164,14 @@ class Security:
                     items.append((k, "..."))
                 else:
                     items.append((k, repr(val)))
-        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
+        return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
 
     def get_tls_config_for_role(self, role):
         """
         Return the TLS configuration for the given role, as a flat dict.
         """
         if role not in {"client", "scheduler", "worker"}:
-            raise ValueError("unknown role %r" % (role,))
+            raise ValueError(f"unknown role {role!r}")
         return {
             "ca_file": self.tls_ca_file,
             "ciphers": self.tls_ciphers,

@@ -43,42 +43,6 @@ from .components.scheduler import (
 from .core import BokehApplication
 from .worker import counters_doc
 
-template_variables = {
-    "pages": [
-        "status",
-        "workers",
-        "tasks",
-        "system",
-        "profile",
-        "graph",
-        "groups",
-        "info",
-    ]
-}
-
-if NVML_ENABLED:
-    template_variables["pages"].insert(4, "gpu")
-
-
-def connect(application, http_server, scheduler, prefix=""):
-    bokeh_app = BokehApplication(
-        applications, scheduler, prefix=prefix, template_variables=template_variables
-    )
-    application.add_application(bokeh_app)
-    bokeh_app.initialize(IOLoop.current())
-
-    bokeh_app.add_handlers(
-        r".*",
-        [
-            (
-                r"/",
-                web.RedirectHandler,
-                {"url": urljoin((prefix or "").strip("/") + "/", r"status")},
-            )
-        ],
-    )
-
-
 applications = {
     "/system": systemmonitor_doc,
     "/stealing": stealing_doc,
@@ -117,3 +81,40 @@ applications = {
     "/individual-gpu-memory": gpu_memory_doc,
     "/individual-gpu-utilization": gpu_utilization_doc,
 }
+
+
+template_variables = {
+    "pages": [
+        "status",
+        "workers",
+        "tasks",
+        "system",
+        "profile",
+        "graph",
+        "groups",
+        "info",
+    ],
+    "plots": [x.replace("/", "") for x in applications if "individual" in x],
+}
+
+if NVML_ENABLED:
+    template_variables["pages"].insert(4, "gpu")
+
+
+def connect(application, http_server, scheduler, prefix=""):
+    bokeh_app = BokehApplication(
+        applications, scheduler, prefix=prefix, template_variables=template_variables
+    )
+    application.add_application(bokeh_app)
+    bokeh_app.initialize(IOLoop.current())
+
+    bokeh_app.add_handlers(
+        r".*",
+        [
+            (
+                r"/",
+                web.RedirectHandler,
+                {"url": urljoin((prefix or "").strip("/") + "/", r"status")},
+            )
+        ],
+    )

@@ -130,7 +130,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
-    **kwargs
+    **kwargs,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -194,7 +194,7 @@ def main(
         dashboard=dashboard,
         dashboard_address=dashboard_address,
         http_prefix=dashboard_prefix,
-        **kwargs
+        **kwargs,
     )
     logger.info("-" * 47)
 
