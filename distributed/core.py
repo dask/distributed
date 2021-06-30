@@ -280,7 +280,6 @@ class Server:
                 if timeout:
                     try:
                         await asyncio.wait_for(self.start(), timeout=timeout)
-                        self.status = Status.running
                     except Exception:
                         await self.close(timeout=1)
                         raise TimeoutError(
@@ -290,13 +289,13 @@ class Server:
                         )
                 else:
                     await self.start()
-                    self.status = Status.running
             return self
 
         return _().__await__()
 
     async def start(self):
         await self.rpc.start()
+        self.status = Status.running
 
     async def __aenter__(self):
         await self

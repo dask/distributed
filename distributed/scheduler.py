@@ -3752,7 +3752,6 @@ class Scheduler(SchedulerState, ServerNode):
     async def start(self):
         """Clear out old state and restart all running coroutines"""
         await super().start()
-        assert self.status != Status.running
 
         enable_gc_diagnosis()
 
