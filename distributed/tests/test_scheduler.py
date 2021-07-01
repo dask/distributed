@@ -2846,7 +2846,7 @@ async def test_gather_on_worker(c, s, a, b):
     assert x_ts.who_has == {a_ws, b_ws}
 
 
-@gen_cluster(client=True, scheduler_kwargs={"timeout": "10ms"})
+@gen_cluster(client=True, scheduler_kwargs={"timeout": "50ms"})
 async def test_gather_on_worker_bad_recipient(c, s, a, b):
     """The recipient is missing"""
     x = await c.scatter("x")
@@ -2856,7 +2856,7 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     assert out == {x.key}
 
 
-@gen_cluster(client=True, worker_kwargs={"timeout": "10ms"})
+@gen_cluster(client=True, worker_kwargs={"timeout": "50ms"})
 async def test_gather_on_worker_bad_sender(c, s, a, b):
     """The only sender for a key is missing"""
     out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
@@ -2864,7 +2864,7 @@ async def test_gather_on_worker_bad_sender(c, s, a, b):
 
 
 @pytest.mark.parametrize("missing_first", [False, True])
-@gen_cluster(client=True, worker_kwargs={"timeout": "10ms"})
+@gen_cluster(client=True, worker_kwargs={"timeout": "50ms"})
 async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first):
     """One of the senders for a key is missing, but the key is available somewhere else"""
     x = await c.scatter("x", workers=[a.address])
@@ -2926,7 +2926,7 @@ async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
 
 
 @gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "10ms"}
+    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "50ms"}
 )
 async def test_rebalance_dead_recipient(client, s, a, b, c):
     """A key fails to be rebalanced due to recipient failure.
@@ -2985,7 +2985,7 @@ async def test_delete_worker_data_double_delete(c, s, a):
     assert a_ws.nbytes == y_ts.nbytes
 
 
-@gen_cluster(scheduler_kwargs={"timeout": "10ms"})
+@gen_cluster(scheduler_kwargs={"timeout": "50ms"})
 async def test_delete_worker_data_bad_worker(s, a, b):
     """_delete_worker_data gracefully handles a non-existing worker;
     e.g. a sender died in the middle of rebalance()
