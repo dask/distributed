@@ -4,12 +4,7 @@ from time import sleep
 from distributed import MultiLock, get_client
 from distributed.metrics import time
 from distributed.multi_lock import MultiLockExtension
-from distributed.utils_test import (  # noqa F401
-    client,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-)
+from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)

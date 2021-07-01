@@ -49,7 +49,6 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@pytest.mark.xfail()
 @nodebug
 @gen_test()
 async def test_simple():
@@ -362,7 +361,7 @@ def _parent_process(child_pipe):
 
     with pristine_loop() as loop:
         try:
-            loop.run_sync(parent_process_coroutine(), timeout=10)
+            loop.run_sync(parent_process_coroutine, timeout=10)
         finally:
             loop.stop()
 
@@ -407,9 +406,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         # test failure.
         try:
             readable = children_alive.poll(short_timeout)
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
+        except BrokenPipeError:
             assert sys.platform.startswith("win"), "should only raise on windows"
             # Broken pipe implies closed, which is readable.
             readable = True
@@ -424,16 +421,14 @@ def test_asyncprocess_child_teardown_on_parent_exit():
             result = children_alive.recv()
         except EOFError:
             pass  # Test passes.
-        except EnvironmentError:
-            # Windows can raise BrokenPipeError. EnvironmentError is caught for
-            # Python2/3 portability.
+        except BrokenPipeError:
             assert sys.platform.startswith("win"), "should only raise on windows"
             # Test passes.
         else:
             # Oops, children_alive read something. It should be closed. If
             # something was read, it's a message from the child telling us they
             # are still alive!
-            raise RuntimeError("unreachable: {}".format(result))
+            raise RuntimeError(f"unreachable: {result}")
 
     finally:
         # Cleanup.

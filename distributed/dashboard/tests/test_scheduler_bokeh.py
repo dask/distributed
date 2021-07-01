@@ -21,13 +21,11 @@ from distributed.compatibility import MACOS
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
+    ClusterMemory,
     ComputePerKey,
     CurrentLoad,
     Events,
     MemoryByKey,
-    NBytes,
-    NBytesCluster,
-    NBytesHistogram,
     Occupancy,
     ProcessingHistogram,
     ProfileServer,
@@ -35,8 +33,11 @@ from distributed.dashboard.components.scheduler import (
     StealingTimeSeries,
     SystemMonitor,
     TaskGraph,
+    TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkersMemory,
+    WorkersMemoryHistogram,
     WorkerTable,
 )
 from distributed.dashboard.components.worker import Counters
@@ -103,15 +104,14 @@ async def test_stealing_events(c, s, a, b):
     se = StealingEvents(s)
 
     futures = c.map(
-        slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
+        slowinc, range(10), delay=0.1, workers=a.address, allow_other_workers=True
     )
 
-    while not b.tasks:  # will steal soon
-        await asyncio.sleep(0.01)
-
+    await wait(futures)
     se.update()
-
     assert len(first(se.source.data.values()))
+    assert b.tasks
+    assert sum(se.source.data["count"]) >= len(b.tasks)
 
 
 @gen_cluster(client=True)
@@ -276,8 +276,8 @@ async def test_ProcessingHistogram(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytes(c, s, a, b):
-    cl = NBytes(s)
+async def test_WorkersMemory(c, s, a, b):
+    cl = WorkersMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -293,8 +293,8 @@ async def test_NBytes(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesCluster(c, s, a, b):
-    cl = NBytesCluster(s)
+async def test_ClusterMemory(c, s, a, b):
+    cl = ClusterMemory(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
     await wait(futures)
@@ -302,7 +302,7 @@ async def test_NBytesCluster(c, s, a, b):
     cl.update()
     d = dict(cl.source.data)
     llens = {len(l) for l in d.values()}
-    # Unlike NBytes, empty rects here aren't pruned away.
+    # Unlike WorkersMemory, empty rects here aren't pruned away.
     assert llens == {4}
     # There is definitely going to be managed_in_memory and
     # unmanaged_old; there may be unmanaged_new. There won't be managed_spilled.
@@ -311,8 +311,8 @@ async def test_NBytesCluster(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_NBytesHistogram(c, s, a, b):
-    nh = NBytesHistogram(s)
+async def test_WorkersMemoryHistogram(c, s, a, b):
+    nh = WorkersMemoryHistogram(s)
     nh.update()
     assert any(nh.source.data["top"] != 0)
 
@@ -608,6 +608,68 @@ async def test_TaskGraph_order(c, s, a, b):
     gp.update()
 
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"
+
+
+@gen_cluster(client=True)
+async def test_TaskGroupGraph(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, range(5))
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 5]
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()
+    assert not any(tgg.nodes_source.data.values())
+
+
+@gen_cluster(client=True)
+async def test_TaskGroupGraph_arrows(c, s, a, b):
+    tgg = TaskGroupGraph(s)
+
+    futures = c.map(inc, range(10))
+    await wait(futures)
+
+    tgg.update()
+    assert all(len(L) == 1 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10]
+
+    assert all(len(L) == 0 for L in tgg.arrows_source.data.values())
+
+    futures2 = c.map(dec, futures)
+    await wait(futures2)
+
+    tgg.update()
+    assert all(len(L) == 2 for L in tgg.nodes_source.data.values())
+    assert tgg.nodes_source.data["name"] == ["inc", "dec"]
+    assert tgg.nodes_source.data["tot_tasks"] == [10, 10]
+
+    assert all(len(L) == 1 for L in tgg.arrows_source.data.values())
+
+    del futures, futures2
+    while s.task_groups:
+        await asyncio.sleep(0.01)
+
+    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    assert not any(tgg.nodes_source.data.values())
+    assert not any(tgg.arrows_source.data.values())
 
 
 @gen_cluster(

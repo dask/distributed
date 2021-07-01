@@ -9,51 +9,7 @@ import dask
 
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    clean,
-    cleanup,
-    gen_test,
-    loop,
-    nodebug,
-    slowinc,
-)
-
-
-@pytest.mark.asyncio
-async def test_simultaneous_scale_up_and_down(cleanup):
-    class TestAdaptive(Adaptive):
-        def get_scale_up_kwargs(self):
-            assert False
-
-        def _retire_workers(self):
-            assert False
-
-    class TestCluster(LocalCluster):
-        def scale_up(self, n, **kwargs):
-            assert False
-
-        def scale_down(self, workers):
-            assert False
-
-    with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"a": 4, "b": 4, "c": 1}}
-    ):
-        async with TestCluster(
-            n_workers=4, processes=False, asynchronous=True
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as c:
-                s = cluster.scheduler
-
-                future = c.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
-
-                while len(s.rprocessing) < 3:
-                    await asyncio.sleep(0.001)
-
-                ta = cluster.adapt(
-                    interval="100 ms", scale_factor=2, Adaptive=TestAdaptive
-                )
-
-                await asyncio.sleep(0.3)
+from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
 
 
 def test_adaptive_local_cluster(loop):
@@ -288,7 +244,7 @@ async def test_adapt_quickly():
 
 @gen_test(timeout=None)
 async def test_adapt_down():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(
         0,
         asynchronous=True,
@@ -312,7 +268,7 @@ async def test_adapt_down():
                 assert time() < start + 60
 
 
-@gen_test(timeout=30)
+@gen_test()
 async def test_no_more_workers_than_tasks():
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1000}}
@@ -348,7 +304,7 @@ def test_basic_no_loop(loop):
 
 @pytest.mark.asyncio
 async def test_target_duration():
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
     ):
@@ -376,7 +332,7 @@ async def test_target_duration():
 
 @pytest.mark.asyncio
 async def test_worker_keys(cleanup):
-    """ Ensure that redefining adapt with a lower maximum removes workers """
+    """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
         workers={
             "a-1": {"cls": Worker},
@@ -460,3 +416,68 @@ async def test_update_adaptive(cleanup):
         await asyncio.sleep(0.2)
         assert first.periodic_callback is None
         assert second.periodic_callback.is_running()
+
+
+@pytest.mark.asyncio
+async def test_adaptive_no_memory_limit(cleanup):
+    """Make sure that adapt() does not keep creating workers when no memory limit is set."""
+    async with LocalCluster(
+        n_workers=0, threads_per_worker=1, memory_limit=0, asynchronous=True
+    ) as cluster:
+        cluster.adapt(minimum=1, maximum=10, interval="1 ms")
+        async with Client(cluster, asynchronous=True) as client:
+            await client.gather(client.map(slowinc, range(5), delay=0.35))
+        assert (
+            sum(
+                state[1]["n"]
+                for state in cluster._adaptive.log
+                if state[1]["status"] == "up"
+            )
+            <= 5
+        )
+
+
+@pytest.mark.asyncio
+async def test_scale_needs_to_be_awaited(cleanup):
+    """
+    This tests that the adaptive class works fine if the scale method uses the
+    `sync` method to schedule its task instead of loop.add_callback
+    """
+
+    class RequiresAwaitCluster(LocalCluster):
+        def scale(self, n):
+            # super invocation in the nested function scope is messy
+            method = super().scale
+
+            async def _():
+                return method(n)
+
+            return self.sync(_)
+
+    async with RequiresAwaitCluster(n_workers=0, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            futures = client.map(slowinc, range(5), delay=0.05)
+            assert len(cluster.workers) == 0
+            cluster.adapt()
+
+            await client.gather(futures)
+
+            del futures
+            await async_wait_for(lambda: not cluster.workers, 10)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_stopped():
+    """
+    We should ensure that the adapt PC is actually stopped once the cluster
+    stops.
+    """
+    async with LocalCluster(n_workers=0, asynchronous=True) as cluster:
+        instance = cluster.adapt(interval="10ms")
+        assert instance.periodic_callback is not None
+
+        await async_wait_for(lambda: instance.periodic_callback.is_running(), timeout=5)
+
+        pc = instance.periodic_callback
+
+    await async_wait_for(lambda: not pc.is_running(), timeout=5)

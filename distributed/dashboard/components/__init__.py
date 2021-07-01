@@ -30,7 +30,7 @@ import dask
 
 from distributed import profile
 from distributed.dashboard.utils import BOKEH_VERSION, without_property_validation
-from distributed.utils import log_errors, parse_timedelta
+from distributed.utils import log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -39,7 +39,7 @@ else:
 
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
-profile_interval = parse_timedelta(profile_interval, default="ms")
+profile_interval = dask.utils.parse_timedelta(profile_interval, default="ms")
 
 
 class DashboardComponent:
@@ -59,7 +59,7 @@ class DashboardComponent:
         self.root = None
 
     def update(self, messages):
-        """ Reads from bokeh.distributed.messages and updates self.source """
+        """Reads from bokeh.distributed.messages and updates self.source"""
 
 
 def add_periodic_callback(doc, component, interval):

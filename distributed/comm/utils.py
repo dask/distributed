@@ -81,29 +81,37 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     return res
 
 
-def get_tcp_server_address(tcp_server):
+def get_tcp_server_addresses(tcp_server):
     """
-    Get the bound address of a started Tornado TCPServer.
+    Get all bound addresses of a started Tornado TCPServer.
     """
     sockets = list(tcp_server._sockets.values())
     if not sockets:
-        raise RuntimeError("TCP Server %r not started yet?" % (tcp_server,))
+        raise RuntimeError(f"TCP Server {tcp_server!r} not started yet?")
 
     def _look_for_family(fam):
+        socks = []
         for sock in sockets:
             if sock.family == fam:
-                return sock
-        return None
+                socks.append(sock)
+        return socks
 
     # If listening on both IPv4 and IPv6, prefer IPv4 as defective IPv6
     # is common (e.g. Travis-CI).
-    sock = _look_for_family(socket.AF_INET)
-    if sock is None:
-        sock = _look_for_family(socket.AF_INET6)
-    if sock is None:
+    socks = _look_for_family(socket.AF_INET)
+    if not socks:
+        socks = _look_for_family(socket.AF_INET6)
+    if not socks:
         raise RuntimeError("No Internet socket found on TCPServer??")
 
-    return sock.getsockname()
+    return [sock.getsockname() for sock in socks]
+
+
+def get_tcp_server_address(tcp_server):
+    """
+    Get the first bound address of a started Tornado TCPServer.
+    """
+    return get_tcp_server_addresses(tcp_server)[0]
 
 
 def ensure_concrete_host(host):

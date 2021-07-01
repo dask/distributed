@@ -8,7 +8,7 @@ from dask.utils import format_bytes
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
-from distributed.utils_test import cleanup, gen_test, inc, loop, popen  # noqa: 401
+from distributed.utils_test import popen
 
 try:
     HOST = get_ip()
@@ -76,7 +76,7 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
     dask.config.refresh()
 
     port = "13339"
-    sched_addr = "ucx://%s:%s" % (HOST, port)
+    sched_addr = f"ucx://{HOST}:{port}"
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]

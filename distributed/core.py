@@ -18,6 +18,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
+from dask.utils import parse_timedelta
 
 from . import profile, protocol
 from .comm import (
@@ -36,7 +37,6 @@ from .utils import (
     get_traceback,
     has_keyword,
     is_coroutine_function,
-    parse_timedelta,
     truncate_exception,
 )
 
@@ -136,7 +136,6 @@ class Server:
         connection_args=None,
         timeout=None,
         io_loop=None,
-        **kwargs,
     ):
         self.handlers = {
             "identity": self.identity,
@@ -238,8 +237,6 @@ class Server:
 
         self.__stopped = False
 
-        super().__init__(**kwargs)
-
     @property
     def status(self):
         return self._status
@@ -261,7 +258,7 @@ class Server:
             raise TypeError(f"expected Status or str, got {new_status}")
 
     async def finished(self):
-        """ Wait until the server has finished """
+        """Wait until the server has finished"""
         await self._event_finished.wait()
 
     def __await__(self):
@@ -431,7 +428,7 @@ class Server:
                 try:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
-                except EnvironmentError as e:
+                except OSError as e:
                     if not sys.is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
@@ -520,7 +517,7 @@ class Server:
                 if reply and not is_dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
-                    except (EnvironmentError, TypeError) as e:
+                    except (OSError, TypeError) as e:
                         logger.debug(
                             "Lost connection to %r while sending result for op %r: %s",
                             address,
@@ -528,6 +525,8 @@ class Server:
                             e,
                         )
                         break
+
+                self._comms[comm] = None
                 msg = result = None
                 if close_desired:
                     await comm.close()
@@ -548,7 +547,6 @@ class Server:
         extra = extra or {}
         logger.info("Starting established connection")
 
-        io_error = None
         closed = False
         try:
             while not closed:
@@ -581,8 +579,9 @@ class Server:
                     else:
                         func()
 
-        except (CommClosedError, EnvironmentError) as e:
-            io_error = e
+        except OSError:
+            # FIXME: This is silently ignored, is this intentional?
+            pass
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -598,15 +597,18 @@ class Server:
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
+        self.__stopped = True
         for listener in self.listeners:
             future = listener.stop()
             if inspect.isawaitable(future):
                 yield future
-        for i in range(20):  # let comms close naturally for a second
-            if not self._comms:
-                break
-            else:
+        for i in range(20):
+            # If there are still handlers running at this point, give them a
+            # second to finish gracefully themselves, otherwise...
+            if any(self._comms.values()):
                 yield asyncio.sleep(0.05)
+            else:
+                break
         yield [comm.close() for comm in list(self._comms)]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
@@ -645,7 +647,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except EnvironmentError:
+    except OSError:
         # On communication errors, we should simply close the communication
         force_close = True
         raise
@@ -761,7 +763,7 @@ class rpc:
                 if not comm.closed():
                     await comm.write({"op": "close", "reply": False})
                     await comm.close()
-            except EnvironmentError:
+            except OSError:
                 comm.abort()
 
         tasks = []
@@ -790,9 +792,7 @@ class rpc:
                 comm.name = "rpc." + key
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
-                raise e.__class__(
-                    "%s: while trying to call remote method %r" % (e, key)
-                )
+                raise e.__class__(f"{e}: while trying to call remote method {key!r}")
 
             self.comms[comm] = True  # mark as open
             return result
@@ -879,7 +879,7 @@ class PooledRPCCall:
         pass
 
     def __repr__(self):
-        return "<pooled rpc to %r>" % (self.addr,)
+        return f"<pooled rpc to {self.addr!r}>"
 
 
 class ConnectionPool:
@@ -944,6 +944,12 @@ class ConnectionPool:
         self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
+        # _n_connecting and _connecting have subtle different semantics. The set
+        # _connecting contains futures actively trying to establish a connection
+        # while the _n_connecting also accounts for connection attempts which
+        # are waiting due to the connection limit
+        self._connecting = set()
+        self.status = Status.init
 
     def _validate(self):
         """
@@ -969,7 +975,7 @@ class ConnectionPool:
         )
 
     def __call__(self, addr=None, ip=None, port=None):
-        """ Cached rpc objects """
+        """Cached rpc objects"""
         addr = addr_from_args(addr=addr, ip=ip, port=port)
         return PooledRPCCall(
             addr, self, serializers=self.serializers, deserializers=self.deserializers
@@ -985,6 +991,7 @@ class ConnectionPool:
     async def start(self):
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
+        self.status = Status.running
 
     async def connect(self, addr, timeout=None):
         """
@@ -1005,27 +1012,42 @@ class ConnectionPool:
 
         self._n_connecting += 1
         await self.semaphore.acquire()
-
+        fut = None
         try:
-            comm = await connect(
-                addr,
-                timeout=timeout or self.timeout,
-                deserialize=self.deserialize,
-                **self.connection_args,
+            if self.status != Status.running:
+                raise CommClosedError(
+                    f"ConnectionPool not running.  Status: {self.status}"
+                )
+
+            fut = asyncio.ensure_future(
+                connect(
+                    addr,
+                    timeout=timeout or self.timeout,
+                    deserialize=self.deserialize,
+                    **self.connection_args,
+                )
             )
+            self._connecting.add(fut)
+            comm = await fut
             comm.name = "ConnectionPool"
             comm._pool = weakref.ref(self)
             comm.allow_offload = self.allow_offload
             self._created.add(comm)
-        except Exception:
+
+            occupied.add(comm)
+
+            return comm
+        except asyncio.CancelledError as exc:
             self.semaphore.release()
-            raise
+            raise CommClosedError(
+                f"ConnectionPool not running.  Status: {self.status}"
+            ) from exc
+        except Exception as exc:
+            self.semaphore.release()
+            raise exc
         finally:
+            self._connecting.discard(fut)
             self._n_connecting -= 1
-
-        occupied.add(comm)
-
-        return comm
 
     def reuse(self, addr, comm):
         """
@@ -1080,16 +1102,26 @@ class ConnectionPool:
         """
         Close all communications
         """
+        self.status = Status.closed
         for d in [self.available, self.occupied]:
-            comms = [comm for comms in d.values() for comm in comms]
+            comms = set()
+            while d:
+                comms.update(d.popitem()[1])
+
             await asyncio.gather(
                 *[comm.close() for comm in comms], return_exceptions=True
             )
+
             for _ in comms:
                 self.semaphore.release()
 
-        for comm in self._created:
-            IOLoop.current().add_callback(comm.abort)
+        for conn_fut in self._connecting:
+            conn_fut.cancel()
+
+        # We might still have tasks haning in the semaphore. This will let them
+        # run into an exception and raise a commclosed
+        while self._n_connecting:
+            await asyncio.sleep(0.005)
 
 
 def coerce_to_address(o):

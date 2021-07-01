@@ -7,7 +7,6 @@ import inspect
 import json
 import logging
 import os
-import socket
 import sys
 import threading
 import uuid
@@ -27,11 +26,18 @@ from tlz import first, groupby, keymap, merge, partition_all, valmap
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
-from dask.compatibility import apply
 from dask.core import flatten
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
-from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from dask.utils import (
+    _deprecated,
+    apply,
+    ensure_dict,
+    format_bytes,
+    funcname,
+    parse_timedelta,
+    stringify,
+)
 
 try:
     from dask.delayed import single_key
@@ -51,8 +57,9 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin
+from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
 from .metrics import time
+from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
@@ -71,7 +78,6 @@ from .utils import (
     key_split,
     log_errors,
     no_default,
-    parse_timedelta,
     sync,
     thread_state,
 )
@@ -201,7 +207,7 @@ class Future(WrappedKey):
         return self._state.status
 
     def done(self):
-        """ Is the computation complete? """
+        """Is the computation complete?"""
         return self._state.done()
 
     def result(self, timeout=None):
@@ -309,7 +315,7 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """ Returns True if the future has been cancelled """
+        """Returns True if the future has been cancelled"""
         return self._state.status == "cancelled"
 
     async def _traceback(self):
@@ -392,26 +398,34 @@ class Future(WrappedKey):
                 typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            return "<Future: %s, type: %s, key: %s>" % (self.status, typ, self.key)
+            return f"<Future: {self.status}, type: {typ}, key: {self.key}>"
         else:
-            return "<Future: %s, key: %s>" % (self.status, self.key)
+            return f"<Future: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
         text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
         text += (
-            '<font color="gray">status: </font>'
-            '<font color="%(color)s">%(status)s</font>, '
+            '<font style="color: var(--jp-ui-font-color2, gray)">status: </font>'
+            '<font style="color: %(color)s">%(status)s</font>, '
         ) % {
             "status": self.status,
-            "color": "red" if self.status == "error" else "black",
+            "color": "var(--jp-error-color0, red)"
+            if self.status == "error"
+            else "var(--jp-ui-font-color0, black)",
         }
         if self.type:
             try:
                 typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            text += '<font color="gray">type: </font>%s, ' % typ
-        text += '<font color="gray">key: </font>%s' % html.escape(str(self.key))
+            text += (
+                '<font style="color: var(--jp-ui-font-color2, gray)">type: </font>%s, '
+                % typ
+            )
+        text += (
+            '<font style="color: var(--jp-ui-font-color2, gray)">key: </font>%s'
+            % html.escape(str(self.key))
+        )
         return text
 
     def __await__(self):
@@ -479,11 +493,11 @@ class FutureState:
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
-        return "<%s: %s>" % (self.__class__.__name__, self.status)
+        return f"<{self.__class__.__name__}: {self.status}>"
 
 
 async def done_callback(future, callback):
-    """ Coroutine that waits on future, then calls callback """
+    """Coroutine that waits on future, then calls callback"""
     while future.status == "pending":
         await future._state.wait()
     callback(future)
@@ -521,7 +535,7 @@ class Client:
     timeout: int
         Timeout duration for initial connection to the scheduler
     set_as_default: bool (True)
-        Claim this scheduler as the global dask scheduler
+        Use this Client as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
     security: Security or bool, optional
@@ -571,7 +585,7 @@ class Client:
 
     Extra keywords will be passed directly to LocalCluster
 
-    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+    >>> client = Client(n_workers=2, threads_per_worker=4)  # doctest: +SKIP
 
     See Also
     --------
@@ -645,9 +659,7 @@ class Client:
                 logger.info("Config value `scheduler-address` found: %s", address)
 
         if address is not None and kwargs:
-            raise ValueError(
-                "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
-            )
+            raise ValueError(f"Unexpected keyword arguments: {sorted(kwargs)}")
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
@@ -707,6 +719,7 @@ class Client:
         )
 
         self._start_arg = address
+        self._set_as_default = set_as_default
         if set_as_default:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
@@ -744,9 +757,9 @@ class Client:
         self.start(timeout=timeout)
         Client._instances.add(self)
 
-        from distributed.recreate_exceptions import ReplayExceptionClient
+        from distributed.recreate_tasks import ReplayTaskClient
 
-        ReplayExceptionClient(self)
+        ReplayTaskClient(self)
 
     @contextmanager
     def as_current(self):
@@ -818,7 +831,10 @@ class Client:
             return self.cluster.dashboard_link
         except AttributeError:
             scheduler, info = self._get_scheduler_info()
-            protocol, rest = scheduler.address.split("://")
+            if scheduler is None:
+                return None
+            else:
+                protocol, rest = scheduler.address.split("://")
 
             port = info["services"]["dashboard"]
             if protocol == "inproc":
@@ -865,7 +881,7 @@ class Client:
             info = self._scheduler_identity
             scheduler = self.scheduler
 
-        return scheduler, info
+        return scheduler, SchedulerInfo(info)
 
     def __repr__(self):
         # Note: avoid doing I/O here...
@@ -888,70 +904,97 @@ class Client:
             return text
 
         elif self.scheduler is not None:
-            return "<%s: scheduler=%r>" % (
+            return "<{}: scheduler={!r}>".format(
                 self.__class__.__name__,
                 self.scheduler.address,
             )
         else:
-            return "<%s: not connected>" % (self.__class__.__name__,)
+            return f"<{self.__class__.__name__}: No scheduler connected>"
 
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()
 
-        text = (
-            '<h3 style="text-align: left;">Client</h3>\n'
-            '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
-        )
-        if scheduler is not None:
-            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
+        if scheduler is None:
+            child_repr = """<p>No scheduler connected.</p>"""
+        elif self.cluster:
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Cluster Info</h3></summary>
+                {self.cluster._repr_html_()}
+                </details>
+                """
         else:
-            text += "  <li><b>Scheduler: not connected</b></li>\n"
+            child_repr = f"""
+                <details>
+                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
+                {info._repr_html_()}
+                </details>
+                """
 
-        if info and "dashboard" in info["services"]:
-            text += (
-                "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a></li>\n"
-                % {"web": self.dashboard_link}
-            )
+        client_status = ""
 
-        text += "</ul>\n"
+        if not self.cluster and not self.scheduler_file:
+            client_status += """
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
-        if info:
-            workers = list(info["workers"].values())
-            cores = sum(w["nthreads"] for w in workers)
-            if all(isinstance(w["memory_limit"], Number) for w in workers):
-                memory = sum(w["memory_limit"] for w in workers)
-                memory = format_bytes(memory)
-            else:
-                memory = ""
+        if self.cluster:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
+                    <td style="text-align: left;"><strong>Cluster type:</strong> {type(self.cluster).__name__}</td>
+                </tr>
+                """
+        elif self.scheduler_file:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
+                    <td style="text-align: left;"><strong>Scheduler file:</strong> {self.scheduler_file}</td>
+                </tr>
+                """
 
-            text2 = (
-                '<h3 style="text-align: left;">Cluster</h3>\n'
-                '<ul style="text-align: left; list-style:none; margin: 0; padding: 0;">\n'
-                "  <li><b>Workers: </b>%d</li>\n"
-                "  <li><b>Cores: </b>%d</li>\n"
-                "  <li><b>Memory: </b>%s</li>\n"
-                "</ul>\n"
-            ) % (len(workers), cores, memory)
+        if self.dashboard_link:
+            client_status += f"""
+                <tr>
+                    <td style="text-align: left;">
+                        <strong>Dashboard: </strong>
+                        <a href="{self.dashboard_link}">{self.dashboard_link}</a>
+                    </td>
+                    <td style="text-align: left;"></td>
+                </tr>
+                """
 
-            return (
-                '<table style="border: 2px solid white;">\n'
-                "<tr>\n"
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
-                "</tr>\n</table>"
-            ) % (text, text2)
-
-        else:
-            return text
+        return f"""
+            <div>
+                <div style="
+                    width: 24px;
+                    height: 24px;
+                    background-color: #e1e1e1;
+                    border: 3px solid #9D9D9D;
+                    border-radius: 5px;
+                    position: absolute;"> </div>
+                <div style="margin-left: 48px;">
+                    <h3 style="margin-bottom: 0px;">Client</h3>
+                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.id}</p>
+                    <table style="width: 100%; text-align: left;">
+                    {client_status}
+                    </table>
+                    {child_repr}
+                </div>
+            </div>
+        """
 
     def start(self, **kwargs):
-        """ Start scheduler running in separate thread """
+        """Start scheduler running in separate thread"""
         if self.status != "newly-created":
             return
 
         self._loop_runner.start()
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "connecting"
 
         if self.asynchronous:
@@ -1027,7 +1070,7 @@ class Client:
                     asynchronous=self._asynchronous,
                     **self._startup_kwargs,
                 )
-            except (OSError, socket.error) as e:
+            except OSError as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
@@ -1077,7 +1120,7 @@ class Client:
                 try:
                     await self._ensure_connected(timeout=timeout)
                     break
-                except EnvironmentError:
+                except OSError:
                     # Wait a bit before retrying
                     await asyncio.sleep(0.1)
                     timeout = deadline - self.loop.time()
@@ -1120,7 +1163,7 @@ class Client:
                     "versions": version_module.get_versions(),
                 }
             )
-        except Exception as e:
+        except Exception:
             if self.status == "closed":
                 return
             else:
@@ -1142,8 +1185,8 @@ class Client:
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
-
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = "running"
 
         for msg in self._pending_msg_buffer:
@@ -1156,8 +1199,8 @@ class Client:
         if self.status not in ("running", "connecting"):
             return
         try:
-            self._scheduler_identity = await self.scheduler.identity()
-        except EnvironmentError:
+            self._scheduler_identity = SchedulerInfo(await self.scheduler.identity())
+        except OSError:
             logger.debug("Not able to query scheduler for identity")
 
     async def _wait_for_workers(self, n_workers=0, timeout=None):
@@ -1189,7 +1232,7 @@ class Client:
         return self
 
     async def __aenter__(self):
-        await self._started
+        await self
         return self
 
     async def __aexit__(self, typ, value, traceback):
@@ -1213,7 +1256,7 @@ class Client:
                 self._release_key(key)
 
     def _release_key(self, key):
-        """ Release key from distributed memory """
+        """Release key from distributed memory"""
         logger.debug("Release key %s", key)
         st = self.futures.pop(key, None)
         if st is not None:
@@ -1224,7 +1267,7 @@ class Client:
             )
 
     async def _handle_report(self):
-        """ Listen to scheduler """
+        """Listen to scheduler"""
         with log_errors():
             try:
                 while True:
@@ -1317,7 +1360,7 @@ class Client:
         logger.exception(exception)
 
     async def _close(self, fast=False):
-        """ Send close signal and wait until scheduler completes """
+        """Send close signal and wait until scheduler completes"""
         if self.status == "closed":
             return
 
@@ -1411,7 +1454,7 @@ class Client:
         if timeout == no_default:
             timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
-        if self.status == "closed":
+        if self.status in ["closed", "newly-created"]:
             if self.asynchronous:
                 future = asyncio.Future()
                 future.set_result(None)
@@ -1807,7 +1850,7 @@ class Client:
                     direct = True
 
         async def wait(k):
-            """ Want to stop the All(...) early if we find an error """
+            """Want to stop the All(...) early if we find an error"""
             st = self.futures[k]
             await st.wait()
             if st.status != "finished" and errors == "raise":
@@ -2499,6 +2542,7 @@ class Client:
         """
         return self.sync(self._run, function, *args, **kwargs)
 
+    @_deprecated(use_instead="Client.run which detects async functions automatically")
     def run_coroutine(self, function, *args, **kwargs):
         """
         Spawn a coroutine on all workers.
@@ -2520,12 +2564,6 @@ class Client:
             Workers on which to run the function. Defaults to all known workers.
 
         """
-        warnings.warn(
-            "This method has been deprecated. "
-            "Instead use Client.run which detects async functions "
-            "automatically",
-            stacklevel=2,
-        )
         return self.run(function, *args, **kwargs)
 
     def _graph_to_futures(
@@ -2545,13 +2583,9 @@ class Client:
             if actors is not None and actors is not True and actors is not False:
                 actors = list(self._expand_key(actors))
 
-            keyset = set(keys)
-
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
-
-            dsk = dsk.__dask_distributed_pack__(self, keyset)
 
             annotations = {}
             if user_priority:
@@ -2569,7 +2603,12 @@ class Client:
             if resources:
                 annotations["resources"] = resources
 
+            # Merge global and local annotations
             annotations = merge(dask.config.get("annotations", {}), annotations)
+
+            # Pack the high level graph before sending it to the scheduler
+            keyset = set(keys)
+            dsk = dsk.__dask_distributed_pack__(self, keyset, annotations)
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
@@ -2581,7 +2620,6 @@ class Client:
                     "priority": priority,
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
-                    "annotations": annotations,
                     "actors": actors,
                 }
             )
@@ -3051,11 +3089,14 @@ class Client:
         )
 
     async def _rebalance(self, futures=None, workers=None):
-        await _wait(futures)
-        keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        if futures is not None:
+            await _wait(futures)
+            keys = list({stringify(f.key) for f in self.futures_of(futures)})
+        else:
+            keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
         if result["status"] == "missing-data":
-            raise ValueError(
+            raise KeyError(
                 f"During rebalance {len(result['keys'])} keys were found to be missing"
             )
         assert result["status"] == "OK"
@@ -3067,9 +3108,12 @@ class Client:
         either affects a subset of the keys/workers or the entire network,
         depending on keyword arguments.
 
-        This operation is generally not well tested against normal operation of
-        the scheduler.  It is not recommended to use it while waiting on
-        computations.
+        For details on the algorithm and configuration options, refer to the matching
+        scheduler-side method :meth:`~distributed.scheduler.Scheduler.rebalance`.
+
+        .. warning::
+           This operation is generally not well tested against normal operation of the
+           scheduler. It is not recommended to use it while waiting on computations.
 
         Parameters
         ----------
@@ -3196,7 +3240,11 @@ class Client:
             keys = list(map(stringify, {f.key for f in futures}))
         else:
             keys = None
-        return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
+
+        async def _():
+            return WhoHas(await self.scheduler.who_has(keys=keys, **kwargs))
+
+        return self.sync(_)
 
     def has_what(self, workers=None, **kwargs):
         """Which keys are held by which workers
@@ -3230,7 +3278,11 @@ class Client:
             workers = list(workers)
         if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
+
+        async def _():
+            return HasWhat(await self.scheduler.has_what(workers=workers, **kwargs))
+
+        return self.sync(_)
 
     def processing(self, workers=None):
         """The tasks currently running on each worker
@@ -3952,6 +4004,34 @@ class Client:
         else:
             return msgs
 
+    async def _register_scheduler_plugin(self, plugin, **kwargs):
+        if isinstance(plugin, type):
+            plugin = plugin(**kwargs)
+
+        return await self.scheduler.register_scheduler_plugin(
+            plugin=dumps(plugin, protocol=4)
+        )
+
+    def register_scheduler_plugin(self, plugin, **kwargs):
+        """Register a scheduler plugin.
+
+        See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
+
+        Parameters
+        ----------
+        plugin : SchedulerPlugin
+            Plugin class or object to pass to the scheduler.
+        **kwargs : Any
+            Arguments passed to the Plugin class (if Plugin is an
+            instance kwargs are unused).
+
+        """
+        return self.sync(
+            self._register_scheduler_plugin,
+            plugin=plugin,
+            **kwargs,
+        )
+
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
@@ -3979,7 +4059,6 @@ class Client:
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
-                typ = type(exc)
                 tb = response["traceback"]
                 raise exc.with_traceback(tb)
         return responses
@@ -3994,7 +4073,7 @@ class Client:
         that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
-        ``release_key``, and ``release_dep``.  See the
+        and ``release_key``.  See the
         ``dask.distributed.WorkerPlugin`` class or the examples below for the
         interface and docstrings.  It must be serializable with the pickle or
         cloudpickle modules.
@@ -4013,6 +4092,7 @@ class Client:
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
+            If plugin has no name attribute a random name is used.
         **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
@@ -4029,8 +4109,6 @@ class Client:
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
-        ...         pass
-        ...     def release_dep(self, dep: str, state: str, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4049,15 +4127,67 @@ class Client:
         See Also
         --------
         distributed.WorkerPlugin
+        unregister_worker_plugin
         """
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
 
+        if name is None:
+            name = _get_worker_plugin_name(plugin)
+
+        assert name
+
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+
+    async def _unregister_worker_plugin(self, name):
+        responses = await self.scheduler.unregister_worker_plugin(name=name)
+
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                tb = response["traceback"]
+                raise exc.with_traceback(tb)
+        return responses
+
+    def unregister_worker_plugin(self, name):
+        """Unregisters a lifecycle worker plugin
+
+        This unregisters an existing worker plugin. As part of the unregistration process
+        the plugin's ``teardown`` method will be called.
+
+        Parameters
+        ----------
+        name : str
+            Name of the plugin to unregister. See the :meth:`Client.register_worker_plugin`
+            docstring for more information.
+
+        Examples
+        --------
+        >>> class MyPlugin(WorkerPlugin):
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     def setup(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...         pass
+        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_worker_plugin(plugin, name='foo')
+        >>> client.unregister_worker_plugin(name='foo')
+
+        See Also
+        --------
+        register_worker_plugin
+        """
+        return self.sync(self._unregister_worker_plugin, name=name)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
-    """ This is used to support older setup functions as callbacks """
+    """This is used to support older setup functions as callbacks"""
 
     def __init__(self, setup):
         self._setup = setup
@@ -4070,7 +4200,7 @@ class _WorkerSetupPlugin(WorkerPlugin):
 
 
 class Executor(Client):
-    """ Deprecated: see Client """
+    """Deprecated: see Client"""
 
     def __init__(self, *args, **kwargs):
         warnings.warn("Executor has been renamed to Client")
@@ -4404,7 +4534,7 @@ class as_completed:
                 return
 
     def clear(self):
-        """ Clear out all submitted futures """
+        """Clear out all submitted futures"""
         with self.lock:
             self.futures.clear()
             while not self.queue.empty():
@@ -4416,7 +4546,7 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started """
+    """Return a client if one has started"""
     c = c or _get_global_client()
     if c:
         return c
@@ -4615,31 +4745,46 @@ class performance_report:
     browser.  Locally we recommend using ``python -m http.server`` or hosting
     the file live online.
 
+    Parameters
+    ----------
+    filename: str (optional)
+        The filename to save the performance report locally
+
+    stacklevel: int (optional)
+        The code execution frame utilized for populating the Calling Code section
+        of the report. Defaults to `1` which is the frame calling ``performance_report``
+
+
     Examples
     --------
-    >>> with performance_report(filename="myfile.html"):
+    >>> with performance_report(filename="myfile.html", stacklevel=1):
     ...     x.compute()
 
     $ python -m http.server
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html"):
+    def __init__(self, filename="dask-report.html", stacklevel=1):
         self.filename = filename
+        # stacklevel 0 or less - shows dask internals which likely isn't helpful
+        self._stacklevel = stacklevel if stacklevel > 0 else 1
 
     async def __aenter__(self):
         self.start = time()
+        self.last_count = await get_client().run_on_scheduler(
+            lambda dask_scheduler: dask_scheduler.monitor.count
+        )
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
     async def __aexit__(self, typ, value, traceback, code=None):
         if not code:
             try:
-                frame = inspect.currentframe().f_back
+                frame = sys._getframe(self._stacklevel)
                 code = inspect.getsource(frame)
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, code=code
+            start=self.start, last_count=self.last_count, code=code
         )
         with open(self.filename, "w") as f:
             f.write(data)
@@ -4649,7 +4794,7 @@ class performance_report:
 
     def __exit__(self, typ, value, traceback):
         try:
-            frame = inspect.currentframe().f_back
+            frame = sys._getframe(self._stacklevel)
             code = inspect.getsource(frame)
         except Exception:
             code = ""

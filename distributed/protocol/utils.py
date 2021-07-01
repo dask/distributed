@@ -1,8 +1,10 @@
 import struct
 
+import dask
+
 from ..utils import nbytes
 
-BIG_BYTES_SHARD_SIZE = 2 ** 26
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
 msgpack_opts = {

@@ -14,15 +14,9 @@ from tlz import take
 
 from distributed import Client
 from distributed.utils import CancelledError
-from distributed.utils_test import (  # noqa: F401
-    a,
-    b,
-    client,
+from distributed.utils_test import (
     cluster,
-    cluster_fixture,
     inc,
-    loop,
-    s,
     slowadd,
     slowdec,
     slowinc,

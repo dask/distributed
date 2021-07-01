@@ -9,7 +9,7 @@ from tornado import web
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
-from distributed.utils_test import captured_logger, cleanup, cluster, loop  # noqa F401
+from distributed.utils_test import captured_logger, cluster
 
 PRELOAD_TEXT = """
 _worker_info = {}

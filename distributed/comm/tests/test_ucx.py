@@ -9,7 +9,7 @@ from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.protocol import to_serialize
-from distributed.utils_test import cleanup, gen_test, inc, loop, popen  # noqa: 401
+from distributed.utils_test import gen_test, inc
 
 try:
     HOST = ucp.get_address()
@@ -79,7 +79,7 @@ def test_ucx_specific():
     # 3. Test peer_address
     # 4. Test cleanup
     async def f():
-        address = "ucx://{}:{}".format(HOST, 0)
+        address = f"ucx://{HOST}:{0}"
 
         async def handle_comm(comm):
             msg = await comm.read()
@@ -189,7 +189,7 @@ async def test_ping_pong_cudf(g):
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
     # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
     cudf = pytest.importorskip("cudf")
-    from cudf.tests.utils import assert_eq
+    from cudf.testing._utils import assert_eq
 
     cudf_obj = g(cudf)
 
