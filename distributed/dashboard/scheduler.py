@@ -64,6 +64,13 @@ applications = {
     "/individual-groups": individual_doc(TaskGroupGraph, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
     "/individual-cluster-memory": individual_doc(ClusterMemory, 100),
+
+    # Temporary backwards compatibility with dask-labextension
+    # See https://github.com/dask/dask-labextension/issues/198
+    "/individual-nbytes": individual_doc(WorkersMemory, 100),
+    "/individual-nbytes-cluster": individual_doc(ClusterMemory, 100),
+    # End backwards compatibility
+
     "/individual-cpu": individual_doc(CurrentLoad, 100, fig_attr="cpu_figure"),
     "/individual-nprocessing": individual_doc(
         CurrentLoad, 100, fig_attr="processing_figure"
