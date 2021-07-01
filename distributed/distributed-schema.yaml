@@ -2,12 +2,14 @@ properties:
   distributed:
     type: object
     properties:
+
       version:
         type: integer
 
       scheduler:
         type: object
         properties:
+
           allowed-failures:
             type: integer
             minimum: 0
@@ -20,8 +22,8 @@ properties:
 
           bandwidth:
             type:
-              - integer
-              - string
+            - integer
+            - string
             description: |
               The expected bandwidth between any pair of workers
 
@@ -43,8 +45,8 @@ properties:
 
           default-data-size:
             type:
-              - string
-              - integer
+            - string
+            - integer
             description: |
               The default size of a piece of data if we don't know anything about it.
 
@@ -58,8 +60,8 @@ properties:
 
           idle-timeout:
             type:
-              - string
-              - "null"
+            - string
+            - "null"
             description: |
               Shut down the scheduler after this duration if no activity has occured
 
@@ -106,8 +108,8 @@ properties:
 
           worker-ttl:
             type:
-              - string
-              - "null"
+            - string
+            - "null"
             description: |
               Time to live for workers.
 
@@ -197,16 +199,16 @@ properties:
                 properties:
                   ca-file:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                   key:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                   cert:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
               bokeh-application:
                 type: object
                 description: |
@@ -244,6 +246,7 @@ properties:
             description: |
               A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
+
 
       worker:
         type: object
@@ -340,8 +343,8 @@ properties:
             properties:
               duration:
                 type:
-                  - string
-                  - "null"
+                - string
+                - "null"
                 description: |
                   The time after creation to close the worker, like "1 hour"
               stagger:
@@ -360,6 +363,7 @@ properties:
                 type: boolean
                 description: |
                   Do we try to resurrect the worker after the lifetime deadline?
+
 
           profile:
             type: object
@@ -447,8 +451,8 @@ properties:
 
               target:
                 oneOf:
-                  - { type: number, minimum: 0, maximum: 1 }
-                  - { enum: [false] }
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we start spilling the dask keys holding the largest
@@ -456,24 +460,24 @@ properties:
 
               spill:
                 oneOf:
-                  - { type: number, minimum: 0, maximum: 1 }
-                  - { enum: [false] }
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we spill all data to disk.
 
               pause:
                 oneOf:
-                  - { type: number, minimum: 0, maximum: 1 }
-                  - { enum: [false] }
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
                 description: >-
                   When the process memory (as observed by the operating system) gets
                   above this amount we no longer start new tasks on this worker.
 
               terminate:
                 oneOf:
-                  - { type: number, minimum: 0, maximum: 1 }
-                  - { enum: [false] }
+                  - {type: number, minimum: 0, maximum: 1}
+                  - {enum: [false]}
                 description: >-
                   When the process memory reaches this level the nanny process will kill
                   the worker (if a nanny is present)
@@ -495,6 +499,7 @@ properties:
         description: |
           Configuration settings for Dask Nannies
         properties:
+
           preload:
             type: array
             description: |
@@ -518,7 +523,8 @@ properties:
         properties:
           heartbeat:
             type: string
-            description: This value is the time between heartbeats
+            description:
+              This value is the time between heartbeats
 
               The client sends a periodic heartbeat message to the scheduler.
               If it misses enough of these then the scheduler assumes that it has gone.
@@ -587,11 +593,13 @@ properties:
         type: object
         description: Configuration settings for Dask communications
         properties:
+
           retry:
             type: object
             description: |
               Some operations (such as gathering data) are subject to re-tries with the below parameters
             properties:
+
               count:
                 type: integer
                 minimum: 0
@@ -617,8 +625,8 @@ properties:
 
           offload:
             type:
-              - boolean
-              - string
+            - boolean
+            - string
             description: |
               The size of message after which we choose to offload serialization to another thread
 
@@ -661,8 +669,8 @@ properties:
 
           require-encryption:
             type:
-              - boolean
-              - "null"
+            - boolean
+            - "null"
             description: |
               Whether to require encryption on non-local comms
 
@@ -680,14 +688,14 @@ properties:
             properties:
               ciphers:
                 type:
-                  - string
-                  - "null"
+                - string
+                - "null"
                 descsription: Allowed ciphers, specified as an OpenSSL cipher string.
 
               ca-file:
                 type:
-                  - string
-                  - "null"
+                - string
+                - "null"
                 description: Path to a CA file, in pem format
 
               scheduler:
@@ -696,13 +704,13 @@ properties:
                 properties:
                   cert:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: Path to certificate file
                   key:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: |
                       Path to key file.
 
@@ -715,13 +723,13 @@ properties:
                 properties:
                   cert:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: Path to certificate file
                   key:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: |
                       Path to key file.
 
@@ -734,13 +742,13 @@ properties:
                 properties:
                   cert:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: Path to certificate file
                   key:
                     type:
-                      - string
-                      - "null"
+                    - string
+                    - "null"
                     description: |
                       Path to key file.
 
@@ -806,7 +814,7 @@ properties:
               interval:
                 type: string
                 description: The time between ticks, default 20ms
-              limit:
+              limit :
                 type: string
                 description: The time allowed before triggering a warning
 
@@ -861,7 +869,7 @@ properties:
       Configuration options for the RAPIDS Memory Manager.
     properties:
       pool-size:
-        type: [integer, "null"]
+        type: [integer, 'null']
         description: |
           The size of the memory pool in bytes.
   ucx:
@@ -893,7 +901,7 @@ properties:
           Set environment variables to enable UCX RDMA connection manager support,
           requires ``ucx.infiniband=True``.
       net-devices:
-        type: [string, "null"]
+        type: [string, 'null']
         description: |
           Interface(s) used by workers for UCX communication. Can be a string (like
           ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
@@ -903,7 +911,7 @@ properties:
           and compiled with hwloc support. Unexpected errors can occur when using
           ``"auto"`` if any interfaces are disconnected or improperly configured.
       reuse-endpoints:
-        type: [boolean, "null"]
+        type: [boolean, 'null']
         description: |
           Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
           UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
