@@ -279,7 +279,7 @@ class Nanny(ServerNode):
                 if len(ports) > 1 and e.errno == errno.EADDRINUSE:
                     continue
                 else:
-                    raise e
+                    raise
             else:
                 self._start_address = start_address
                 break
@@ -451,7 +451,7 @@ class Nanny(ServerNode):
         ):
             try:
                 await self._unregister()
-            except (OSError, CommClosedError):
+            except OSError:
                 if not self.reconnect:
                     await self.close()
                     return
