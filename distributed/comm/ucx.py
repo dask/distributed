@@ -14,7 +14,7 @@ import dask
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
 from .registry import Backend, backends
-from .utils import ensure_concrete_host, to_frames, from_frames
+from .utils import ensure_concrete_host, to_frames, from_frames, get_array_types, init_rmm_pool
 from ..utils import (
     ensure_ip,
     get_ip,
@@ -62,52 +62,8 @@ def init_once():
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
-    # Find the function, `host_array()`, to use when allocating new host arrays
-    try:
-        import numpy
-
-        host_array = lambda n: numpy.empty((n,), dtype="u1")
-    except ImportError:
-        host_array = lambda n: bytearray(n)
-
-    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
-    try:
-        import rmm
-
-        if hasattr(rmm, "DeviceBuffer"):
-            device_array = lambda n: rmm.DeviceBuffer(size=n)
-        else:  # pre-0.11.0
-            import numba.cuda
-
-            def rmm_device_array(n):
-                a = rmm.device_array(n, dtype="u1")
-                weakref.finalize(a, numba.cuda.current_context)
-                return a
-
-            device_array = rmm_device_array
-    except ImportError:
-        try:
-            import numba.cuda
-
-            def numba_device_array(n):
-                a = numba.cuda.device_array((n,), dtype="u1")
-                weakref.finalize(a, numba.cuda.current_context)
-                return a
-
-            device_array = numba_device_array
-        except ImportError:
-
-            def device_array(n):
-                raise RuntimeError(
-                    "In order to send/recv CUDA arrays, Numba or RMM is required"
-                )
-
-    pool_size_str = dask.config.get("rmm.pool-size")
-    if pool_size_str is not None:
-        pool_size = parse_bytes(pool_size_str)
-        rmm.reinitialize(
-            pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
-        )
+    host_array, device_array = get_array_types()
+    init_rmm_pool()
 
     try:
         from ucp.endpoint_reuse import EndpointReuse
