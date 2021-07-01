@@ -920,6 +920,16 @@ class TaskGroup:
 
        The result types of this TaskGroup
 
+    .. attribute:: last_worker: WorkerState
+
+       The worker most recently assigned a task from this group, or None when the group
+       is not identified to be root-like by `SchedulerState.decide_worker`.
+
+    .. attribute:: last_worker_tasks_left: int
+
+       If `last_worker` is not None, the number of times that worker should be assigned
+       subsequent tasks until a new worker is chosen.
+
     See also
     --------
     TaskPrefix
@@ -935,6 +945,8 @@ class TaskGroup:
     _start: double
     _stop: double
     _all_durations: object
+    _last_worker: WorkerState
+    _last_worker_tasks_left: Py_ssize_t
 
     def __init__(self, name: str):
         self._name = name
@@ -948,6 +960,8 @@ class TaskGroup:
         self._start = 0.0
         self._stop = 0.0
         self._all_durations = defaultdict(float)
+        self._last_worker = None
+        self._last_worker_tasks_left = 0
 
     @property
     def name(self):
@@ -988,6 +1002,14 @@ class TaskGroup:
     @property
     def stop(self):
         return self._stop
+
+    @property
+    def last_worker(self):
+        return self._last_worker
+
+    @property
+    def last_worker_tasks_left(self):
+        return self._last_worker_tasks_left
 
     @ccall
     def add(self, o):
@@ -2308,19 +2330,58 @@ class SchedulerState:
     @exceptval(check=False)
     def decide_worker(self, ts: TaskState) -> WorkerState:
         """
-        Decide on a worker for task *ts*.  Return a WorkerState.
+        Decide on a worker for task *ts*. Return a WorkerState.
+
+        If it's a root or root-like task, we place it with its relatives to
+        reduce future data tansfer.
+
+        If it has dependencies or restrictions, we use
+        `decide_worker_from_deps_and_restrictions`.
+
+        Otherwise, we pick the least occupied worker, or pick from all workers
+        in a round-robin fashion.
         """
+        if not self._workers_dv:
+            return None
+
         ws: WorkerState = None
+        group: TaskGroup = ts._group
         valid_workers: set = self.valid_workers(ts)
 
         if (
             valid_workers is not None
             and not valid_workers
             and not ts._loose_restrictions
-            and self._workers_dv
         ):
             self._unrunnable.add(ts)
             ts.state = "no-worker"
+            return ws
+
+        # Group is larger than cluster with few dependencies? Minimize future data transfers.
+        if (
+            valid_workers is None
+            and len(group) > self._total_nthreads * 2
+            and sum(map(len, group._dependencies)) < 5
+        ):
+            ws: WorkerState = group._last_worker
+
+            if not (
+                ws and group._last_worker_tasks_left and ws._address in self._workers_dv
+            ):
+                # Last-used worker is full or unknown; pick a new worker for the next few tasks
+                ws = min(
+                    (self._idle_dv or self._workers_dv).values(),
+                    key=partial(self.worker_objective, ts),
+                )
+                group._last_worker_tasks_left = math.floor(
+                    (len(group) / self._total_nthreads) * ws._nthreads
+                )
+
+            # Record `last_worker`, or clear it on the final task
+            group._last_worker = (
+                ws if group.states["released"] + group.states["waiting"] > 1 else None
+            )
+            group._last_worker_tasks_left -= 1
             return ws
 
         if ts._dependencies or valid_workers is not None:
@@ -2331,6 +2392,7 @@ class SchedulerState:
                 partial(self.worker_objective, ts),
             )
         else:
+            # Fastpath when there are no related tasks or restrictions
             worker_pool = self._idle or self._workers
             worker_pool_dv = cast(dict, worker_pool)
             wp_vals = worker_pool.values()
@@ -6488,7 +6550,7 @@ class Scheduler(SchedulerState, ServerNode):
                         response = function(self, state)
                     await comm.write(response)
                     await asyncio.sleep(interval)
-            except (OSError, CommClosedError):
+            except OSError:
                 pass
             finally:
                 if teardown:

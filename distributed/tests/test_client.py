@@ -1883,17 +1883,11 @@ async def test_allow_restrictions(c, s, a, b):
         c.map(inc, [20], workers="127.0.0.1", allow_other_workers="Hello!")
 
 
-@pytest.mark.skipif("True", reason="because")
 def test_bad_address():
-    try:
+    with pytest.raises(OSError, match="connect"):
         Client("123.123.123.123:1234", timeout=0.1)
-    except (OSError, TimeoutError) as e:
-        assert "connect" in str(e).lower()
-
-    try:
+    with pytest.raises(OSError, match="connect"):
         Client("127.0.0.1:1234", timeout=0.1)
-    except (OSError, TimeoutError) as e:
-        assert "connect" in str(e).lower()
 
 
 def test_informative_error_on_cluster_type():
