@@ -2807,46 +2807,35 @@ def status_doc(scheduler, extra, doc):
 
         if len(scheduler.workers) < 50:
             nbytes_workers = NBytes(scheduler, sizing_mode="stretch_both")
-            current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-            occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+            processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
-            processing_root = current_load.processing_figure
-            cpu_root = current_load.cpu_figure
-            occupancy_root = occupancy.root
+            processing_root = processing.processing_figure
 
-            processing_root.y_range = nbytes_workers.root.y_range
-            cpu_root.y_range = nbytes_workers.root.y_range
-            occupancy_root.y_range = nbytes_workers.root.y_range
         else:
             nbytes_workers = NBytesHistogram(scheduler, sizing_mode="stretch_both")
-            processing_hist = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
-            current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
-            occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+            processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
 
-            cpu_root = current_load.cpu_figure
-            processing_hist_root = processing_hist.root
-            occupancy_root = occupancy.root
+            processing_root = processing.root
 
-            row(nbytes_workers.root, processing_hist.root, sizing_mode="stretch_both")
+        current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
+        occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+
+        cpu_root = current_load.cpu_figure
+        occupancy_root = occupancy.root
 
         nbytes_workers.update()
+        processing.update()
         current_load.update()
         occupancy.update()
 
         add_periodic_callback(doc, nbytes_workers, 100)
+        add_periodic_callback(doc, processing, 100)
         add_periodic_callback(doc, current_load, 100)
         add_periodic_callback(doc, occupancy, 100)
 
         doc.add_root(nbytes_workers.root)
 
-        if len(scheduler.workers) < 50:
-            tab1 = Panel(child=processing_root, title="Processing")
-        else:
-            processing_hist.update()
-            add_periodic_callback(doc, processing_hist, 100)
-
-            tab1 = Panel(child=processing_hist_root, title="Processing")
-
+        tab1 = Panel(child=processing_root, title="Processing")
         tab2 = Panel(child=cpu_root, title="CPU")
         tab3 = Panel(child=occupancy_root, title="Occupancy")
 
