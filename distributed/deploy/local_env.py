@@ -247,7 +247,6 @@ def LocalEnvCluster(
     >>> from dask.distributed import Client, LocalEnvCluster
     >>> cluster = LocalEnvCluster(
     ...     "/Users/user/miniconda3/envs/myenv/bin/python",
-    ...     connect_options={"known_hosts": None},
     ...     worker_options={"nthreads": 1},
     ... )
     >>> client = Client(cluster)
