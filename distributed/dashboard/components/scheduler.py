@@ -2808,22 +2808,40 @@ def status_doc(scheduler, extra, doc):
         if len(scheduler.workers) < 50:
             workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
+
             processing_root = processing.processing_figure
-            processing_root.y_range = workers_memory.root.y_range
         else:
             workers_memory = WorkersMemoryHistogram(
                 scheduler, sizing_mode="stretch_both"
             )
             processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
+
             processing_root = processing.root
-            row(workers_memory.root, processing.root, sizing_mode="stretch_both")
+
+        current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
+        occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+
+        cpu_root = current_load.cpu_figure
+        occupancy_root = occupancy.root
 
         workers_memory.update()
         processing.update()
+        current_load.update()
+        occupancy.update()
+
         add_periodic_callback(doc, workers_memory, 100)
         add_periodic_callback(doc, processing, 100)
+        add_periodic_callback(doc, current_load, 100)
+        add_periodic_callback(doc, occupancy, 100)
+
         doc.add_root(workers_memory.root)
-        doc.add_root(processing_root)
+
+        tab1 = Panel(child=processing_root, title="Processing")
+        tab2 = Panel(child=cpu_root, title="CPU")
+        tab3 = Panel(child=occupancy_root, title="Occupancy")
+
+        proc_tabs = Tabs(tabs=[tab1, tab2, tab3], name="processing_tabs")
+        doc.add_root(proc_tabs)
 
         task_stream = TaskStream(
             scheduler,
