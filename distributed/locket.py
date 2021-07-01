@@ -63,11 +63,8 @@ else:
         try:
             fcntl.flock(file_.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
-        except OSError as error:
-            if error.errno in [errno.EACCES, errno.EAGAIN]:
-                return False
-            else:
-                raise
+        except (PermissionError, BlockingIOError):
+            return False
 
     def _unlock_file(file_):
         fcntl.flock(file_.fileno(), fcntl.LOCK_UN)

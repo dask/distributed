@@ -228,8 +228,8 @@ class ProcessingHistogram(DashboardComponent):
         self.source.data.update({"left": x[:-1], "right": x[1:], "top": counts})
 
 
-def _nbytes_color(current: int, limit: int) -> str:
-    """Dynamic color used by NBytes and NBytesCluster"""
+def _memory_color(current: int, limit: int) -> str:
+    """Dynamic color used by WorkersMemory and ClusterMemory"""
     if limit and current > limit:
         return "red"
     elif limit and current > limit / 2:
@@ -238,7 +238,7 @@ def _nbytes_color(current: int, limit: int) -> str:
         return "blue"
 
 
-class NBytesCluster(DashboardComponent):
+class ClusterMemory(DashboardComponent):
     """Total memory usage on the cluster"""
 
     def __init__(self, scheduler, width=600, **kwargs):
@@ -262,9 +262,9 @@ class NBytesCluster(DashboardComponent):
             self.root = figure(
                 title="Bytes stored on cluster",
                 tools="",
-                id="bk-nbytes-cluster-worker-plot",
+                id="bk-cluster-memory-plot",
                 width=int(width / 2),
-                name="nbytes_cluster",
+                name="cluster_memory",
                 **kwargs,
             )
             rect = self.root.rect(
@@ -322,7 +322,7 @@ class NBytesCluster(DashboardComponent):
         with log_errors():
             limit = sum(ws.memory_limit for ws in self.scheduler.workers.values())
             meminfo = self.scheduler.memory
-            color = _nbytes_color(meminfo.process, limit)
+            color = _memory_color(meminfo.process, limit)
 
             width = [
                 meminfo.managed_in_memory,
@@ -356,7 +356,7 @@ class NBytesCluster(DashboardComponent):
             update(self.source, result)
 
 
-class NBytes(DashboardComponent):
+class WorkersMemory(DashboardComponent):
     """Memory usage for single workers"""
 
     def __init__(self, scheduler, width=600, **kwargs):
@@ -382,9 +382,9 @@ class NBytes(DashboardComponent):
             self.root = figure(
                 title="Bytes stored per worker",
                 tools="",
-                id="bk-nbytes-worker-plot",
+                id="bk-workers-memory-plot",
                 width=int(width / 2),
-                name="nbytes_workers",
+                name="workers_memory",
                 **kwargs,
             )
             rect = self.root.rect(
@@ -472,7 +472,7 @@ class NBytes(DashboardComponent):
                 max_limit = max(
                     max_limit, limit, meminfo.process + meminfo.managed_spilled
                 )
-                color_i = _nbytes_color(meminfo.process, limit)
+                color_i = _memory_color(meminfo.process, limit)
 
                 width += [
                     meminfo.managed_in_memory,
@@ -517,7 +517,7 @@ class NBytes(DashboardComponent):
             update(self.source, result)
 
 
-class NBytesHistogram(DashboardComponent):
+class WorkersMemoryHistogram(DashboardComponent):
     """Histogram of memory usage, showing how many workers there are in each bucket of
     usage. Replaces the per-worker graph when there are >= 50 workers.
     """
@@ -532,8 +532,8 @@ class NBytesHistogram(DashboardComponent):
 
             self.root = figure(
                 title="Bytes stored per worker (Histogram)",
-                name="nbytes_workers",
-                id="bk-nbytes-histogram-plot",
+                name="workers_memory",
+                id="bk-workers-memory-histogram-plot",
                 y_axis_label="frequency",
                 tools="",
                 **kwargs,
@@ -2800,19 +2800,20 @@ def tg_graph_doc(scheduler, extra, doc):
 
 def status_doc(scheduler, extra, doc):
     with log_errors():
-        nbytes_cluster = NBytesCluster(scheduler, sizing_mode="stretch_both")
-        nbytes_cluster.update()
-        add_periodic_callback(doc, nbytes_cluster, 100)
-        doc.add_root(nbytes_cluster.root)
+        cluster_memory = ClusterMemory(scheduler, sizing_mode="stretch_both")
+        cluster_memory.update()
+        add_periodic_callback(doc, cluster_memory, 100)
+        doc.add_root(cluster_memory.root)
 
         if len(scheduler.workers) < 50:
-            nbytes_workers = NBytes(scheduler, sizing_mode="stretch_both")
+            workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
             processing_root = processing.processing_figure
-
         else:
-            nbytes_workers = NBytesHistogram(scheduler, sizing_mode="stretch_both")
+            workers_memory = WorkersMemoryHistogram(
+                scheduler, sizing_mode="stretch_both"
+            )
             processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
 
             processing_root = processing.root
@@ -2823,17 +2824,17 @@ def status_doc(scheduler, extra, doc):
         cpu_root = current_load.cpu_figure
         occupancy_root = occupancy.root
 
-        nbytes_workers.update()
+        workers_memory.update()
         processing.update()
         current_load.update()
         occupancy.update()
 
-        add_periodic_callback(doc, nbytes_workers, 100)
+        add_periodic_callback(doc, workers_memory, 100)
         add_periodic_callback(doc, processing, 100)
         add_periodic_callback(doc, current_load, 100)
         add_periodic_callback(doc, occupancy, 100)
 
-        doc.add_root(nbytes_workers.root)
+        doc.add_root(workers_memory.root)
 
         tab1 = Panel(child=processing_root, title="Processing")
         tab2 = Panel(child=cpu_root, title="CPU")

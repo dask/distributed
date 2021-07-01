@@ -579,7 +579,7 @@ class Server:
                     else:
                         func()
 
-        except (CommClosedError, OSError):
+        except OSError:
             # FIXME: This is silently ignored, is this intentional?
             pass
         except Exception as e:
@@ -647,7 +647,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except (OSError, CommClosedError):
+    except OSError:
         # On communication errors, we should simply close the communication
         force_close = True
         raise
