@@ -1,4 +1,3 @@
-import errno
 import glob
 import logging
 import os
@@ -23,10 +22,11 @@ def is_locking_enabled():
 def safe_unlink(path):
     try:
         os.unlink(path)
-    except OSError as e:
+    except FileNotFoundError:
         # Perhaps it was removed by someone else?
-        if e.errno != errno.ENOENT:
-            logger.error("Failed to remove %r", str(e))
+        pass
+    except OSError as e:
+        logger.error(f"Failed to remove {path}: {e}")
 
 
 class WorkDir:
@@ -121,9 +121,8 @@ class WorkSpace:
     def _init_workspace(self):
         try:
             os.mkdir(self.base_dir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
+        except FileExistsError:
+            pass
 
     def _global_lock(self, **kwargs):
         return locket.lock_file(self._global_lock_path, **kwargs)

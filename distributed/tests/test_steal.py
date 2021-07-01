@@ -146,21 +146,18 @@ async def test_steal_related_tasks(e, s, a, b, c):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
 async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
-    np = pytest.importorskip("numpy")
-    x = c.submit(np.random.random, 10000000, workers=workers[0].address)
-
     def do_nothing(x, y=None):
         pass
 
-    # execute and measure runtime once
-    await wait(c.submit(do_nothing, 1))
+    xs = c.map(do_nothing, range(10), workers=workers[0].address)
+    await wait(xs)
 
-    futures = c.map(do_nothing, range(1000), y=x)
+    futures = c.map(do_nothing, range(1000), y=xs)
 
     await wait(futures)
 
-    assert len(s.who_has[x.key]) == 1
-    assert len(s.has_what[workers[0].address]) == 1001
+    assert len(set.union(*(s.who_has[x.key] for x in xs))) == 1
+    assert len(s.has_what[workers[0].address]) == len(xs) + len(futures)
 
 
 @gen_cluster(client=True)
@@ -553,7 +550,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
 
         if result2 == expected2:
             return
-    raise Exception(f"Expected: {str(expected2)}; got: {str(result2)}")
+    raise Exception(f"Expected: {expected2}; got: {result2}")
 
 
 @pytest.mark.parametrize(

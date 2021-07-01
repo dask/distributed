@@ -1120,10 +1120,9 @@ def has_ipv6():
         serv.bind(("::", 0))
         serv.listen(5)
         cli = socket.create_connection(serv.getsockname()[:2])
+        return True
     except OSError:
         return False
-    else:
-        return True
     finally:
         if cli is not None:
             cli.close()

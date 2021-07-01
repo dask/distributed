@@ -100,7 +100,7 @@ def async_ssh(cmd_dict):
             print(
                 "               "
                 + bcolors.FAIL
-                + f"Retrying... (attempt {retries}/{3})"
+                + f"Retrying... (attempt {retries}/3)"
                 + bcolors.ENDC
             )
 
@@ -152,7 +152,7 @@ def async_ssh(cmd_dict):
                 cmd_dict["output_queue"].put(
                     "[ {label} ] : ".format(label=cmd_dict["label"])
                     + bcolors.FAIL
-                    + f"{line}"
+                    + line
                     + bcolors.ENDC
                 )
                 line = stderr.readline()
@@ -215,14 +215,14 @@ def start_scheduler(
 
     # Optionally re-direct stdout and stderr to a logfile
     if logdir is not None:
-        cmd = f"mkdir -p {logdir} && " + cmd
+        cmd = f"mkdir -p {logdir} && {cmd}"
         cmd += "&> {logdir}/dask_scheduler_{addr}:{port}.log".format(
             addr=addr, port=port, logdir=logdir
         )
 
     # Format output labels we can prepend to each line of output, and create
     # a 'status' key to keep track of jobs that terminate prematurely.
-    label = bcolors.BOLD + f"scheduler {addr}:{port}" + bcolors.ENDC
+    label = f"{bcolors.BOLD}scheduler {addr}:{port}{bcolors.ENDC}"
 
     # Create a command dictionary, which contains everything we need to run and
     # interact with this command.
@@ -305,7 +305,7 @@ def start_worker(
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
-        cmd = f"mkdir -p {logdir} && " + cmd
+        cmd = f"mkdir -p {logdir} && {cmd}"
         cmd += "&> {logdir}/dask_scheduler_{addr}.log".format(
             addr=worker_addr, logdir=logdir
         )
