@@ -42,10 +42,6 @@ from distributed.utils_test import (
 )
 
 
-def echo(comm, x):
-    return x
-
-
 class CountedObject:
     """
     A class which counts the number of live instances.
@@ -443,16 +439,16 @@ async def test_rpc_with_many_connections_inproc():
 
 async def check_large_packets(listen_arg):
     """tornado has a 100MB cap by default"""
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(listen_arg)
 
     data = b"0" * int(200e6)  # slightly more than 100MB
     async with rpc(server.address) as conn:
-        result = await conn.echo(x=data)
+        result = await conn.echo(data=data)
         assert result == data
 
         d = {"x": data}
-        result = await conn.echo(x=d)
+        result = await conn.echo(data=d)
         assert result == d
 
     server.stop()
@@ -544,17 +540,17 @@ async def test_connect_raises():
 
 @pytest.mark.asyncio
 async def test_send_recv_args():
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(0)
 
     comm = await connect(server.address)
-    result = await send_recv(comm, op="echo", x=b"1")
+    result = await send_recv(comm, op="echo", data=b"1")
     assert result == b"1"
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"2", reply=False)
+    result = await send_recv(comm, op="echo", data=b"2", reply=False)
     assert result is None
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"3", close=True)
+    result = await send_recv(comm, op="echo", data=b"3", close=True)
     assert result == b"3"
     assert comm.closed()
 
