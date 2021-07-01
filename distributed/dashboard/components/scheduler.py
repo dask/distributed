@@ -281,7 +281,6 @@ class ClusterMemory(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -341,12 +340,9 @@ class ClusterMemory(DashboardComponent):
                 "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
                 "spilled": [meminfo.managed_spilled] * 4,
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled out
-            self.root.x_range.end = max(
-                limit, meminfo.process + meminfo.managed_spilled
-            )
+
+            x_end = max(limit, meminfo.process + meminfo.managed_spilled)
+            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -402,7 +398,6 @@ class WorkersMemory(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -510,10 +505,8 @@ class WorkersMemory(DashboardComponent):
             result = {
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled to disk
-            self.root.x_range.end = max_limit
+
+            self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
             update(self.source, result)
 
 
