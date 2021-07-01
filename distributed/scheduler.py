@@ -36,7 +36,6 @@ from tlz import (
     valmap,
 )
 from tornado.ioloop import IOLoop, PeriodicCallback
-from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
@@ -93,6 +92,12 @@ try:
     from cython import compiled
 except ImportError:
     compiled = False
+
+try:
+    import zeroconf
+    from zeroconf.asyncio import AsyncServiceInfo, AsyncZeroconf
+except ImportError:
+    zeroconf = False
 
 if compiled:
     from cython import (
@@ -164,6 +169,7 @@ logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
+ZEROCONF = dask.config.get("distributed.scheduler.zeroconf")
 DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
@@ -3357,8 +3363,9 @@ class Scheduler(SchedulerState, ServerNode):
         self._lock = asyncio.Lock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
-        self._zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
-        self._zeroconf_services = []
+        if zeroconf and ZEROCONF:
+            self._zeroconf = AsyncZeroconf(ip_version=zeroconf.IPVersion.V4Only)
+            self._zeroconf_services = []
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -3730,21 +3737,22 @@ class Scheduler(SchedulerState, ServerNode):
 
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
-            # Advertise service via mdns service discovery
-            host, port = get_address_host_port(listener.contact_address)
-            protocol, _ = parse_address(listener.contact_address)
-            short_id = self.id.split("-")[1]
-            info = ServiceInfo(
-                "_dask._tcp.local.",
-                f"_sched-{short_id}._dask._tcp.local.",
-                addresses=[socket.inet_aton(host)],
-                port=port,
-                properties={"protocol": protocol},
-                server=f"sched-{short_id}.dask.local.",
-            )
-            self._zeroconf_services.append(info)
-            self._zeroconf.register_service(info)
-            logger.info("  Advertising as: %25s", info.server)
+            if zeroconf and ZEROCONF:
+                # Advertise service via mdns service discovery
+                host, port = get_address_host_port(listener.contact_address)
+                protocol, _ = parse_address(listener.contact_address)
+                short_id = self.id.split("-")[1]
+                info = AsyncServiceInfo(
+                    "_dask._tcp.local.",
+                    f"_sched-{short_id}._dask._tcp.local.",
+                    addresses=[socket.inet_aton(host)],
+                    port=port,
+                    properties={"protocol": protocol},
+                    server=f"sched-{short_id}.dask.local.",
+                )
+                self._zeroconf_services.append(info)
+                await self._zeroconf.async_register_service(info)
+                logger.info("  Advertising as: %25s", info.server)
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
@@ -3809,9 +3817,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stop_services()
 
-        for info in self._zeroconf_services:
-            self._zeroconf.unregister_service(info)
-        self._zeroconf.close()
+        if zeroconf and ZEROCONF:
+            for info in self._zeroconf_services:
+                await self._zeroconf.async_unregister_service(info)
+            await self._zeroconf.async_close()
 
         for ext in parent._extensions.values():
             with suppress(AttributeError):

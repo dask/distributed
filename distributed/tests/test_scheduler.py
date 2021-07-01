@@ -2800,3 +2800,17 @@ async def test_transition_counter(c, s, a, b):
     assert s.transition_counter == 0
     await c.submit(inc, 1)
     assert s.transition_counter > 1
+
+
+@gen_cluster(
+    config={"distributed.scheduler.zeroconf": True},
+)
+async def test_zeroconf(s, *_):
+    zeroconf = pytest.importorskip("zeroconf")
+    assert len(s._zeroconf_services) == 1
+    async with zeroconf.asyncio.AsyncZeroconf(interfaces=["127.0.0.1"]) as aiozc:
+        service = s._zeroconf_services[0]
+        service = await aiozc.async_get_service_info("_dask._tcp.local.", service.name)
+        [address] = service.parsed_addresses()
+        assert str(address) in s.address
+        assert str(service.port) in s.address

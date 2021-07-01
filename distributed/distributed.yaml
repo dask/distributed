@@ -30,6 +30,7 @@ distributed:
       rechunk-split: 1us
       shuffle-split: 1us
     validate: False         # Check scheduler state at every step for debugging
+    zeroconf: true
     dashboard:
       status:
         task-stream-length: 1000
@@ -59,6 +60,7 @@ distributed:
     allowed-imports:
       - dask
       - distributed
+
 
   worker:
     blocked-handlers: []
