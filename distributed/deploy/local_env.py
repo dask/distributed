@@ -29,9 +29,7 @@ class Process(ProcessInterface):
         super().__init__(**kwargs)
 
     async def start(self):
-        weakref.finalize(
-            self, self.proc.kill
-        )
+        weakref.finalize(self, self.proc.kill)
         await super().start()
 
     async def close(self):
@@ -96,18 +94,16 @@ class Worker(Process):
             + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
         )
         self.proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stderr=asyncio.subprocess.PIPE,
-            **self.connect_options
+            cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
 
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
-            if not line.decode('ascii').strip():
+            if not line.decode("ascii").strip():
                 raise Exception("Worker failed to start")
             else:
-                line = line.decode('ascii').strip()
+                line = line.decode("ascii").strip()
             logger.info(line)
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
@@ -144,27 +140,20 @@ class Scheduler(Process):
         set_env = await _set_env_helper(self.connect_options)
 
         cmd = " ".join(
-            [
-                set_env,
-                self.python_exe,
-                "-m",
-                "distributed.cli.dask_scheduler"
-            ]
+            [set_env, self.python_exe, "-m", "distributed.cli.dask_scheduler"]
             + cli_keywords(self.kwargs, cls=_Scheduler)
         )
         self.proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stderr=asyncio.subprocess.PIPE,
-            **self.connect_options
+            cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
 
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
-            if not line.decode('ascii').strip():
+            if not line.decode("ascii").strip():
                 raise Exception("Scheduler failed to start")
             else:
-                line = line.decode('ascii').strip()
+                line = line.decode("ascii").strip()
             logger.info(line)
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
@@ -193,10 +182,7 @@ async def _set_env_helper(connect_options: dict):
             dask.config.serialize(dask.config.global_config)
         )
     else:
-        proc = await asyncio.create_subprocess_shell(
-            "cmd /c ver",
-            **connect_options
-        )
+        proc = await asyncio.create_subprocess_shell("cmd /c ver", **connect_options)
         await proc.communicate()
         if proc.returncode == 0:
             set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
@@ -207,6 +193,7 @@ async def _set_env_helper(connect_options: dict):
                 "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
             )
     return set_env
+
 
 def LocalEnvCluster(
     python_exe: str,
