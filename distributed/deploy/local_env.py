@@ -218,11 +218,12 @@ def LocalEnvCluster(
 ):
     """Deploy a Dask cluster that utilises a different Python executable
 
-    The SSHCluster function deploys a Dask Scheduler and Workers for you on a
-    set of machine addresses that you provide.  The first address will be used
-    for the scheduler while the rest will be used for the workers (feel free to
-    repeat the first hostname if you want to have the scheduler and worker
-    co-habitate one machine.)
+    The LocalEnvCluster function deploys a Dask Scheduler and Workers for you on
+    your local machine, running in the Python environment specified by
+    `python_exe`. This allows you to run a Dask cluster in a different Python
+    environment to the host Python environment; particularly useful when
+    combined with `dask-labextension` as you can run a Dask Scheduler and
+    Workers in a different Python env to the env hosting JupyterLab.
 
     You may configure the scheduler and workers by passing
     ``scheduler_options`` and ``worker_options`` dictionary keywords.  See the
@@ -230,10 +231,11 @@ def LocalEnvCluster(
     details on the available options, but the defaults should work in most
     situations.
 
-    You may configure your use of SSH itself using the ``connect_options``
-    keyword, which passes values to the ``asyncssh.connect`` function.  For
-    more information on these see the documentation for the ``asyncssh``
-    library https://asyncssh.readthedocs.io .
+    You may configure how to connect to the local Scheduler and Workers using
+    the ``connect_options`` keyword, which passes values to the
+    ``asyncio.create_subprocess_shell`` function.  For more information on this
+    see the documentation on the
+    [asyncio library](https://docs.python.org/3/library/asyncio-subprocess.html#asyncio-subprocess).
 
     Parameters
     ----------
@@ -253,33 +255,21 @@ def LocalEnvCluster(
     worker_module : str, optional
         Python module to call to start the worker.
 
-    Examples
-    --------
-    >>> from dask.distributed import Client, SSHCluster
-    >>> cluster = SSHCluster(
-    ...     ["localhost", "localhost", "localhost", "localhost"],
+    Example
+    -------
+    >>> from dask.distributed import Client, LocalEnvCluster
+    >>> cluster = LocalEnvCluster(
+    ...     "/Users/user/miniconda3/envs/myenv/bin/python",
     ...     connect_options={"known_hosts": None},
-    ...     worker_options={"nthreads": 2},
-    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"}
+    ...     worker_options={"nthreads": 1},
     ... )
-    >>> client = Client(cluster)
-
-    An example using a different worker module, in particular the
-    ``dask-cuda-worker`` command from the ``dask-cuda`` project.
-
-    >>> from dask.distributed import Client, SSHCluster
-    >>> cluster = SSHCluster(
-    ...     ["localhost", "hostwithgpus", "anothergpuhost"],
-    ...     connect_options={"known_hosts": None},
-    ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module='dask_cuda.dask_cuda_worker')
     >>> client = Client(cluster)
 
     See Also
     --------
     dask.distributed.Scheduler
     dask.distributed.Worker
-    asyncssh.connect
+    asyncio.create_subprocess_shell
     """
     scheduler = {
         "cls": Scheduler,
