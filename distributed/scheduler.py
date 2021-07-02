@@ -7089,7 +7089,7 @@ class Scheduler(SchedulerState, ServerNode):
         from bokeh.plotting import output_file, save
 
         with tmpfile(extension=".html") as fn:
-            output_file(filename=fn, title="Dask Performance Report")
+            output_file(filename=fn, title="Dask Performance Report", mode="inline")
             template_directory = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "dashboard", "templates"
             )

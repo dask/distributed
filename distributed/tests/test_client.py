@@ -6380,6 +6380,7 @@ async def test_performance_report(c, s, a, b):
     assert "Threads: 4" in data
     assert "distributed.scheduler - INFO - Clear task state" in data
     assert dask.__version__ in data
+    assert "cdn.bokeh.org" not in data
 
     # Stacklevel two captures code two frames back -- which in this case
     # is the testing function
