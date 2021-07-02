@@ -310,5 +310,6 @@ API
 
 .. autoclass:: Scheduler
    :members:
+   :inherited-members:
 
 .. autofunction:: decide_worker
