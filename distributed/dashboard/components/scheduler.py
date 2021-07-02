@@ -281,7 +281,6 @@ class ClusterMemory(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -341,12 +340,9 @@ class ClusterMemory(DashboardComponent):
                 "unmanaged_recent": [meminfo.unmanaged_recent] * 4,
                 "spilled": [meminfo.managed_spilled] * 4,
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled out
-            self.root.x_range.end = max(
-                limit, meminfo.process + meminfo.managed_spilled
-            )
+
+            x_end = max(limit, meminfo.process + meminfo.managed_spilled)
+            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -402,7 +398,6 @@ class WorkersMemory(DashboardComponent):
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.x_range.start = 0
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
@@ -510,10 +505,8 @@ class WorkersMemory(DashboardComponent):
             result = {
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
-            # FIXME https://github.com/dask/distributed/issues/4675
-            #       This causes flickering after adding workers and when enough memory
-            #       is spilled to disk
-            self.root.x_range.end = max_limit
+
+            self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
             update(self.source, result)
 
 
@@ -2808,22 +2801,40 @@ def status_doc(scheduler, extra, doc):
         if len(scheduler.workers) < 50:
             workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
+
             processing_root = processing.processing_figure
-            processing_root.y_range = workers_memory.root.y_range
         else:
             workers_memory = WorkersMemoryHistogram(
                 scheduler, sizing_mode="stretch_both"
             )
             processing = ProcessingHistogram(scheduler, sizing_mode="stretch_both")
+
             processing_root = processing.root
-            row(workers_memory.root, processing.root, sizing_mode="stretch_both")
+
+        current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
+        occupancy = Occupancy(scheduler, sizing_mode="stretch_both")
+
+        cpu_root = current_load.cpu_figure
+        occupancy_root = occupancy.root
 
         workers_memory.update()
         processing.update()
+        current_load.update()
+        occupancy.update()
+
         add_periodic_callback(doc, workers_memory, 100)
         add_periodic_callback(doc, processing, 100)
+        add_periodic_callback(doc, current_load, 100)
+        add_periodic_callback(doc, occupancy, 100)
+
         doc.add_root(workers_memory.root)
-        doc.add_root(processing_root)
+
+        tab1 = Panel(child=processing_root, title="Processing")
+        tab2 = Panel(child=cpu_root, title="CPU")
+        tab3 = Panel(child=occupancy_root, title="Occupancy")
+
+        proc_tabs = Tabs(tabs=[tab1, tab2, tab3], name="processing_tabs")
+        doc.add_root(proc_tabs)
 
         task_stream = TaskStream(
             scheduler,

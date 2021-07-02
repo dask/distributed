@@ -139,6 +139,7 @@ class Server:
     ):
         self.handlers = {
             "identity": self.identity,
+            "echo": self.echo,
             "connection_stream": self.handle_stream,
         }
         self.handlers.update(handlers)
@@ -383,6 +384,9 @@ class Server:
 
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
+
+    def echo(self, comm=None, data=None):
+        return data
 
     async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
         if port_or_addr is None:
