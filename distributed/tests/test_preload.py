@@ -173,3 +173,14 @@ def dask_setup(dask_server):
         assert "12345/preload" in log.getvalue()
     finally:
         server.stop()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_startup(cleanup):
+    async with Scheduler(port=0) as s:
+        text = f"""
+import dask
+dask.config.set(scheduler_address="{s.address}")
+"""
+        async with Worker(preload=[text]) as w:
+            pass
