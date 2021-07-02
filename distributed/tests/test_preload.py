@@ -182,5 +182,16 @@ async def test_scheduler_startup(cleanup):
 import dask
 dask.config.set(scheduler_address="{s.address}")
 """
-        async with Worker(preload=[text]) as w:
+        async with Worker(preload=text) as w:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_scheduler_startup_nanny(cleanup):
+    async with Scheduler(port=0) as s:
+        text = f"""
+import dask
+dask.config.set(scheduler_address="{s.address}")
+"""
+        async with Nanny(preload_nanny=text) as w:
             pass
