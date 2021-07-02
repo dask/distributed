@@ -183,7 +183,7 @@ import dask
 dask.config.set(scheduler_address="{s.address}")
 """
         async with Worker(preload=text) as w:
-            pass
+            assert w.scheduler.address == s.address
 
 
 @pytest.mark.asyncio
@@ -194,4 +194,4 @@ import dask
 dask.config.set(scheduler_address="{s.address}")
 """
         async with Nanny(preload_nanny=text) as w:
-            pass
+            assert w.scheduler.address == s.address
