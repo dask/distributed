@@ -651,7 +651,7 @@ class Worker(ServerNode):
                 self.nthreads, thread_name_prefix="Dask-Default-Threads"
             )
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
+        self.batched_stream = BatchedSend(interval="25ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = dict()
@@ -999,6 +999,8 @@ class Worker(ServerNode):
             self.periodic_callbacks["heartbeat"].callback_time = (
                 response["heartbeat-interval"] * 1000
             )
+            self.batched_stream.interval = response["batched-send-interval"]
+            # print(response["batched-send-interval"])
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
         except CommClosedError:

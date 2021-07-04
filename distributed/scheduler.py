@@ -3993,6 +3993,7 @@ class Scheduler(SchedulerState, ServerNode):
             "status": "OK",
             "time": local_now,
             "heartbeat-interval": heartbeat_interval(len(parent._workers_dv)),
+            "batched-send-interval": batched_send_interval(len(parent._workers_dv)),
         }
 
     async def add_worker(
@@ -7137,6 +7138,23 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return dict(zip(parent._workers_dv, results))
 
+    def batched_send_interval(self) -> float:
+        min_ms: float = 2.0
+        max_ms: float = 50.0
+        cpu_fraction: float = self.proc.cpu_percent() / 100
+        print(cpu_fraction)
+        if cpu_fraction < 0.5:
+            return min_ms / 1000
+        target_ms: float = (max_ms - min_ms) * cpu_fraction + min_ms
+        return min(target_ms, max_ms) / 1000
+        # return (
+        #     min_ms
+        #     if target_ms < min_ms
+        #     else max_ms
+        #     if target_ms > max_ms
+        #     else target_ms
+        # )
+
     ###########
     # Cleanup #
     ###########
@@ -7750,6 +7768,16 @@ def heartbeat_interval(n):
     else:
         # no more than 200 hearbeats a second scaled by workers
         return n / 200 + 1
+
+
+def batched_send_interval(n):
+    """
+    Interval in seconds that we desire each worker to send updates, based on number of workers
+
+    Target is 5,000 messages received per second; capped between 5ms and 100ms.
+    """
+    target = n / 5000
+    return max(0.005, min(0.1, target))
 
 
 class KilledWorker(Exception):
