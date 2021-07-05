@@ -27,12 +27,11 @@ from ..utils import (
     parse_bytes,
 )
 
-from mpi4py import MPI
-
 logger = logging.getLogger(__name__)
 
 host_array = None
 device_array = None
+MPI = None
 INITIAL_TAG_OFFSET = 100
 TAG_QUOTA_PER_CONNECTION = 200
 
@@ -79,12 +78,15 @@ def init_tag_table():
     logger.debug(tag_table)
 
 def init_once():
-    global initialized, host_array, device_array
+    global initialized, host_array, device_array, MPI
 
     if initialized is True:
         return
      
     initialized = True
+
+    from mpi4py import MPI as _MPI
+    MPI = _MPI
 
     random.seed(random.randrange(sys.maxsize))
 
