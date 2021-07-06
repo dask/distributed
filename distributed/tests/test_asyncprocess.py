@@ -8,6 +8,7 @@ import weakref
 from datetime import timedelta
 from time import sleep
 
+import psutil
 import pytest
 from tornado import gen
 from tornado.locks import Event
@@ -285,8 +286,6 @@ async def test_child_main_thread():
 )
 @gen_test()
 async def test_num_fds():
-    psutil = pytest.importorskip("psutil")
-
     # Warm up
     proc = AsyncProcess(target=exit_now)
     proc.daemon = True

@@ -14,7 +14,12 @@ jobs:
 
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # Must also change env.TEST_ID below
         run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    env:
+      #TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
@@ -78,6 +83,7 @@ jobs:
         run: bash continuous_integration/scripts/setup_ssh.sh
 
       - name: Test
+        id: run_tests
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
@@ -89,8 +95,20 @@ jobs:
           fi
 
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "not avoid_ci" --runslow
+
+          pytest distributed -m "not avoid_ci" -m stress --runslow \
+            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
+
+      - name: Upload test artifacts
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.TEST_ID }}
+          path: reports

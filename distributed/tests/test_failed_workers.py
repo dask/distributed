@@ -325,6 +325,9 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await y
 
 
+@pytest.mark.stress
+@pytest.mark.slow
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100

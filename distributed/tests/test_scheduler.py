@@ -12,6 +12,7 @@ from time import sleep
 from unittest import mock
 
 import cloudpickle
+import psutil
 import pytest
 from tlz import concat, first, frequencies, merge, valmap
 
@@ -742,24 +743,20 @@ async def test_config_stealing(cleanup):
             assert "stealing" not in s.extensions
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
+@pytest.mark.stress
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_file_descriptors_dont_leak(s):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
     before = proc.num_fds()
 
-    w = await Worker(s.address)
-    await w.close()
-
-    during = proc.num_fds()
+    async with Worker(s.address):
+        assert proc.num_fds() > before
 
     start = time()
     while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert time() < start + 10, (before, proc.num_fds())
 
 
 @gen_cluster()
@@ -935,7 +932,6 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 @gen_cluster(client=True, nthreads=[], timeout=240)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
-    psutil = pytest.importorskip("psutil")
     da = pytest.importorskip("dask.array")
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
@@ -1335,6 +1331,8 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_test()
 async def test_service_hosts():
     port = 0
@@ -1814,6 +1812,10 @@ async def test_result_type(c, s, a, b):
     assert "int" in s.tasks[x.key].type
 
 
+# FIXME race condition: occasionally the status is closing and not closed
+#       after Scheduler.close returns
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster()
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)

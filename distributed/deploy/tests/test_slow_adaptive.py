@@ -55,7 +55,9 @@ async def test_startup(cleanup):
             await client.wait_for_workers(n_workers=2)
 
 
+@pytest.mark.stress
 @pytest.mark.asyncio
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 async def test_scale_up_down(cleanup):
     start = time()
     async with SpecCluster(

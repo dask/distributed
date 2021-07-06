@@ -1,3 +1,4 @@
+import psutil
 import pytest
 
 pytest.importorskip("requests")
@@ -144,7 +145,6 @@ def test_dashboard_whitelist(loop):
 
 
 def test_interface(loop):
-    psutil = pytest.importorskip("psutil")
     if_names = sorted(psutil.net_if_addrs())
     for if_name in if_names:
         try:

@@ -1005,27 +1005,20 @@ async def test_global_workers(s, a, b):
     assert w is a or w is b
 
 
-@pytest.mark.skipif(WINDOWS, reason="file descriptors")
+@pytest.mark.stress
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_worker_fds(s):
-    psutil = pytest.importorskip("psutil")
-    await asyncio.sleep(0.05)
-    start = psutil.Process().num_fds()
+    proc = psutil.Process()
+    before = psutil.Process().num_fds()
 
-    worker = await Worker(s.address, loop=s.loop)
-    await asyncio.sleep(0.1)
-    middle = psutil.Process().num_fds()
-    start = time()
-    while middle > start:
-        await asyncio.sleep(0.01)
-        assert time() < start + 1
-
-    await worker.close()
+    async with Worker(s.address, loop=s.loop):
+        assert proc.num_fds() > before
 
     start = time()
-    while psutil.Process().num_fds() > start:
+    while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 0.5
+        assert time() < start + 10
 
 
 @gen_cluster(nthreads=[])
@@ -1061,16 +1054,18 @@ async def test_scheduler_file():
         s.stop()
 
 
+@pytest.mark.stress
 @gen_cluster(client=True)
 async def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
-    assert abs(a.scheduler_delay) < 0.3
-    assert abs(b.scheduler_delay) < 0.3
-    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.3)
+    assert abs(a.scheduler_delay) < 0.6
+    assert abs(b.scheduler_delay) < 0.6
+    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.6)
     assert a.scheduler_delay != old
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -1133,6 +1128,7 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
         assert time() < start + 5
 
 
+@pytest.mark.stress
 @pytest.mark.slow
 @pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
@@ -1162,7 +1158,7 @@ async def test_pause_executor(c, s, a):
         start = time()
         while not a.paused:
             await asyncio.sleep(0.01)
-            assert time() < start + 4, (
+            assert time() < start + 10, (
                 format_bytes(psutil.Process().memory_info().rss),
                 format_bytes(a.memory_limit),
                 len(a.data),

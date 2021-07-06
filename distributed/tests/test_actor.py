@@ -465,6 +465,7 @@ async def bench_param_server(c, s, *workers):
     print(format_time(end - start))
 
 
+@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_compute(c, s, a, b):
@@ -488,7 +489,7 @@ async def test_compute(c, s, a, b):
     start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 30
+        assert time() < start + 10, (dict(a.data), dict(b.data))
 
 
 def test_compute_sync(client):

@@ -178,8 +178,10 @@ async def test_AllProgress(c, s, a, b):
     assert all(set(d) == {"div"} for d in p.state.values())
 
 
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, Worker=Nanny)
-async def test_AllProgress_lost_key(c, s, a, b, timeout=None):
+async def test_AllProgress_lost_key(c, s, a, b):
     p = AllProgress(s)
     futures = c.map(inc, range(5))
     await wait(futures)
@@ -191,7 +193,7 @@ async def test_AllProgress_lost_key(c, s, a, b, timeout=None):
     start = time()
     while len(p.state["memory"]["inc"]) > 0:
         await asyncio.sleep(0.1)
-        assert time() < start + 5
+        assert time() < start + 10
 
 
 @gen_cluster(client=True)

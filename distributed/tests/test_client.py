@@ -2851,9 +2851,9 @@ async def test_persist_get(c, s, a, b):
     assert result == ((1 + 1) + (2 + 2)) + 10
 
 
+@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 def test_client_num_fds(loop):
-    psutil = pytest.importorskip("psutil")
     with cluster() as (s, [a, b]):
         proc = psutil.Process()
         with Client(s["address"], loop=loop) as c:  # first client to start loop
@@ -2864,7 +2864,7 @@ def test_client_num_fds(loop):
             start = time()
             while proc.num_fds() > before:
                 sleep(0.01)
-                assert time() < start + 4
+                assert time() < start + 10, (before, proc.num_fds())
 
 
 @gen_cluster()
@@ -3789,7 +3789,6 @@ async def test_reconnect_timeout(c, s):
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
 
     with cluster(nworkers=0, active_rpc_timeout=2) as (s, _):
@@ -5276,18 +5275,19 @@ def _dynamic_workload(x, delay=0.01):
     return total.result()
 
 
-def _test_dynamic_workloads_sync(c, delay):
-    future = c.submit(_dynamic_workload, 0, delay=delay)
-    assert future.result(timeout=40) == 52
-
-
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync(c):
-    _test_dynamic_workloads_sync(c, delay=0.02)
+    future = c.submit(_dynamic_workload, 0, delay=0.02)
+    assert future.result(timeout=20) == 52
 
 
 @pytest.mark.slow
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync_random(c):
-    _test_dynamic_workloads_sync(c, delay="random")
+    future = c.submit(_dynamic_workload, 0, delay="random")
+    assert future.result(timeout=20) == 52
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
@@ -5424,6 +5424,8 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
@@ -6063,6 +6065,7 @@ async def test_wait_for_workers(c, s, a, b):
     assert "1 ms" in str(info.value)
 
 
+@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
@@ -6071,18 +6074,18 @@ async def test_file_descriptors_dont_leak(Worker):
     df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})
 
     proc = psutil.Process()
-    start = proc.num_fds()
+    before = proc.num_fds()
     async with Scheduler(port=0, dashboard_address=":0") as s:
-        async with Worker(s.address, nthreads=2) as a, Worker(
-            s.address, nthreads=2
-        ) as b:
-            async with Client(s.address, asynchronous=True) as c:
-                await df.sum().persist()
+        async with Worker(s.address), Worker(s.address), Client(
+            s.address, asynchronous=True
+        ):
+            assert proc.num_fds() > before
+            await df.sum().persist()
 
-    begin = time()
-    while proc.num_fds() > begin:
+    start = time()
+    while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < begin + 5, (start, proc.num_fds())
+        assert time() < start + 10, (before, proc.num_fds())
 
 
 @pytest.mark.asyncio

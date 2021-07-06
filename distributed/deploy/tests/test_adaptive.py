@@ -302,6 +302,8 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
+@pytest.mark.stress
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.asyncio
 async def test_target_duration():
     """Ensure that redefining adapt with a lower maximum removes workers"""
@@ -323,7 +325,9 @@ async def test_target_duration():
 
                 futures = client.map(slowinc, range(100), delay=0.3)
 
+                start = time()
                 while len(adapt.log) < 2:
+                    assert time() < start + 10
                     await asyncio.sleep(0.01)
 
                 assert adapt.log[0][1] == {"status": "up", "n": 2}

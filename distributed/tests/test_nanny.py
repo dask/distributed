@@ -7,6 +7,7 @@ import random
 import sys
 from contextlib import suppress
 
+import psutil
 import pytest
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
@@ -115,7 +116,6 @@ async def test_nanny_process_failure(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_run(s):
-    pytest.importorskip("psutil")
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
     with rpc(n.address) as nn:
@@ -203,7 +203,6 @@ async def test_random_seed(c, s, a, b):
 )
 @gen_cluster(client=False, nthreads=[])
 async def test_num_fds(s):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
 
     # Warm up
