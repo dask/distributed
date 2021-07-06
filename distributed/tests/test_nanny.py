@@ -8,6 +8,9 @@ import sys
 from contextlib import suppress
 
 import pytest
+
+pytestmark = pytest.mark.gpu
+
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
