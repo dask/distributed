@@ -1812,8 +1812,7 @@ async def test_result_type(c, s, a, b):
     assert "int" in s.tasks[x.key].type
 
 
-# FIXME race condition: occasionally the status is closing and not closed
-#       after Scheduler.close returns
+# FIXME race condition: status can still be 'closing' after Scheduler.close returns
 @pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster()

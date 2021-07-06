@@ -93,7 +93,6 @@ jobs:
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
           fi
-
           source continuous_integration/scripts/set_ulimit.sh
 
           pytest distributed -m "not avoid_ci" -m stress --runslow \
