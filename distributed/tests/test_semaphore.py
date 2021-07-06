@@ -338,7 +338,6 @@ async def test_retry_acquire(c, s, a, b):
         assert result is False
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={
@@ -437,12 +436,13 @@ async def test_oversubscribing_leases(c, s, a, b):
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]
     refresh_unknown = [log for log in logs if "Refreshing an unknown lease ID" in log]
-    assert len(timeouts) == 2
-    assert len(refresh_unknown) == 2
+    assert len(timeouts) >= 2
+    assert len(refresh_unknown) >= 2
 
     assert sorted(payload) == [0, 1]
     # Back to normal
-    assert await sem.get_value() == 0
+    while await sem.get_value():
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
