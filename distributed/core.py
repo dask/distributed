@@ -438,6 +438,10 @@ class Server:
         logger.debug("Connection from %r to %s", address, type(self).__name__)
         self._comms[comm] = op
 
+        # The server might already be listening even though it is not properly
+        # started, yet. (e.g. preload modules not done)
+        await self
+
         try:
             while True:
                 try:
