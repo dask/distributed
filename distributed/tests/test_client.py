@@ -2851,7 +2851,6 @@ async def test_persist_get(c, s, a, b):
     assert result == ((1 + 1) + (2 + 2)) + 10
 
 
-@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 def test_client_num_fds(loop):
     with cluster() as (s, [a, b]):
@@ -5275,7 +5274,6 @@ def _dynamic_workload(x, delay=0.01):
     return total.result()
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync(c):
     future = c.submit(_dynamic_workload, 0, delay=0.02)
@@ -5283,7 +5281,6 @@ def test_dynamic_workloads_sync(c):
 
 
 @pytest.mark.slow
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync_random(c):
     future = c.submit(_dynamic_workload, 0, delay="random")
@@ -5424,7 +5421,6 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile(c, s, a, b):
@@ -6065,7 +6061,6 @@ async def test_wait_for_workers(c, s, a, b):
     assert "1 ms" in str(info.value)
 
 
-@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])

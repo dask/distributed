@@ -137,7 +137,6 @@ def test_cancellation(client):
         assert n_cancelled == 2
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 def test_map(client):
     with client.get_executor() as e:

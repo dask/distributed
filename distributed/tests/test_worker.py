@@ -1005,7 +1005,6 @@ async def test_global_workers(s, a, b):
     assert w is a or w is b
 
 
-@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_worker_fds(s):
@@ -1054,7 +1053,6 @@ async def test_scheduler_file():
         s.stop()
 
 
-@pytest.mark.stress
 @gen_cluster(client=True)
 async def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
@@ -1064,7 +1062,6 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
@@ -1128,7 +1125,6 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
         assert time() < start + 5
 
 
-@pytest.mark.stress
 @pytest.mark.slow
 @pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(

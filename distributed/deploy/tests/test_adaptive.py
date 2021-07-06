@@ -302,7 +302,6 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.asyncio
 async def test_target_duration():

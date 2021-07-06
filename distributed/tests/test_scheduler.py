@@ -743,7 +743,6 @@ async def test_config_stealing(cleanup):
             assert "stealing" not in s.extensions
 
 
-@pytest.mark.stress
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_file_descriptors_dont_leak(s):
@@ -1331,7 +1330,6 @@ async def test_correct_bad_time_estimate(c, s, *workers):
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_test()
 async def test_service_hosts():
@@ -1813,7 +1811,6 @@ async def test_result_type(c, s, a, b):
 
 
 # FIXME race condition: status can still be 'closing' after Scheduler.close returns
-@pytest.mark.stress
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster()
 async def test_close_workers(s, a, b):
