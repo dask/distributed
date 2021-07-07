@@ -98,12 +98,15 @@ class Cluster:
         self.status = Status.running
 
     async def _sync_cluster_info(self):
-        while True:
-            await self.scheduler_comm.set_metadata(
-                keys=["cluster-manager-info"],
-                value=copy.copy(self.cluster_info),
-            )
-            await asyncio.sleep(1)
+        try:
+            while True:
+                await self.scheduler_comm.set_metadata(
+                    keys=["cluster-manager-info"],
+                    value=copy.copy(self.cluster_info),
+                )
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            return
 
     async def _close(self):
         if self.status == Status.closed:
@@ -116,6 +119,8 @@ class Cluster:
             await self._watch_worker_status_comm.close()
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
+        if self._sync_cluster_info_task:
+            await self._sync_cluster_info_task.cancel()
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
