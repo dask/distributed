@@ -1339,10 +1339,13 @@ async def test_correct_bad_time_estimate(c, s, *workers):
         ),
     ],
 )
-@pytest.mark.parametrize("dashboard_address,expect", [
-    (None, ("::", "0.0.0.0")),
-    ("127.0.0.1:0", ("127.0.0.1", )),
-])
+@pytest.mark.parametrize(
+    "dashboard_address,expect",
+    [
+        (None, ("::", "0.0.0.0")),
+        ("127.0.0.1:0", ("127.0.0.1",)),
+    ],
+)
 @pytest.mark.asyncio
 async def test_dashboard_host(host, dashboard_address, expect):
     """Dashboard is accessible from any host by default, but it can be also bound to
