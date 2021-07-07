@@ -412,10 +412,8 @@ class SlowTransmitData:
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
-    start = time()
     while len(s.nthreads) < 3:
         await asyncio.sleep(0.01)
-        assert time() < start + 10
 
     def slow_ser(x, delay):
         return SlowTransmitData(x, delay=delay)
@@ -439,10 +437,8 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
-    start = time()
     while len(s.workers) > 2:
         await asyncio.sleep(0.01)
-        assert time() < start + 10
 
     await result_fut
 

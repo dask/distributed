@@ -752,10 +752,8 @@ async def test_file_descriptors_dont_leak(s):
     async with Worker(s.address):
         assert proc.num_fds() > before
 
-    start = time()
     while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 10, (before, proc.num_fds())
 
 
 @gen_cluster()

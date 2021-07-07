@@ -189,10 +189,8 @@ async def test_AllProgress_lost_key(c, s, a, b):
     await a.close()
     await b.close()
 
-    start = time()
     while len(p.state["memory"]["inc"]) > 0:
-        await asyncio.sleep(0.1)
-        assert time() < start + 10
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)

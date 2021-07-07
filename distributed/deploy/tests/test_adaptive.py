@@ -40,8 +40,8 @@ def test_adaptive_local_cluster(loop):
             assert not c.nthreads()
 
 
-@pytest.mark.asyncio
-async def test_adaptive_local_cluster_multi_workers(cleanup):
+@gen_test()
+async def test_adaptive_local_cluster_multi_workers():
     async with LocalCluster(
         n_workers=0,
         scheduler_port=0,
@@ -56,19 +56,14 @@ async def test_adaptive_local_cluster_multi_workers(cleanup):
         async with Client(cluster, asynchronous=True) as c:
             futures = c.map(slowinc, range(100), delay=0.01)
 
-            start = time()
             while not cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
-                assert time() < start + 15, adapt.log
 
             await c.gather(futures)
             del futures
 
-            start = time()
-            # while cluster.workers:
             while cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
-                assert time() < start + 15, adapt.log
 
             # no workers for a while
             for i in range(10):
@@ -303,7 +298,7 @@ def test_basic_no_loop(loop):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
-@pytest.mark.asyncio
+@gen_test()
 async def test_target_duration():
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
@@ -318,7 +313,7 @@ async def test_target_duration():
         ) as cluster:
             adapt = cluster.adapt(interval="20ms", minimum=2, target_duration="5s")
             async with Client(cluster, asynchronous=True) as client:
-                await client.wait_for_workers(2, timeout=10)
+                await client.wait_for_workers(2)
                 futures = client.map(slowinc, range(100), delay=0.3)
                 await wait(futures)
 

@@ -93,10 +93,8 @@ async def test_counters(c, s, a, b):
     await asyncio.sleep(0.1)
     ss.update()
 
-    start = time()
     while not len(ss.digest_sources["tick-duration"][0].data["x"]):
-        await asyncio.sleep(1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -184,7 +182,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
 
     await wait(c.map(inc, range(10)))
     ts.update()
-    await asyncio.sleep(0.010)
+    await asyncio.sleep(0.01)
     await wait(c.map(dec, range(10)))
     ts.update()
 
@@ -192,7 +190,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
     assert ts.source.data["name"].count("inc") == 10
     assert ts.source.data["name"].count("dec") == 10
 
-    await asyncio.sleep(0.300)
+    await asyncio.sleep(0.3)
     await wait(c.map(inc, range(10, 20)))
     ts.update()
 

@@ -990,7 +990,7 @@ async def test_repr(cleanup):
 @pytest.mark.asyncio
 async def test_threads_per_worker_set_to_0(cleanup):
     with pytest.warns(
-        Warning, match="Setting `threads_per_worker` to 0 is discouraged."
+        Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
     ):
         async with LocalCluster(
             n_workers=2, processes=False, threads_per_worker=0, asynchronous=True

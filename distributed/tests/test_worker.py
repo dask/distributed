@@ -18,7 +18,6 @@ from tlz import first, pluck, sliding_window
 import dask
 from dask import delayed
 from dask.system import CPU_COUNT
-from dask.utils import format_bytes
 
 from distributed import (
     Client,
@@ -1014,10 +1013,8 @@ async def test_worker_fds(s):
     async with Worker(s.address, loop=s.loop):
         assert proc.num_fds() > before
 
-    start = time()
     while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 10
 
 
 @gen_cluster(nthreads=[])
@@ -1136,7 +1133,6 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
         "memory_target_fraction": False,
         "memory_pause_fraction": 0.5,
     },
-    timeout=20,
 )
 async def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().rss
@@ -1151,14 +1147,9 @@ async def test_pause_executor(c, s, a):
         future = c.submit(f)
         futures = c.map(slowinc, range(30), delay=0.1)
 
-        start = time()
         while not a.paused:
             await asyncio.sleep(0.01)
-            assert time() < start + 10, (
-                format_bytes(psutil.Process().memory_info().rss),
-                format_bytes(a.memory_limit),
-                len(a.data),
-            )
+
         out = logger.getvalue()
         assert "memory" in out.lower()
         assert "pausing" in out.lower()

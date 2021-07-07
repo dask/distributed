@@ -110,7 +110,7 @@ async def debug_loop():
     while True:
         loop = ioloop.IOLoop.current()
         print(".", loop, loop._handlers)
-        await asyncio.sleep(0.50)
+        await asyncio.sleep(0.5)
 
 
 #

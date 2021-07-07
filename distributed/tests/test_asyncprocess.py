@@ -302,11 +302,8 @@ async def test_num_fds():
     assert not proc.is_alive()
     assert proc.exitcode == 0
 
-    start = time()
     while p.num_fds() > before:
-        await asyncio.sleep(0.1)
-        print("fds:", before, p.num_fds())
-        assert time() < start + 10
+        await asyncio.sleep(0.01)
 
 
 @gen_test()
