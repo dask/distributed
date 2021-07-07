@@ -75,6 +75,7 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
+@pytest.mark.flaky(reruns=10, reruns_timeout=5)
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -406,6 +407,7 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
+@pytest.mark.flaky(reruns=10, reruns_timeout=5)
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
@@ -413,7 +415,7 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     start = time()
     while len(s.nthreads) < 3:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
+        assert time() < start + 10
 
     def slow_ser(x, delay):
         return SlowTransmitData(x, delay=delay)
@@ -437,8 +439,10 @@ async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     with suppress(CommClosedError):
         await c._run(os._exit, 1, workers=[n_worker_address])
 
+    start = time()
     while len(s.workers) > 2:
         await asyncio.sleep(0.01)
+        assert time() < start + 10
 
     await result_fut
 

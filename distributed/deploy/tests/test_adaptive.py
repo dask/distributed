@@ -305,12 +305,11 @@ def test_basic_no_loop(loop):
 @pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.asyncio
 async def test_target_duration():
-    """Ensure that redefining adapt with a lower maximum removes workers"""
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
     ):
         async with LocalCluster(
-            0,
+            n_workers=0,
             asynchronous=True,
             processes=False,
             scheduler_port=0,
@@ -319,18 +318,12 @@ async def test_target_duration():
         ) as cluster:
             adapt = cluster.adapt(interval="20ms", minimum=2, target_duration="5s")
             async with Client(cluster, asynchronous=True) as client:
-                while len(cluster.scheduler.workers) < 2:
-                    await asyncio.sleep(0.01)
-
+                await client.wait_for_workers(2, timeout=10)
                 futures = client.map(slowinc, range(100), delay=0.3)
+                await wait(futures)
 
-                start = time()
-                while len(adapt.log) < 2:
-                    assert time() < start + 10
-                    await asyncio.sleep(0.01)
-
-                assert adapt.log[0][1] == {"status": "up", "n": 2}
-                assert adapt.log[1][1] == {"status": "up", "n": 20}
+            assert adapt.log[0][1] == {"status": "up", "n": 2}
+            assert adapt.log[1][1] == {"status": "up", "n": 20}
 
 
 @pytest.mark.asyncio

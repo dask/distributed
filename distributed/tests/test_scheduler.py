@@ -1320,37 +1320,37 @@ async def test_non_existent_worker(c, s):
 async def test_correct_bad_time_estimate(c, s, *workers):
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
-
     futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-
     await asyncio.sleep(0.5)
-
     await wait(futures)
-
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
-@gen_test()
-async def test_service_hosts():
-    port = 0
-    for url, expected in [
-        ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
-    ]:
-        async with Scheduler(host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            if isinstance(expected, tuple):
-                assert sock.getsockname()[0] in expected
-            else:
-                assert sock.getsockname()[0] == expected
-
-    port = ("127.0.0.1", 0)
-    for url in ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]:
-        async with Scheduler(dashboard_address="127.0.0.1:0", host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            assert sock.getsockname()[0] == "127.0.0.1"
+@pytest.mark.parametrize(
+    "host",
+    [
+        "tcp://0.0.0.0",
+        "tcp://127.0.0.1",
+        pytest.param(
+            "tcp://127.0.0.1:38275",
+            marks=pytest.mark.flaky(
+                reruns=10, reruns_delay=5, reason="Address already in use"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("dashboard_address,expect", [
+    (None, ("::", "0.0.0.0")),
+    ("127.0.0.1:0", ("127.0.0.1", )),
+])
+@pytest.mark.asyncio
+async def test_dashboard_host(host, dashboard_address, expect):
+    """Dashboard is accessible from any host by default, but it can be also bound to
+    localhost.
+    """
+    async with Scheduler(host=host, dashboard_address=dashboard_address) as s:
+        sock = first(s.http_server._sockets.values())
+        assert sock.getsockname()[0] in expect
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})

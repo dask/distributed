@@ -809,8 +809,6 @@ async def start_cluster(
         )
         for i, ncore in enumerate(nthreads)
     ]
-    # for w in workers:
-    #     w.rpc = workers[0].rpc
 
     await asyncio.gather(*workers)
 
