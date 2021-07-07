@@ -120,7 +120,7 @@ class Cluster:
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
         if self._sync_cluster_info_task:
-            await self._sync_cluster_info_task.cancel()
+            self._sync_cluster_info_task.cancel()
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
