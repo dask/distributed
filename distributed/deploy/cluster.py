@@ -1,4 +1,6 @@
 import asyncio
+import contextlib
+import copy
 import datetime
 import logging
 import threading
@@ -13,7 +15,15 @@ from dask.utils import _deprecated, format_bytes, parse_timedelta
 
 from ..core import Status
 from ..objects import SchedulerInfo
-from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
+from ..utils import (
+    Log,
+    Logs,
+    format_dashboard_link,
+    log_errors,
+    sync,
+    thread_state,
+    typename,
+)
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
@@ -51,16 +61,25 @@ class Cluster:
         self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
+        self._sync_cluster_info_task = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
         self._adaptive = None
 
-        if name is not None:
-            self.name = name
-        elif self.name is None:
-            self.name = str(uuid.uuid4())[:8]
+        if name is None:
+            name = str(uuid.uuid4())[:8]
+
+        self.cluster_info = {"name": name, "type": typename(type(self))}
         self.status = Status.created
+
+    @property
+    def name(self):
+        return self.cluster_info["name"]
+
+    @name.setter
+    def name(self, name):
+        self.cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
@@ -70,7 +89,21 @@ class Cluster:
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
+
+        with contextlib.suppress(KeyError):
+            self.cluster_info.update(
+                (await self.scheduler_comm.get_metadata(keys=["cluster-manager-info"]))
+            )
+        self._sync_cluster_info_task = asyncio.ensure_future(self._sync_cluster_info())
         self.status = Status.running
+
+    async def _sync_cluster_info(self):
+        while True:
+            await self.scheduler_comm.set_metadata(
+                keys=["cluster-manager-info"],
+                value=copy.copy(self.cluster_info),
+            )
+            await asyncio.sleep(1)
 
     async def _close(self):
         if self.status == Status.closed:
