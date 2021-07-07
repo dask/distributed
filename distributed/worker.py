@@ -16,7 +16,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Iterable, Optional
+from typing import Dict, Hashable, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado import gen
@@ -107,10 +107,7 @@ class TaskState:
     * **dependencies**: ``set(TaskState instances)``
         The data needed by this key to run
     * **dependents**: ``set(TaskState instances)``
-        The keys that use this dependency. Only keys which are not available
-        already are tracked in this structure and dependents made available are
-        actively removed. Only after all dependents have been removed, this task
-        is allowed to be forgotten
+        The keys that use this dependency.
     * **duration**: ``float``
         Expected duration the a task
     * **priority**: ``tuple``
@@ -1987,11 +1984,6 @@ class Worker(ServerNode):
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
 
-                # Don't release the dependency keys, but do remove them from `dependents`
-                for dependency in ts.dependencies:
-                    dependency.dependents.discard(ts)
-                ts.dependencies.clear()
-
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
             else:
@@ -2608,15 +2600,14 @@ class Worker(ServerNode):
 
     def release_key(
         self,
-        key: str,
+        key: Hashable,
         cause: Optional[TaskState] = None,
         reason: Optional[str] = None,
         report: bool = True,
     ):
         try:
-
             if self.validate:
-                assert isinstance(key, str)
+                assert not isinstance(key, TaskState)
             ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
@@ -2658,6 +2649,12 @@ class Worker(ServerNode):
                 if ts.state == "executing":
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
+
+            for d in ts.dependencies:
+                d.dependents.discard(ts)
+
+                if not d.dependents and d.state in ("flight", "fetch"):
+                    self.release_key(d.key, reason="Dependent released")
 
             if report:
                 # Inform the scheduler of keys which will have gone missing
