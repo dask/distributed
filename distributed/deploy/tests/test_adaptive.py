@@ -11,9 +11,9 @@ import dask
 from distributed import (
     Adaptive,
     Client,
-    ElasticAdaptive,
     LocalCluster,
     SpecCluster,
+    TaskAdaptive,
     Worker,
     wait,
 )
@@ -498,7 +498,7 @@ async def test_adaptive_stopped():
     await async_wait_for(lambda: not pc.is_running(), timeout=5)
 
 
-def test_elastic_local_cluster(loop):
+def test_task_adaptive_local_cluster(loop):
     with LocalCluster(
         n_workers=0,
         scheduler_port=0,
@@ -507,7 +507,7 @@ def test_elastic_local_cluster(loop):
         loop=loop,
     ) as cluster:
         with captured_logger("distributed.deploy.adaptive", level=logging.DEBUG) as log:
-            alc = cluster.adapt(interval="100 ms", Adaptive=ElasticAdaptive)
+            alc = cluster.adapt(interval="100 ms", Adaptive=TaskAdaptive)
             with Client(cluster, loop=loop) as c:
                 assert not c.nthreads()
                 future = c.submit(lambda x: x + 1, 1)
@@ -529,7 +529,7 @@ def test_elastic_local_cluster(loop):
 
 
 @pytest.mark.asyncio
-async def test_elastic_multi_workers(cleanup):
+async def test_task_adaptive_multi_workers(cleanup):
     async with SpecCluster(
         workers={
             "a": {"cls": Worker},
@@ -544,7 +544,7 @@ async def test_elastic_multi_workers(cleanup):
         with captured_logger("distributed.deploy.adaptive", level=logging.DEBUG) as log:
             cluster.scheduler.allowed_failures = 1000
 
-            adapt = cluster.adapt(interval="10 ms", Adaptive=ElasticAdaptive)
+            adapt = cluster.adapt(interval="10 ms", Adaptive=TaskAdaptive)
             async with Client(cluster, asynchronous=True) as c:
                 futures = []
                 for i in range(5):
