@@ -32,18 +32,11 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
+          condarc-file: continuous_integration/condarc
           use-mamba: true
-          channels: conda-forge,defaults
-          channel-priority: true
           python-version: ${{ matrix.python-version }}
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
-          auto-activate-base: false
-          # Increase resiliency to random HTTP errors
-          remote_backoff_factor: 20
-          remote_connect_timeout_secs: 20.0
-          remote_max_retries: 10
-          remote_read_timeout_secs: 60.0
 
       - name: Show conda options
         shell: bash -l {0}
