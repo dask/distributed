@@ -274,7 +274,7 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
 
 
 @pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
-@pytest.mark.xfail(condition=WINDOWS)
+@pytest.mark.xfail(condition=WINDOWS, reason="unknown")
 @pytest.mark.slow
 def test_workspace_concurrency(tmpdir):
     _test_workspace_concurrency(tmpdir, 5.0, 6)
