@@ -2360,7 +2360,7 @@ async def test_unknown_task_duration_config_2(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))
@@ -2494,7 +2494,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
 # This test is heavily influenced by hard-to-control factors such as memory management
 # by the Python interpreter and the OS, so it occasionally glitches
 @pytest.mark.flaky(reruns=3, reruns_delay=5)
-# ~33s runtime, or distributed.memory.recent-to-old-time + 3s
+# ~33s runtime, or distributed.worker.memory.recent-to-old-time + 3s
 @pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60

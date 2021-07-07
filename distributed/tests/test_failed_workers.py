@@ -549,7 +549,7 @@ class SlowDeserialize:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_handle_superfluous_data(c, s, a, b):
     """
     See https://github.com/dask/distributed/pull/4784#discussion_r649210094

@@ -33,7 +33,7 @@ async def test_simple(c, s, a, b):
     assert counter not in s.plugins
 
 
-@gen_cluster(nthreads=[], client=False)
+@gen_cluster(nthreads=[])
 async def test_add_remove_worker(s):
     events = []
 
@@ -71,7 +71,7 @@ async def test_add_remove_worker(s):
     assert events == []
 
 
-@gen_cluster(nthreads=[], client=False)
+@gen_cluster(nthreads=[])
 async def test_async_add_remove_worker(s):
     events = []
 

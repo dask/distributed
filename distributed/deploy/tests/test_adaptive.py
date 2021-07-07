@@ -237,7 +237,7 @@ async def test_adapt_quickly():
         await cluster.close()
 
 
-@gen_test(timeout=None)
+@gen_test()
 async def test_adapt_down():
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(

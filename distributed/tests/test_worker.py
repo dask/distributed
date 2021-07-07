@@ -779,7 +779,7 @@ async def test_hold_onto_dependents(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=False, nthreads=[])
+@gen_cluster(nthreads=[])
 async def test_worker_death_timeout(s):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         await s.close()
@@ -2302,7 +2302,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
             await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)], timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)])
 async def test_hold_on_to_replicas(c, s, *workers):
     f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
     f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")

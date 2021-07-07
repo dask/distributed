@@ -96,7 +96,7 @@ def check_bar_completed(capsys, width=40):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(client=True, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress(c, s, a, b):
     x, y, z = c.map(inc, [1, 2, 3])
     xx, yy, zz = c.map(dec, [x, y, z])

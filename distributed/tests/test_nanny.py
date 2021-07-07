@@ -173,7 +173,7 @@ async def test_nanny_alt_worker_class(c, s, w1, w2):
 
 
 @pytest.mark.slow
-@gen_cluster(client=False, nthreads=[])
+@gen_cluster(nthreads=[])
 async def test_nanny_death_timeout(s):
     await s.close()
     w = Nanny(s.address, death_timeout=1)
@@ -201,7 +201,7 @@ async def test_random_seed(c, s, a, b):
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="num_fds not supported on windows"
 )
-@gen_cluster(client=False, nthreads=[])
+@gen_cluster(nthreads=[])
 async def test_num_fds(s):
     proc = psutil.Process()
 

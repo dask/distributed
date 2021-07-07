@@ -57,7 +57,7 @@ def test_stress_gc(loop, func, n):
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="test can leave dangling RPC objects"
 )
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8)
 async def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random((50, 50), chunks=(2, 2))
@@ -86,7 +86,7 @@ def test_cancel_stress_sync(loop):
                 c.cancel(f)
 
 
-@gen_cluster(nthreads=[], client=True, timeout=None)
+@gen_cluster(nthreads=[], client=True)
 async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
     s.allowed_failures = 100000

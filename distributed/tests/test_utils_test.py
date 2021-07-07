@@ -141,7 +141,7 @@ def test_gen_cluster_cleans_up_client(loop):
     assert not dask.config.get("get", None)
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:

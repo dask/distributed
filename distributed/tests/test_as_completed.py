@@ -260,7 +260,7 @@ async def test_as_completed_with_results_no_raise_async(c, s, a, b):
     assert dd[z][0] == 2
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_clear(c, s, a, b):
     futures = c.map(inc, range(3))
     ac = as_completed(futures)

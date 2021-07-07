@@ -95,7 +95,7 @@ from distributed.utils_test import (
 )
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_submit(c, s, a, b):
     x = c.submit(inc, 10)
     assert not x.done()
@@ -624,7 +624,7 @@ async def test_limit_concurrent_gathering(c, s, a, b):
     assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_get(c, s, a, b):
     future = c.get({"x": (inc, 1)}, "x", sync=False)
     assert isinstance(future, Future)
@@ -991,7 +991,7 @@ async def dont_test_bad_restrictions_raise_exception(c, s, a, b):
         assert z.key in str(e)
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_remove_worker(c, s, a, b):
     L = c.map(inc, range(20))
     await wait(L)
@@ -1455,7 +1455,7 @@ async def test_scatter_direct_empty(c, s):
         await c.scatter(123, direct=True, timeout=0.1)
 
 
-@gen_cluster(client=True, timeout=None, nthreads=[("127.0.0.1", 1)] * 5)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5)
 async def test_scatter_direct_spread_evenly(c, s, *workers):
     futures = []
     for i in range(10):
@@ -3210,7 +3210,6 @@ async def test_client_replicate(c, s, *workers):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1), ("127.0.0.2", 1)],
-    timeout=None,
 )
 async def test_client_replicate_host(client, s, a, b, c):
     aws = s.workers[a.address]
@@ -3855,7 +3854,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 raise ValueError("File descriptors did not clean up")
 
 
-@gen_cluster(client=False, timeout=None)
+@gen_cluster()
 async def test_idempotence(s, a, b):
     c = await Client(s.address, asynchronous=True)
     f = await Client(s.address, asynchronous=True)
@@ -4068,7 +4067,7 @@ async def test_scatter_compute_store_lose_processing(c, s, a, b):
     assert z.status == "cancelled"
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_serialize_future(s, a, b):
     c1 = await Client(s.address, asynchronous=True)
     c2 = await Client(s.address, asynchronous=True)
@@ -4089,7 +4088,7 @@ async def test_serialize_future(s, a, b):
     await c2.close()
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_temp_default_client(s, a, b):
     c1 = await Client(s.address, asynchronous=True)
     c2 = await Client(s.address, asynchronous=True)
@@ -4170,7 +4169,7 @@ def test_as_current_is_thread_local(s):
     t2.join()
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_as_current_is_task_local(s, a, b):
     l1 = asyncio.Lock()
     l2 = asyncio.Lock()
@@ -4555,7 +4554,7 @@ def assert_no_data_loss(scheduler):
                 assert not (k == key and v == "waiting")
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_interleave_computations(c, s, a, b):
     import distributed
 
@@ -4590,7 +4589,7 @@ async def test_interleave_computations(c, s, a, b):
 
 
 @pytest.mark.skip(reason="Now prefer first-in-first-out")
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_interleave_computations_map(c, s, a, b):
     xs = c.map(slowinc, range(30), delay=0.02)
     ys = c.map(slowdec, xs, delay=0.02)
