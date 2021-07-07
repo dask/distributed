@@ -90,7 +90,7 @@ class Cluster:
             self._watch_worker_status(comm)
         )
 
-        with contextlib.suppress(KeyError):
+        with contextlib.suppress(KeyError):  # The scheduler might not have any info
             self.cluster_info.update(
                 (await self.scheduler_comm.get_metadata(keys=["cluster-manager-info"]))
             )
