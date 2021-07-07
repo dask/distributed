@@ -15,11 +15,11 @@ jobs:
         # Uncomment to stress-test the test suite for random failures
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # Must also change env.TEST_ID below
-        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
