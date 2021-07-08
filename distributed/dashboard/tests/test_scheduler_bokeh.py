@@ -17,7 +17,6 @@ from dask.core import flatten
 from dask.utils import stringify
 
 from distributed.client import wait
-from distributed.compatibility import MACOS
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
@@ -846,7 +845,6 @@ async def test_aggregate_action(c, s, a, b):
     assert ("compute") in mbk.action_source.data["names"]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
     mbk = ComputePerKey(s)

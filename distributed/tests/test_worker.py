@@ -1059,7 +1059,6 @@ async def test_scheduler_delay(c, s, a, b):
     assert a.scheduler_delay != old
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -1123,7 +1122,6 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,

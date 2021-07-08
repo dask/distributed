@@ -98,6 +98,7 @@ jobs:
           source continuous_integration/scripts/set_ulimit.sh
 
           pytest distributed -m "not avoid_ci" --runslow \
+            --reruns 5 --reruns-delay 10 \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
       # - name: Debug with tmate on failure

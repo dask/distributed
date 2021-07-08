@@ -197,7 +197,6 @@ async def test_unexpected_closed_worker(cleanup):
             assert len(cluster.workers) == 2
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_restart(cleanup):

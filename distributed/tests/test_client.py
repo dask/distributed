@@ -55,7 +55,7 @@ from distributed.client import (
     wait,
 )
 from distributed.comm import CommClosedError
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
@@ -4618,7 +4618,6 @@ async def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.slow
 @gen_test()
 async def test_client_timeout():
@@ -5175,7 +5174,6 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @pytest.mark.slow
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
 async def test_secede_balances(c, s, a, b):
@@ -5273,14 +5271,12 @@ def _dynamic_workload(x, delay=0.01):
     return total.result()
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync(c):
     future = c.submit(_dynamic_workload, 0, delay=0.02)
     assert future.result(timeout=20) == 52
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_dynamic_workloads_sync_random(c):
     future = c.submit(_dynamic_workload, 0, delay="random")
     assert future.result(timeout=20) == 52
@@ -5420,7 +5416,6 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)

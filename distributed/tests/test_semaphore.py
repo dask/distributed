@@ -11,7 +11,6 @@ from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget
 from distributed.comm import Comm
-from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
 from distributed.utils_test import captured_logger, cluster, gen_cluster, slowidentity
@@ -564,7 +563,6 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

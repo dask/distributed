@@ -1325,17 +1325,7 @@ async def test_correct_bad_time_estimate(c, s, *workers):
 
 
 @pytest.mark.parametrize(
-    "host",
-    [
-        "tcp://0.0.0.0",
-        "tcp://127.0.0.1",
-        pytest.param(
-            "tcp://127.0.0.1:38275",
-            marks=pytest.mark.flaky(
-                reruns=10, reruns_delay=5, reason="Address already in use"
-            ),
-        ),
-    ],
+    "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
 )
 @pytest.mark.parametrize(
     "dashboard_address,expect",
@@ -1540,9 +1530,6 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@pytest.mark.flaky(
-    reruns=10, reruns_delay=5, reason="second worker also errant for some reason"
-)
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
@@ -1811,8 +1798,6 @@ async def test_result_type(c, s, a, b):
     assert "int" in s.tasks[x.key].type
 
 
-# FIXME race condition: status can still be 'closing' after Scheduler.close returns
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster()
 async def test_close_workers(s, a, b):
     await s.close(close_workers=True)
@@ -2491,9 +2476,6 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
         await asyncio.sleep(0.1)
 
 
-# This test is heavily influenced by hard-to-control factors such as memory management
-# by the Python interpreter and the OS, so it occasionally glitches
-@pytest.mark.flaky(reruns=3, reruns_delay=5)
 # ~33s runtime, or distributed.worker.memory.recent-to-old-time + 3s
 @pytest.mark.slow
 @gen_cluster(

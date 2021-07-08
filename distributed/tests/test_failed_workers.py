@@ -12,7 +12,6 @@ from dask import delayed
 
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
-from distributed.compatibility import MACOS
 from distributed.metrics import time
 from distributed.scheduler import COMPILED
 from distributed.utils import CancelledError, sync
@@ -75,7 +74,6 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
-@pytest.mark.flaky(reruns=10, reruns_timeout=5)
 @gen_cluster(
     client=True,
     Worker=Nanny,
@@ -299,7 +297,6 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
-@pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
     import gc
@@ -327,7 +324,6 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
@@ -407,7 +403,6 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
-@pytest.mark.flaky(reruns=10, reruns_timeout=5)
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
