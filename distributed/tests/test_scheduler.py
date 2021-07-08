@@ -821,7 +821,7 @@ async def test_scheduler_sees_memory_limits(s):
     await w.close()
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     [y] = await c.scatter([list(range(1000))], workers=b.address)
@@ -923,10 +923,8 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
-@gen_cluster(client=True, nthreads=[], timeout=240)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@gen_cluster(client=True, nthreads=[], timeout=60)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
     da = pytest.importorskip("dask.array")
@@ -973,10 +971,8 @@ async def test_file_descriptors(c, s):
             assert comm.closed() or comm.peer_address != s.address, comm
     assert not s.stream_comms
 
-    start = time()
     while proc.num_fds() > num_fds_1 + N:
         await asyncio.sleep(0.01)
-        assert time() < start + 3
 
 
 @pytest.mark.slow

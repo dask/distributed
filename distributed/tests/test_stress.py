@@ -170,6 +170,7 @@ def vsum(*args):
 
 @pytest.mark.avoid_ci
 @pytest.mark.slow
+@pytest.mark.timeout(1100)  # Override timeout from setup.cfg
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 80, timeout=1000)
 async def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise

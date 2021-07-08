@@ -14,7 +14,7 @@ from distributed.utils_test import gen_cluster, inc, throws
 
 
 @gen_cluster(client=True)
-async def test__as_completed(c, s, a, b):
+async def test_as_completed_async(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 1)
     z = c.submit(inc, 2)
@@ -29,7 +29,7 @@ async def test__as_completed(c, s, a, b):
     assert result in [x, y, z]
 
 
-def test_as_completed(client):
+def test_as_completed_sync(client):
     x = client.submit(inc, 1)
     y = client.submit(inc, 2)
     z = client.submit(inc, 1)

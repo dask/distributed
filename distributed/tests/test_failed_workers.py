@@ -100,7 +100,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, timeout=60, client=True)
+@gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)

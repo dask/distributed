@@ -717,7 +717,7 @@ async def test_wait_first_completed(c, s, a, b):
     assert y.status == "pending"
 
 
-@gen_cluster(client=True, timeout=2)
+@gen_cluster(client=True)
 async def test_wait_timeout(c, s, a, b):
     future = c.submit(sleep, 0.3)
     with pytest.raises(TimeoutError):
@@ -794,7 +794,7 @@ async def test_garbage_collection_with_scatter(c, s, a, b):
             await asyncio.sleep(0.1)
 
 
-@gen_cluster(timeout=1000, client=True)
+@gen_cluster(client=True)
 async def test_recompute_released_key(c, s, a, b):
     x = c.submit(inc, 100)
     result1 = await x
@@ -1799,7 +1799,7 @@ async def test_remote_scatter_gather(c, s, a, b):
     assert (xx, yy, zz) == (1, 2, 3)
 
 
-@gen_cluster(timeout=1000, client=True)
+@gen_cluster(client=True)
 async def test_remote_submit_on_Future(c, s, a, b):
     x = c.submit(lambda x: x + 1, 1)
     y = c.submit(lambda x: x + 1, x)
@@ -5163,7 +5163,7 @@ async def test_serialize_collections(c, s, a, b):
     assert result == sum(range(10))
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 1, timeout=100)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 1)
 async def test_secede_simple(c, s, a):
     def f():
         client = get_client()

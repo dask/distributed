@@ -144,7 +144,7 @@ async def test_steal_related_tasks(e, s, a, b, c):
     assert nearby > 10
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
 async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
     def do_nothing(x, y=None):
         pass
@@ -354,9 +354,7 @@ async def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.tasks) == 0
 
 
-@gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})], timeout=3
-)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})])
 async def test_steal_resource_restrictions(c, s, a):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     await future
