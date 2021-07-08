@@ -857,33 +857,12 @@ async def test_adjust_batched_send_interval(c, s, a, b):
     await wait_for_heartbeat()
     assert a.batched_stream.interval == 0.005
 
+    # Scale up cluster so send interval increases
     workers = [Worker(s.address, nthreads=1) for i in range(27)]
     await asyncio.gather(*workers)
     await wait_for_heartbeat()
 
     assert a.batched_stream.interval > 0.005
-
-
-# def test_batched_send_interval(client, a):
-#     sleep(1)
-#     address = a["address"]
-#     initials = client.run(lambda dask_worker: dask_worker.batched_stream.interval)
-#     assert initials[address] == 2 / 1000
-#     heartbeat_interval = (
-#         client.run(
-#             lambda dask_worker: dask_worker.periodic_callbacks[
-#                 "heartbeat"
-#             ].callback_time
-#         )[address]
-#         / 1000
-#     )
-#     # sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.1)
-#     sleep(heartbeat_interval + 0.2)
-#     intervals = client.run(lambda dask_worker: dask_worker.batched_stream.interval)
-#     assert intervals == initials
-#     client.run_on_scheduler(run_for, heartbeat_interval + 0.2)
-#     intervals = client.run(lambda dask_worker: dask_worker.batched_stream.interval)
-#     assert intervals[address] >= 27.5 / 1000
 
 
 @pytest.mark.parametrize("worker", [Worker, Nanny])

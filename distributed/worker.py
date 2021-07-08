@@ -1000,7 +1000,6 @@ class Worker(ServerNode):
                 response["heartbeat-interval"] * 1000
             )
             self.batched_stream.interval = response["batched-send-interval"]
-            # print(response["batched-send-interval"])
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
         except CommClosedError:

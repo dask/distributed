@@ -7138,23 +7138,6 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return dict(zip(parent._workers_dv, results))
 
-    def batched_send_interval(self) -> float:
-        min_ms: float = 2.0
-        max_ms: float = 50.0
-        cpu_fraction: float = self.proc.cpu_percent() / 100
-        print(cpu_fraction)
-        if cpu_fraction < 0.5:
-            return min_ms / 1000
-        target_ms: float = (max_ms - min_ms) * cpu_fraction + min_ms
-        return min(target_ms, max_ms) / 1000
-        # return (
-        #     min_ms
-        #     if target_ms < min_ms
-        #     else max_ms
-        #     if target_ms > max_ms
-        #     else target_ms
-        # )
-
     ###########
     # Cleanup #
     ###########
