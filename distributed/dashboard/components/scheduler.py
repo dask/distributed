@@ -282,7 +282,7 @@ class ClusterMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
-            self.root.x_range = Range1d(start=0, end=1)
+            self.root.x_range = Range1d(start=0)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
@@ -402,7 +402,7 @@ class WorkersMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
-            self.root.x_range = Range1d(start=0, end=1)
+            self.root.x_range = Range1d(start=0)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
