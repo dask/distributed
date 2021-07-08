@@ -1,6 +1,7 @@
 name: Tests
 
-on: [push, pull_request]
+# on: [push, pull_request]
+on: [push]
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -89,6 +90,12 @@ jobs:
         # https://github.com/dask/distributed/issues/4509
         if: ${{ matrix.os != 'windows-latest' }}
         run: bash continuous_integration/scripts/setup_ssh.sh
+
+      - name: Reconfigure pytest-timeout
+        shell: bash -l {0}
+        # No SIGALRM available on Windows
+        if: ${{ matrix.os != 'windows-latest' }}
+        run: sed -i 's/timeout_method = thread/timeout_method = signal/' setup.cfg
 
       - name: Test
         id: run_tests
