@@ -282,6 +282,7 @@ class ClusterMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.x_range = Range1d(start=0, end=1)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
@@ -342,7 +343,9 @@ class ClusterMemory(DashboardComponent):
             }
 
             x_end = max(limit, meminfo.process + meminfo.managed_spilled)
-            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)
+            self.root.x_range.end = (
+                x_end  # = DataRange1d(start=0, end=x_end, range_padding=0)
+            )
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -399,6 +402,7 @@ class WorkersMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.x_range = Range1d(start=0, end=1)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
@@ -506,7 +510,9 @@ class WorkersMemory(DashboardComponent):
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
 
-            self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
+            self.root.x_range.end = (
+                max_limit  # = DataRange1d(start=0, end=max_limit, range_padding=0)
+            )
             update(self.source, result)
 
 
