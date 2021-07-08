@@ -3833,7 +3833,10 @@ class Scheduler(SchedulerState, ServerNode):
         if close_workers:
             await self.broadcast(msg={"op": "close_gracefully"}, nanny=True)
             for worker in parent._workers_dv:
-                self.worker_send(worker, {"op": "close"})
+                # Report would require the worker to unregister with the
+                # currently closing scheduler. This is not necessary and might
+                # delay shutdown of the worker unnecessarily
+                self.worker_send(worker, {"op": "close", "report": False})
             for i in range(20):  # wait a second for send signals to clear
                 if parent._workers_dv:
                     await asyncio.sleep(0.05)
