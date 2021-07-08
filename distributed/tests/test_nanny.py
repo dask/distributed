@@ -6,6 +6,7 @@ import os
 import random
 import sys
 from contextlib import suppress
+from time import sleep
 
 import psutil
 import pytest
@@ -272,29 +273,24 @@ async def test_nanny_timeout(c, s, a):
     nthreads=[("127.0.0.1", 1)],
     client=True,
     Worker=Nanny,
-    worker_kwargs={"memory_limit": 1e8},
-    timeout=20,
-    clean_kwargs={"threads": False},
+    worker_kwargs={"memory_limit": "400 MiB"},
 )
 async def test_nanny_terminate(c, s, a):
-    from time import sleep
-
     def leak():
         L = []
         while True:
-            L.append(b"0" * 5000000)
+            L.append(b"0" * 5_000_000)
             sleep(0.01)
 
-    proc = a.process.pid
+    before = a.process.pid
     with captured_logger(logging.getLogger("distributed.nanny")) as logger:
         future = c.submit(leak)
-        start = time()
-        while a.process.pid == proc:
-            await asyncio.sleep(0.1)
-            assert time() < start + 10
-        out = logger.getvalue()
-        assert "restart" in out.lower()
-        assert "memory" in out.lower()
+        while a.process.pid == before:
+            await asyncio.sleep(0.01)
+
+    out = logger.getvalue()
+    assert "restart" in out.lower()
+    assert "memory" in out.lower()
 
 
 @gen_cluster(

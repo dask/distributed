@@ -2492,8 +2492,8 @@ async def test_memory(c, s, *_):
     assert s_m0.managed == 0
     assert a.memory.managed == 0
     assert b.memory.managed == 0
-    # When a worker first goes online, its RAM is immediately counted as
-    # unmanaged_old
+
+    # When a worker first goes online, its RAM is immediately counted as unmanaged_old
     await assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
     await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
     await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
@@ -2806,23 +2806,20 @@ async def test_rebalance_no_limit(c, s, a, b):
     worker_kwargs={"memory_limit": "1000 MiB"},
     config={
         "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.recipient-max": 0.4,
+        "distributed.worker.memory.rebalance.sender-min": 0.2,
+        "distributed.worker.memory.rebalance.recipient-max": 0.1,
     },
 )
 async def test_rebalance_no_recipients(c, s, *_):
     """There are sender workers, but no recipient workers"""
     a, b = s.workers
-    futures = [
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[a]),  # 40%
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[b]),  # 40%
-    ] + c.map(
-        lambda _: "x" * (2 ** 21), range(100), workers=[a]
-    )  # 20%
-    await wait(futures)
-    await assert_memory(s, "managed", 1000, 1001)
-    await assert_ndata(c, {a: 101, b: 1})
+    fut_a = c.map(lambda _: "x" * (2 ** 20), range(250), workers=[a])  # 25%
+    fut_b = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[b])  # 10%
+    await wait(fut_a + fut_b)
+    await assert_memory(s, "managed", 350, 351)
+    await assert_ndata(c, {a: 250, b: 100})
     await s.rebalance()
-    await assert_ndata(c, {a: 101, b: 1})
+    await assert_ndata(c, {a: 250, b: 100})
     s.validate_state()
 
 

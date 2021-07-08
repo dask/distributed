@@ -14,6 +14,7 @@ from distributed.core import Status
 from distributed.deploy.spec import ProcessInterface, close_clusters, run_spec
 from distributed.metrics import time
 from distributed.utils import is_valid_xml
+from distributed.utils_test import gen_test
 
 
 class MyWorker(Worker):
@@ -197,10 +198,9 @@ async def test_unexpected_closed_worker(cleanup):
             assert len(cluster.workers) == 2
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_restart(cleanup):
-    # Regression test for https://github.com/dask/distributed/issues/3062
+@gen_test()
+async def test_restart():
+    """Regression test for https://github.com/dask/distributed/issues/3062"""
     worker = {"cls": Nanny, "options": {"nthreads": 1}}
     with dask.config.set({"distributed.deploy.lost-worker-timeout": "2s"}):
         async with SpecCluster(
@@ -211,10 +211,8 @@ async def test_restart(cleanup):
                 await cluster
                 assert len(cluster.workers) == 2
                 await client.restart()
-                start = time()
                 while len(cluster.workers) < 2:
-                    await asyncio.sleep(0.5)
-                    assert time() < start + 60
+                    await asyncio.sleep(0.01)
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
