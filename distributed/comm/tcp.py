@@ -387,7 +387,13 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
         except SSLError as err:
-            raise FatalCommClosedError() from err
+            if "CERTIFICATE_VERIFY_FAILED" in str(err):
+                raise FatalCommClosedError(
+                    "TLS certificate does not match. Check your security settings. "
+                    "More info at https://distributed.dask.org/en/latest/tls.html"
+                ) from err
+            else:
+                raise FatalCommClosedError() from err
 
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(
