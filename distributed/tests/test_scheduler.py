@@ -2494,8 +2494,8 @@ async def test_memory(c, s, *_):
     await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
     await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
-    f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
-    f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
+    f1 = c.submit(leaking, 100, 50, 10, pure=False, workers=[a.name])
+    f2 = c.submit(leaking, 100, 50, 10, pure=False, workers=[b.name])
     await assert_memory(s, "unmanaged_recent", 300, 380)
     await assert_memory(a, "unmanaged_recent", 150, 190)
     await assert_memory(b, "unmanaged_recent", 150, 190)

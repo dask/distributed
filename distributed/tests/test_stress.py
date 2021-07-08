@@ -88,7 +88,12 @@ def test_cancel_stress_sync(loop):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[], client=True, scheduler_kwargs={"allowed_failures": 100_000})
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    timeout=120,
+    scheduler_kwargs={"allowed_failures": 100_000},
+)
 async def test_stress_creation_and_deletion(c, s):
     # Assertions are handled by the validate mechanism in the scheduler
     da = pytest.importorskip("dask.array")
@@ -101,13 +106,13 @@ async def test_stress_creation_and_deletion(c, s):
     async def create_and_destroy_worker(delay):
         start = time()
         while time() < start + 5:
-            async with Nanny(s.address, nthreads=4):
+            async with Nanny(s.address, nthreads=2):
                 await asyncio.sleep(delay)
             print("Killed nanny")
 
     await asyncio.gather(*(create_and_destroy_worker(0.1 * i) for i in range(20)))
 
-    async with Nanny(s.address, nthreads=4):
+    async with Nanny(s.address, nthreads=2):
         assert await c.compute(z) == 8000884.93
 
 
