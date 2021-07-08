@@ -61,7 +61,6 @@ class Cluster:
         self._asynchronous = asynchronous
         self._watch_worker_status_comm = None
         self._watch_worker_status_task = None
-        self._sync_cluster_info_task = None
         self._cluster_manager_logs = []
         self.quiet = quiet
         self.scheduler_comm = None
