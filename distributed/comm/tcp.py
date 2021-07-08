@@ -5,7 +5,7 @@ import socket
 import struct
 import sys
 import weakref
-from ssl import SSLError
+from ssl import SSLCertVerificationError, SSLError
 
 from tornado import gen
 
@@ -386,14 +386,13 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLCertVerificationError as err:
+            raise FatalCommClosedError(
+                "TLS certificate does not match. Check your security settings. "
+                "More info at https://distributed.dask.org/en/latest/tls.html"
+            ) from err
         except SSLError as err:
-            if "CERTIFICATE_VERIFY_FAILED" in str(err):
-                raise FatalCommClosedError(
-                    "TLS certificate does not match. Check your security settings. "
-                    "More info at https://distributed.dask.org/en/latest/tls.html"
-                ) from err
-            else:
-                raise FatalCommClosedError() from err
+            raise FatalCommClosedError() from err
 
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(
