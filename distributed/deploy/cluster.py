@@ -8,7 +8,7 @@ import uuid
 from contextlib import suppress
 from inspect import isawaitable
 
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta
@@ -96,11 +96,11 @@ class Cluster:
             self.cluster_info.update(
                 (await self.scheduler_comm.get_metadata(keys=["cluster-manager-info"]))
             )
-        self.loop = IOLoop.current()
-        self.periodic_callbacks["sync-cluster-info"] = pc = PeriodicCallback(
+        self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
             self._sync_cluster_info, self._sync_interval * 1000
         )
-        self.loop.add_callback(pc.start)
+        for pc in self.periodic_callbacks.values():
+            pc.start()
         self.status = Status.running
 
     async def _sync_cluster_info(self):
