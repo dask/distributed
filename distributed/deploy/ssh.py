@@ -238,10 +238,11 @@ old_cluster_kwargs = {
 def SSHCluster(
     hosts: List[str] = None,
     connect_options: Union[List[dict], dict] = {},
-    worker_options: dict = {},
+    worker_options: Union[List[dict], dict] = {},
     scheduler_options: dict = {},
     worker_module: str = "distributed.cli.dask_worker",
     remote_python: Union[str, List[str]] = None,
+    names=None,
     **kwargs,
 ):
     """Deploy a Dask cluster using SSH
@@ -274,7 +275,7 @@ def SSHCluster(
         or ``known_hosts``. See docs for :func:`asyncssh.connect` and
         :class:`asyncssh.SSHClientConnectionOptions` for full information.
         If a list it must have the same length as ``hosts``.
-    worker_options : dict, optional
+    worker_options : dict or list of dict, optional
         Keywords to pass on to workers.
     scheduler_options : dict, optional
         Keywords to pass on to scheduler.
@@ -282,6 +283,10 @@ def SSHCluster(
         Python module to call to start the worker.
     remote_python : str or list of str, optional
         Path to Python on remote nodes.
+    names : list, optional
+        Names for workers on each host. Must be the same length as the number of
+        hosts. If multiple processes per host are used consecutive numbers will
+        be appended to worker names.
 
     Examples
     --------
@@ -332,10 +337,22 @@ def SSHCluster(
             "dictionary for each address."
         )
 
+    if isinstance(worker_options, list) and len(worker_options) != len(hosts) - 1:
+        raise RuntimeError(
+            "When specifying a list of worker_options you must provide a "
+            "dictionary for each worker address."
+        )
+
     if isinstance(remote_python, list) and len(remote_python) != len(hosts):
         raise RuntimeError(
             "When specifying a list of remote_python you must provide a "
             "path for each address."
+        )
+
+    if isinstance(names, list) and len(names) != len(hosts) - 1:
+        raise RuntimeError(
+            "When specifying a list of names you must provide a "
+            "name for each address except the scheduler."
         )
 
     scheduler = {
@@ -359,11 +376,16 @@ def SSHCluster(
                 "connect_options": connect_options
                 if isinstance(connect_options, dict)
                 else connect_options[i + 1],
-                "kwargs": worker_options,
+                "kwargs": worker_options
+                if isinstance(worker_options, dict)
+                else worker_options[i],
                 "worker_module": worker_module,
                 "remote_python": remote_python[i + 1]
                 if isinstance(remote_python, list)
                 else remote_python,
+                "name": names[i]
+                if isinstance(names, list)
+                else None,
             },
         }
         for i, host in enumerate(hosts[1:])
