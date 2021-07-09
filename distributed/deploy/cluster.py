@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import copy
 import datetime
 import logging
@@ -92,10 +91,11 @@ class Cluster:
             self._watch_worker_status(comm)
         )
 
-        with contextlib.suppress(KeyError):  # The scheduler might not have any info
-            self.cluster_info.update(
-                (await self.scheduler_comm.get_metadata(keys=["cluster-manager-info"]))
-            )
+        info = await self.scheduler_comm.get_metadata(
+            keys=["cluster-manager-info"], default={}
+        )
+        self.cluster_info.update(info)
+
         self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
             self._sync_cluster_info, self._sync_interval * 1000
         )
