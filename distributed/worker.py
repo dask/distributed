@@ -507,6 +507,35 @@ class Worker(ServerNode):
 
         self._setup_logging(logger)
 
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if not local_directory:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+
+        os.makedirs(local_directory, exist_ok=True)
+        local_directory = os.path.join(local_directory, "dask-worker-space")
+
+        with warn_on_duration(
+            "1s",
+            "Creating scratch directories is taking a surprisingly long time. "
+            "This is often due to running workers on a network file system. "
+            "Consider specifying a local-directory to point workers to write "
+            "scratch data to a local disk.",
+        ):
+            self._workspace = WorkSpace(os.path.abspath(local_directory))
+            self._workdir = self._workspace.new_work_dir(prefix="worker-")
+            self.local_directory = self._workdir.dir_path
+
+        if preload is None:
+            preload = dask.config.get("distributed.worker.preload")
+        if preload_argv is None:
+            preload_argv = dask.config.get("distributed.worker.preload-argv")
+        self.preloads = preloading.process_preloads(
+            self, preload, preload_argv, file_dir=self.local_directory
+        )
+
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
             scheduler_addr = cfg["address"]
@@ -548,35 +577,6 @@ class Worker(ServerNode):
         self.extensions = dict()
         if silence_logs:
             silence_logging(level=silence_logs)
-
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
-        if not local_directory:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
-
-        os.makedirs(local_directory, exist_ok=True)
-        local_directory = os.path.join(local_directory, "dask-worker-space")
-
-        with warn_on_duration(
-            "1s",
-            "Creating scratch directories is taking a surprisingly long time. "
-            "This is often due to running workers on a network file system. "
-            "Consider specifying a local-directory to point workers to write "
-            "scratch data to a local disk.",
-        ):
-            self._workspace = WorkSpace(os.path.abspath(local_directory))
-            self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_directory = self._workdir.dir_path
-
-        if preload is None:
-            preload = dask.config.get("distributed.worker.preload")
-        if preload_argv is None:
-            preload_argv = dask.config.get("distributed.worker.preload-argv")
-        self.preloads = preloading.process_preloads(
-            self, preload, preload_argv, file_dir=self.local_directory
-        )
 
         if isinstance(security, dict):
             security = Security(**security)
