@@ -2473,8 +2473,8 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
 
 
 # ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
-# On Windows, it can take up to 80s due to worker memory needing to stabilize first.
-#@pytest.mark.slow
+# On Windows, it can take ~65s due to worker memory needing to stabilize first.
+@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )

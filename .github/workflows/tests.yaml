@@ -16,8 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # os: [ubuntu-latest, windows-latest, macos-latest]
-        os: [windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.7", "3.8", "3.9"]
 
         # Uncomment to stress-test the test suite for random failures.
@@ -25,7 +24,7 @@ jobs:
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
-        # fork (https://github.com/<your name>/distributed/actions).
+        # branch (https://github.com/<your name>/distributed/actions).
         run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
@@ -114,9 +113,7 @@ jobs:
           fi
           source continuous_integration/scripts/set_ulimit.sh
 
-          pytest \
-            distributed/tests/test_scheduler.py::test_memory \
-            -m "not avoid_ci" --runslow \
+          pytest distributed -m "not avoid_ci" --runslow \
             --reruns 10 --reruns-delay 10 \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
