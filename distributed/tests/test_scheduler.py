@@ -2462,7 +2462,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nmib = getattr(minfo, attr) / 2**20
+        nmib = getattr(minfo, attr) / 2 ** 20
         if min_ <= nmib <= max_:
             return
         if time() - t0 > timeout:
@@ -2527,9 +2527,9 @@ async def test_memory(c, s, *_):
     # the interpreter is using.
     more_futs = []
     while not s.memory.managed_spilled:
-        if a.memory.process < 0.7 * 500 * 2**20:
+        if a.memory.process < 0.7 * 500 * 2 ** 20:
             more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[a.name]))
-        if b.memory.process < 0.7 * 500 * 2**20:
+        if b.memory.process < 0.7 * 500 * 2 ** 20:
             more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[b.name]))
         await wait(more_futs)
         await asyncio.sleep(1)
