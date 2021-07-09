@@ -2039,7 +2039,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2105,7 +2105,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2171,7 +2171,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2232,7 +2232,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     )
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     expected_states_A = {
         f.key: "memory",

@@ -764,6 +764,10 @@ def gen_test(timeout=_TEST_TIMEOUT):
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
 
     def _(func):
         def test_func():
@@ -873,6 +877,10 @@ def gen_cluster(
         start
         end
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
     if ncores is not None:
         warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
@@ -928,8 +936,7 @@ def gen_cluster(
                             args = [c] + args
                         try:
                             future = func(*args, *outer_args, **kwargs)
-                            if timeout:
-                                future = asyncio.wait_for(future, timeout)
+                            future = asyncio.wait_for(future, timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()

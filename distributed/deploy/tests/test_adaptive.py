@@ -8,6 +8,7 @@ import pytest
 import dask
 
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
 
@@ -297,6 +298,7 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
+@pytest.mark.xfail(condition=WINDOWS, reason="extremely flaky")
 @gen_test()
 async def test_target_duration():
     with dask.config.set(

@@ -297,11 +297,8 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
-@gen_cluster(Worker=Nanny, timeout=60)
+@gen_cluster(Worker=Nanny)
 async def test_restart_scheduler(s, a, b):
-    import gc
-
-    gc.collect()
     addrs = (a.worker_address, b.worker_address)
     await s.restart()
     assert len(s.nthreads) == 2

@@ -74,12 +74,11 @@ async def test_str(s, a, b):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    n = await Nanny(s.address, nthreads=2)
     first_dir = n.worker_dir
 
     assert os.path.exists(first_dir)
 
-    original_address = n.worker_address
     ww = rpc(n.worker_address)
     await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
     pid = n.pid
@@ -87,23 +86,17 @@ async def test_nanny_process_failure(c, s):
     with suppress(CommClosedError):
         await c.run(os._exit, 0, workers=[n.worker_address])
 
-    start = time()
     while n.pid == pid:  # wait while process dies and comes back
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
-    start = time()
     await asyncio.sleep(1)
     while not n.is_alive():  # wait while process comes back
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
     # assert n.worker_address != original_address  # most likely
 
-    start = time()
     while n.worker_address not in s.nthreads or n.worker_dir is None:
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
     second_dir = n.worker_dir
 

@@ -276,7 +276,7 @@ async def test_ucx_localcluster(processes, cleanup):
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             x = client.submit(inc, 1)
-            await x.result()
+            await x
             assert x.key in cluster.scheduler.tasks
             if not processes:
                 assert any(w.data == {x.key: 2} for w in cluster.workers.values())

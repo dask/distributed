@@ -12,6 +12,7 @@ import pytest
 
 import dask
 
+from distributed.compatibility import MACOS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
@@ -273,11 +274,13 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
 def test_workspace_concurrency(tmpdir):
     _test_workspace_concurrency(tmpdir, 5.0, 6)
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
 def test_workspace_concurrency_intense(tmpdir):
     n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)
     assert n_created >= 100
