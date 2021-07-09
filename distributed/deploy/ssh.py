@@ -383,9 +383,7 @@ def SSHCluster(
                 "remote_python": remote_python[i + 1]
                 if isinstance(remote_python, list)
                 else remote_python,
-                "name": names[i]
-                if isinstance(names, list)
-                else None,
+                "name": names[i] if isinstance(names, list) else None,
             },
         }
         for i, host in enumerate(hosts[1:])
