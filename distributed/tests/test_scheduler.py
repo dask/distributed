@@ -2472,10 +2472,11 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
         await asyncio.sleep(0.1)
 
 
-# ~33s runtime, or distributed.worker.memory.recent-to-old-time + 3s
+# ~33s runtime, or distributed.worker.memory.recent-to-old-time + 3s.
+# On Windows, it can take up to 80s due to worker memory needing to stabilize first.
 @pytest.mark.slow
 @gen_cluster(
-    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60
+    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
 async def test_memory(c, s, *_):
     pytest.importorskip("zict")
@@ -2489,10 +2490,21 @@ async def test_memory(c, s, *_):
     assert a.memory.managed == 0
     assert b.memory.managed == 0
 
-    # When a worker first goes online, its RAM is immediately counted as unmanaged_old
-    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
-    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
-    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
+    # When a worker first goes online, its RAM is immediately counted as unmanaged_old.
+    # On Windows, however, there is somehow enough time between the worker start and
+    # this line for 2 heartbeats and the memory keeps growing substantially for a while.
+    # Sometimes there is a single heartbeat but on the consecutive test we observe
+    # hundreds of unexpected unmanaged_recent memory.
+    # Wait for the situation to stabilize.
+    if WINDOWS:
+        await time.sleep(10)
+        initial_timeout = 40
+    else:
+        initial_timeout = 0
+
+    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=initial_timeout)
+    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=initial_timeout)
+    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=initial_timeout)
 
     f1 = c.submit(leaking, 100, 50, 10, pure=False, workers=[a.name])
     f2 = c.submit(leaking, 100, 50, 10, pure=False, workers=[b.name])

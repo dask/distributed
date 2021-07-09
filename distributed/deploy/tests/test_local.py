@@ -693,13 +693,12 @@ def test_adapt_then_manual(loop):
         processes=False,
         n_workers=8,
     ) as cluster:
-        sleep(0.1)
         cluster.adapt(minimum=0, maximum=4, interval="10ms")
 
         start = time()
         while cluster.scheduler.workers or cluster.workers:
-            sleep(0.1)
-            assert time() < start + 5
+            sleep(0.01)
+            assert time() < start + 30
 
         assert not cluster.workers
 
@@ -715,8 +714,8 @@ def test_adapt_then_manual(loop):
 
             start = time()
             while len(cluster.scheduler.workers) != 2:
-                sleep(0.1)
-                assert time() < start + 5
+                sleep(0.01)
+                assert time() < start + 30
 
 
 @pytest.mark.parametrize("temporary", [True, False])

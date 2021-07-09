@@ -74,12 +74,7 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("127.0.0.1", 1)] * 4,
-    config={"distributed.comm.timeouts.connect": "1s"},
-)
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1)] * 4)
 async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     L = c.map(inc, range(20))
     await wait(L)
@@ -87,7 +82,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     w.process.process._process.terminate()
     total = c.submit(sum, L)
 
-    for i in range(3):
+    for _ in range(3):
         await wait(total)
         addr = first(s.tasks[total.key].who_has).address
         for worker in [x, y, z]:

@@ -113,7 +113,21 @@ jobs:
           fi
           source continuous_integration/scripts/set_ulimit.sh
 
-          pytest distributed -m "not avoid_ci" --runslow \
+          pytest \
+            distributed/tests/test_client.py::test_no_threads_lingering \
+            distributed/tests/test_queues.py::test_race \
+            distributed/tests/test_scheduler.py::test_memory \
+            distributed/tests/test_scheduler.py::test_restart \
+            distributed/tests/test_scheduler.py::test_balance_many_workers \
+            distributed/tests/test_failed_workers.py::test_restart_scheduler \
+            distributed/tests/test_failed_workers.py::test_gather_then_submit_after_failed_workers \
+            distributed/tests/test_nanny.py::test_nanny_process_failure \
+            distributed/tests/test_variable.py::test_race \
+            distributed/deploy/tests/test_adaptive.py::test_target_duration \
+            distributed/deploy/tests/test_local.py::test_adapt_then_manual \
+            distributed/deploy/tests/test_spec_cluster.py::test_adaptive_killed_worker \
+            distributed/deploy/tests/test_spec_cluster.py::test_restart \
+            -m "not avoid_ci" --runslow \
             --reruns 10 --reruns-delay 10 \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
