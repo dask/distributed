@@ -6952,7 +6952,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None, last_count=None, code=""):
+    async def performance_report(
+        self, comm=None, start=None, last_count=None, code="", mode=None
+    ):
         parent: SchedulerState = cast(SchedulerState, self)
         stop = time()
         # Profiles
@@ -7092,7 +7094,7 @@ class Scheduler(SchedulerState, ServerNode):
         from bokeh.plotting import output_file, save
 
         with tmpfile(extension=".html") as fn:
-            output_file(filename=fn, title="Dask Performance Report", mode="inline")
+            output_file(filename=fn, title="Dask Performance Report", mode=mode)
             template_directory = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "dashboard", "templates"
             )
