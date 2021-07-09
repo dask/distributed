@@ -198,17 +198,16 @@ async def test_unexpected_closed_worker():
 async def test_restart():
     """Regression test for https://github.com/dask/distributed/issues/3062"""
     worker = {"cls": Nanny, "options": {"nthreads": 1}}
-    with dask.config.set({"distributed.deploy.lost-worker-timeout": "10s"}):
-        async with SpecCluster(
-            asynchronous=True, scheduler=scheduler, worker=worker
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                cluster.scale(2)
-                await cluster
-                assert len(cluster.workers) == 2
-                await client.restart()
-                while len(cluster.workers) < 2:
-                    await asyncio.sleep(0.01)
+    async with SpecCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            cluster.scale(2)
+            await cluster
+            assert len(cluster.workers) == 2
+            await client.restart()
+            while len(cluster.workers) < 2:
+                await asyncio.sleep(0.01)
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")

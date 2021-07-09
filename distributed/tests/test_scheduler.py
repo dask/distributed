@@ -2494,7 +2494,7 @@ async def test_memory(c, s, *_):
     # On Windows, however, there is somehow enough time between the worker start and
     # this line for 2 heartbeats and the memory keeps growing substantially for a while.
     # Sometimes there is a single heartbeat but on the consecutive test we observe
-    # hundreds of unexpected unmanaged_recent memory.
+    # a large unexplained increase in unmanaged_recent memory.
     # Wait for the situation to stabilize.
     if WINDOWS:
         await time.sleep(10)
