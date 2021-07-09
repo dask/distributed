@@ -2497,7 +2497,7 @@ async def test_memory(c, s, *_):
     # a large unexplained increase in unmanaged_recent memory.
     # Wait for the situation to stabilize.
     if WINDOWS:
-        await time.sleep(10)
+        await asyncio.sleep(10)
         initial_timeout = 40
     else:
         initial_timeout = 0
