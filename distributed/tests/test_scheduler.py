@@ -2474,7 +2474,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
 
 # ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
 # On Windows, it can take up to 80s due to worker memory needing to stabilize first.
-@pytest.mark.slow
+#@pytest.mark.slow
 @gen_cluster(
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
@@ -2555,23 +2555,18 @@ async def test_memory(c, s, *_):
     # transition into unmanaged_old
     await c.run(gc.collect)
     await assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
-    await assert_memory(
-        s,
-        "unmanaged_old",
-        orig_old + 90,
-        # On MacOS, the process memory of the Python interpreter does not shrink as
-        # fast as on Linux/Windows
-        9999 if MACOS else orig_old + 290,
-        timeout=40,
-    )
+    await assert_memory(s, "unmanaged_old", orig_old + 90, 9999, timeout=40)
 
     # When the leaked memory is cleared, unmanaged and unmanaged_old drop
     # On MacOS, the process memory of the Python interpreter does not shrink as fast
     # as on Linux/Windows
+
+    orig_unmanaged = s.memory.unmanaged / 2 ** 20
+    orig_old = s.memory.unmanaged_old / 2 ** 20
     if not MACOS:
         await c.run(clear_leak)
-        await assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
-        await assert_memory(s, "unmanaged_old", 0, orig_old + 95)
+        await assert_memory(s, "unmanaged", 0, orig_unmanaged - 60)
+        await assert_memory(s, "unmanaged_old", 0, orig_old - 60)
         await assert_memory(s, "unmanaged_recent", 0, 90)
 
 
