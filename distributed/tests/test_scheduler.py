@@ -2561,7 +2561,7 @@ async def test_memory(c, s, *_):
         orig_old + 90,
         # On MacOS, the process memory of the Python interpreter does not shrink as
         # fast as on Linux/Windows
-        9999 if MACOS else orig_old + 190,
+        9999 if MACOS else orig_old + 290,
         timeout=40,
     )
 
