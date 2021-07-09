@@ -343,9 +343,7 @@ class ClusterMemory(DashboardComponent):
             }
 
             x_end = max(limit, meminfo.process + meminfo.managed_spilled)
-            self.root.x_range.end = (
-                x_end  # = DataRange1d(start=0, end=x_end, range_padding=0)
-            )
+            self.root.x_range.end = x_end
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -510,9 +508,7 @@ class WorkersMemory(DashboardComponent):
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
 
-            self.root.x_range.end = (
-                max_limit  # = DataRange1d(start=0, end=max_limit, range_padding=0)
-            )
+            self.root.x_range.end = max_limit
             update(self.source, result)
 
 
