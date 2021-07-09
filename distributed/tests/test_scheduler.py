@@ -2462,8 +2462,8 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nbytes = getattr(minfo, attr)
-        if min_ * 2 ** 20 <= nbytes <= max_ * 2 ** 20:
+        nmib = getattr(minfo, attr) / 2**20
+        if min_ <= nmib <= max_:
             return
         if time() - t0 > timeout:
             raise TimeoutError(
@@ -2472,7 +2472,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
         await asyncio.sleep(0.1)
 
 
-# ~33s runtime, or distributed.worker.memory.recent-to-old-time + 3s.
+# ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
 # On Windows, it can take up to 80s due to worker memory needing to stabilize first.
 @pytest.mark.slow
 @gen_cluster(
@@ -2522,19 +2522,17 @@ async def test_memory(c, s, *_):
     await assert_memory(b, "unmanaged_recent", 50, 90)
 
     # Force the output of f1 and f2 to spill to disk.
-    # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
-    # process memory per worker, or roughly after 3~7 rounds of the below depending
-    # on how much RAM the interpreter is using.
+    # With spill=0.7 and memory_limit=500 MiB, we'll start spilling at 350 MiB process
+    # memory per worker, or up to 20 iterations of the below depending on how much RAM
+    # the interpreter is using.
     more_futs = []
-    for _ in range(8):
-        if s.memory.managed_spilled > 0:
-            break
-        more_futs += [
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
-        ]
-        await asyncio.sleep(2)
-    await assert_memory(s, "managed_spilled", 1, 999)
+    while not s.memory.managed_spilled:
+        if a.memory.process < 0.7 * 500 * 2**20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[a.name]))
+        if b.memory.process < 0.7 * 500 * 2**20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[b.name]))
+        await wait(more_futs)
+        await asyncio.sleep(1)
 
     # Wait for the spilling to finish. Note that this does not make the test take
     # longer as we're waiting for recent-to-old-time anyway.
