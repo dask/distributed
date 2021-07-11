@@ -5835,9 +5835,15 @@ async def test_scatter_error_cancel(c, s, a, b):
     assert y.status == "error"  # not cancelled
 
 
-def test_no_threads_lingering():
-    active = dict(threading._active)
-    assert threading.active_count() < 40, list(active.values())
+@gen_test()
+async def test_no_threads_lingering():
+    while threading.active_count() >= 40:
+        active = dict(threading._active)
+        print(f"==== Found {len(active)} active threads: ====")
+        for t in active.values():
+            print(t)
+        # Maybe another test has been slow to shut down? Wait until gen_test timeout
+        await asyncio.sleep(1)
 
 
 @gen_cluster()

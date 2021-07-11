@@ -151,7 +151,8 @@ async def test_adaptive_killed_worker():
             async with Client(cluster, asynchronous=True) as client:
                 # Scale up a cluster with 1 worker.
                 cluster.adapt(minimum=1, maximum=1)
-                await client.wait_for_workers(1)
+                while not cluster.workers:
+                    await asyncio.sleep(0.01)
 
                 future = client.submit(sleep, 0.1)
 

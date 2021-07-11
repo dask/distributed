@@ -22,7 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -2557,17 +2557,19 @@ async def test_memory(c, s, *_):
     await assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
     await assert_memory(s, "unmanaged_old", orig_old + 90, 9999, timeout=40)
 
-    # When the leaked memory is cleared, unmanaged and unmanaged_old drop
-    # On MacOS, the process memory of the Python interpreter does not shrink as fast
-    # as on Linux/Windows
+    # When the leaked memory is cleared, unmanaged and unmanaged_old drop.
+    # On MacOS and Windows, the process memory of the Python interpreter does not shrink
+    # as fast as on Linux. Note that this behaviour is heavily impacted by OS tweaks,
+    # meaning that what you observe on your local host may behave differently on CI.
+    if not LINUX:
+        return
 
     orig_unmanaged = s.memory.unmanaged / 2 ** 20
     orig_old = s.memory.unmanaged_old / 2 ** 20
-    if not MACOS:
-        await c.run(clear_leak)
-        await assert_memory(s, "unmanaged", 0, orig_unmanaged - 60)
-        await assert_memory(s, "unmanaged_old", 0, orig_old - 60)
-        await assert_memory(s, "unmanaged_recent", 0, 90)
+    await c.run(clear_leak)
+    await assert_memory(s, "unmanaged", 0, orig_unmanaged - 60)
+    await assert_memory(s, "unmanaged_old", 0, orig_old - 60)
+    await assert_memory(s, "unmanaged_recent", 0, 90)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})

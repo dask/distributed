@@ -294,12 +294,18 @@ async def test_multiple_clients_restart(s, a, b):
 
 @gen_cluster(Worker=Nanny)
 async def test_restart_scheduler(s, a, b):
-    addrs = (a.worker_address, b.worker_address)
-    await s.restart()
     assert len(s.nthreads) == 2
-    addrs2 = (a.worker_address, b.worker_address)
+    pids = (a.pid, b.pid)
+    assert pids[0]
+    assert pids[1]
 
-    assert addrs != addrs2
+    await s.restart()
+
+    assert len(s.nthreads) == 2
+    pids2 = (a.pid, b.pid)
+    assert pids2[0]
+    assert pids2[1]
+    assert pids != pids2
 
 
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
