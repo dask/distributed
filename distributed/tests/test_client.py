@@ -3563,7 +3563,7 @@ def test_get_returns_early(c):
 
 
 @pytest.mark.slow
-@gen_cluster(Worker=Nanny, client=True)
+@gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
@@ -5835,15 +5835,15 @@ async def test_scatter_error_cancel(c, s, a, b):
     assert y.status == "error"  # not cancelled
 
 
-@gen_test()
-async def test_no_threads_lingering():
-    while threading.active_count() >= 40:
-        active = dict(threading._active)
-        print(f"==== Found {len(active)} active threads: ====")
-        for t in active.values():
-            print(t)
-        # Maybe another test has been slow to shut down? Wait until gen_test timeout
-        await asyncio.sleep(1)
+@pytest.mark.xfail(reason="GH#5409 Dask-Default-Threads are frequently detected")
+def test_no_threads_lingering():
+    if threading.active_count() < 40:
+        return
+    active = dict(threading._active)
+    print(f"==== Found {len(active)} active threads: ====")
+    for t in active.values():
+        print(t)
+    assert False
 
 
 @gen_cluster()

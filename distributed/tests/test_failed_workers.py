@@ -292,7 +292,7 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
-@gen_cluster(Worker=Nanny)
+@gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
     assert len(s.nthreads) == 2
     pids = (a.pid, b.pid)

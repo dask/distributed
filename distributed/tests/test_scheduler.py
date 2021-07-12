@@ -619,7 +619,7 @@ async def test_ready_remove_worker(s, a, b):
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(inc, range(20))
     await wait(futures)
@@ -1759,7 +1759,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = c.submit(np.arange, 1000000, workers=[a.worker_address], pure=False)
