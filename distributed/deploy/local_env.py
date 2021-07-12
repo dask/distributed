@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import weakref
 from typing import List, Union
 
 import dask
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class Process(ProcessInterface):
-    """A superclass for SSH Workers and Nannies
+    """A superclass for Workers and Nannies run by a specified Python executable
 
     See Also
     --------
@@ -29,7 +28,6 @@ class Process(ProcessInterface):
         super().__init__(**kwargs)
 
     async def start(self):
-        weakref.finalize(self, self.proc.kill)
         await super().start()
 
     async def close(self):
@@ -37,7 +35,53 @@ class Process(ProcessInterface):
         await super().close()
 
     def __repr__(self):
-        return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
+        return "<LocalEnv %s: status=%s>" % (type(self).__name__, self.status)
+
+    async def _set_env_helper(self):
+        """Helper function to locate existing dask internal config for the remote
+        Scheduler and Workers to inherit when started.
+
+        Returns
+        -------
+            Dask config to inherit, if any.
+        """
+        proc = await asyncio.create_subprocess_shell("uname", **self.connect_options)
+        await proc.communicate()
+        if proc.returncode == 0:
+            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+                dask.config.serialize(dask.config.global_config)
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                "cmd /c ver", **self.connect_options
+            )
+            await proc.communicate()
+            if proc.returncode == 0:
+                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                    dask.config.serialize(dask.config.global_config)
+                )
+            else:
+                name = self.__class__.__name__
+                emsg = f"{name} failed to set DASK_INTERNAL_INHERIT_CONFIG variable"
+                raise Exception(emsg)
+        return set_env
+
+    async def _get_address(self, search_str):
+        # We watch stderr in order to get the address, then we return
+        name = self.__class__.__name__
+        while True:
+            line = await self.proc.stderr.readline()
+            if not line.decode("ascii").strip():
+                raise Exception(f"{name} failed to start")
+            else:
+                line = line.decode("ascii").strip()
+            logger.info(line)
+            if search_str in line:
+                self.address = line.split(f"{search_str}:")[1].strip()
+                if name == "Worker":
+                    self.status = Status.running
+                break
+        logger.debug("%s", line)
 
 
 class Worker(Process):
@@ -79,7 +123,7 @@ class Worker(Process):
         self.name = name
 
     async def start(self):
-        set_env = await _set_env_helper(self.connect_options)
+        set_env = await self._set_env_helper()
 
         cmd = " ".join(
             [
@@ -97,19 +141,8 @@ class Worker(Process):
             cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
 
-        # We watch stderr in order to get the address, then we return
-        while True:
-            line = await self.proc.stderr.readline()
-            if not line.decode("ascii").strip():
-                raise Exception("Worker failed to start")
-            else:
-                line = line.decode("ascii").strip()
-            logger.info(line)
-            if "worker at" in line:
-                self.address = line.split("worker at:")[1].strip()
-                self.status = Status.running
-                break
-        logger.debug("%s", line)
+        search_string = "worker at"
+        await self._get_address(search_string)
         await super().start()
 
 
@@ -137,7 +170,7 @@ class Scheduler(Process):
     async def start(self):
         logger.debug("Created Scheduler")
 
-        set_env = await _set_env_helper(self.connect_options)
+        set_env = await self._set_env_helper()
 
         cmd = " ".join(
             [set_env, self.python_executable, "-m", "distributed.cli.dask_scheduler"]
@@ -147,52 +180,9 @@ class Scheduler(Process):
             cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
         )
 
-        # We watch stderr in order to get the address, then we return
-        while True:
-            line = await self.proc.stderr.readline()
-            if not line.decode("ascii").strip():
-                raise Exception("Scheduler failed to start")
-            else:
-                line = line.decode("ascii").strip()
-            logger.info(line)
-            if "Scheduler at" in line:
-                self.address = line.split("Scheduler at:")[1].strip()
-                break
-        logger.debug("%s", line)
+        search_string = "Scheduler at"
+        await self._get_address(search_string)
         await super().start()
-
-
-async def _set_env_helper(connect_options: dict):
-    """Helper function to locate existing dask internal config for the remote
-    scheduler and workers to inherit when started.
-
-    Parameters
-    ----------
-    connect_options : dict
-        Connection options to pass to the async subprocess shell.
-
-    Returns
-    -------
-        Dask config to inherit, if any.
-    """
-    proc = await asyncio.create_subprocess_shell("uname", **connect_options)
-    await proc.communicate()
-    if proc.returncode == 0:
-        set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-            dask.config.serialize(dask.config.global_config)
-        )
-    else:
-        proc = await asyncio.create_subprocess_shell("cmd /c ver", **connect_options)
-        await proc.communicate()
-        if proc.returncode == 0:
-            set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                dask.config.serialize(dask.config.global_config)
-            )
-        else:
-            raise Exception(
-                "Scheduler failed to set DASK_INTERNAL_INHERIT_CONFIG variable "
-            )
-    return set_env
 
 
 def LocalEnvCluster(
