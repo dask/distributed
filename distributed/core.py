@@ -275,20 +275,18 @@ class Server:
             timeout = getattr(self, "death_timeout", None)
             if self._startup_fut is None:
                 self._startup_fut = asyncio.ensure_future(
-                    asyncio.wait_for(self.start(), timeout=timeout)
+                    asyncio.wait_for(self._start(), timeout=timeout)
                 )
+            await self.rpc.start()
 
             try:
                 await self._startup_fut
             except Exception:
-                # This timeout is very arbitrary but the close method itself
-                # already may wait more than a second to close gracefully.
-                # before we interrupt we should give it enough time to finish
-
+                await self.rpc.close()
                 # Suppress all exception since the objects might not have been
                 # properly initialized for close to be successful.
                 with suppress(Exception):
-                    await asyncio.wait_for(self.close(), timeout=2)
+                    await self.close()
                 if timeout:
                     raise TimeoutError(
                         f"{type(self).__name__} failed to start in {timeout} seconds"
@@ -300,11 +298,13 @@ class Server:
         return _().__await__()
 
     async def _start(self):
+        """Child specific logic to define startup behaviour."""
         self.status = Status.running
 
     async def start(self):
-        await self.rpc.start()
-        await self._start()
+        """Start the server. Child classes are supposed to overwrite
+        Server._start for custom startup logic."""
+        await self
 
     async def __aenter__(self):
         await self
@@ -1019,6 +1019,8 @@ class ConnectionPool:
         return _().__await__()
 
     async def start(self):
+        if self.status is not Status.init:
+            return
         # Invariant: semaphore._value == limit - open - _n_connecting
         self.semaphore = asyncio.Semaphore(self.limit)
         self.status = Status.running

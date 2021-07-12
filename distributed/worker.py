@@ -1226,7 +1226,7 @@ class Worker(ServerNode):
 
             if self.status not in (Status.running, Status.closing_gracefully):
                 logger.info(
-                    "Closed worker %s has not yet started: %s",
+                    "Closing worker %s has not yet started: %s",
                     self.name,
                     self.status,
                 )

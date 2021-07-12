@@ -541,7 +541,7 @@ class StartException(Exception):
 
 
 class BrokenWorker(worker.Worker):
-    async def start(self):
+    async def _start(self):
         raise StartException("broken")
 
 
