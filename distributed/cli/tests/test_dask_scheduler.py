@@ -21,6 +21,7 @@ from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
+    get_unused_port,
     popen,
 )
 
@@ -296,20 +297,18 @@ def test_preload_module(loop):
 def test_preload_remote_module(loop, tmp_path):
     with open(tmp_path / "scheduler_info.py", "w") as f:
         f.write(PRELOAD_TEXT)
-
-    with popen([sys.executable, "-m", "http.server", "9382"], cwd=tmp_path):
+    port = get_unused_port()
+    with popen([sys.executable, "-m", "http.server", str(port)], cwd=tmp_path):
         with popen(
             [
                 "dask-scheduler",
                 "--scheduler-file",
                 str(tmp_path / "scheduler-file.json"),
                 "--preload",
-                "http://localhost:9382/scheduler_info.py",
+                f"http://localhost:{port}/scheduler_info.py",
             ]
         ) as proc:
-            with Client(
-                scheduler_file=tmp_path / "scheduler-file.json", loop=loop
-            ) as c:
+            with Client(scheduler_file=tmp_path / "scheduler-file.json") as c:
                 assert (
                     c.run_on_scheduler(
                         lambda dask_scheduler: getattr(dask_scheduler, "foo", None)

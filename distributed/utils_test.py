@@ -1606,3 +1606,13 @@ class TaskStateMetadataPlugin(WorkerPlugin):
             ts.metadata["start_time"] = time()
         elif start == "executing" and finish == "memory":
             ts.metadata["stop_time"] = time()
+
+
+def get_unused_port(addr: str = "") -> int:
+    """Return a currently open port. Not thread safe!"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((addr, 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    s.close()
+    return port

@@ -224,7 +224,7 @@ class Server:
             self.thread_id = threading.get_ident()
 
         self.io_loop.add_callback(set_thread_ident)
-        self._startup_lock = asyncio.Lock()
+        self._startup_fut = None
         self.status = Status.undefined
 
         self.rpc = ConnectionPool(
@@ -265,9 +265,6 @@ class Server:
 
     def __await__(self):
         async def _():
-            if self.status == Status.running:
-                return self
-
             if self.status in (Status.closing, Status.closed):
                 # We should never await an object which is already closing but
                 # we should also not start it up again otherwise we'd produce
@@ -275,20 +272,29 @@ class Server:
                 await self.finished()
                 return
 
-            timeout = getattr(self, "death_timeout", 0)
-            async with self._startup_lock:
+            timeout = getattr(self, "death_timeout", None)
+            if self._startup_fut is None:
+                self._startup_fut = asyncio.ensure_future(
+                    asyncio.wait_for(self.start(), timeout=timeout)
+                )
+
+            try:
+                await self._startup_fut
+            except Exception:
+                # This timeout is very arbitrary but the close method itself
+                # already may wait more than a second to close gracefully.
+                # before we interrupt we should give it enough time to finish
+
+                # Suppress all exception since the objects might not have been
+                # properly initialized for close to be successful.
+                with suppress(Exception):
+                    await asyncio.wait_for(self.close(), timeout=2)
                 if timeout:
-                    try:
-                        await asyncio.wait_for(self.start(), timeout=timeout)
-                    except Exception:
-                        await self.close(timeout=1)
-                        raise TimeoutError(
-                            "{} failed to start in {} seconds".format(
-                                type(self).__name__, timeout
-                            )
-                        )
+                    raise TimeoutError(
+                        f"{type(self).__name__} failed to start in {timeout} seconds"
+                    )
                 else:
-                    await self.start()
+                    raise
             return self
 
         return _().__await__()
@@ -1042,7 +1048,6 @@ class ConnectionPool:
                 raise CommClosedError(
                     f"ConnectionPool not running.  Status: {self.status}"
                 )
-
             fut = asyncio.ensure_future(
                 connect(
                     addr,
@@ -1146,6 +1151,7 @@ class ConnectionPool:
         # run into an exception and raise a commclosed
         while self._n_connecting:
             await asyncio.sleep(0.005)
+        await asyncio.sleep(0)
 
 
 def coerce_to_address(o):

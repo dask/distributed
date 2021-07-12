@@ -633,6 +633,7 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
     monkeypatch.setitem(backends, "tcp", SlowBackend())
 
     server = Server({})
+    await server
     await server.listen("tcp://")
 
     pool = await ConnectionPool(limit=2)
@@ -999,3 +1000,51 @@ async def test_close_grace_period_for_handlers():
         await asyncio.wait_for(fut, 0.5)
     await comm.close()
     await server.close()
+
+
+@pytest.mark.asyncio
+async def test_idempotent_await():
+    class NotIdempotentServer(Server):
+        def __init__(self, *args, **kwargs):
+            self.value = 0
+            super().__init__(*args, **kwargs)
+
+        async def _start(self):
+            self.value += 1
+            if self.value > 1:
+                raise RuntimeError("Must not be run twice!")
+            await super()._start()
+
+    server = NotIdempotentServer({"ping": pingpong})
+
+    async def _await_server():
+        await server
+
+    async def _await_server_many():
+        futs = []
+        for _ in range(100):
+            futs.append(_await_server())
+        await asyncio.gather(*futs)
+
+    await _await_server_many()
+
+    assert server.status == Status.running
+    assert server.value == 1
+
+    # Let's ensure the server is actally up and works
+    await server.listen(0)
+    async with rpc(server.address) as remote:
+        response = await remote.ping()
+        assert response == b"pong"
+
+    # Even now, awaiting it again shouldn't hurt
+    await _await_server_many()
+
+    async with rpc(server.address) as remote:
+        response = await remote.ping()
+        assert response == b"pong"
+
+    await server.close()
+    await _await_server_many()
+
+    assert server.status == Status.closed
