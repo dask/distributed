@@ -47,7 +47,7 @@ class Worker(Process):
     ----------
     scheduler: str
         The address of the scheduler
-    python_exe: str
+    python_executable: str
         Full path to Python executable to run this worker
     connect_options: dict
         kwargs to be passed to asyncio subprocess connections
@@ -63,7 +63,7 @@ class Worker(Process):
     def __init__(
         self,
         scheduler: str,
-        python_exe: str,
+        python_executable: str,
         connect_options: dict,
         kwargs: dict,
         worker_module="distributed.cli.dask_worker",
@@ -72,7 +72,7 @@ class Worker(Process):
         super().__init__()
 
         self.scheduler = scheduler
-        self.python_exe = python_exe
+        self.python_executable = python_executable
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.worker_module = worker_module
@@ -84,7 +84,7 @@ class Worker(Process):
         cmd = " ".join(
             [
                 set_env,
-                self.python_exe,
+                self.python_executable,
                 "-m",
                 self.worker_module,
                 self.scheduler,
@@ -118,7 +118,7 @@ class Scheduler(Process):
 
     Parameters
     ----------
-    python_exe: str
+    python_executable: str
         Full path to Python executable to run this scheduler
     connect_options: dict
         kwargs to be passed to asyncio subprocess connections
@@ -127,10 +127,10 @@ class Scheduler(Process):
         dask.distributed.Scheduler class
     """
 
-    def __init__(self, python_exe: str, connect_options: dict, kwargs: dict):
+    def __init__(self, python_executable: str, connect_options: dict, kwargs: dict):
         super().__init__()
 
-        self.python_exe = python_exe
+        self.python_executable = python_executable
         self.kwargs = kwargs
         self.connect_options = connect_options
 
@@ -140,7 +140,7 @@ class Scheduler(Process):
         set_env = await _set_env_helper(self.connect_options)
 
         cmd = " ".join(
-            [set_env, self.python_exe, "-m", "distributed.cli.dask_scheduler"]
+            [set_env, self.python_executable, "-m", "distributed.cli.dask_scheduler"]
             + cli_keywords(self.kwargs, cls=_Scheduler)
         )
         self.proc = await asyncio.create_subprocess_shell(
@@ -196,7 +196,7 @@ async def _set_env_helper(connect_options: dict):
 
 
 def LocalEnvCluster(
-    python_exe: str,
+    python_executable: str,
     connect_options: Union[List[dict], dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
@@ -207,8 +207,8 @@ def LocalEnvCluster(
 
     The LocalEnvCluster function deploys a Dask Scheduler and Workers for you on
     your local machine, running in the Python environment specified by
-    `python_exe`. This allows you to run a Dask cluster in a different Python
-    environment to the host Python environment; particularly useful when
+    `python_executable`. This allows you to run a Dask cluster in a different
+    Python environment to the host Python environment; particularly useful when
     combined with `dask-labextension` as you can run a Dask Scheduler and
     Workers in a different Python env to the env hosting JupyterLab.
 
@@ -226,8 +226,8 @@ def LocalEnvCluster(
 
     Parameters
     ----------
-    python_exe : str
-        Full path to another Python executable, for example from another
+    python_executable : str
+        Full path to a Python executable, for example from another
         conda env or Python venv.
     connect_options : dict or list of dict, optional
         Keywords to pass through to :func:`asyncssh.connect`.
@@ -260,7 +260,7 @@ def LocalEnvCluster(
     scheduler = {
         "cls": Scheduler,
         "options": {
-            "python_exe": python_exe,
+            "python_executable": python_executable,
             "connect_options": connect_options,
             "kwargs": scheduler_options,
         },
@@ -269,7 +269,7 @@ def LocalEnvCluster(
         0: {
             "cls": Worker,
             "options": {
-                "python_exe": python_exe,
+                "python_executable": python_executable,
                 "connect_options": connect_options,
                 "kwargs": worker_options,
                 "worker_module": worker_module,
