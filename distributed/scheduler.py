@@ -169,7 +169,6 @@ logger = logging.getLogger(__name__)
 
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
-ZEROCONF = dask.config.get("distributed.scheduler.zeroconf")
 DEFAULT_DATA_SIZE = declare(
     Py_ssize_t, parse_bytes(dask.config.get("distributed.scheduler.default-data-size"))
 )
@@ -3363,7 +3362,7 @@ class Scheduler(SchedulerState, ServerNode):
         self._lock = asyncio.Lock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
-        if zeroconf and ZEROCONF:
+        if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
             self._zeroconf = AsyncZeroconf(ip_version=zeroconf.IPVersion.V4Only)
             self._zeroconf_services = []
 
@@ -3737,7 +3736,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
-            if zeroconf and ZEROCONF:
+            if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
                 # Advertise service via mdns service discovery
                 host, port = get_address_host_port(listener.contact_address)
                 protocol, _ = parse_address(listener.contact_address)
@@ -3817,7 +3816,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stop_services()
 
-        if zeroconf and ZEROCONF:
+        if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
             for info in self._zeroconf_services:
                 await self._zeroconf.async_unregister_service(info)
             await self._zeroconf.async_close()
