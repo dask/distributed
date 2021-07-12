@@ -42,6 +42,7 @@ dependencies:
   - toolz
   - torchvision  # Only tested here
   - tornado=6
+  - zeroconf  # Only tested here
   - zict  # overridden by git tip below
   - zstandard
   - pip:
