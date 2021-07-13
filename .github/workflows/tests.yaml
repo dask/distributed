@@ -1,7 +1,6 @@
 name: Tests
 
 on: [push, pull_request]
-# on: [push]
 
 # When this workflow is queued, automatically cancel any previous running
 # or pending jobs from the same branch
@@ -25,11 +24,11 @@ jobs:
         # To avoid hamstringing other people, change 'on: [push, pull_request]' above
         # to just 'on: [push]'; this way the stress test will run exclusively in your
         # branch (https://github.com/<your name>/distributed/actions).
-        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
     env:
-      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
-      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
