@@ -5696,7 +5696,8 @@ class Scheduler(SchedulerState, ServerNode):
                 ws._nbytes -= ts.get_nbytes()
                 if not ts._who_has:
                     # Last copy deleted
-                    del parent._tasks[key]
+                    self.transitions({key: "released"})
+
         self.log_event(ws._address, {"action": "remove-worker-data", "keys": keys})
 
     async def rebalance(
