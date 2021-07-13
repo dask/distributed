@@ -13,6 +13,7 @@ import pytest
 from tlz import take
 
 from distributed import Client
+from distributed.compatibility import MACOS
 from distributed.utils import CancelledError
 from distributed.utils_test import (
     cluster,
@@ -135,6 +136,7 @@ def test_cancellation(client):
         assert n_cancelled == 2
 
 
+@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 def test_map(client):
     with client.get_executor() as e:
         N = 10

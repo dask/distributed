@@ -4,6 +4,7 @@ import pytest
 
 from distributed import Nanny
 from distributed.client import wait
+from distributed.compatibility import LINUX
 from distributed.diagnostics.progress import (
     AllProgress,
     GroupProgress,
@@ -95,6 +96,7 @@ def check_bar_completed(capsys, width=40):
     assert percent == "100% Completed"
 
 
+@pytest.mark.flaky(condition=not COMPILED and LINUX, reruns=10, reruns_delay=5)
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
 @gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress(c, s, a, b):
@@ -178,6 +180,7 @@ async def test_AllProgress(c, s, a, b):
     assert all(set(d) == {"div"} for d in p.state.values())
 
 
+@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, Worker=Nanny)
 async def test_AllProgress_lost_key(c, s, a, b):
     p = AllProgress(s)

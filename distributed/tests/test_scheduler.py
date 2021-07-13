@@ -2475,6 +2475,7 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
 # ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
 # On Windows, it can take ~65s due to worker memory needing to stabilize first.
 @pytest.mark.slow
+@pytest.mark.flaky(condition=LINUX, reason="see comments", reruns=10, reruns_delay=5)
 @gen_cluster(
     client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
@@ -2561,6 +2562,8 @@ async def test_memory(c, s, *_):
     # On MacOS and Windows, the process memory of the Python interpreter does not shrink
     # as fast as on Linux. Note that this behaviour is heavily impacted by OS tweaks,
     # meaning that what you observe on your local host may behave differently on CI.
+    # Even on Linux, this occasionally glitches - hence why there is a flaky marker on
+    # this test.
     if not LINUX:
         return
 

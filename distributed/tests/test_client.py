@@ -4625,18 +4625,17 @@ async def test_client_timeout():
 
     s = Scheduler(loop=c.loop, port=57484)
     await asyncio.sleep(4)
+
     try:
         await s
     except OSError:  # port in use
         await c.close()
         return
 
-    start = time()
-    await c
     try:
-        assert time() < start + 2
-    finally:
+        await c
         await c.close()
+    finally:
         await s.close()
 
 
@@ -5416,6 +5415,7 @@ async def test_call_stack_collections_all(c, s, a, b):
     assert result
 
 
+@pytest.mark.flaky(condition=WINDOWS, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
 async def test_profile(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)

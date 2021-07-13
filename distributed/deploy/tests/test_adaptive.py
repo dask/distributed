@@ -298,6 +298,7 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
+@pytest.mark.flaky(condition=not WINDOWS, reruns=10, reruns_delay=5)
 @pytest.mark.xfail(condition=WINDOWS, reason="extremely flaky")
 @gen_test()
 async def test_target_duration():
