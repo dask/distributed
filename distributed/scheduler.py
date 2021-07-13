@@ -6025,6 +6025,7 @@ class Scheduler(SchedulerState, ServerNode):
                 to_recipients,
                 await asyncio.gather(
                     *(
+                        # Note: this never raises exceptions
                         self._gather_on_worker(w, who_has)
                         for w, who_has in to_recipients.items()
                     )
@@ -6036,6 +6037,8 @@ class Scheduler(SchedulerState, ServerNode):
         for snd_ws, rec_ws, ts in msgs:
             if ts._key not in failed_keys_by_recipient[rec_ws.address]:
                 to_senders[snd_ws.address].append(ts._key)
+
+        # Note: this never raises exceptions
         await asyncio.gather(
             *(self._delete_worker_data(r, v) for r, v in to_senders.items())
         )
@@ -6120,6 +6123,7 @@ class Scheduler(SchedulerState, ServerNode):
                         ):
                             del_worker_tasks[ws].add(ts)
 
+                # Note: this never raises exceptions
                 await asyncio.gather(
                     *[
                         self._delete_worker_data(ws._address, [t.key for t in tasks])
@@ -6151,6 +6155,7 @@ class Scheduler(SchedulerState, ServerNode):
 
                 await asyncio.gather(
                     *(
+                        # Note: this never raises exceptions
                         self._gather_on_worker(w, who_has)
                         for w, who_has in gathers.items()
                     )
