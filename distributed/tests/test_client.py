@@ -6344,7 +6344,7 @@ async def test_performance_report(c, s, a, b):
     pytest.importorskip("bokeh")
     da = pytest.importorskip("dask.array")
 
-    async def f(stacklevel):
+    async def f(stacklevel, mode=None):
         """
         We wrap this in a function so that the assertions aren't in the
         performanace report itself
@@ -6353,7 +6353,9 @@ async def test_performance_report(c, s, a, b):
         """
         x = da.random.random((1000, 1000), chunks=(100, 100))
         with tmpfile(extension="html") as fn:
-            async with performance_report(filename=fn, stacklevel=stacklevel):
+            async with performance_report(
+                filename=fn, stacklevel=stacklevel, mode=mode
+            ):
                 await c.compute((x + x.T).sum())
 
             with open(fn) as f:
@@ -6383,6 +6385,11 @@ async def test_performance_report(c, s, a, b):
     data = await f(stacklevel=0)
     assert "Also, we want this comment to appear" in data
     assert "Dask Performance Report" in data
+
+    data = await f(stacklevel=1, mode="inline")
+    assert "cdn.bokeh.org" not in data
+    data = await f(stacklevel=1, mode="cdn")
+    assert "cdn.bokeh.org" in data
 
 
 @pytest.mark.asyncio
