@@ -403,60 +403,59 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
-@gen_cluster()
-async def test_gather(s, a, b):
-    b.data["x"] = 1
-    b.data["y"] = 2
+@gen_cluster(client=True)
+async def test_gather(c, s, a, b):
+    x, y = await c.scatter(["x", "y"], workers=[b.address])
     with rpc(a.address) as aa:
-        resp = await aa.gather(who_has={"x": [b.address], "y": [b.address]})
+        resp = await aa.gather(who_has={x.key: [b.address], y.key: [b.address]})
 
     assert resp == {"status": "OK"}
-    assert a.data["x"] == b.data["x"]
-    assert a.data["y"] == b.data["y"]
+    assert a.data[x.key] == b.data[x.key] == "x"
+    assert a.data[y.key] == b.data[y.key] == "y"
 
 
-@gen_cluster()
-async def test_gather_missing_keys(s, a, b):
+@gen_cluster(client=True)
+async def test_gather_missing_keys(c, s, a, b):
     """A key is missing. Other keys are gathered successfully."""
-    b.data["x"] = 1
+    x = await c.scatter("x", workers=[b.address])
     with rpc(a.address) as aa:
-        resp = await aa.gather(who_has={"x": [b.address], "y": [b.address]})
+        resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
 
     assert resp == {"status": "missing-data", "keys": {"y": (b.address,)}}
-    assert a.data["x"] == b.data["x"]
+    assert a.data[x.key] == b.data[x.key] == "x"
 
 
-@gen_cluster(worker_kwargs={"timeout": "100ms"})
-async def test_gather_missing_workers(s, a, b):
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_missing_workers(c, s, a, b):
     """A worker owning the only copy of a key is missing.
     Keys from other workers are gathered successfully.
     """
     assert b.address.startswith("tcp://127.0.0.1:")
-    c_addr = "tcp://127.0.0.1:12345"
-    b.data["x"] = 1
+    bad_addr = "tcp://127.0.0.1:12345"
+    x = await c.scatter("x", workers=[b.address])
 
     with rpc(a.address) as aa:
-        resp = await aa.gather(who_has={"x": [b.address], "y": [c_addr]})
+        resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
 
-    assert resp == {"status": "missing-data", "keys": {"y": (c_addr,)}}
-    assert a.data["x"] == b.data["x"]
+    assert resp == {"status": "missing-data", "keys": {"y": (bad_addr,)}}
+    assert a.data[x.key] == b.data[x.key] == "x"
 
 
 @pytest.mark.parametrize("missing_first", [False, True])
-@gen_cluster(worker_kwargs={"timeout": "100ms"})
-async def test_gather_missing_workers_replicated(s, a, b, missing_first):
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
     """A worker owning a redundant copy of a key is missing.
     The key is successfully gathered from other workers.
     """
     assert b.address.startswith("tcp://127.0.0.1:")
-    b.data["x"] = 1
-    c_addr = "tcp://127.0.0.1:12345"
+    x = await c.scatter("x", workers=[b.address])
+    bad_addr = "tcp://127.0.0.1:12345"
     # Order matters! Test both
-    addrs = [c_addr, b.address] if missing_first else [b.address, c_addr]
+    addrs = [bad_addr, b.address] if missing_first else [b.address, bad_addr]
     with rpc(a.address) as aa:
-        resp = await aa.gather(who_has={"x": addrs})
+        resp = await aa.gather(who_has={x.key: addrs})
     assert resp == {"status": "OK"}
-    assert a.data["x"] == b.data["x"]
+    assert a.data[x.key] == b.data[x.key] == "x"
 
 
 @pytest.mark.asyncio
