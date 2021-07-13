@@ -4747,13 +4747,15 @@ class performance_report:
 
     Parameters
     ----------
-    filename: str (optional)
+    filename: str, optional
         The filename to save the performance report locally
 
-    stacklevel: int (optional)
+    stacklevel: int, optional
         The code execution frame utilized for populating the Calling Code section
         of the report. Defaults to `1` which is the frame calling ``performance_report``
 
+    mode: str, optional
+        Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
     Examples
     --------
@@ -4764,10 +4766,11 @@ class performance_report:
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html", stacklevel=1):
+    def __init__(self, filename="dask-report.html", stacklevel=1, mode=None):
         self.filename = filename
         # stacklevel 0 or less - shows dask internals which likely isn't helpful
         self._stacklevel = stacklevel if stacklevel > 0 else 1
+        self.mode = mode
 
     async def __aenter__(self):
         self.start = time()
@@ -4784,7 +4787,7 @@ class performance_report:
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, last_count=self.last_count, code=code
+            start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
         with open(self.filename, "w") as f:
             f.write(data)
