@@ -11,6 +11,7 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
