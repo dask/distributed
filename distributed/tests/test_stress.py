@@ -1,6 +1,5 @@
 import asyncio
 import random
-import sys
 from contextlib import suppress
 from operator import add
 from time import sleep
@@ -11,6 +10,7 @@ from tlz import concat, sliding_window
 from dask import delayed
 
 from distributed import Client, Nanny, wait
+from distributed.compatibility import WINDOWS
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import CancelledError
@@ -55,9 +55,7 @@ def test_stress_gc(loop, func, n):
             assert x.result() == n + 2
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="test can leave dangling RPC objects"
-)
+@pytest.mark.skipif(WINDOWS, reason="test can leave dangling RPC objects")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 8)
 async def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip("dask.array")

@@ -1801,9 +1801,7 @@ async def test_close_workers(s, a, b):
     assert b.status == Status.closed
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_test()
 async def test_host_address():
     s = await Scheduler(host="127.0.0.2", port=0)

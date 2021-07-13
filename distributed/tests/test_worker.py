@@ -30,7 +30,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
@@ -1294,9 +1294,7 @@ async def test_wait_for_outgoing(c, s, a, b):
     assert 1 / 3 < ratio < 3
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
 )
@@ -1449,9 +1447,7 @@ async def test_local_directory_make_new_directory(s):
         assert "dask-worker-space" in w.local_directory
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
     w = await Worker(s.address, host="127.0.0.2")

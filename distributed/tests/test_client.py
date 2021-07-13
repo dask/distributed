@@ -55,7 +55,7 @@ from distributed.client import (
     wait,
 )
 from distributed.comm import CommClosedError
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.objects import HasWhat, WhoHas
@@ -907,9 +907,7 @@ async def test_tokenize_on_futures(c, s, a, b):
     assert tok == tokenize(y)
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_restrictions_submit(c, s, a, b):
     x = c.submit(inc, 1, workers={a.ip})
@@ -936,9 +934,7 @@ async def test_restrictions_ip_port(c, s, a, b):
     assert y.key in b.data
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_restrictions_map(c, s, a, b):
     L = c.map(inc, range(5), workers={a.ip})
@@ -950,9 +946,7 @@ async def test_restrictions_map(c, s, a, b):
         assert s.host_restrictions[x.key] == {a.ip}
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_restrictions_get(c, s, a, b):
     dsk = {"x": 1, "y": (inc, "x"), "z": (inc, "y")}
@@ -1280,9 +1274,7 @@ async def test_get_nbytes(c, s, a, b):
     assert s.get_nbytes(summary=False) == {x.key: sizeof(1), y.key: sizeof(2)}
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_nbytes_determines_worker(c, s, a, b):
     x = c.submit(identity, 1, workers=[a.ip])
@@ -1836,9 +1828,7 @@ async def test_client_with_scheduler(c, s, a, b):
     assert result == 12
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_allow_restrictions(c, s, a, b):
     aws = s.workers[a.address]
@@ -1971,7 +1961,7 @@ async def test_badly_serialized_input(c, s, a, b):
     assert "hello!" in str(info.value)
 
 
-@pytest.mark.skipif("True", reason="")
+@pytest.mark.skip
 async def test_badly_serialized_input_stderr(capsys, c):
     o = BadlySerializedObject()
     future = c.submit(inc, o)
@@ -3034,9 +3024,7 @@ async def test_receive_lost_key(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_unrunnable_task_runs(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.ip])
@@ -3072,9 +3060,7 @@ async def test_add_worker_after_tasks(c, s):
     await n.close()
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([("127.0.0.1", 1), ("127.0.0.2", 2)], client=True)
 async def test_workers_register_indirect_data(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
@@ -3204,9 +3190,7 @@ async def test_client_replicate(c, s, *workers):
     assert len(s.tasks[y.key].who_has) == 10
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1), ("127.0.0.2", 1)],

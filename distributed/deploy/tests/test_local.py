@@ -17,6 +17,7 @@ from tornado.ioloop import IOLoop
 from dask.system import CPU_COUNT
 
 from distributed import Client, Nanny, Worker, get_client
+from distributed.compatibility import LINUX
 from distributed.core import Status
 from distributed.deploy.local import LocalCluster
 from distributed.deploy.utils_test import ClusterTest
@@ -842,9 +843,7 @@ def test_protocol_tcp(loop):
         assert cluster.scheduler.address.startswith("tcp://")
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_protocol_ip(loop):
     with LocalCluster(
         host="tcp://127.0.0.2", loop=loop, n_workers=0, processes=False

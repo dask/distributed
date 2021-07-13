@@ -15,6 +15,7 @@ from click.testing import CliRunner
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
+from distributed.compatibility import LINUX
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
@@ -119,9 +120,7 @@ def test_dashboard_non_standard_ports(loop):
         requests.get("http://localhost:4832/status/")
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_whitelist(loop):
     pytest.importorskip("bokeh")
     with pytest.raises(Exception):

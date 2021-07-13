@@ -4,7 +4,6 @@ import io
 import os
 import queue
 import socket
-import sys
 import traceback
 from time import sleep
 
@@ -13,6 +12,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.compatibility import LINUX, MACOS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
@@ -140,23 +140,20 @@ def test_ensure_ip():
         assert ensure_ip("::1") == "::1"
 
 
-def test_get_ip_interface():
-    if sys.platform == "darwin":
-        assert get_ip_interface("lo0") == "127.0.0.1"
-    elif sys.platform.startswith("linux"):
-        assert get_ip_interface("lo") == "127.0.0.1"
-    else:
-        pytest.skip(f"test needs to be enhanced for platform {sys.platform!r}")
-
+@pytest.mark.skipif(not MACOS, reason="")
+def test_get_ip_interface_macos():
+    assert get_ip_interface("lo0") == "127.0.0.1"
     non_existent_interface = "__non-existent-interface"
     expected_error_message = f"{non_existent_interface!r}.+network interface.+"
+    expected_error_message += "'lo0'"
 
-    if sys.platform == "darwin":
-        expected_error_message += "'lo0'"
-    elif sys.platform.startswith("linux"):
-        expected_error_message += "'lo'"
-    with pytest.raises(ValueError, match=expected_error_message):
-        get_ip_interface(non_existent_interface)
+
+@pytest.mark.skipif(not LINUX, reason="")
+def test_get_ip_interface_linux():
+    assert get_ip_interface("lo") == "127.0.0.1"
+    non_existent_interface = "__non-existent-interface"
+    expected_error_message = f"{non_existent_interface!r}.+network interface.+"
+    expected_error_message += "'lo'"
 
 
 def test_truncate_exception():

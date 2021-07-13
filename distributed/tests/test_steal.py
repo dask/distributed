@@ -2,7 +2,6 @@ import asyncio
 import itertools
 import logging
 import random
-import sys
 import weakref
 from operator import mul
 from time import sleep
@@ -13,6 +12,7 @@ from tlz import concat, sliding_window
 import dask
 
 from distributed import Nanny, Worker, wait, worker_client
+from distributed.compatibility import LINUX
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import key_split
@@ -33,9 +33,7 @@ setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)])
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
@@ -285,9 +283,7 @@ async def test_steal_worker_restrictions(c, s, wa, wb, wc):
     assert len(wc.tasks) == 0
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1)])
 async def test_dont_steal_host_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
@@ -306,9 +302,7 @@ async def test_dont_steal_host_restrictions(c, s, a, b):
     assert len(b.tasks) == 0
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 2)])
 async def test_steal_host_restrictions(c, s, wa, wb):
     future = c.submit(slowinc, 1, delay=0.10, workers=wa.address)

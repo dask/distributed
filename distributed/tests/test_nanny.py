@@ -4,7 +4,6 @@ import logging
 import multiprocessing as mp
 import os
 import random
-import sys
 from contextlib import suppress
 from time import sleep
 
@@ -16,6 +15,7 @@ from tornado.ioloop import IOLoop
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
@@ -192,9 +192,7 @@ async def test_random_seed(c, s, a, b):
     await check_func(lambda a, b: np.random.randint(a, b))
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="num_fds not supported on windows"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_num_fds(s):
     proc = psutil.Process()
@@ -212,16 +210,12 @@ async def test_num_fds(s):
         await asyncio.sleep(0.1)
         await w.close()
 
-    start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
         await asyncio.sleep(0.1)
-        assert time() < start + 10
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_uses_same_host_as_nanny(c, s):
     for host in ["tcp://0.0.0.0", "tcp://127.0.0.2"]:

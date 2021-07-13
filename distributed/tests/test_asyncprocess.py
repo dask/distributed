@@ -281,9 +281,7 @@ async def test_child_main_thread():
     q._writer.close()
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="num_fds not supported on windows"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_test()
 async def test_num_fds():
     # Warm up
@@ -403,7 +401,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         try:
             readable = children_alive.poll(short_timeout)
         except BrokenPipeError:
-            assert sys.platform.startswith("win"), "should only raise on windows"
+            assert WINDOWS, "should only raise on windows"
             # Broken pipe implies closed, which is readable.
             readable = True
 
@@ -418,7 +416,7 @@ def test_asyncprocess_child_teardown_on_parent_exit():
         except EOFError:
             pass  # Test passes.
         except BrokenPipeError:
-            assert sys.platform.startswith("win"), "should only raise on windows"
+            assert WINDOWS, "should only raise on windows"
             # Test passes.
         else:
             # Oops, children_alive read something. It should be closed. If
