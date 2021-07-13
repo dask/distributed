@@ -5466,8 +5466,8 @@ class Scheduler(SchedulerState, ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
-    async def restart(self, client=None, timeout=20):
-        """Restart all workers.  Reset local state."""
+    async def restart(self, client=None, timeout=30):
+        """Restart all workers. Reset local state."""
         parent: SchedulerState = cast(SchedulerState, self)
         with log_errors():
 

@@ -492,7 +492,7 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
         future = c.submit(sleep, 3600)
         await asyncio.sleep(0.1)
-        await c.restart(timeout=20)
+        await c.restart()
 
     text = sio.getvalue()
     assert "timeout" not in text.lower()
