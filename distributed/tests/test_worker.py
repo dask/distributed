@@ -147,27 +147,6 @@ async def test_worker_bad_args(c, s, a, b):
     assert tuple(results) == (3, 7)
 
 
-@pytest.mark.slow
-@gen_cluster()
-async def dont_test_delete_data_with_missing_worker(c, a, b):
-    bad = "127.0.0.1:9001"  # this worker doesn't exist
-    c.who_has["z"].add(bad)
-    c.who_has["z"].add(a.address)
-    c.has_what[bad].add("z")
-    c.has_what[a.address].add("z")
-    a.data["z"] = 5
-
-    cc = rpc(ip=c.ip, port=c.port)
-
-    await cc.delete_data(keys=["z"])  # TODO: this hangs for a while
-    assert "z" not in a.data
-    assert not c.who_has["z"]
-    assert not c.has_what[bad]
-    assert not c.has_what[a.address]
-
-    await cc.close_rpc()
-
-
 @gen_cluster(client=True)
 async def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
