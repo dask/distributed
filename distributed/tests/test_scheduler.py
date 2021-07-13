@@ -2734,7 +2734,7 @@ async def test_rebalance_workers_and_keys(client, s, *_):
 async def test_rebalance_missing_data1(s, a, b):
     """key never existed"""
     out = await s.rebalance(keys=["notexist"])
-    assert out == {"status": "missing-data", "keys": ["notexist"]}
+    assert out == {"status": "partial-fail", "keys": ["notexist"]}
 
 
 @gen_cluster(client=True)
@@ -2745,7 +2745,7 @@ async def test_rebalance_missing_data2(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
     out = await s.rebalance(keys=[f.key for f in futures])
-    assert out["status"] == "missing-data"
+    assert out["status"] == "partial-fail"
     assert 8 <= len(out["keys"]) <= 10
 
 
@@ -2766,7 +2766,7 @@ async def test_rebalance_raises_missing_data3(c, s, *_, explicit):
         keys = [f.key for f in futures]
         del futures
         out = await s.rebalance(keys=keys)
-        assert out["status"] == "missing-data"
+        assert out["status"] == "partial-fail"
         assert 1 <= len(out["keys"]) <= 10
     else:
         del futures
@@ -3051,8 +3051,7 @@ async def test_rebalance_dead_recipient(client, s, a, b, c):
     assert s.workers.keys() == {a.address, b.address}
 
     out = await s._rebalance_move_data([(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)])
-    # FIXME status code is misleading
-    assert out == {"status": "missing-data", "keys": [y.key]}
+    assert out == {"status": "partial-fail", "keys": [y.key]}
     assert a.data == {y.key: "y"}
     assert b.data == {x.key: "x"}
     assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}

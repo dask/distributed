@@ -5635,7 +5635,7 @@ class Scheduler(SchedulerState, ServerNode):
         elif result["status"] == "OK":
             keys_failed = set()
             keys_ok = who_has.keys()
-        elif result["status"] == "missing-data":
+        elif result["status"] == "partial-fail":
             keys_failed = set(result["keys"])
             keys_ok = who_has.keys() - keys_failed
             logger.warning(
@@ -5791,7 +5791,7 @@ class Scheduler(SchedulerState, ServerNode):
                     if k not in parent._tasks or not parent._tasks[k].who_has
                 ]
                 if missing_data:
-                    return {"status": "missing-data", "keys": missing_data}
+                    return {"status": "partial-fail", "keys": missing_data}
 
             msgs = self._rebalance_find_msgs(keys, workers)
             if not msgs:
@@ -5799,7 +5799,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             async with self._lock:
                 result = await self._rebalance_move_data(msgs)
-                if result["status"] == "missing-data" and keys is None:
+                if result["status"] == "partial-fail" and keys is None:
                     # Only return failed keys if the client explicitly asked for them
                     result = {"status": "OK"}
                 return result
@@ -6057,7 +6057,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         missing_keys = {k for r in failed_keys_by_recipient.values() for k in r}
         if missing_keys:
-            return {"status": "missing-data", "keys": list(missing_keys)}
+            return {"status": "partial-fail", "keys": list(missing_keys)}
         else:
             return {"status": "OK"}
 
@@ -6110,7 +6110,7 @@ class Scheduler(SchedulerState, ServerNode):
             tasks = {parent._tasks[k] for k in keys}
             missing_data = [ts._key for ts in tasks if not ts._who_has]
             if missing_data:
-                return {"status": "missing-data", "keys": missing_data}
+                return {"status": "partial-fail", "keys": missing_data}
 
             # Delete extraneous data
             if delete:

@@ -400,7 +400,7 @@ async def test_gather_missing_keys(c, s, a, b):
     with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
 
-    assert resp == {"status": "missing-data", "keys": {"y": (b.address,)}}
+    assert resp == {"status": "partial-fail", "keys": {"y": (b.address,)}}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
@@ -416,7 +416,7 @@ async def test_gather_missing_workers(c, s, a, b):
     with rpc(a.address) as aa:
         resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
 
-    assert resp == {"status": "missing-data", "keys": {"y": (bad_addr,)}}
+    assert resp == {"status": "partial-fail", "keys": {"y": (bad_addr,)}}
     assert a.data[x.key] == b.data[x.key] == "x"
 
 

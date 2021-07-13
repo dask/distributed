@@ -3095,7 +3095,7 @@ class Client:
         else:
             keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
-        if result["status"] == "missing-data":
+        if result["status"] == "partial-fail":
             raise KeyError(f"Could not rebalance keys: {result['keys']}")
         assert result["status"] == "OK", result
 

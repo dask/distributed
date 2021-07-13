@@ -1088,7 +1088,7 @@ class Worker(ServerNode):
                 missing_workers,
                 who_has,
             )
-            return {"status": "missing-data", "keys": missing_keys}
+            return {"status": "partial-fail", "keys": missing_keys}
         else:
             return {"status": "OK"}
 
