@@ -66,6 +66,18 @@ class Adaptive(AdaptiveCore):
     >>> cluster = MyCluster()
     >>> cluster.adapt(minimum=10, maximum=100)
 
+    In some cases, you may want to subclass Adaptive for custom functionality. 
+    As mentioned, for example, you might need to override :meth:`Adaptive.workers_to_close`
+    to determine how workers are removed from the cluster in accordance to your workload's 
+    memory requirements. Same thing goes for other class methods like :meth:`Adaptive.target`.
+
+    >>> from distributed import Adaptive
+    >>> class MyAdaptive(Adaptive):
+    ...     async def workers_to_close(self, target: int):
+    ...        """ Get list of worker addresses to close, if any """
+    ...     async def target(self)::
+    ...        """ Determine target number of workers """
+
     Notes
     -----
     Subclasses can override :meth:`Adaptive.target` and
