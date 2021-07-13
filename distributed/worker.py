@@ -11,7 +11,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Hashable, MutableMapping
+from collections.abc import MutableMapping
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
@@ -2608,12 +2608,15 @@ class Worker(ServerNode):
 
     def release_key(
         self,
-        key: Hashable,
+        key: str,
         cause: Optional[TaskState] = None,
         reason: Optional[str] = None,
         report: bool = True,
     ):
         try:
+
+            if self.validate:
+                assert isinstance(key, str)
             ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
