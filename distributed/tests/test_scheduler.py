@@ -2936,3 +2936,47 @@ async def test_transition_counter(c, s, a, b):
     assert s.transition_counter == 0
     await c.submit(inc, 1)
     assert s.transition_counter > 1
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1) for _ in range(10)],
+    # typical runtime just 2-3s but on CI this may increase significantly
+    timeout=60,
+)
+async def test_worker_heartbeat_after_cancel(c, s, *workers):
+    """This test is intended to ensure that after cancelation of a graph, the
+    worker heartbeat is always successful. The hearbeat may not be successful if
+    the worker and scheduler state drift and the scheduler doesn't handle
+    unknown information gracefully. One example would be a released/cancelled
+    computation where the worker returns metrics about duration, type, etc. and
+    the scheduler doesn't handle the forgotten task gracefully.
+
+    Failures are not triggered reliably since the race conditions for this error
+    case are very hard to produce. Likelihood of failure increases with the
+    number of workers.
+
+    See also https://github.com/dask/distributed/issues/4587
+    """
+    da = pytest.importorskip("dask.array")
+    for w in workers:
+        w.periodic_callbacks["heartbeat"].stop()
+    x = da.random.random((2000000, 100), chunks=(10000, None))
+    svd = da.linalg.svd(x)
+
+    futs = c.compute(svd)
+
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+
+    while sum(w.executing_count for w in workers) < len(workers) / 2:
+        await asyncio.sleep(0.001)
+
+    await c.cancel(futs)
+
+    while s.tasks:
+        await asyncio.sleep(0.001)
+
+    while any(w.tasks for w in workers):
+        await asyncio.gather(*[w.heartbeat() for w in workers])

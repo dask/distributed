@@ -3947,7 +3947,9 @@ class Scheduler(SchedulerState, ServerNode):
         ws._last_seen = local_now
         if executing is not None:
             ws._executing = {
-                parent._tasks[key]: duration for key, duration in executing.items()
+                parent._tasks[key]: duration
+                for key, duration in executing.items()
+                if key in parent._tasks
             }
 
         ws._metrics = metrics
