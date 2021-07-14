@@ -13,6 +13,7 @@ import pytest
 from tlz import take
 
 from distributed import Client
+from distributed.compatibility import MACOS
 from distributed.utils import CancelledError
 from distributed.utils_test import (
     cluster,
@@ -93,13 +94,12 @@ def test_wait(client):
         assert "hello" in str(errors[0])
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_cancellation(client):
     with client.get_executor(pure=False) as e:
         fut = e.submit(time.sleep, 2.0)
         start = time.time()
         while number_of_processing_tasks(client) == 0:
-            assert time.time() < start + 1
+            assert time.time() < start + 10
             time.sleep(0.01)
         assert not fut.done()
 
@@ -107,7 +107,7 @@ def test_cancellation(client):
         assert fut.cancelled()
         start = time.time()
         while number_of_processing_tasks(client) != 0:
-            assert time.time() < start + 1
+            assert time.time() < start + 10
             time.sleep(0.01)
 
         with pytest.raises(CancelledError):
@@ -118,7 +118,7 @@ def test_cancellation(client):
         N = 10
         fs = [e.submit(slowinc, i, delay=0.02) for i in range(N)]
         fs[3].cancel()
-        res = wait(fs, return_when=FIRST_COMPLETED)
+        res = wait(fs, return_when=FIRST_COMPLETED, timeout=30)
         assert len(res.not_done) > 0
         assert len(res.done) >= 1
 
@@ -132,10 +132,11 @@ def test_cancellation(client):
         fs[3].cancel()
         fs[8].cancel()
 
-        n_cancelled = sum(f.cancelled() for f in as_completed(fs))
+        n_cancelled = sum(f.cancelled() for f in as_completed(fs, timeout=30))
         assert n_cancelled == 2
 
 
+@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 def test_map(client):
     with client.get_executor() as e:
         N = 10

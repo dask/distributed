@@ -176,7 +176,7 @@ distributed:
       threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
-      connect: 10s          # time before connecting fails
+      connect: 30s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
     require-encryption: null # Whether to require encryption on non-local comms
