@@ -106,17 +106,16 @@ class ServerNode(Server):
         """
         deque_handler = self._deque_handler
         if start is None:
-            L = list(deque_handler.deque)
-        else:
-            L = deque_handler.deque
-            L = [msg for msg in L if msg.created > start]
-        if n is not None:
-            L = [L[-i - 1] for i in range(min(n, len(L)))]
-        if timestamps:
-            return [
-                (msg.created, msg.levelname, deque_handler.format(msg)) for msg in L
-            ]
-        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+            start = -1
+        L = []
+        for count, msg in enumerate(deque_handler.deque):
+            if n and count >= n or msg.created < start:
+                break
+            if timestamps:
+                L.append((msg.created, msg.levelname, deque_handler.format(msg)))
+            else:
+                L.append((msg.levelname, deque_handler.format(msg)))
+        return L
 
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None
