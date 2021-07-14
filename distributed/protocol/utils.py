@@ -4,9 +4,6 @@ import dask
 
 from ..utils import nbytes
 
-BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
-
-
 msgpack_opts = {
     ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
 }
@@ -14,7 +11,7 @@ msgpack_opts["strict_map_key"] = False
 msgpack_opts["raw"] = False
 
 
-def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
+def frame_split_size(frame, n=None) -> list:
     """
     Split a frame into a list of frames of maximum size
 
@@ -25,6 +22,7 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
+    n = n or dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
     frame = memoryview(frame)
 
     if frame.nbytes <= n:
