@@ -1217,7 +1217,7 @@ class Worker(ServerNode):
         return self.close(*args, **kwargs)
 
     async def close(
-        self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
+        self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):
         with log_errors():
             if self.status in (Status.closed, Status.closing):

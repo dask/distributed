@@ -12,6 +12,7 @@ from time import sleep
 from unittest import mock
 
 import cloudpickle
+import psutil
 import pytest
 from tlz import concat, first, frequencies, merge, valmap
 
@@ -21,7 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -616,7 +617,7 @@ async def test_ready_remove_worker(s, a, b):
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(inc, range(20))
     await wait(futures)
@@ -740,24 +741,17 @@ async def test_config_stealing(cleanup):
             assert "stealing" not in s.extensions
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_file_descriptors_dont_leak(s):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
     before = proc.num_fds()
 
-    w = await Worker(s.address)
-    await w.close()
+    async with Worker(s.address):
+        assert proc.num_fds() > before
 
-    during = proc.num_fds()
-
-    start = time()
     while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
 
 
 @gen_cluster()
@@ -825,7 +819,7 @@ async def test_scheduler_sees_memory_limits(s):
     await w.close()
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     [y] = await c.scatter([list(range(1000))], workers=b.address)
@@ -927,13 +921,10 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
-@gen_cluster(client=True, nthreads=[], timeout=240)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@gen_cluster(client=True, nthreads=[], timeout=60)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
-    psutil = pytest.importorskip("psutil")
     da = pytest.importorskip("dask.array")
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
@@ -978,10 +969,8 @@ async def test_file_descriptors(c, s):
             assert comm.closed() or comm.peer_address != s.address, comm
     assert not s.stream_comms
 
-    start = time()
     while proc.num_fds() > num_fds_1 + N:
         await asyncio.sleep(0.01)
-        assert time() < start + 3
 
 
 @pytest.mark.slow
@@ -1322,36 +1311,30 @@ async def test_non_existent_worker(c, s):
 async def test_correct_bad_time_estimate(c, s, *workers):
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
-
     futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-
     await asyncio.sleep(0.5)
-
     await wait(futures)
-
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
-@gen_test()
-async def test_service_hosts():
-    port = 0
-    for url, expected in [
-        ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
-    ]:
-        async with Scheduler(host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            if isinstance(expected, tuple):
-                assert sock.getsockname()[0] in expected
-            else:
-                assert sock.getsockname()[0] == expected
-
-    port = ("127.0.0.1", 0)
-    for url in ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]:
-        async with Scheduler(dashboard_address="127.0.0.1:0", host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            assert sock.getsockname()[0] == "127.0.0.1"
+@pytest.mark.parametrize(
+    "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
+)
+@pytest.mark.parametrize(
+    "dashboard_address,expect",
+    [
+        (None, ("::", "0.0.0.0")),
+        ("127.0.0.1:0", ("127.0.0.1",)),
+    ],
+)
+@pytest.mark.asyncio
+async def test_dashboard_host(host, dashboard_address, expect):
+    """Dashboard is accessible from any host by default, but it can be also bound to
+    localhost.
+    """
+    async with Scheduler(host=host, dashboard_address=dashboard_address) as s:
+        sock = first(s.http_server._sockets.values())
+        assert sock.getsockname()[0] in expect
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
@@ -1540,9 +1523,6 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@pytest.mark.flaky(
-    reruns=10, reruns_delay=5, reason="second worker also errant for some reason"
-)
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
@@ -1776,7 +1756,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = c.submit(np.arange, 1000000, workers=[a.worker_address], pure=False)
@@ -1818,9 +1798,7 @@ async def test_close_workers(s, a, b):
     assert b.status == Status.closed
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_test()
 async def test_host_address():
     s = await Scheduler(host="127.0.0.2", port=0)
@@ -2358,7 +2336,7 @@ async def test_unknown_task_duration_config_2(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))
@@ -2479,8 +2457,8 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nbytes = getattr(minfo, attr)
-        if min_ * 2 ** 20 <= nbytes <= max_ * 2 ** 20:
+        nmib = getattr(minfo, attr) / 2 ** 20
+        if min_ <= nmib <= max_:
             return
         if time() - t0 > timeout:
             raise TimeoutError(
@@ -2489,13 +2467,12 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
         await asyncio.sleep(0.1)
 
 
-# This test is heavily influenced by hard-to-control factors such as memory management
-# by the Python interpreter and the OS, so it occasionally glitches
-@pytest.mark.flaky(reruns=3, reruns_delay=5)
-# ~33s runtime, or distributed.memory.recent-to-old-time + 3s
+# ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
+# On Windows, it can take ~65s due to worker memory needing to stabilize first.
 @pytest.mark.slow
+@pytest.mark.flaky(condition=LINUX, reason="see comments", reruns=10, reruns_delay=5)
 @gen_cluster(
-    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60
+    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
 async def test_memory(c, s, *_):
     pytest.importorskip("zict")
@@ -2508,14 +2485,25 @@ async def test_memory(c, s, *_):
     assert s_m0.managed == 0
     assert a.memory.managed == 0
     assert b.memory.managed == 0
-    # When a worker first goes online, its RAM is immediately counted as
-    # unmanaged_old
-    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
-    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
-    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
-    f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
-    f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
+    # When a worker first goes online, its RAM is immediately counted as unmanaged_old.
+    # On Windows, however, there is somehow enough time between the worker start and
+    # this line for 2 heartbeats and the memory keeps growing substantially for a while.
+    # Sometimes there is a single heartbeat but on the consecutive test we observe
+    # a large unexplained increase in unmanaged_recent memory.
+    # Wait for the situation to stabilize.
+    if WINDOWS:
+        await asyncio.sleep(10)
+        initial_timeout = 40
+    else:
+        initial_timeout = 0
+
+    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=initial_timeout)
+    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=initial_timeout)
+    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=initial_timeout)
+
+    f1 = c.submit(leaking, 100, 50, 10, pure=False, workers=[a.name])
+    f2 = c.submit(leaking, 100, 50, 10, pure=False, workers=[b.name])
     await assert_memory(s, "unmanaged_recent", 300, 380)
     await assert_memory(a, "unmanaged_recent", 150, 190)
     await assert_memory(b, "unmanaged_recent", 150, 190)
@@ -2530,19 +2518,17 @@ async def test_memory(c, s, *_):
     await assert_memory(b, "unmanaged_recent", 50, 90)
 
     # Force the output of f1 and f2 to spill to disk.
-    # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
-    # process memory per worker, or roughly after 3~7 rounds of the below depending
-    # on how much RAM the interpreter is using.
+    # With spill=0.7 and memory_limit=500 MiB, we'll start spilling at 350 MiB process
+    # memory per worker, or up to 20 iterations of the below depending on how much RAM
+    # the interpreter is using.
     more_futs = []
-    for _ in range(8):
-        if s.memory.managed_spilled > 0:
-            break
-        more_futs += [
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
-        ]
-        await asyncio.sleep(2)
-    await assert_memory(s, "managed_spilled", 1, 999)
+    while not s.memory.managed_spilled:
+        if a.memory.process < 0.7 * 500 * 2 ** 20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[a.name]))
+        if b.memory.process < 0.7 * 500 * 2 ** 20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[b.name]))
+        await wait(more_futs)
+        await asyncio.sleep(1)
 
     # Wait for the spilling to finish. Note that this does not make the test take
     # longer as we're waiting for recent-to-old-time anyway.
@@ -2565,24 +2551,23 @@ async def test_memory(c, s, *_):
     # transition into unmanaged_old
     await c.run(gc.collect)
     await assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
-    await assert_memory(
-        s,
-        "unmanaged_old",
-        orig_old + 90,
-        # On MacOS, the process memory of the Python interpreter does not shrink as
-        # fast as on Linux/Windows
-        9999 if MACOS else orig_old + 190,
-        timeout=40,
-    )
+    await assert_memory(s, "unmanaged_old", orig_old + 90, 9999, timeout=40)
 
-    # When the leaked memory is cleared, unmanaged and unmanaged_old drop
-    # On MacOS, the process memory of the Python interpreter does not shrink as fast
-    # as on Linux/Windows
-    if not MACOS:
-        await c.run(clear_leak)
-        await assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
-        await assert_memory(s, "unmanaged_old", 0, orig_old + 95)
-        await assert_memory(s, "unmanaged_recent", 0, 90)
+    # When the leaked memory is cleared, unmanaged and unmanaged_old drop.
+    # On MacOS and Windows, the process memory of the Python interpreter does not shrink
+    # as fast as on Linux. Note that this behaviour is heavily impacted by OS tweaks,
+    # meaning that what you observe on your local host may behave differently on CI.
+    # Even on Linux, this occasionally glitches - hence why there is a flaky marker on
+    # this test.
+    if not LINUX:
+        return
+
+    orig_unmanaged = s.memory.unmanaged / 2 ** 20
+    orig_old = s.memory.unmanaged_old / 2 ** 20
+    await c.run(clear_leak)
+    await assert_memory(s, "unmanaged", 0, orig_unmanaged - 60)
+    await assert_memory(s, "unmanaged_old", 0, orig_old - 60)
+    await assert_memory(s, "unmanaged_recent", 0, 90)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
@@ -2829,23 +2814,20 @@ async def test_rebalance_no_limit(c, s, a, b):
     worker_kwargs={"memory_limit": "1000 MiB"},
     config={
         "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.recipient-max": 0.4,
+        "distributed.worker.memory.rebalance.sender-min": 0.2,
+        "distributed.worker.memory.rebalance.recipient-max": 0.1,
     },
 )
 async def test_rebalance_no_recipients(c, s, *_):
     """There are sender workers, but no recipient workers"""
     a, b = s.workers
-    futures = [
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[a]),  # 40%
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[b]),  # 40%
-    ] + c.map(
-        lambda _: "x" * (2 ** 21), range(100), workers=[a]
-    )  # 20%
-    await wait(futures)
-    await assert_memory(s, "managed", 1000, 1001)
-    await assert_ndata(c, {a: 101, b: 1})
+    fut_a = c.map(lambda _: "x" * (2 ** 20), range(250), workers=[a])  # 25%
+    fut_b = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[b])  # 10%
+    await wait(fut_a + fut_b)
+    await assert_memory(s, "managed", 350, 351)
+    await assert_ndata(c, {a: 250, b: 100})
     await s.rebalance()
-    await assert_ndata(c, {a: 101, b: 1})
+    await assert_ndata(c, {a: 250, b: 100})
 
 
 @gen_cluster(
@@ -3118,3 +3100,47 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1) for _ in range(10)],
+    # typical runtime just 2-3s but on CI this may increase significantly
+    timeout=60,
+)
+async def test_worker_heartbeat_after_cancel(c, s, *workers):
+    """This test is intended to ensure that after cancelation of a graph, the
+    worker heartbeat is always successful. The hearbeat may not be successful if
+    the worker and scheduler state drift and the scheduler doesn't handle
+    unknown information gracefully. One example would be a released/cancelled
+    computation where the worker returns metrics about duration, type, etc. and
+    the scheduler doesn't handle the forgotten task gracefully.
+
+    Failures are not triggered reliably since the race conditions for this error
+    case are very hard to produce. Likelihood of failure increases with the
+    number of workers.
+
+    See also https://github.com/dask/distributed/issues/4587
+    """
+    da = pytest.importorskip("dask.array")
+    for w in workers:
+        w.periodic_callbacks["heartbeat"].stop()
+    x = da.random.random((2000000, 100), chunks=(10000, None))
+    svd = da.linalg.svd(x)
+
+    futs = c.compute(svd)
+
+    while not s.tasks:
+        await asyncio.sleep(0.001)
+
+    while sum(w.executing_count for w in workers) < len(workers) / 2:
+        await asyncio.sleep(0.001)
+
+    await c.cancel(futs)
+
+    while s.tasks:
+        await asyncio.sleep(0.001)
+
+    while any(w.tasks for w in workers):
+        await asyncio.gather(*[w.heartbeat() for w in workers])
