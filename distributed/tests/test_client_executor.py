@@ -99,7 +99,7 @@ def test_cancellation(client):
         fut = e.submit(time.sleep, 2.0)
         start = time.time()
         while number_of_processing_tasks(client) == 0:
-            assert time.time() < start + 1
+            assert time.time() < start + 10
             time.sleep(0.01)
         assert not fut.done()
 
@@ -107,7 +107,7 @@ def test_cancellation(client):
         assert fut.cancelled()
         start = time.time()
         while number_of_processing_tasks(client) != 0:
-            assert time.time() < start + 1
+            assert time.time() < start + 10
             time.sleep(0.01)
 
         with pytest.raises(CancelledError):
@@ -118,7 +118,7 @@ def test_cancellation(client):
         N = 10
         fs = [e.submit(slowinc, i, delay=0.02) for i in range(N)]
         fs[3].cancel()
-        res = wait(fs, return_when=FIRST_COMPLETED)
+        res = wait(fs, return_when=FIRST_COMPLETED, timeout=30)
         assert len(res.not_done) > 0
         assert len(res.done) >= 1
 
@@ -132,7 +132,7 @@ def test_cancellation(client):
         fs[3].cancel()
         fs[8].cancel()
 
-        n_cancelled = sum(f.cancelled() for f in as_completed(fs))
+        n_cancelled = sum(f.cancelled() for f in as_completed(fs, timeout=30))
         assert n_cancelled == 2
 
 
