@@ -790,19 +790,14 @@ async def test_hold_onto_dependents(c, s, a, b):
         await asyncio.sleep(0.1)
 
 
-@pytest.mark.slow
-@gen_cluster(nthreads=[])
-async def test_worker_death_timeout(s):
-    with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
-        await s.close()
-        w = Worker(s.address, death_timeout=1)
-
+@gen_test()
+async def test_worker_death_timeout():
+    w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
     with pytest.raises(TimeoutError) as info:
         await w
 
     assert "Worker" in str(info.value)
     assert "timed out" in str(info.value) or "failed to start" in str(info.value)
-
     assert w.status == Status.closed
 
 
