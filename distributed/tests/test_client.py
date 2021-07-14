@@ -6741,3 +6741,21 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 
     c_default = default_client()
     assert c is c_default
+
+
+@gen_cluster(client=True)
+async def test_annotate_collections(c, s, a, b):
+    import dask.array as da
+
+    x = da.ones(10)
+
+    with dask.annotate(foo="bar"):
+        y = x + 1
+
+    assert y.__dask_graph__().layers[y.name].annotations == {"foo": "bar"}
+
+    y = await y.persist()
+
+    ts = first(v for k, v in s.tasks.items() if "add" in k)
+
+    assert ts.annotations == {"foo": "bar"}
