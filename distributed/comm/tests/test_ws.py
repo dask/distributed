@@ -95,33 +95,26 @@ async def test_expect_scheduler_ssl_when_sharing_server():
                     pass
 
 
-@gen_cluster(nthreads=[], scheduler_kwargs={"protocol": "ws://"})
-async def test_roundtrip(s, a, b):
-    async with Worker(s.address) as w:
-        async with Client(s.address, asynchronous=True) as c:
-            assert c.scheduler.address.startswith("ws://")
-            assert w.address.startswith("ws://")
-            future = c.submit(inc, 1)
-            result = await future
-            assert result == 2
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_roundtrip(c, s, a, b):
+    assert a.address.startswith("ws://")
+    assert b.address.startswith("ws://")
+    assert c.scheduler.address.startswith("ws://")
+    assert await c.submit(inc, 1) == 2
 
 
-@gen_cluster(nthreads=[], scheduler_kwargs={"protocol": "ws://"})
-async def test_collections(s):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    async with Worker(s.address), Worker(s.address):
-        async with Client(s.address, asynchronous=True):
-            x = da.random.random((1000, 1000), chunks=(100, 100))
-            x = x + x.T
-            await x.persist()
+    x = da.random.random((1000, 1000), chunks=(100, 100))
+    x = x + x.T
+    await x.persist()
 
 
-@gen_cluster(nthreads=[], scheduler_kwargs={"protocol": "ws://"})
-async def test_large_transfer(s):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_large_transfer(c, s, a, b):
     np = pytest.importorskip("numpy")
-    async with Worker(s.address, protocol="ws://"):
-        async with Client(s.address, asynchronous=True) as c:
-            await c.scatter(np.random.random(1_000_000))
+    await c.scatter(np.random.random(1_000_000))
 
 
 @pytest.mark.asyncio
@@ -181,7 +174,9 @@ async def test_connection_made_with_extra_conn_args(cleanup, protocol, security)
 @gen_test()
 async def test_quiet_close():
     with warnings.catch_warnings(record=True) as record:
-        async with Client(protocol="ws", processes=False, asynchronous=True) as c:
+        async with Client(
+            protocol="ws", processes=False, asynchronous=True, dashboard_address=":0"
+        ):
             pass
 
     # For some reason unrelated @coroutine warnings are showing up

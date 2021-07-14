@@ -256,15 +256,13 @@ def test_nprocs_auto(loop):
 
 def test_nprocs_expands_name(loop):
     with popen(["dask-scheduler", "--no-dashboard"]):
-        with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]
-        ) as worker:
+        with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]):
             with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2"]):
                 with Client("tcp://127.0.0.1:8786", loop=loop) as c:
                     start = time()
                     while len(c.scheduler_info()["workers"]) < 4:
                         sleep(0.2)
-                        assert time() < start + 10
+                        assert time() < start + 30
 
                     info = c.scheduler_info()
                     names = [d["name"] for d in info["workers"].values()]

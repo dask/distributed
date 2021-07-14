@@ -1514,7 +1514,7 @@ async def test_interface_async(cleanup, loop, Worker):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_protocol_from_scheduler_address(cleanup, Worker):
-    ucp = pytest.importorskip("ucp")
+    pytest.importorskip("ucp")
 
     async with Scheduler(protocol="ucx", port=0, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
@@ -1572,16 +1572,14 @@ async def test_close_gracefully(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[])
-async def test_lifetime(s):
+@gen_cluster(client=True, nthreads=[])
+async def test_lifetime(c, s):
     async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
-        async with Client(s.address, asynchronous=True) as c:
-            futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
-            await asyncio.sleep(1.5)
-            assert b.status != Status.running
-            await b.finished()
-
-            assert set(b.data) == set(a.data)  # successfully moved data over
+        futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
+        await asyncio.sleep(1.5)
+        assert b.status != Status.running
+        await b.finished()
+        assert set(b.data) == set(a.data)  # successfully moved data over
 
 
 @gen_cluster(worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
@@ -1670,20 +1668,19 @@ async def test_update_latency(s):
 
 
 @pytest.mark.skipif(MACOS, reason="frequently hangs")
-@gen_cluster(nthreads=[])
-async def test_workerstate_executing(s):
+@gen_cluster(client=True, nthreads=[])
+async def test_workerstate_executing(c, s):
     async with await Worker(s.address) as w:
-        async with Client(s.address, asynchronous=True) as c:
-            ws = s.workers[w.address]
-            # Initially there are no active tasks
-            assert not ws.executing
-            # Submit a task and ensure the WorkerState is updated with the task
-            # it's executing
-            f = c.submit(slowinc, 1, delay=1)
-            while not ws.executing:
-                await asyncio.sleep(0.01)
-            assert s.tasks[f.key] in ws.executing
-            await f
+        ws = s.workers[w.address]
+        # Initially there are no active tasks
+        assert not ws.executing
+        # Submit a task and ensure the WorkerState is updated with the task
+        # it's executing
+        f = c.submit(slowinc, 1, delay=1)
+        while not ws.executing:
+            await asyncio.sleep(0.01)
+        assert s.tasks[f.key] in ws.executing
+        await f
 
 
 @pytest.mark.parametrize("reconnect", [True, False])
@@ -1721,26 +1718,25 @@ async def test_bad_local_directory(s):
     assert not any("error" in log for log in s.get_logs())
 
 
-@gen_cluster(nthreads=[])
-async def test_taskstate_metadata(s):
+@gen_cluster(client=True, nthreads=[])
+async def test_taskstate_metadata(c, s):
     async with await Worker(s.address) as w:
-        async with Client(s.address, asynchronous=True) as c:
-            await c.register_worker_plugin(TaskStateMetadataPlugin())
+        await c.register_worker_plugin(TaskStateMetadataPlugin())
 
-            f = c.submit(inc, 1)
-            await f
+        f = c.submit(inc, 1)
+        await f
 
-            ts = w.tasks[f.key]
-            assert "start_time" in ts.metadata
-            assert "stop_time" in ts.metadata
-            assert ts.metadata["stop_time"] > ts.metadata["start_time"]
+        ts = w.tasks[f.key]
+        assert "start_time" in ts.metadata
+        assert "stop_time" in ts.metadata
+        assert ts.metadata["stop_time"] > ts.metadata["start_time"]
 
-            # Check that Scheduler TaskState.metadata was also updated
-            assert s.tasks[f.key].metadata == ts.metadata
+        # Check that Scheduler TaskState.metadata was also updated
+        assert s.tasks[f.key].metadata == ts.metadata
 
 
-@gen_cluster(nthreads=[])
-async def test_executor_offload(s, monkeypatch):
+@gen_cluster(client=True, nthreads=[])
+async def test_executor_offload(c, s, monkeypatch):
     class SameThreadClass:
         def __getstate__(self):
             return ()
@@ -1756,13 +1752,12 @@ async def test_executor_offload(s, monkeypatch):
 
         assert w.executor is _offload_executor
 
-        async with Client(s.address, asynchronous=True) as c:
-            x = SameThreadClass()
+        x = SameThreadClass()
 
-            def f(x):
-                return threading.get_ident() == x._thread_ident
+        def f(x):
+            return threading.get_ident() == x._thread_ident
 
-            assert await c.submit(f, x)
+        assert await c.submit(f, x)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -1979,8 +1974,8 @@ async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a,
             default_client()
 
 
-@gen_cluster(nthreads=[])
-async def test_multiple_executors(s):
+@gen_cluster(client=True, nthreads=[])
+async def test_multiple_executors(c, s):
     def get_thread_name():
         return threading.current_thread().name
 
@@ -1988,16 +1983,15 @@ async def test_multiple_executors(s):
         s.address,
         nthreads=2,
         executor={"GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")},
-    ) as w:
-        async with Client(s.address, asynchronous=True) as c:
-            futures = []
-            with dask.annotate(executor="default"):
-                futures.append(c.submit(get_thread_name, pure=False))
-            with dask.annotate(executor="GPU"):
-                futures.append(c.submit(get_thread_name, pure=False))
-            default_result, gpu_result = await c.gather(futures)
-            assert "Dask-Default-Threads" in default_result
-            assert "Dask-GPU-Threads" in gpu_result
+    ):
+        futures = []
+        with dask.annotate(executor="default"):
+            futures.append(c.submit(get_thread_name, pure=False))
+        with dask.annotate(executor="GPU"):
+            futures.append(c.submit(get_thread_name, pure=False))
+        default_result, gpu_result = await c.gather(futures)
+        assert "Dask-Default-Threads" in default_result
+        assert "Dask-GPU-Threads" in gpu_result
 
 
 def assert_task_states_on_worker(expected, worker):

@@ -34,7 +34,7 @@ worker_spec = {
     1: {"cls": Worker, "options": {"nthreads": 2}},
     "my-worker": {"cls": MyWorker, "options": {"nthreads": 3}},
 }
-scheduler = {"cls": Scheduler, "options": {"port": 0}}
+scheduler = {"cls": Scheduler, "options": {"port": 0, "dashboard_address": ":0"}}
 
 
 @gen_test()
@@ -89,9 +89,7 @@ def test_spec_sync(loop):
 
 
 def test_loop_started():
-    with SpecCluster(
-        worker_spec, scheduler={"cls": Scheduler, "options": {"port": 0}}
-    ) as cluster:
+    with SpecCluster(worker_spec, scheduler=scheduler):
         pass
 
 
@@ -146,7 +144,7 @@ async def test_adaptive_killed_worker():
         async with SpecCluster(
             asynchronous=True,
             worker={"cls": Nanny, "options": {"nthreads": 1}},
-            scheduler={"cls": Scheduler, "options": {"port": 0}},
+            scheduler=scheduler,
         ) as cluster:
             async with Client(cluster, asynchronous=True) as client:
                 # Scale up a cluster with 1 worker.
@@ -221,7 +219,7 @@ async def test_broken_worker():
         async with SpecCluster(
             asynchronous=True,
             workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
-            scheduler={"cls": Scheduler, "options": {"port": 0}},
+            scheduler=scheduler,
         ):
             pass
 
@@ -229,10 +227,8 @@ async def test_broken_worker():
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")
-@pytest.mark.slow
 def test_spec_close_clusters(loop):
     workers = {0: {"cls": Worker}}
-    scheduler = {"cls": Scheduler, "options": {"port": 0}}
     cluster = SpecCluster(workers=workers, scheduler=scheduler, loop=loop)
     assert cluster in SpecCluster._instances
     close_clusters()
@@ -254,12 +250,8 @@ async def test_new_worker_spec():
 
 @gen_test()
 async def test_nanny_port():
-    scheduler = {"cls": Scheduler}
     workers = {0: {"cls": Nanny, "options": {"port": 9200}}}
-
-    async with SpecCluster(
-        scheduler=scheduler, workers=workers, asynchronous=True
-    ) as cluster:
+    async with SpecCluster(scheduler=scheduler, workers=workers, asynchronous=True):
         pass
 
 

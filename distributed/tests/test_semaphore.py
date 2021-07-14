@@ -515,7 +515,9 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
             "distributed.scheduler.locks.lease-timeout": 0.1,
         }
     ):
-        with Client(processes=False, threads_per_worker=4) as client:
+        with Client(
+            processes=False, port=0, dashboard_address=":0", threads_per_worker=4
+        ) as client:
             sem = Semaphore(max_leases=1, name="database")
             protected_resource = []
 

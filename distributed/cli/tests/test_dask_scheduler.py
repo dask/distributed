@@ -38,9 +38,6 @@ def test_defaults(loop):
         response = requests.get("http://127.0.0.1:8787/status/")
         response.raise_for_status()
 
-    with pytest.raises(Exception):
-        response = requests.get("http://127.0.0.1:9786/info.json")
-
 
 def test_hostport(loop):
     with popen(["dask-scheduler", "--no-dashboard", "--host", "127.0.0.1:8978"]):
@@ -55,9 +52,8 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop):
-    pytest.importorskip("bokeh")
-    with popen(["dask-scheduler", "--no-dashboard"]) as proc:
-        with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/status/")
             assert response.status_code == 404
 
