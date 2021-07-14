@@ -2630,13 +2630,6 @@ async def test_close_scheduler__close_workers_Nanny(s, a, b):
     assert "retry" not in log
 
 
-@gen_cluster(client=True)
-async def test_transition_counter(c, s, a, b):
-    assert s.transition_counter == 0
-    await c.submit(inc, 1)
-    assert s.transition_counter > 1
-
-
 async def assert_ndata(client, by_addr, total=None):
     """Test that the number of elements in Worker.data is as expected.
     To be used when the worker is wrapped by a nanny.
@@ -3100,6 +3093,13 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
+
+
+@gen_cluster(client=True)
+async def test_transition_counter(c, s, a, b):
+    assert s.transition_counter == 0
+    await c.submit(inc, 1)
+    assert s.transition_counter > 1
 
 
 @pytest.mark.slow
