@@ -254,8 +254,8 @@ def test_Client_twice(loop):
             assert c.cluster.scheduler.port != f.cluster.scheduler.port
 
 
-@pytest.mark.asyncio
-async def test_client_constructor_with_temporary_security(cleanup):
+@gen_test()
+async def test_client_constructor_with_temporary_security():
     pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=None, asynchronous=True
@@ -264,8 +264,8 @@ async def test_client_constructor_with_temporary_security(cleanup):
         assert c.security == c.cluster.security
 
 
-@pytest.mark.asyncio
-async def test_defaults(cleanup):
+@gen_test()
+async def test_defaults():
     async with LocalCluster(
         scheduler_port=0, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
@@ -273,8 +273,8 @@ async def test_defaults(cleanup):
         assert all(isinstance(w, Nanny) for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_defaults_2(cleanup):
+@gen_test()
+async def test_defaults_2():
     async with LocalCluster(
         processes=False,
         scheduler_port=0,
@@ -287,8 +287,8 @@ async def test_defaults_2(cleanup):
         assert len(c.workers) == 1
 
 
-@pytest.mark.asyncio
-async def test_defaults_3(cleanup):
+@gen_test()
+async def test_defaults_3():
     async with LocalCluster(
         n_workers=2,
         scheduler_port=0,
@@ -304,8 +304,8 @@ async def test_defaults_3(cleanup):
         assert sum(w.nthreads for w in c.workers.values()) == expected_total_threads
 
 
-@pytest.mark.asyncio
-async def test_defaults_4(cleanup):
+@gen_test()
+async def test_defaults_4():
     async with LocalCluster(
         threads_per_worker=CPU_COUNT * 2,
         scheduler_port=0,
@@ -316,8 +316,8 @@ async def test_defaults_4(cleanup):
         assert len(c.workers) == 1
 
 
-@pytest.mark.asyncio
-async def test_defaults_5(cleanup):
+@gen_test()
+async def test_defaults_5():
     async with LocalCluster(
         n_workers=CPU_COUNT * 2,
         scheduler_port=0,
@@ -328,8 +328,8 @@ async def test_defaults_5(cleanup):
         assert all(w.nthreads == 1 for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_defaults_6(cleanup):
+@gen_test()
+async def test_defaults_6():
     async with LocalCluster(
         threads_per_worker=2,
         n_workers=3,
@@ -342,8 +342,8 @@ async def test_defaults_6(cleanup):
         assert all(w.nthreads == 2 for w in c.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_worker_params(cleanup):
+@gen_test()
+async def test_worker_params():
     async with LocalCluster(
         processes=False,
         n_workers=2,
@@ -356,8 +356,8 @@ async def test_worker_params(cleanup):
         assert [w.memory_limit for w in c.workers.values()] == [500] * 2
 
 
-@pytest.mark.asyncio
-async def test_memory_limit_none(cleanup):
+@gen_test()
+async def test_memory_limit_none():
     async with LocalCluster(
         n_workers=2,
         scheduler_port=0,
@@ -431,7 +431,7 @@ def test_blocks_until_full(loop):
         assert len(c.nthreads()) > 0
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_scale_up_and_down():
     async with LocalCluster(
         n_workers=0,
@@ -546,8 +546,8 @@ def test_death_timeout_raises(loop):
     LocalCluster._instances.clear()  # ignore test hygiene checks
 
 
-@pytest.mark.asyncio
-async def test_bokeh_kwargs(cleanup):
+@gen_test()
+async def test_bokeh_kwargs():
     pytest.importorskip("bokeh")
     async with LocalCluster(
         n_workers=0,
@@ -881,8 +881,8 @@ def test_worker_class_nanny(loop):
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
-@pytest.mark.asyncio
-async def test_worker_class_nanny_async(cleanup):
+@gen_test()
+async def test_worker_class_nanny_async():
     class MyNanny(Nanny):
         pass
 
@@ -940,8 +940,8 @@ def test_client_cluster_synchronous(loop):
             assert not c.cluster.asynchronous
 
 
-@pytest.mark.asyncio
-async def test_scale_memory_cores(cleanup):
+@gen_test()
+async def test_scale_memory_cores():
     async with LocalCluster(
         n_workers=0,
         processes=False,
@@ -962,22 +962,20 @@ async def test_scale_memory_cores(cleanup):
         assert len(cluster.worker_spec) == 4
 
 
-@pytest.mark.asyncio
-async def test_repr(cleanup):
+@gen_test()
+async def test_repr():
     async with LocalCluster(
         n_workers=2,
         processes=False,
         threads_per_worker=2,
-        memory_limit="2GB",
+        memory_limit="2 GiB",
         asynchronous=True,
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             await client.wait_for_workers(2)
         text = repr(cluster)
-        assert "workers=2" in text
         assert cluster.scheduler_address in text
-        assert "cores=4" in text or "threads=4" in text
-        assert "4.00 GB" in text or "3.73 GiB" in text
+        assert "workers=2, threads=2, memory=2.00 GiB" in text
 
     async with LocalCluster(
         n_workers=2, processes=False, memory_limit=None, asynchronous=True
@@ -985,8 +983,8 @@ async def test_repr(cleanup):
         assert "memory" not in repr(cluster)
 
 
-@pytest.mark.asyncio
-async def test_threads_per_worker_set_to_0(cleanup):
+@gen_test()
+async def test_threads_per_worker_set_to_0():
     with pytest.warns(
         Warning, match="Setting `threads_per_worker` to 0 has been deprecated."
     ):
@@ -1017,8 +1015,8 @@ async def test_capture_security(cleanup, temporary):
             assert client.security == cluster.security
 
 
-@pytest.mark.asyncio
-async def test_no_danglng_asyncio_tasks(cleanup):
+@gen_test()
+async def test_no_danglng_asyncio_tasks():
     start = asyncio.all_tasks()
     async with LocalCluster(asynchronous=True, processes=False):
         await asyncio.sleep(0.01)
@@ -1027,7 +1025,7 @@ async def test_no_danglng_asyncio_tasks(cleanup):
     assert tasks == start
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_async_with():
     async with LocalCluster(processes=False, asynchronous=True) as cluster:
         w = cluster.workers
@@ -1036,15 +1034,15 @@ async def test_async_with():
     assert not w
 
 
-@pytest.mark.asyncio
-async def test_no_workers(cleanup):
+@gen_test()
+async def test_no_workers():
     async with Client(
         n_workers=0, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
         pass
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_cluster_names():
     async with LocalCluster(processes=False, asynchronous=True) as unnamed_cluster:
         async with LocalCluster(

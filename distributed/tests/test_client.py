@@ -1978,13 +1978,13 @@ async def test_badly_serialized_input_stderr(capsys, c):
 
 def test_repr(loop):
     funcs = [str, repr, lambda x: x._repr_html_()]
-    with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GB"}) as (s, [a, b, c]):
+    with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GiB"}) as (s, [a, b, c]):
         with Client(s["address"], loop=loop) as c:
             for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
                 assert "threads=3" in text or "Total threads: </strong>" in text
-                assert "6.00 GB" in text or "5.59 GiB" in text
+                assert "6.00 GiB" in text
                 if "<table" not in text:
                     assert len(text) < 80
 
@@ -2778,9 +2778,8 @@ async def test_diagnostic_nbytes(c, s, a, b):
     assert s.get_nbytes(summary=True) == {"inc": sizeof(1) * 3, "double": sizeof(1) * 3}
 
 
-@gen_test()
-async def test_worker_aliases():
-    s = await Scheduler(validate=True, port=0)
+@gen_cluster(nthreads=[])
+async def test_worker_aliases(s):
     a = Worker(s.address, name="alice")
     b = Worker(s.address, name="bob")
     w = Worker(s.address, name=3)
@@ -2800,7 +2799,6 @@ async def test_worker_aliases():
 
     await c.close()
     await asyncio.gather(a.close(), b.close(), w.close())
-    await s.close()
 
 
 def test_persist_get_sync(c):
@@ -3625,18 +3623,14 @@ def test_as_completed_next_batch(c):
     assert not ac.has_ready()
 
 
-@gen_test()
-async def test_status():
-    s = await Scheduler(port=0)
-
+@gen_cluster(nthreads=[])
+async def test_status(s):
     c = await Client(s.address, asynchronous=True)
     assert c.status == "running"
     x = c.submit(inc, 1)
 
     await c.close()
     assert c.status == "closed"
-
-    await s.close()
 
 
 @gen_cluster(client=True)
@@ -4607,7 +4601,7 @@ async def test_scatter_dict_workers(c, s, a, b):
 async def test_client_timeout():
     c = Client("127.0.0.1:57484", asynchronous=True)
 
-    s = Scheduler(loop=c.loop, port=57484)
+    s = Scheduler(loop=c.loop, port=57484, dashboard_address=":0")
     await asyncio.sleep(4)
 
     try:
@@ -6079,15 +6073,14 @@ async def test_dashboard_link_cluster(cleanup):
             assert "http://foo.com" in client._repr_html_()
 
 
-@pytest.mark.asyncio
-async def test_shutdown(cleanup):
-    async with Scheduler(port=0) as s:
-        async with Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                await c.shutdown()
+@gen_cluster(nthreads=[])
+async def test_shutdown(s):
+    async with Worker(s.address) as w:
+        async with Client(s.address, asynchronous=True) as c:
+            await c.shutdown()
 
-            assert s.status == Status.closed
-            assert w.status == Status.closed
+    assert s.status == Status.closed
+    assert w.status == Status.closed
 
 
 @pytest.mark.asyncio
@@ -6383,11 +6376,10 @@ async def test_performance_report(c, s, a, b):
     assert "cdn.bokeh.org" in data
 
 
-@pytest.mark.asyncio
-async def test_client_gather_semaphore_loop(cleanup):
-    async with Scheduler(port=0) as s:
-        async with Client(s.address, asynchronous=True) as c:
-            assert c._gather_semaphore._loop is c.loop.asyncio_loop
+@gen_cluster(nthreads=[])
+async def test_client_gather_semaphore_loop(s):
+    async with Client(s.address, asynchronous=True) as c:
+        assert c._gather_semaphore._loop is c.loop.asyncio_loop
 
 
 @gen_cluster(client=True)
@@ -6403,22 +6395,21 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_mixed_compression(cleanup):
+@gen_cluster(nthreads=[])
+async def test_mixed_compression(s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Nanny(
+        s.address, nthreads=1, config={"distributed.comm.compression": None}
+    ):
         async with Nanny(
-            s.address, nthreads=1, config={"distributed.comm.compression": None}
-        ) as a:
-            async with Nanny(
-                s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
-            ) as b:
-                async with Client(s.address, asynchronous=True) as c:
-                    await c.get_versions()
-                    x = da.ones((10000, 10000))
-                    y = x + x.T
-                    await c.compute(y.sum())
+            s.address, nthreads=1, config={"distributed.comm.compression": "lz4"}
+        ):
+            async with Client(s.address, asynchronous=True) as c:
+                await c.get_versions()
+                x = da.ones((10000, 10000))
+                y = x + x.T
+                await c.compute(y.sum())
 
 
 @gen_cluster(client=True)
