@@ -1,4 +1,6 @@
 import dask
+from dask.sizeof import sizeof
+from dask.utils import parse_bytes
 
 from distributed.protocol.utils import frame_split_size, pack_frames, unpack_frames
 
@@ -14,6 +16,7 @@ def test_pack_frames():
 
 def test_frame_split_is_configurable():
     frame = b"1234abcd" * (2 ** 20)  # 8 MiB
+    assert sizeof(frame) == parse_bytes("8MiB")
     with dask.config.set({"distributed.comm.shard": "3MiB"}):
         split_frames = frame_split_size(frame)
         assert len(split_frames) == 3
