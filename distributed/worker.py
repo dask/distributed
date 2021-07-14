@@ -2947,21 +2947,36 @@ class Worker(ServerNode):
             )  # TODO: comment out?
             assert key == ts.key
             try:
-                result = await self.executor_submit(
-                    ts.key,
-                    apply_function,
-                    args=(
-                        function,
-                        args2,
-                        kwargs2,
-                        self.execution_state,
+                e = self.executors[executor]
+                if "ThreadPoolExecutor" in str(type(e)):
+                    result = await self.executor_submit(
                         ts.key,
-                        self.active_threads,
-                        self.active_threads_lock,
-                        self.scheduler_delay,
-                    ),
-                    executor=self.executors[executor],
-                )
+                        apply_function,
+                        args=(
+                            function,
+                            args2,
+                            kwargs2,
+                            self.execution_state,
+                            ts.key,
+                            self.active_threads,
+                            self.active_threads_lock,
+                            self.scheduler_delay,
+                        ),
+                        executor=e,
+                    )
+                else:
+                    result = await self.executor_submit(
+                        ts.key,
+                        apply_function_simple,
+                        args=(
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        ),
+                        executor=e,
+                    )
+
             except RuntimeError as e:
                 executor_error = e
                 raise
@@ -3854,6 +3869,27 @@ def apply_function(
     thread_state.start_time = time()
     thread_state.execution_state = execution_state
     thread_state.key = key
+
+    msg = apply_function_simple(function, args, kwargs, time_delay)
+
+    with active_threads_lock:
+        del active_threads[ident]
+    return msg
+
+
+def apply_function_simple(
+    function,
+    args,
+    kwargs,
+    time_delay,
+):
+    """Run a function, collect information
+
+    Returns
+    -------
+    msg: dictionary with status, result/error, timings, etc..
+    """
+    ident = threading.get_ident()
     start = time()
     try:
         result = function(*args, **kwargs)
@@ -3874,8 +3910,6 @@ def apply_function(
     msg["start"] = start + time_delay
     msg["stop"] = end + time_delay
     msg["thread"] = ident
-    with active_threads_lock:
-        del active_threads[ident]
     return msg
 
 
