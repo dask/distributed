@@ -4,6 +4,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
+import dask
+
 from distributed.protocol import (
     decompress,
     deserialize,
@@ -16,10 +18,11 @@ from distributed.protocol import (
 from distributed.protocol.compression import maybe_compress
 from distributed.protocol.numpy import itemsize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
-from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_bytes, nbytes, tmpfile
 from distributed.utils_test import gen_cluster
+
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
 def test_serialize():
