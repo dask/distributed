@@ -1080,6 +1080,7 @@ class Worker(ServerNode):
         result, missing_keys, missing_workers = await gather_from_workers(
             who_has, rpc=self.rpc, who=self.address
         )
+        self.update_data(data=result, report=False)
         if missing_keys:
             logger.warning(
                 "Could not find data: %s on workers: %s (who_has: %s)",
@@ -1087,9 +1088,8 @@ class Worker(ServerNode):
                 missing_workers,
                 who_has,
             )
-            return {"status": "missing-data", "keys": missing_keys}
+            return {"status": "partial-fail", "keys": missing_keys}
         else:
-            self.update_data(data=result, report=False)
             return {"status": "OK"}
 
     def get_monitor_info(self, comm=None, recent=False, start=0):
@@ -1500,9 +1500,9 @@ class Worker(ServerNode):
         self.log.append(("free-keys", keys, reason))
         for key in keys:
             ts = self.tasks.get(key)
-            if ts:
+            if ts is not None:
                 ts.scheduler_holds_ref = False
-            self.release_key(key, report=False, reason=reason)
+                self.release_key(key, report=False, reason=reason)
 
     def handle_superfluous_data(self, keys=(), reason=None):
         """Stream handler notifying the worker that it might be holding unreferenced, superfluous data.
@@ -2625,12 +2625,7 @@ class Worker(ServerNode):
             if ts is None or ts.scheduler_holds_ref:
                 return
             logger.debug(
-                "Release key %s",
-                {
-                    "key": key,
-                    "cause": cause,
-                    "reason": reason,
-                },
+                "Release key %s", {"key": key, "cause": cause, "reason": reason}
             )
             if cause:
                 self.log.append((key, "release-key", {"cause": cause}, reason))

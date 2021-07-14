@@ -330,7 +330,6 @@ async def test_remove_worker_from_scheduler(s, a, b):
     await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
-    s.validate_state()
 
 
 @gen_cluster()
@@ -339,7 +338,6 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
     assert await s.remove_worker(address=a.address) == "already-removed"
-    s.validate_state()
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -1040,7 +1038,6 @@ async def test_learn_occupancy_multiple_workers(c, s, a, b):
     await wait(x)
 
     assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
-    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -2307,7 +2304,7 @@ async def test_multiple_listeners(cleanup):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_worker_name_collision(s, a):
-    # test that a name collision for workers produces the expected respsone
+    # test that a name collision for workers produces the expected response
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
     with captured_logger(logging.getLogger("distributed.scheduler")) as log:
@@ -2679,7 +2676,6 @@ async def test_rebalance(c, s, *_):
     # rebalance() when there is nothing to do
     await s.rebalance()
     await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2711,15 +2707,12 @@ async def test_rebalance_workers_and_keys(client, s, *_):
     with pytest.raises(KeyError):
         await s.rebalance(workers=["notexist"])
 
-    s.validate_state()
-
 
 @gen_cluster()
 async def test_rebalance_missing_data1(s, a, b):
     """key never existed"""
     out = await s.rebalance(keys=["notexist"])
-    assert out == {"status": "missing-data", "keys": ["notexist"]}
-    s.validate_state()
+    assert out == {"status": "partial-fail", "keys": ["notexist"]}
 
 
 @gen_cluster(client=True)
@@ -2730,32 +2723,38 @@ async def test_rebalance_missing_data2(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
     out = await s.rebalance(keys=[f.key for f in futures])
-    assert out["status"] == "missing-data"
+    assert out["status"] == "partial-fail"
     assert 8 <= len(out["keys"]) <= 10
-    s.validate_state()
 
 
+@pytest.mark.parametrize("explicit", [False, True])
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance_raises_missing_data3(c, s, *_):
+async def test_rebalance_raises_missing_data3(c, s, *_, explicit):
     """keys exist when the sync part of rebalance runs, but are gone by the time the
-    actual data movement runs
+    actual data movement runs.
+    There is an error message only if the keys are explicitly listed in the API call.
     """
     a, _ = s.workers
     futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
-    del futures
-    out = await s.rebalance()
-    assert out["status"] == "missing-data"
-    assert 1 <= len(out["keys"]) <= 10
-    s.validate_state()
+
+    if explicit:
+        keys = [f.key for f in futures]
+        del futures
+        out = await s.rebalance(keys=keys)
+        assert out["status"] == "partial-fail"
+        assert 1 <= len(out["keys"]) <= 10
+    else:
+        del futures
+        out = await s.rebalance()
+        assert out == {"status": "OK"}
 
 
 @gen_cluster(nthreads=[])
 async def test_rebalance_no_workers(s):
     await s.rebalance()
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2783,7 +2782,6 @@ async def test_rebalance_managed_memory(c, s, *_):
     # We can expect an exact, stable result because we are completely bypassing the
     # unpredictability of unmanaged memory.
     await assert_ndata(c, {a: 62, b: 38})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2801,7 +2799,6 @@ async def test_rebalance_no_limit(c, s, a, b):
     await s.rebalance()
     # Disabling memory_limit made us ignore all % thresholds set in the config
     await assert_ndata(c, {a.address: 50, b.address: 50})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2824,7 +2821,6 @@ async def test_rebalance_no_recipients(c, s, *_):
     await assert_ndata(c, {a: 250, b: 100})
     await s.rebalance()
     await assert_ndata(c, {a: 250, b: 100})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2842,7 +2838,6 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
     await assert_ndata(client, {a.address: 10, b.address: 2, c.address: 2})
     await client.rebalance(futures[:2])
     await assert_ndata(client, {a.address: 8, b.address: 2, c.address: 4})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2858,7 +2853,6 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     await assert_ndata(c, {a.address: 10, b.address: 1})
     await c.rebalance(futures[:2])
     await assert_ndata(c, {a.address: 9, b.address: 2})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2907,10 +2901,198 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     await assert_ndata(c, {a: 11, b: 0})
     await s.rebalance()
     await assert_ndata(c, {a: 1, b: 10})
-    assert await c.has_what() == {
-        a: (large_future.key,),
-        b: tuple(f.key for f in small_futures),
-    }
+    has_what = await c.has_what()
+    assert has_what[a] == (large_future.key,)
+    assert sorted(has_what[b]) == sorted(f.key for f in small_futures)
+
+
+@gen_cluster(client=True)
+async def test_gather_on_worker(c, s, a, b):
+    x = await c.scatter("x", workers=[a.address])
+    x_ts = s.tasks[x.key]
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+
+    assert a_ws.nbytes > 0
+    assert b_ws.nbytes == 0
+    assert x_ts in a_ws.has_what
+    assert x_ts not in b_ws.has_what
+    assert x_ts.who_has == {a_ws}
+
+    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+
+    assert b_ws.nbytes == a_ws.nbytes
+    assert x_ts in b_ws.has_what
+    assert x_ts.who_has == {a_ws, b_ws}
+
+
+@gen_cluster(client=True, scheduler_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_recipient(c, s, a, b):
+    """The recipient is missing"""
+    x = await c.scatter("x")
+    await b.close()
+    assert s.workers.keys() == {a.address}
+    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    assert out == {x.key}
+
+
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_sender(c, s, a, b):
+    """The only sender for a key is missing"""
+    out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
+    assert out == {"x"}
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first):
+    """One of the senders for a key is missing, but the key is available somewhere else"""
+    x = await c.scatter("x", workers=[a.address])
+    bad_addr = "tcp://127.0.0.1:12345"
+    # Order matters; test both
+    addrs = [bad_addr, a.address] if missing_first else [a.address, bad_addr]
+    out = await s._gather_on_worker(b.address, {x.key: addrs})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+
+
+@gen_cluster(client=True)
+async def test_gather_on_worker_key_not_on_sender(c, s, a, b):
+    """The only sender for a key does not actually hold it"""
+    out = await s._gather_on_worker(a.address, {"x": [b.address]})
+    assert out == {"x"}
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_gather_on_worker_key_not_on_sender_replicated(
+    client, s, a, b, c, missing_first
+):
+    """One of the senders for a key does not actually hold it, but the key is available
+    somewhere else
+    """
+    x = await client.scatter("x", workers=[a.address])
+    # Order matters; test both
+    addrs = [b.address, a.address] if missing_first else [a.address, b.address]
+    out = await s._gather_on_worker(c.address, {x.key: addrs})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert c.data[x.key] == "x"
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
+    """Race condition where the recipient worker receives the same task twice.
+    Test that the task nbytes are not double-counted on the recipient.
+    """
+    x = await client.scatter("x", workers=[a.address, b.address], broadcast=True)
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+    assert x.key not in c.data
+
+    out = await asyncio.gather(
+        s._gather_on_worker(c.address, {x.key: [a.address]}),
+        s._gather_on_worker(c.address, {x.key: [b.address]}),
+    )
+    assert out == [set(), set()]
+    assert c.data[x.key] == "x"
+
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    c_ws = s.workers[c.address]
+    assert a_ws.nbytes > 0
+    assert c_ws.nbytes == b_ws.nbytes == a_ws.nbytes
+
+
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "100ms"}
+)
+async def test_rebalance_dead_recipient(client, s, a, b, c):
+    """A key fails to be rebalanced due to recipient failure.
+    The key is not deleted from the sender.
+    Unrelated, successful keys are deleted from the senders.
+    """
+    x, y = await client.scatter(["x", "y"], workers=[a.address])
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    c_ws = s.workers[c.address]
+    x_ts = s.tasks[x.key]
+    y_ts = s.tasks[y.key]
+    await c.close()
+    assert s.workers.keys() == {a.address, b.address}
+
+    out = await s._rebalance_move_data([(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)])
+    assert out == {"status": "partial-fail", "keys": [y.key]}
+    assert a.data == {y.key: "y"}
+    assert b.data == {x.key: "x"}
+    assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}
+
+
+@gen_cluster(client=True)
+async def test_delete_worker_data(c, s, a, b):
+    # delete only copy of x
+    # delete one of the copies of y
+    # don't touch z
+    x, y, z = await c.scatter(["x", "y", "z"], workers=[a.address])
+    await c.replicate(y)
+
+    assert a.data == {x.key: "x", y.key: "y", z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key, z.key}
+
+    await s._delete_worker_data(a.address, [x.key, y.key])
+    assert a.data == {z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key, z.key}
+    assert s.workers[a.address].nbytes == s.tasks[z.key].nbytes
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_double_delete(c, s, a):
+    """_delete_worker_data race condition where the same key is deleted twice.
+    WorkerState.nbytes is not double-decreased.
+    """
+    x, y = await c.scatter(["x", "y"])
+    await asyncio.gather(
+        s._delete_worker_data(a.address, [x.key]),
+        s._delete_worker_data(a.address, [x.key]),
+    )
+    assert a.data == {y.key: "y"}
+    a_ws = s.workers[a.address]
+    y_ts = s.tasks[y.key]
+    assert a_ws.nbytes == y_ts.nbytes
+
+
+@gen_cluster(scheduler_kwargs={"timeout": "100ms"})
+async def test_delete_worker_data_bad_worker(s, a, b):
+    """_delete_worker_data gracefully handles a non-existing worker;
+    e.g. a sender died in the middle of rebalance()
+    """
+    await a.close()
+    assert s.workers.keys() == {b.address}
+    await s._delete_worker_data(a.address, ["x"])
+
+
+@pytest.mark.parametrize("bad_first", [False, True])
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_bad_task(c, s, a, bad_first):
+    """_delete_worker_data gracefully handles a non-existing key;
+    e.g. a task was stolen by work stealing in the middle of a rebalance().
+    Other tasks on the same worker are deleted.
+    """
+    x, y = await c.scatter(["x", "y"])
+    assert a.data == {x.key: "x", y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key}
+
+    keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
+    await s._delete_worker_data(a.address, keys)
+    assert a.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key}
+    assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
 
 
 @gen_cluster(client=True)
