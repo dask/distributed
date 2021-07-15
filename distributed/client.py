@@ -3506,7 +3506,7 @@ class Client:
         if self.scheduler_file:
             raise ValueError("Scheduler file already set")
         else:
-            self.scheduler_file = scheduler_file
+            self.scheduler_file = os.path.expanduser(scheduler_file)
 
         with open(self.scheduler_file, "w") as f:
             json.dump(self.scheduler_info(), f, indent=2)
