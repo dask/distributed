@@ -19,7 +19,6 @@ from pickle import PicklingError
 from typing import Dict, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
-from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -4021,9 +4020,8 @@ except (Exception, RuntimeError):
     pass
 else:
 
-    @gen.coroutine
-    def gpu_metric(worker):
-        result = yield offload(nvml.real_time)
+    async def gpu_metric(worker):
+        result = await offload(nvml.real_time)
         return result
 
     DEFAULT_METRICS["gpu"] = gpu_metric
