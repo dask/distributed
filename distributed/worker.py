@@ -2686,41 +2686,6 @@ class Worker(ServerNode):
     # Execute Task #
     ################
 
-    # FIXME: this breaks if changed to async def...
-    # xref: https://github.com/dask/distributed/issues/3938
-    @gen.coroutine
-    def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
-        """Safely run function in thread pool executor
-
-        We've run into issues running concurrent.future futures within
-        tornado.  Apparently it's advantageous to use timeouts and periodic
-        callbacks to ensure things run smoothly.  This can get tricky, so we
-        pull it off into an separate method.
-        """
-        executor = executor or self.executors["default"]
-        job_counter[0] += 1
-        # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
-        kwargs = kwargs or {}
-        future = executor.submit(function, *args, **kwargs)
-        pc = PeriodicCallback(
-            lambda: logger.debug("future state: %s - %s", key, future._state), 1000
-        )
-        ts = self.tasks.get(key)
-        if ts is not None:
-            ts.start_time = time()
-        pc.start()
-        try:
-            yield future
-        finally:
-            pc.stop()
-            if ts is not None:
-                ts.stop_time = time()
-
-        result = future.result()
-
-        # logger.info("Finish job %d, %s", i, key)
-        raise gen.Return(result)
-
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
 
@@ -2782,19 +2747,16 @@ class Worker(ServerNode):
             if iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             elif separate_thread:
-                result = await self.executor_submit(
-                    name,
+                result = await self.loop.run_in_executor(
+                    self.executors["actor"],
                     apply_function_actor,
-                    args=(
-                        func,
-                        args,
-                        kwargs,
-                        self.execution_state,
-                        name,
-                        self.active_threads,
-                        self.active_threads_lock,
-                    ),
-                    executor=self.executors["actor"],
+                    func,
+                    args,
+                    kwargs,
+                    self.execution_state,
+                    name,
+                    self.active_threads,
+                    self.active_threads_lock,
                 )
             else:
                 result = func(*args, **kwargs)
@@ -2948,21 +2910,19 @@ class Worker(ServerNode):
             assert key == ts.key
             try:
                 e = self.executors[executor]
+                ts.start_time = time()
                 if "ThreadPoolExecutor" in str(type(e)):
-                    result = await self.executor_submit(
-                        ts.key,
+                    result = await self.loop.run_in_executor(
+                        e,
                         apply_function,
-                        args=(
-                            function,
-                            args2,
-                            kwargs2,
-                            self.execution_state,
-                            ts.key,
-                            self.active_threads,
-                            self.active_threads_lock,
-                            self.scheduler_delay,
-                        ),
-                        executor=e,
+                        function,
+                        args2,
+                        kwargs2,
+                        self.execution_state,
+                        ts.key,
+                        self.active_threads,
+                        self.active_threads_lock,
+                        self.scheduler_delay,
                     )
                 else:
                     try:
