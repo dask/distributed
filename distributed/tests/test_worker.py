@@ -510,7 +510,6 @@ async def test_Executor(c, s):
     with ThreadPoolExecutor(2) as e:
         async with Worker(s.address, executor=e) as w:
             assert w.executor is e
-            w = await w
 
             future = c.submit(inc, 1)
             result = await future
