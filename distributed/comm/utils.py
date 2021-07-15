@@ -25,6 +25,7 @@ async def to_frames(
 ):
     """
     Serialize a message into a list of Distributed protocol frames.
+    Any kwargs are forwarded to protocol.dumps().
     """
 
     def _to_frames():
