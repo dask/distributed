@@ -26,6 +26,8 @@ from distributed.utils_test import (
     slowinc,
 )
 
+pytestmark = pytest.mark.ci1
+
 
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):

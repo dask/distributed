@@ -23,6 +23,8 @@ from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
+pytestmark = pytest.mark.ci1
+
 
 # FIXME why does this leave behind unclosed Comm objects?
 @gen_cluster(nthreads=[], allow_unclosed=True)
