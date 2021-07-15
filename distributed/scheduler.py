@@ -3788,11 +3788,12 @@ class Scheduler(SchedulerState, ServerNode):
         self.loop.add_callback(self.reevaluate_occupancy)
 
         if self.scheduler_file:
-            with open(self.scheduler_file, "w") as f:
+            fn = os.path.expanduser(self.scheduler_file)
+
+            with open(fn, "w") as f:
                 json.dump(self.identity(), f, indent=2)
 
-            fn = self.scheduler_file  # remove file when we close the process
-
+            # remove file when we close the process
             def del_scheduler_file():
                 if os.path.exists(fn):
                     os.remove(fn)

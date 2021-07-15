@@ -633,7 +633,7 @@ class Client:
         self.status = "newly-created"
         self._pending_msg_buffer = []
         self.extensions = {}
-        self.scheduler_file = scheduler_file
+        self.scheduler_file = os.path.expanduser(scheduler_file)
         self._startup_kwargs = kwargs
         self.cluster = None
         self.scheduler = None
