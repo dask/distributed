@@ -759,6 +759,20 @@ properties:
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
 
+          websockets:
+            type: object
+            properties:
+              shard:
+                type:
+                - string
+                description: |
+                  The maximum size of a websocket frame to send through a comm.
+
+                  This is somewhat duplicative of distributed.comm.shard, but websockets
+                  often have much smaller maximum message sizes than othe protocols, so
+                  this attribute is used to set a smaller default shard size and to
+                  allow separate control of websocket message sharding.
+
       diagnostics:
         type: object
         properties:
