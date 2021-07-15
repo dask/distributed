@@ -437,6 +437,7 @@ class Worker(ServerNode):
 
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
+        self.active_keys = set()
         self.profile_keys = defaultdict(profile.create)
         self.profile_keys_history = deque(maxlen=3600)
         self.profile_recent = profile.create()
@@ -967,8 +968,6 @@ class Worker(ServerNode):
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
-            with self.active_threads_lock:
-                active_keys = list(self.active_threads.values())
             response = await retry_operation(
                 self.scheduler.heartbeat_worker,
                 address=self.contact_address,
@@ -976,7 +975,7 @@ class Worker(ServerNode):
                 metrics=await self.get_metrics(),
                 executing={
                     key: start - self.tasks[key].start_time
-                    for key in active_keys
+                    for key in self.active_keys
                     if key in self.tasks
                 },
             )
@@ -2907,6 +2906,7 @@ class Worker(ServerNode):
                 executor,
             )  # TODO: comment out?
             assert key == ts.key
+            self.active_keys.add(ts.key)
             try:
                 e = self.executors[executor]
                 ts.start_time = time()
@@ -2946,6 +2946,8 @@ class Worker(ServerNode):
             except RuntimeError as e:
                 executor_error = e
                 raise
+            finally:
+                self.active_keys.discard(ts.key)
 
             # We'll need to check again for the task state since it may have
             # changed since the execution was kicked off. In particular, it may
