@@ -276,7 +276,8 @@ def SSHCluster(
         :class:`asyncssh.SSHClientConnectionOptions` for full information.
         If a list it must have the same length as ``hosts``.
     worker_options : dict or list of dict, optional
-        Keywords to pass on to workers.
+        Keywords to pass on to workers. If a list must be the same length as
+        ``hosts``.
     scheduler_options : dict, optional
         Keywords to pass on to scheduler.
     worker_module : str, optional
@@ -284,9 +285,9 @@ def SSHCluster(
     remote_python : str or list of str, optional
         Path to Python on remote nodes.
     names : list, optional
-        Names for workers on each host. Must be the same length as the number of
-        hosts. If multiple processes per host are used consecutive numbers will
-        be appended to worker names.
+        Names for workers on each ``host``. Must be the same length as the
+        number of ``hosts``. If multiple processes per host are used consecutive
+        numbers will be appended to worker names.
 
     Examples
     --------
