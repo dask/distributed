@@ -22,7 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -3093,6 +3093,7 @@ async def test_transition_counter(c, s, a, b):
     assert s.transition_counter > 1
 
 
+@pytest.mark.skipif(MACOS and sys.version_info < (3, 9), reason="GH#5056")
 @pytest.mark.slow
 @gen_cluster(
     client=True,
@@ -3101,8 +3102,8 @@ async def test_transition_counter(c, s, a, b):
     timeout=60,
 )
 async def test_worker_heartbeat_after_cancel(c, s, *workers):
-    """This test is intended to ensure that after cancelation of a graph, the
-    worker heartbeat is always successful. The hearbeat may not be successful if
+    """This test is intended to ensure that after cancellation of a graph, the
+    worker heartbeat is always successful. The heartbeat may not be successful if
     the worker and scheduler state drift and the scheduler doesn't handle
     unknown information gracefully. One example would be a released/cancelled
     computation where the worker returns metrics about duration, type, etc. and
