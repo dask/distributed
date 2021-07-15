@@ -11,7 +11,6 @@ from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget
 from distributed.comm import Comm
-from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
 from distributed.utils_test import captured_logger, cluster, gen_cluster, slowidentity
@@ -91,21 +90,17 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
-    client=True,
-    timeout=20,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(c, s, a, b):
+async def test_release_semaphore_after_timeout(s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
     semB = await Semaphore(name="x", max_leases=2)
-
     assert await semB.acquire()  # leases: 1 - 1 = 0
-
     assert not (await sem.acquire(timeout=0.01))
     assert not (await semB.acquire(timeout=0.01))
 
@@ -114,9 +109,7 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
 
     semB.refresh_callback.stop()
     del semB
-
     assert await sem.acquire(timeout=1)
-
     assert not (await sem.acquire(timeout=0.1))
 
 
@@ -564,7 +557,6 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

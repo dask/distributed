@@ -384,7 +384,7 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def restart(self, comm=None, timeout=2, executor_wait=True):
+    async def restart(self, comm=None, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -393,7 +393,9 @@ class Nanny(ServerNode):
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out, returning before finished")
+            logger.error(
+                f"Restart timed out after {timeout}s; returning before finished"
+            )
             return "timed out"
         else:
             return "OK"

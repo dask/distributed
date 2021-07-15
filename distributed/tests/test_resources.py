@@ -9,7 +9,6 @@ from dask.utils import stringify
 
 from distributed import Worker
 from distributed.client import wait
-from distributed.compatibility import WINDOWS
 from distributed.utils_test import gen_cluster, inc, slowadd, slowinc
 
 
@@ -378,9 +377,7 @@ async def test_full_collections(c, s, a, b):
                 reason="don't track resources through optimization"
             ),
         ),
-        pytest.param(
-            False, marks=pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
-        ),
+        False,
     ],
 )
 def test_collections_get(client, optimize_graph, s, a, b):
