@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from numbers import Number
 from operator import add
 from time import sleep
@@ -508,17 +508,14 @@ async def test_run_coroutine_dask_worker(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_Executor(c, s):
     with ThreadPoolExecutor(2) as e:
-        w = Worker(s.address, executor=e)
-        assert w.executor is e
-        w = await w
+        async with Worker(s.address, executor=e) as w:
+            assert w.executor is e
 
-        future = c.submit(inc, 1)
-        result = await future
-        assert result == 2
+            future = c.submit(inc, 1)
+            result = await future
+            assert result == 2
 
-        assert e._threads  # had to do some work
-
-        await w.close()
+            assert e._threads  # had to do some work
 
 
 @pytest.mark.skip(
@@ -2026,6 +2023,34 @@ async def test_multiple_executors(cleanup):
                 default_result, gpu_result = await c.gather(futures)
                 assert "Dask-Default-Threads" in default_result
                 assert "Dask-GPU-Threads" in gpu_result
+
+
+@gen_cluster(client=True)
+async def test_process_executor(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+
+        future = c.submit(os.getpid, pure=False)
+        assert (await future) == os.getpid()
+
+        with dask.annotate(executor="processes"):
+            future = c.submit(os.getpid, pure=False)
+
+        assert (await future) != os.getpid()
+
+
+@gen_cluster(client=True)
+async def test_process_executor_kills_process(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(sys.exit, 1)
+
+        exc = await future.exception()
+        assert "SystemExit(1)" in repr(exc)
 
 
 def assert_task_states_on_worker(expected, worker):
