@@ -5206,6 +5206,9 @@ class Scheduler(SchedulerState, ServerNode):
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        if key not in parent._tasks:
+            logger.debug("Skipping long_running since key %s was already released", key)
+            return
         ts: TaskState = parent._tasks[key]
         steal = parent._extensions.get("stealing")
         if steal is not None:

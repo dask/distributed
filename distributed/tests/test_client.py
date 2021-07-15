@@ -5148,30 +5148,25 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
+@gen_cluster(client=True)
 async def test_secede_balances(c, s, a, b):
     count = threading.active_count()
 
     def f(x):
         client = get_client()
-        sleep(0.01)  # do some work
         secede()
-        futures = client.map(slowinc, range(10), pure=False, delay=0.01)
+        futures = client.map(inc, range(10), pure=False)
         total = client.submit(sum, futures).result()
         return total
 
     futures = c.map(f, range(100))
-    start = time()
-    while not all(f.status == "finished" for f in futures):
-        await asyncio.sleep(0.01)
-        assert threading.active_count() < count + 50
-        assert time() < start + 60
-
-    assert len(a.log) < 2 * len(b.log)
-    assert len(b.log) < 2 * len(a.log)
 
     results = await c.gather(futures)
+
+    assert a.executed_count + b.executed_count == 1100
+    assert a.executed_count > 200
+    assert b.executed_count > 200
+
     assert results == [sum(map(inc, range(10)))] * 100
 
 
