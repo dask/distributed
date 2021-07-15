@@ -35,6 +35,7 @@ from dask.utils import (
     ensure_dict,
     format_bytes,
     funcname,
+    json_load_robust,
     parse_timedelta,
     stringify,
 )
@@ -633,7 +634,7 @@ class Client:
         self.status = "newly-created"
         self._pending_msg_buffer = []
         self.extensions = {}
-        self.scheduler_file = os.path.expanduser(scheduler_file)
+        self.scheduler_file = scheduler_file
         self._startup_kwargs = kwargs
         self.cluster = None
         self.scheduler = None
@@ -1051,16 +1052,8 @@ class Client:
                 )
             address = self.cluster.scheduler_address
         elif self.scheduler_file is not None:
-            while not os.path.exists(self.scheduler_file):
-                await asyncio.sleep(0.01)
-            for i in range(10):
-                try:
-                    with open(self.scheduler_file) as f:
-                        cfg = json.load(f)
-                    address = cfg["address"]
-                    break
-                except (ValueError, KeyError):  # JSON file not yet flushed
-                    await asyncio.sleep(0.01)
+            cfg = json_load_robust(self.scheduler_file)
+            address = cfg["address"]
         elif self._start_arg is None:
             from .deploy import LocalCluster
 
