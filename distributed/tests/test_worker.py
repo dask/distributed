@@ -2041,6 +2041,19 @@ async def test_process_executor(c, s, a, b):
         assert (await future) != os.getpid()
 
 
+@gen_cluster(client=True)
+async def test_process_executor_kills_process(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(sys.exit, 1)
+
+        exc = await future.exception()
+        assert "SystemExit(1)" in repr(exc)
+
+
 def assert_task_states_on_worker(expected, worker):
     for dep_key, expected_state in expected.items():
         assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)

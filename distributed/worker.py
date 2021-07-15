@@ -2965,17 +2965,24 @@ class Worker(ServerNode):
                         executor=e,
                     )
                 else:
-                    result = await self.executor_submit(
-                        ts.key,
-                        apply_function_simple,
-                        args=(
+                    try:
+                        start = time() + self.scheduler_delay
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
                             function,
                             args2,
                             kwargs2,
                             self.scheduler_delay,
-                        ),
-                        executor=e,
-                    )
+                        )
+                    except BaseException as e:
+                        msg = error_message(e)
+                        msg["op"] = "task-erred"
+                        msg["actual-exception"] = e
+                        msg["start"] = start
+                        msg["stop"] = time() + self.scheduler_delay
+                        msg["thread"] = None
+                        result = msg
 
             except RuntimeError as e:
                 executor_error = e
