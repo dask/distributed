@@ -24,9 +24,8 @@ from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to
 logger = logging.getLogger(__name__)
 
 
-BIG_BYTES_SHARD_SIZE = min(
-    dask.utils.parse_bytes(dask.config.get("distributed.comm.shard")),
-    10_000_000,
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
+    dask.config.get("distributed.comm.websockets.shard")
 )
 
 

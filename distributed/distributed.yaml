@@ -196,6 +196,9 @@ distributed:
         key: null
         cert: null
 
+    websockets:
+      shard: 8MiB
+
   diagnostics:
     nvml: True
 
