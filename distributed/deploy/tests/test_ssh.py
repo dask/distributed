@@ -179,7 +179,6 @@ async def test_list_of_worker_options():
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
             d = client.scheduler_info()["workers"]
-            assert [v["nprocs"] for v in d.values()] == [4, 2]
             assert all(v["threads"] == 1 for v in d.values())
 
 
