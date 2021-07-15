@@ -157,7 +157,7 @@ def test_no_reconnect(nanny, loop):
         start = time()
         while worker.poll() is None:
             sleep(0.1)
-            assert time() < start + 10
+            assert time() < start + 30
 
 
 def test_resources(loop):

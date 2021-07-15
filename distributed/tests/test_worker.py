@@ -30,7 +30,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
@@ -1662,20 +1662,20 @@ async def test_update_latency(s):
             assert w.digests["latency"].size() > 0
 
 
-@pytest.mark.skipif(MACOS, reason="frequently hangs")
-@gen_cluster(client=True, nthreads=[])
-async def test_workerstate_executing(c, s):
-    async with await Worker(s.address) as w:
-        ws = s.workers[w.address]
-        # Initially there are no active tasks
-        assert not ws.executing
-        # Submit a task and ensure the WorkerState is updated with the task
-        # it's executing
-        f = c.submit(slowinc, 1, delay=1)
-        while not ws.executing:
-            await asyncio.sleep(0.01)
-        assert s.tasks[f.key] in ws.executing
-        await f
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_workerstate_executing(c, s, a):
+    ws = s.workers[a.address]
+    # Initially there are no active tasks
+    assert not ws.executing
+    # Submit a task and ensure the WorkerState is updated with the task
+    # it's executing
+    f = c.submit(slowinc, 1, delay=3)
+    while not ws.executing:
+        assert f.status == "pending"
+        await asyncio.sleep(0.01)
+    assert s.tasks[f.key] in ws.executing
+    await f
 
 
 @pytest.mark.parametrize("reconnect", [True, False])
