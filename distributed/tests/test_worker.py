@@ -18,7 +18,6 @@ from tlz import first, pluck, sliding_window
 import dask
 from dask import delayed
 from dask.system import CPU_COUNT
-from dask.utils import format_bytes
 
 from distributed import (
     Client,
@@ -31,7 +30,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
@@ -48,6 +47,7 @@ from distributed.utils_test import (
     mul,
     nodebug,
     slowinc,
+    slowsum,
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
@@ -144,27 +144,6 @@ async def test_worker_bad_args(c, s, a, b):
     results = await c._gather([xx, yy])
 
     assert tuple(results) == (3, 7)
-
-
-@pytest.mark.slow
-@gen_cluster()
-async def dont_test_delete_data_with_missing_worker(c, a, b):
-    bad = "127.0.0.1:9001"  # this worker doesn't exist
-    c.who_has["z"].add(bad)
-    c.who_has["z"].add(a.address)
-    c.has_what[bad].add("z")
-    c.has_what[a.address].add("z")
-    a.data["z"] = 5
-
-    cc = rpc(ip=c.ip, port=c.port)
-
-    await cc.delete_data(keys=["z"])  # TODO: this hangs for a while
-    assert "z" not in a.data
-    assert not c.who_has["z"]
-    assert not c.has_what[bad]
-    assert not c.has_what[a.address]
-
-    await cc.close_rpc()
 
 
 @gen_cluster(client=True)
@@ -402,16 +381,59 @@ async def test_chained_error_message(c, s, a, b):
         assert "Bar" in str(e.__cause__)
 
 
-@gen_cluster()
-async def test_gather(s, a, b):
-    b.data["x"] = 1
-    b.data["y"] = 2
+@gen_cluster(client=True)
+async def test_gather(c, s, a, b):
+    x, y = await c.scatter(["x", "y"], workers=[b.address])
     with rpc(a.address) as aa:
-        resp = await aa.gather(who_has={"x": [b.address], "y": [b.address]})
-        assert resp["status"] == "OK"
+        resp = await aa.gather(who_has={x.key: [b.address], y.key: [b.address]})
 
-        assert a.data["x"] == b.data["x"]
-        assert a.data["y"] == b.data["y"]
+    assert resp == {"status": "OK"}
+    assert a.data[x.key] == b.data[x.key] == "x"
+    assert a.data[y.key] == b.data[y.key] == "y"
+
+
+@gen_cluster(client=True)
+async def test_gather_missing_keys(c, s, a, b):
+    """A key is missing. Other keys are gathered successfully."""
+    x = await c.scatter("x", workers=[b.address])
+    with rpc(a.address) as aa:
+        resp = await aa.gather(who_has={x.key: [b.address], "y": [b.address]})
+
+    assert resp == {"status": "partial-fail", "keys": {"y": (b.address,)}}
+    assert a.data[x.key] == b.data[x.key] == "x"
+
+
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_missing_workers(c, s, a, b):
+    """A worker owning the only copy of a key is missing.
+    Keys from other workers are gathered successfully.
+    """
+    assert b.address.startswith("tcp://127.0.0.1:")
+    bad_addr = "tcp://127.0.0.1:12345"
+    x = await c.scatter("x", workers=[b.address])
+
+    with rpc(a.address) as aa:
+        resp = await aa.gather(who_has={x.key: [b.address], "y": [bad_addr]})
+
+    assert resp == {"status": "partial-fail", "keys": {"y": (bad_addr,)}}
+    assert a.data[x.key] == b.data[x.key] == "x"
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
+    """A worker owning a redundant copy of a key is missing.
+    The key is successfully gathered from other workers.
+    """
+    assert b.address.startswith("tcp://127.0.0.1:")
+    x = await c.scatter("x", workers=[b.address])
+    bad_addr = "tcp://127.0.0.1:12345"
+    # Order matters! Test both
+    addrs = [bad_addr, b.address] if missing_first else [b.address, bad_addr]
+    with rpc(a.address) as aa:
+        resp = await aa.gather(who_has={x.key: addrs})
+    assert resp == {"status": "OK"}
+    assert a.data[x.key] == b.data[x.key] == "x"
 
 
 @pytest.mark.asyncio
@@ -779,7 +801,7 @@ async def test_hold_onto_dependents(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=False, nthreads=[])
+@gen_cluster(nthreads=[])
 async def test_worker_death_timeout(s):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
         await s.close()
@@ -1004,27 +1026,17 @@ async def test_global_workers(s, a, b):
     assert w is a or w is b
 
 
-@pytest.mark.skipif(WINDOWS, reason="file descriptors")
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_worker_fds(s):
-    psutil = pytest.importorskip("psutil")
-    await asyncio.sleep(0.05)
-    start = psutil.Process().num_fds()
+    proc = psutil.Process()
+    before = psutil.Process().num_fds()
 
-    worker = await Worker(s.address, loop=s.loop)
-    await asyncio.sleep(0.1)
-    middle = psutil.Process().num_fds()
-    start = time()
-    while middle > start:
+    async with Worker(s.address, loop=s.loop):
+        assert proc.num_fds() > before
+
+    while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 1
-
-    await worker.close()
-
-    start = time()
-    while psutil.Process().num_fds() > start:
-        await asyncio.sleep(0.01)
-        assert time() < start + 0.5
 
 
 @gen_cluster(nthreads=[])
@@ -1063,13 +1075,13 @@ async def test_scheduler_file():
 @gen_cluster(client=True)
 async def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
-    assert abs(a.scheduler_delay) < 0.3
-    assert abs(b.scheduler_delay) < 0.3
-    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.3)
+    assert abs(a.scheduler_delay) < 0.6
+    assert abs(b.scheduler_delay) < 0.6
+    await asyncio.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.6)
     assert a.scheduler_delay != old
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_statistical_profiling(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -1133,7 +1145,6 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=sys.version_info[:2] == (3, 8))
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1143,7 +1154,6 @@ async def test_robust_to_bad_sizeof_estimates(c, s, a):
         "memory_target_fraction": False,
         "memory_pause_fraction": 0.5,
     },
-    timeout=20,
 )
 async def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().rss
@@ -1158,14 +1168,9 @@ async def test_pause_executor(c, s, a):
         future = c.submit(f)
         futures = c.map(slowinc, range(30), delay=0.1)
 
-        start = time()
         while not a.paused:
             await asyncio.sleep(0.01)
-            assert time() < start + 4, (
-                format_bytes(psutil.Process().memory_info().rss),
-                format_bytes(a.memory_limit),
-                len(a.data),
-            )
+
         out = logger.getvalue()
         assert "memory" in out.lower()
         assert "pausing" in out.lower()
@@ -1311,9 +1316,7 @@ async def test_wait_for_outgoing(c, s, a, b):
     assert 1 / 3 < ratio < 3
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(
     nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
 )
@@ -1466,9 +1469,7 @@ async def test_local_directory_make_new_directory(s):
         assert "dask-worker-space" in w.local_directory
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
     w = await Worker(s.address, host="127.0.0.2")
@@ -1589,12 +1590,12 @@ async def test_lifetime(cleanup):
     async with Scheduler() as s:
         async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
             async with Client(s.address, asynchronous=True) as c:
-                futures = c.map(slowinc, range(200), delay=0.1)
+                futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
                 await asyncio.sleep(1.5)
                 assert b.status != Status.running
                 await b.finished()
 
-                assert set(b.data).issubset(a.data)  # successfully moved data over
+                assert set(b.data) == set(a.data)  # successfully moved data over
 
 
 @gen_cluster(client=True, worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
@@ -2057,7 +2058,7 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2087,11 +2088,6 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
-        # We currently don't have a good way to actually release this memory as
-        # long as the tasks still have a dependent. We'll need to live with this
-        # memory for now
-        f.key: "memory",
-        g.key: "memory",
         res.key: "error",
     }
 
@@ -2128,7 +2124,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2159,6 +2155,7 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
 
     expected_states = {
         f.key: "memory",
+        g.key: "memory",
     }
 
     assert_task_states_on_worker(expected_states, a)
@@ -2166,7 +2163,6 @@ async def test_worker_state_error_release_error_first(c, s, a, b):
     f.release()
     g.release()
 
-    # This is not happening
     for server in [s, a, b]:
         while server.tasks:
             await asyncio.sleep(0.01)
@@ -2194,7 +2190,7 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     res = c.submit(raise_exc, f, g, workers=[a.address])
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     # Nothing bad happened on B, therefore B should hold on to G
     assert len(b.tasks) == 1
@@ -2220,13 +2216,14 @@ async def test_worker_state_error_release_error_int(c, s, a, b):
     res.release()
     # We no longer hold any refs to f or g and B didn't have any erros. It
     # releases everything as expected
-    while a.tasks:
+    while len(a.tasks) > 1:
         await asyncio.sleep(0.01)
 
     expected_states = {
         g.key: "memory",
     }
 
+    assert_task_states_on_worker(expected_states, a)
     assert_task_states_on_worker(expected_states, b)
 
     g.release()
@@ -2254,7 +2251,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     )
 
     with pytest.raises(RuntimeError):
-        await res.result()
+        await res
 
     expected_states_A = {
         f.key: "memory",
@@ -2283,7 +2280,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
-        f.key: "memory",
         g.key: "memory",
         h.key: "memory",
         res.key: "error",
@@ -2301,15 +2297,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
-        f.key: "memory",
-        # We actually cannot hold on to G even though the graph would suggest
-        # otherwise. This is because H was only introduced as a dependency and
-        # the scheduler never told the worker how H fits into the big picture.
-        # Therefore, it thinks that G does not have any dependents anymore and
-        # releases it. Too bad. Once we have speculative task assignments this
-        # should be more exact since we should always tell the worker what's
-        # going on
-        # g.key: released,
         h.key: "memory",
         res.key: "error",
     }
@@ -2320,10 +2307,6 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     expected_states_A = {}
     assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
-        f.key: "memory",
-        # See above
-        # g.key: released,
-        h.key: "memory",
         res.key: "error",
     }
 
@@ -2334,3 +2317,29 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     for server in [s, a, b]:
         while server.tasks:
             await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", x) for x in range(4)])
+async def test_hold_on_to_replicas(c, s, *workers):
+    f1 = c.submit(inc, 1, workers=[workers[0].address], key="f1")
+    f2 = c.submit(inc, 2, workers=[workers[1].address], key="f2")
+
+    sum_1 = c.submit(
+        slowsum, [f1, f2], delay=0.1, workers=[workers[2].address], key="sum"
+    )
+    sum_2 = c.submit(
+        slowsum, [f1, sum_1], delay=0.2, workers=[workers[3].address], key="sum_2"
+    )
+    f1.release()
+    f2.release()
+
+    while sum_2.key not in workers[3].tasks:
+        await asyncio.sleep(0.01)
+
+    while not workers[3].tasks[sum_2.key].state == "memory":
+        assert len(s.tasks[f1.key].who_has) >= 2
+        assert s.tasks[f2.key].state == "released"
+        await asyncio.sleep(0.01)
+
+    while len(workers[2].tasks) > 1:
+        await asyncio.sleep(0.01)

@@ -5,7 +5,7 @@ import socket
 import struct
 import sys
 import weakref
-from ssl import SSLError
+from ssl import SSLCertVerificationError, SSLError
 
 from tornado import gen
 
@@ -92,7 +92,7 @@ def set_tcp_timeout(comm):
             logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except EnvironmentError as e:
+    except OSError as e:
         logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
@@ -105,7 +105,7 @@ def get_stream_address(comm):
 
     try:
         return unparse_host_port(*comm.socket.getsockname()[:2])
-    except EnvironmentError:
+    except OSError:
         # Probably EBADF
         return "<closed>"
 
@@ -119,14 +119,10 @@ def convert_stream_closed_error(obj, exc):
         exc = exc.real_error
         if ssl and isinstance(exc, ssl.SSLError):
             if "UNKNOWN_CA" in exc.reason:
-                raise FatalCommClosedError(
-                    "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
-                )
-        raise CommClosedError(
-            "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
-        ) from exc
+                raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
+        raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
     else:
-        raise CommClosedError("in %s: %s" % (obj, exc)) from exc
+        raise CommClosedError(f"in {obj}: {exc}") from exc
 
 
 def _close_comm(ref):
@@ -304,7 +300,7 @@ class TCP(Comm):
                 if stream.writing():
                     yield stream.write(b"")
                 stream.socket.shutdown(socket.SHUT_RDWR)
-            except EnvironmentError:
+            except OSError:
                 pass
             finally:
                 self._finalizer.detach()
@@ -390,6 +386,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLCertVerificationError as err:
+            raise FatalCommClosedError(
+                "TLS certificate does not match. Check your security settings. "
+                "More info at https://distributed.dask.org/en/latest/tls.html"
+            ) from err
         except SSLError as err:
             raise FatalCommClosedError() from err
 
@@ -452,7 +453,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                 sockets = netutil.bind_sockets(
                     self.port, address=self.ip, backlog=backlog
                 )
-            except EnvironmentError as e:
+            except OSError as e:
                 # EADDRINUSE can happen sporadically when trying to bind
                 # to an ephemeral port
                 if self.port != 0 or e.errno != errno.EADDRINUSE:
@@ -545,7 +546,7 @@ class TLSListener(BaseTCPListener):
     async def _prepare_stream(self, stream, address):
         try:
             await stream.wait_for_handshake()
-        except EnvironmentError as e:
+        except OSError as e:
             # The handshake went wrong, log and ignore
             logger.warning(
                 "Listener on %r: TLS handshake failed with remote %r: %s",

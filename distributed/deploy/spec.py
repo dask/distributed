@@ -97,7 +97,7 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return "<%s: status=%s>" % (type(self).__name__, self.status)
+        return f"<{type(self).__name__}: status={self.status}>"
 
     async def __aenter__(self):
         await self

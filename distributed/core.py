@@ -139,6 +139,7 @@ class Server:
     ):
         self.handlers = {
             "identity": self.identity,
+            "echo": self.echo,
             "connection_stream": self.handle_stream,
         }
         self.handlers.update(handlers)
@@ -384,6 +385,9 @@ class Server:
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
+    def echo(self, comm=None, data=None):
+        return data
+
     async def listen(self, port_or_addr=None, allow_offload=True, **kwargs):
         if port_or_addr is None:
             port_or_addr = self.default_port
@@ -428,7 +432,7 @@ class Server:
                 try:
                     msg = await comm.read()
                     logger.debug("Message from %r: %s", address, msg)
-                except EnvironmentError as e:
+                except OSError as e:
                     if not sys.is_finalizing():
                         logger.debug(
                             "Lost connection to %r while reading message: %s."
@@ -517,7 +521,7 @@ class Server:
                 if reply and not is_dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
-                    except (EnvironmentError, TypeError) as e:
+                    except (OSError, TypeError) as e:
                         logger.debug(
                             "Lost connection to %r while sending result for op %r: %s",
                             address,
@@ -579,7 +583,7 @@ class Server:
                     else:
                         func()
 
-        except (CommClosedError, EnvironmentError):
+        except OSError:
             # FIXME: This is silently ignored, is this intentional?
             pass
         except Exception as e:
@@ -647,7 +651,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             response = await comm.read(deserializers=deserializers)
         else:
             response = None
-    except (EnvironmentError, CommClosedError):
+    except OSError:
         # On communication errors, we should simply close the communication
         force_close = True
         raise
@@ -763,7 +767,7 @@ class rpc:
                 if not comm.closed():
                     await comm.write({"op": "close", "reply": False})
                     await comm.close()
-            except EnvironmentError:
+            except OSError:
                 comm.abort()
 
         tasks = []
@@ -792,9 +796,7 @@ class rpc:
                 comm.name = "rpc." + key
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
-                raise e.__class__(
-                    "%s: while trying to call remote method %r" % (e, key)
-                )
+                raise e.__class__(f"{e}: while trying to call remote method {key!r}")
 
             self.comms[comm] = True  # mark as open
             return result
@@ -881,7 +883,7 @@ class PooledRPCCall:
         pass
 
     def __repr__(self):
-        return "<pooled rpc to %r>" % (self.addr,)
+        return f"<pooled rpc to {self.addr!r}>"
 
 
 class ConnectionPool:

@@ -1,3 +1,4 @@
+import psutil
 import pytest
 
 pytest.importorskip("requests")
@@ -14,6 +15,7 @@ from click.testing import CliRunner
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
+from distributed.compatibility import LINUX
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
@@ -118,9 +120,7 @@ def test_dashboard_non_standard_ports(loop):
         requests.get("http://localhost:4832/status/")
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_whitelist(loop):
     pytest.importorskip("bokeh")
     with pytest.raises(Exception):
@@ -144,7 +144,6 @@ def test_dashboard_whitelist(loop):
 
 
 def test_interface(loop):
-    psutil = pytest.importorskip("psutil")
     if_names = sorted(psutil.net_if_addrs())
     for if_name in if_names:
         try:
@@ -168,25 +167,24 @@ def test_interface(loop):
                 start = time()
                 while not len(c.nthreads()):
                     sleep(0.1)
-                    assert time() - start < 5
+                    assert time() - start < 30
                 info = c.scheduler_info()
                 assert "tcp://127.0.0.1" in info["address"]
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
         while not os.path.exists(pidfile):
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 30
 
         text = False
         start = time()
         while not text:
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 30
             with open(pidfile) as f:
                 text = f.read()
         pid = int(text)

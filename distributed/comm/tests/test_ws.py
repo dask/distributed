@@ -122,9 +122,9 @@ async def test_collections(cleanup):
 async def test_large_transfer(cleanup):
     np = pytest.importorskip("numpy")
     async with Scheduler(protocol="ws://") as s:
-        async with Worker(s.address, protocol="ws://") as w:
+        async with Worker(s.address, protocol="ws://"):
             async with Client(s.address, asynchronous=True) as c:
-                future = await c.scatter(np.random.random(1000000))
+                await c.scatter(np.random.random(1_000_000))
 
 
 @pytest.mark.asyncio

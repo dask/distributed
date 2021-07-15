@@ -76,7 +76,7 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
     dask.config.refresh()
 
     port = "13339"
-    sched_addr = "ucx://%s:%s" % (HOST, port)
+    sched_addr = f"ucx://{HOST}:{port}"
 
     with popen(
         ["dask-scheduler", "--no-dashboard", "--protocol", "ucx", "--port", port]

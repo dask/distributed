@@ -14,6 +14,7 @@ from distributed.core import Status
 from distributed.deploy.spec import ProcessInterface, close_clusters, run_spec
 from distributed.metrics import time
 from distributed.utils import is_valid_xml
+from distributed.utils_test import gen_test
 
 
 class MyWorker(Worker):
@@ -138,8 +139,8 @@ async def test_scale(cleanup):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_adaptive_killed_worker(cleanup):
+@gen_test()
+async def test_adaptive_killed_worker():
     with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
 
         async with SpecCluster(
@@ -147,13 +148,10 @@ async def test_adaptive_killed_worker(cleanup):
             worker={"cls": Nanny, "options": {"nthreads": 1}},
             scheduler={"cls": Scheduler, "options": {"port": 0}},
         ) as cluster:
-
             async with Client(cluster, asynchronous=True) as client:
-
-                cluster.adapt(minimum=1, maximum=1)
-
                 # Scale up a cluster with 1 worker.
-                while len(cluster.workers) != 1:
+                cluster.adapt(minimum=1, maximum=1)
+                while not cluster.workers:
                     await asyncio.sleep(0.01)
 
                 future = client.submit(sleep, 0.1)
@@ -163,11 +161,11 @@ async def test_adaptive_killed_worker(cleanup):
                 await cluster.workers[worker_id].kill()
 
                 # Wait for the worker to re-spawn and finish sleeping.
-                await future.result(timeout=5)
+                await future
 
 
-@pytest.mark.asyncio
-async def test_unexpected_closed_worker(cleanup):
+@gen_test()
+async def test_unexpected_closed_worker():
     worker = {"cls": Worker, "options": {"nthreads": 1}}
     with dask.config.set({"distributed.deploy.lost-worker-timeout": "10ms"}):
         async with SpecCluster(
@@ -197,25 +195,20 @@ async def test_unexpected_closed_worker(cleanup):
             assert len(cluster.workers) == 2
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_restart(cleanup):
-    # Regression test for https://github.com/dask/distributed/issues/3062
+@gen_test(timeout=60)
+async def test_restart():
+    """Regression test for https://github.com/dask/distributed/issues/3062"""
     worker = {"cls": Nanny, "options": {"nthreads": 1}}
-    with dask.config.set({"distributed.deploy.lost-worker-timeout": "2s"}):
-        async with SpecCluster(
-            asynchronous=True, scheduler=scheduler, worker=worker
-        ) as cluster:
-            async with Client(cluster, asynchronous=True) as client:
-                cluster.scale(2)
-                await cluster
-                assert len(cluster.workers) == 2
-                await client.restart()
-                start = time()
-                while len(cluster.workers) < 2:
-                    await asyncio.sleep(0.5)
-                    assert time() < start + 60
+    async with SpecCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            cluster.scale(2)
+            await cluster
+            assert len(cluster.workers) == 2
+            await client.restart()
+            while len(cluster.workers) < 2:
+                await asyncio.sleep(0.01)
 
 
 @pytest.mark.skipif(WINDOWS, reason="HTTP Server doesn't close out")

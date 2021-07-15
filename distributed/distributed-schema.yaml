@@ -634,6 +634,15 @@ properties:
               This is useful if you want to include serialization in profiling data,
               or if you have data types that are particularly sensitive to deserialization
 
+          shard:
+            type: string
+            description: |
+              The maximum size of a frame to send through a comm
+
+              Some network infrastructure doesn't like sending through very large messages.
+              Dask comms will cut up these large messages into many small ones.
+              This attribute determines the maximum size of such a shard.
+
           socket-backlog:
             type: integer
             description: |
@@ -754,6 +763,20 @@ properties:
 
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
+
+          websockets:
+            type: object
+            properties:
+              shard:
+                type:
+                - string
+                description: |
+                  The maximum size of a websocket frame to send through a comm.
+
+                  This is somewhat duplicative of distributed.comm.shard, but websockets
+                  often have much smaller maximum message sizes than othe protocols, so
+                  this attribute is used to set a smaller default shard size and to
+                  allow separate control of websocket message sharding.
 
       diagnostics:
         type: object

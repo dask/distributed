@@ -14,7 +14,7 @@ from distributed.utils_test import gen_cluster, inc, throws
 
 
 @gen_cluster(client=True)
-async def test__as_completed(c, s, a, b):
+async def test_as_completed_async(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 1)
     z = c.submit(inc, 2)
@@ -29,7 +29,7 @@ async def test__as_completed(c, s, a, b):
     assert result in [x, y, z]
 
 
-def test_as_completed(client):
+def test_as_completed_sync(client):
     x = client.submit(inc, 1)
     y = client.submit(inc, 2)
     z = client.submit(inc, 1)
@@ -201,7 +201,6 @@ async def test_as_completed_with_results_async(c, s, a, b):
     assert str(exc.value) == "hello!"
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_as_completed_with_results_no_raise(client):
     x = client.submit(throws, 1)
     y = client.submit(inc, 5)
@@ -260,7 +259,7 @@ async def test_as_completed_with_results_no_raise_async(c, s, a, b):
     assert dd[z][0] == 2
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_clear(c, s, a, b):
     futures = c.map(inc, range(3))
     ac = as_completed(futures)

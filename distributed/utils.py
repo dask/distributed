@@ -134,7 +134,7 @@ def _get_ip(host, port, family):
         sock.connect((host, port))
         ip = sock.getsockname()[0]
         return ip
-    except EnvironmentError as e:
+    except OSError as e:
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
@@ -187,7 +187,7 @@ def get_ip_interface(ifname):
     for info in net_if_addrs[ifname]:
         if info.family == socket.AF_INET:
             return info.address
-    raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
+    raise ValueError(f"interface {ifname!r} doesn't have an IPv4 address")
 
 
 async def All(args, quiet_exceptions=()):
@@ -317,7 +317,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
             e.wait(10)
@@ -726,7 +726,7 @@ def validate_key(k):
     """Validate a key as received on a stream."""
     typ = type(k)
     if typ is not str and typ is not bytes:
-        raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
+        raise TypeError(f"Unexpected key type {typ} (value: {k!r})")
 
 
 def _maybe_complex(task):
@@ -1085,13 +1085,11 @@ def command_has_keyword(cmd, k):
         if isinstance(getattr(cmd, "main"), click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
-            cmd_params = set(
-                [
-                    p.human_readable_name
-                    for p in cmd.params
-                    if isinstance(p, click.core.Option)
-                ]
-            )
+            cmd_params = {
+                p.human_readable_name
+                for p in cmd.params
+                if isinstance(p, click.core.Option)
+            }
             return k in cmd_params
 
     return False
@@ -1308,11 +1306,11 @@ def cli_keywords(d: dict, cls=None, cmd=None):
                     )
                 elif cls:
                     raise ValueError(
-                        "Class %s does not support keyword %s" % (typename(cls), k)
+                        f"Class {typename(cls)} does not support keyword {k}"
                     )
                 else:
                     raise ValueError(
-                        "Module %s does not support keyword %s" % (typename(cmd), k)
+                        f"Module {typename(cmd)} does not support keyword {k}"
                     )
 
     def convert_value(v):
