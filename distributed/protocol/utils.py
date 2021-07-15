@@ -25,6 +25,7 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
+    n = n or BIG_BYTES_SHARD_SIZE
     frame = memoryview(frame)
 
     if frame.nbytes <= n:

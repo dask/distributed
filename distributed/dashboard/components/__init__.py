@@ -79,6 +79,7 @@ def add_periodic_callback(doc, component, interval):
     _attach(doc, component)
 
 
+@without_property_validation
 def update(ref):
     comp = ref()
     if comp is not None:
