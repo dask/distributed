@@ -1082,15 +1082,15 @@ async def test_local_cluster_redundant_kwarg(nanny):
 @pytest.mark.asyncio
 async def test_cluster_info_sync():
     async with LocalCluster(
-        processes=False, asynchronous=True, scheduler_sync_interval="2ms"
+        processes=False, asynchronous=True, scheduler_sync_interval="1ms"
     ) as cluster:
         assert cluster.cluster_info["name"] == cluster.name
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.01)
         info = await cluster.scheduler_comm.get_metadata(keys=["cluster-manager-info"])
         assert info["name"] == cluster.name
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["name"] == cluster.name
 
         cluster.cluster_info["foo"] = "bar"
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.01)
         assert "foo" in cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
