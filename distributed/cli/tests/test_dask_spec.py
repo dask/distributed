@@ -9,7 +9,7 @@ from distributed.utils_test import gen_test, popen
 
 
 @pytest.mark.skipif(COMPILED, reason="Fails with cythonized scheduler")
-@gen_test()
+@gen_test(timeout=120)
 async def test_text():
     with popen(
         [

@@ -4584,7 +4584,7 @@ async def test_scatter_dict_workers(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_test()
+@gen_test(timeout=180)
 async def test_client_timeout():
     c = Client("127.0.0.1:57484", asynchronous=True)
 
@@ -5145,7 +5145,7 @@ async def test_secede_simple(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=60)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=120)
 async def test_secede_balances(c, s, a, b):
     count = threading.active_count()
 
@@ -6387,7 +6387,7 @@ def test_client_connectionpool_semaphore_loop(s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], timeout=60)
 async def test_mixed_compression(s):
     pytest.importorskip("lz4")
     da = pytest.importorskip("dask.array")

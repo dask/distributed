@@ -183,7 +183,8 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert result.count(False) == 9
 
 
-@gen_cluster(client=True)
+@pytest.mark.slow
+@gen_cluster(client=True, timeout=120)
 async def test_close_async(c, s, a, b):
     sem = await Semaphore(name="test")
 

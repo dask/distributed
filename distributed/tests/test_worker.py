@@ -300,7 +300,7 @@ async def test_worker_port_range(s):
 
 
 @pytest.mark.slow
-@gen_test()
+@gen_test(timeout=60)
 async def test_worker_waits_for_scheduler():
     w = Worker("127.0.0.1:8724")
     try:
@@ -790,7 +790,9 @@ async def test_hold_onto_dependents(c, s, a, b):
         await asyncio.sleep(0.1)
 
 
-@gen_test()
+# Normally takes >2s but it has been observed to take >30s occasionally
+@pytest.mark.slow
+@gen_test(timeout=120)
 async def test_worker_death_timeout():
     w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
     with pytest.raises(TimeoutError) as info:

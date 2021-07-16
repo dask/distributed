@@ -50,6 +50,7 @@ def test_nanny_worker_ports(loop):
                 )
 
 
+@pytest.mark.slow
 def test_nanny_worker_port_range(loop):
     with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
         nprocs = 3

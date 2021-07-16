@@ -24,8 +24,8 @@ from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
-# FIXME why does this leave behind unclosed Comm objects?
-@gen_cluster(nthreads=[], allow_unclosed=True)
+@pytest.mark.slow
+@gen_cluster(nthreads=[], timeout=120)
 async def test_nanny(s):
     async with Nanny(s.address, nthreads=2, loop=s.loop) as n:
         async with rpc(n.address) as nn:
@@ -121,7 +121,7 @@ async def test_run(s):
 
 
 @pytest.mark.slow
-@gen_cluster(config={"distributed.comm.timeouts.connect": "1s"})
+@gen_cluster(config={"distributed.comm.timeouts.connect": "1s"}, timeout=120)
 async def test_no_hang_when_scheduler_closes(s, a, b):
     # https://github.com/dask/distributed/issues/2880
     with captured_logger("tornado.application", logging.ERROR) as logger:
@@ -434,7 +434,7 @@ async def test_nanny_closes_cleanly(s):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[])
+@gen_cluster(nthreads=[], timeout=60)
 async def test_lifetime(s):
     counter = 0
     event = asyncio.Event()
