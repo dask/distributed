@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import os
 import random
+import sys
 from contextlib import suppress
 from time import sleep
 
@@ -22,6 +23,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
+from distributed.worker_client import get_worker
 
 
 # FIXME why does this leave behind unclosed Comm objects?
@@ -561,3 +563,24 @@ async def test_failure_during_worker_initialization(cleanup):
                 async with Nanny(s.address, foo="bar") as n:
                     await n
         assert "Restarting worker" not in logs.getvalue()
+
+
+def _exitcode_tester(_):
+    sleep(0.1)
+    if get_worker().name > 0:
+        sys.exit(1)
+    return 1
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_log_exitcode(client, scheduler, worker_a, worker_b, caplog):
+    with caplog.at_level(logging.WARNING, logger="distributed.nanny"):
+        futures = client.map(_exitcode_tester, range(8))
+        await client.gather(futures)
+
+    warned = False
+    for record in caplog.records:
+        warned = "Restarting worker: worker exited with exitcode '1'" in record
+        if warned:
+            break
+    assert warned
