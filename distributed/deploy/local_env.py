@@ -187,6 +187,7 @@ class Scheduler(Process):
 
 def LocalEnvCluster(
     python_executable: str,
+    n_workers: int = 1,
     connect_options: Union[List[dict], dict] = {},
     worker_options: dict = {},
     scheduler_options: dict = {},
@@ -219,6 +220,8 @@ def LocalEnvCluster(
     python_executable : str
         Full path to a Python executable, for example from another
         conda env or Python venv.
+    n_workers : int
+        Number of workers to start
     connect_options : dict or list of dict, optional
         Keywords to pass through to :func:`asyncssh.connect`.
         This could include things such as ``port``, ``username``, ``password``
@@ -256,7 +259,7 @@ def LocalEnvCluster(
         },
     }
     workers = {
-        0: {
+        i: {
             "cls": Worker,
             "options": {
                 "python_executable": python_executable,
@@ -265,5 +268,6 @@ def LocalEnvCluster(
                 "worker_module": worker_module,
             },
         }
+        for i in range(n_workers)
     }
     return SpecCluster(workers, scheduler, name="LocalEnvCluster", **kwargs)
