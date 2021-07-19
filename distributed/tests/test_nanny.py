@@ -566,7 +566,7 @@ async def test_failure_during_worker_initialization(cleanup):
 
 
 def _exitcode_tester(_):
-    if get_worker().name != 0:
+    if get_worker().name == 0:
         sys.exit(1)
     return 1
 
