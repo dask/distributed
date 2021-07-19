@@ -250,13 +250,13 @@ class ActorFuture:
         if not hasattr(self, "_cached_result"):
             out = await self.q.get()
             if out["status"] == "OK":
+                self.status = "finished"
                 self._cached_result = out["result"]
             else:
+                self.status = "error"
                 self._cached_result = out["exception"]
-        if isinstance(self._cached_result, Exception):
-            self.status = "error"
+        if self.status == "error":
             raise self._cached_result
-        self.status = "finished"
         return self._cached_result
 
     def result(self, timeout=None):
