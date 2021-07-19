@@ -50,9 +50,9 @@ class Actor(WrappedKey):
     """
 
     def __init__(self, cls, address, key, worker=None):
+        super().__init__(key)
         self._cls = cls
         self._address = address
-        self.key = key
         self._future = None
         if worker:
             self._worker = worker
@@ -158,8 +158,9 @@ class Actor(WrappedKey):
                             kwargs={k: to_serialize(v) for k, v in kwargs.items()},
                         )
                     except OSError:
-                        if self._future:
+                        if self._future and not self._future.done():
                             await self._future
+                            return await run_actor_function_on_worker()
                         else:
                             raise OSError("Unable to contact Actor's worker")
                     return result
@@ -241,9 +242,23 @@ class ActorFuture:
         self.io_loop = io_loop
         if result:
             self._cached_result = result
+        self.status = "pending"
 
     def __await__(self):
         return self.result()
+
+    async def _result(self, raiseit=True):
+        if not hasattr(self, "_cached_result"):
+            out = await self.q.get()
+            if out["status"] == "OK":
+                self._cached_result = out["result"]
+            else:
+                self._cached_result = out["exception"]
+        if isinstance(self._cached_result, Exception):
+            self.status = "error"
+            raise self._cached_result
+        self.status = "finished"
+        return self._cached_result
 
     def result(self, timeout=None):
         try:
