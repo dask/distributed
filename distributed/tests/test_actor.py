@@ -6,7 +6,7 @@ import pytest
 
 import dask
 
-from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
+from distributed import Actor, ActorFuture, Client, Future, Nanny, get_client, wait
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -624,3 +624,20 @@ async def test_exception_async(client, s, a, b):
 
     with pytest.raises(MyException):
         await ac.prop
+
+
+@gen_cluster(client=True)
+async def test_serialize_with_pickle(c, s, a, b):
+    class Foo:
+        def __init__(self):
+            self.actor = get_client().submit(Counter, actor=True).result()
+
+        def __getstate__(self):
+            return self.actor
+
+        def __setstate__(self, state):
+            self.actor = state
+
+    future = c.submit(Foo, workers=a.address)
+    foo = await future
+    assert isinstance(foo.actor, Actor)
