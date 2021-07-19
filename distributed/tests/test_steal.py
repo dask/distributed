@@ -850,3 +850,45 @@ async def test_blacklist_shuffle_split(c, s, a, b):
                     assert "split" not in ts.prefix.name
         await asyncio.sleep(0.001)
     await res
+
+
+@pytest.mark.parametrize("num_workers", [2, 3])
+def test_steal_while_closing(num_workers):
+    @gen_cluster(client=True, nthreads=[("", 1)] * num_workers)
+    async def test(c, s, *workers):
+
+        futures = c.map(
+            slowinc,
+            range(50),
+            delay=0.01,
+            workers=workers[0].address,
+            allow_other_workers=True,
+            key=[f"f-{x:02d}" for x in range(50)],
+        )
+
+        while sum(len(w.tasks) for w in workers[1:]) < 10:
+            await asyncio.sleep(0.01)
+
+        await workers[-1].close()
+
+        await c.gather(futures)
+
+        # The scheduler should only initiate transitions for the closed worker
+        # but nothing else
+
+        ## Ordinary transition if everything works as expected
+        #
+        # released -> waiting
+        # waiting -> processing
+        # processing -> memory
+
+        ## For tasks on the dying worker everything is prepended with
+        ## three more transitions
+        # memory -> released (sometimes)
+        # released -> waiting
+        # waiting -> processing
+        # processing -> released
+        # + standard transitions
+        assert max(len(s.story(f.key)) for f in futures) <= 7
+
+    test()

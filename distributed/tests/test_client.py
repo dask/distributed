@@ -825,11 +825,8 @@ async def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     await x
 
 
-@pytest.mark.skip
 @gen_cluster(client=True)
 async def test_missing_data_heals(c, s, a, b):
-    a.validate = False
-    b.validate = False
     x = c.submit(inc, 1)
     y = c.submit(inc, x)
     z = c.submit(inc, y)
@@ -837,12 +834,11 @@ async def test_missing_data_heals(c, s, a, b):
     await wait([x, y, z])
 
     # Secretly delete y's key
-    if y.key in a.data:
-        del a.data[y.key]
-        a.release_key(y.key)
-    if y.key in b.data:
-        del b.data[y.key]
-        b.release_key(y.key)
+    for w in [a, b]:
+        w.handle_free_keys(keys=(y.key,))
+        assert y.key not in w.data
+        assert y.key not in w.tasks
+
     await asyncio.sleep(0)
 
     w = c.submit(add, y, z)
@@ -851,30 +847,23 @@ async def test_missing_data_heals(c, s, a, b):
     assert result == 3 + 4
 
 
-@pytest.mark.skip
 @gen_cluster(client=True)
 async def test_gather_robust_to_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
     x, y, z = c.map(inc, range(3))
     await wait([x, y, z])  # everything computed
 
     for f in [x, y]:
         for w in [a, b]:
-            if f.key in w.data:
-                del w.data[f.key]
-                await asyncio.sleep(0)
-                w.release_key(f.key)
+            w.handle_free_keys(keys=(f.key,))
+            assert f.key not in w.data
+            assert f.key not in w.tasks
 
     xx, yy, zz = await c.gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)
 
 
-@pytest.mark.skip
 @gen_cluster(client=True)
 async def test_gather_robust_to_nested_missing_data(c, s, a, b):
-    a.validate = False
-    b.validate = False
     w = c.submit(inc, 1)
     x = c.submit(inc, w)
     y = c.submit(inc, x)
@@ -884,10 +873,9 @@ async def test_gather_robust_to_nested_missing_data(c, s, a, b):
 
     for worker in [a, b]:
         for datum in [y, z]:
-            if datum.key in worker.data:
-                del worker.data[datum.key]
-                await asyncio.sleep(0)
-                worker.release_key(datum.key)
+            worker.handle_free_keys(keys=(datum.key,))
+            assert datum.key not in worker.data
+            assert datum.key not in worker.tasks
 
     result = await c.gather([z])
 

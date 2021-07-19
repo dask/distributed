@@ -2653,19 +2653,15 @@ class Worker(ServerNode):
                         self.available_resources[resource] += quantity
 
             if report:
-                # Inform the scheduler of keys which will have gone missing
-                # We are releasing them before they have completed
-                if ts.state in PROCESSING:
-                    # This path is only hit with work stealing
-                    msg = {"op": "release", "key": key, "cause": cause}
-                else:
-                    # This path is only hit when calling release_key manually
-                    msg = {
-                        "op": "release-worker-data",
-                        "keys": [key],
-                        "worker": self.address,
-                    }
-                self.batched_stream.send(msg)
+                # TODO: Is this conditional check for task state necessary?
+                if ts.state not in PROCESSING:
+                    self.batched_stream.send(
+                        {
+                            "op": "release-worker-data",
+                            "keys": [key],
+                            "worker": self.address,
+                        }
+                    )
 
             self._notify_plugins("release_key", key, ts.state, cause, reason, report)
             del self.tasks[key]
