@@ -3798,7 +3798,11 @@ class Scheduler(SchedulerState, ServerNode):
             logger.info("  Scheduler at: %25s", listener.contact_address)
             if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
                 # Advertise service via mdns service discovery
-                host, port = get_address_host_port(listener.contact_address)
+                try:
+                    host, port = get_address_host_port(listener.contact_address)
+                except NotImplementedError:
+                    # If address is not IP based continue
+                    continue
                 protocol, _ = parse_address(listener.contact_address)
                 short_id = self.id.split("-")[1]
                 info = AsyncServiceInfo(
