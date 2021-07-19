@@ -96,11 +96,11 @@ class Cluster:
         # If the cluster is already closed, we're already done
         if self.status == Status.closed:
 
-            # check if the cluster is in Adaptive mode and close Adaptive
+            # check if the cluster is in Adaptive mode and close adaptive
             if self._adaptive is not None:
                 self._adaptive.stop()
                 self._adaptive = None
-                
+
             if self.asynchronous:
                 future = asyncio.Future()
                 future.set_result(None)
