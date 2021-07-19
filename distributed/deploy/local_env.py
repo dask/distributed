@@ -222,12 +222,9 @@ def LocalEnvCluster(
         conda env or Python venv.
     n_workers : int
         Number of workers to start
-    connect_options : dict or list of dict, optional
-        Keywords to pass through to :func:`asyncssh.connect`.
-        This could include things such as ``port``, ``username``, ``password``
-        or ``known_hosts``. See docs for :func:`asyncssh.connect` and
-        :class:`asyncssh.SSHClientConnectionOptions` for full information.
-        If a list it must have the same length as ``hosts``.
+    connect_options : dict, optional
+        Keywords to pass through to :func:`asyncio.create_subprocess_shell`.
+        See docs for :func:`asyncio.create_subprocess_shell` for full information.
     worker_options : dict, optional
         Keywords to pass on to workers.
     scheduler_options : dict, optional
