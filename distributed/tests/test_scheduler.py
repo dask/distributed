@@ -702,10 +702,7 @@ async def test_coerce_address():
         assert s.coerce_address("[::1]:8000") == "tcp://[::1]:8000"
         assert s.coerce_address("tcp://127.0.0.1:8000") == "tcp://127.0.0.1:8000"
         assert s.coerce_address("tcp://[::1]:8000") == "tcp://[::1]:8000"
-        assert s.coerce_address("localhost:8000") in (
-            "tcp://127.0.0.1:8000",
-            "tcp://[::1]:8000",
-        )
+    with dask.config.set({"distributed.scheduler.resolve-worker-hostname": True}):
         assert s.coerce_address("localhost:8000") in (
             "tcp://127.0.0.1:8000",
             "tcp://[::1]:8000",

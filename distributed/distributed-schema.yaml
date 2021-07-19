@@ -140,6 +140,15 @@ properties:
 
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
+          resolve-worker-hostname:
+            type: boolean
+            description: |
+              Whether the scheduler should resolve the worker hostname when joining.
+              If true, the worker's contact string is resolved to an IP address when it connects
+              (and the IP address is used to identify the worker internally).  Otherwise, the
+              resolution is only done when a socket is connected.  Disabling hostname resolution
+              may be advantageous when using TLS security.
+              
           unknown-task-duration:
             type: string
             description: |
