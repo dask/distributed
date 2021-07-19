@@ -1,7 +1,7 @@
 import asyncio
 import functools
 import threading
-from queue import Queue
+from asyncio import Queue
 
 from .client import Future, default_client
 from .protocol import to_serialize
@@ -162,6 +162,7 @@ class Actor(WrappedKey):
                             await self._future
                             return await run_actor_function_on_worker()
                         else:
+                            print("#########", key)
                             raise OSError("Unable to contact Actor's worker")
                     return result
 
@@ -177,11 +178,11 @@ class Actor(WrappedKey):
                 else:
                     # TODO: this mechanism is error prone
                     # we should endeavor to make dask's standard code work here
-                    q = Queue()
+                    q = Queue(loop=self._io_loop.asyncio_loop)
 
                     async def wait_then_add_to_queue():
                         x = await run_actor_function_on_worker()
-                        q.put(x)
+                        await q.put(x)
 
                     self._io_loop.add_callback(wait_then_add_to_queue)
 
@@ -261,17 +262,13 @@ class ActorFuture:
         return self._cached_result
 
     def result(self, timeout=None):
-        try:
-            if isinstance(self._cached_result, Exception):
-                raise self._cached_result
-            return self._cached_result
-        except AttributeError:
-            out = self.q.get(timeout=timeout)
-            if out["status"] == "OK":
-                self._cached_result = out["result"]
-            else:
-                self._cached_result = out["exception"]
-        return self.result()
+        if not hasattr(self, "_cached_result"):
+            sync(self.io_loop, self._result, callback_timeout=timeout)
+        if isinstance(self._cached_result, Exception):
+            self.status = "error"
+            raise self._cached_result
+        self.status = "finished"
+        return self._cached_result
 
     def __repr__(self):
         return "<ActorFuture>"
