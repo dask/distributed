@@ -566,21 +566,15 @@ async def test_failure_during_worker_initialization(cleanup):
 
 
 def _exitcode_tester(_):
-    sleep(0.1)
-    if get_worker().name > 0:
+    if get_worker().name != 0:
         sys.exit(1)
     return 1
 
 
 @gen_cluster(client=True, Worker=Nanny)
-async def test_log_exitcode(client, scheduler, worker_a, worker_b, caplog):
-    with caplog.at_level(logging.WARNING, logger="distributed.nanny"):
+async def test_warn_exitcode(client, scheduler, worker_a, worker_b):
+    with captured_logger("distributed.nanny", logging.WARNING) as log:
         futures = client.map(_exitcode_tester, range(8))
         await client.gather(futures)
 
-    warned = False
-    for record in caplog.records:
-        warned = "Restarting worker: worker exited with exitcode '1'" in record
-        if warned:
-            break
-    assert warned
+    assert "exited with status 1" in log.getvalue()

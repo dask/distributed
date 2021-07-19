@@ -465,9 +465,7 @@ class Nanny(ServerNode):
                 Status.closing_gracefully,
             ):
                 if self.auto_restart:
-                    logger.warning(
-                        f"Restarting worker: worker exited with exitcode '{exitcode}'"
-                    )
+                    logger.warning("Restarting worker")
                     await self.instantiate()
             elif self.status == Status.closing_gracefully:
                 await self.close()
@@ -641,7 +639,7 @@ class WorkerProcess:
             assert r is not None
             if r != 0:
                 msg = self._death_message(self.process.pid, r)
-                logger.info(msg)
+                logger.warn(msg)
             self.status = Status.stopped
             self.stopped.set()
             # Release resources
