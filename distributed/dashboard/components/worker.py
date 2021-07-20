@@ -2,6 +2,7 @@ import logging
 import math
 import os
 
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     BoxZoomTool,
@@ -29,7 +30,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, update, without_property_validation
+from distributed.dashboard.utils import transpose, update
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
 from distributed.utils import key_split, log_errors

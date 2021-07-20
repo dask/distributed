@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from numbers import Number
 
+from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -59,13 +60,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import (
-    BOKEH_VERSION,
-    PROFILING,
-    transpose,
-    update,
-    without_property_validation,
-)
+from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin

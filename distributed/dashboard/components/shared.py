@@ -3,6 +3,7 @@ import weakref
 from statistics import mean
 
 import tlz as toolz
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     Button,
@@ -23,11 +24,7 @@ import dask
 from distributed import profile
 from distributed.compatibility import WINDOWS
 from distributed.dashboard.components import DashboardComponent
-from distributed.dashboard.utils import (
-    BOKEH_VERSION,
-    update,
-    without_property_validation,
-)
+from distributed.dashboard.utils import update
 from distributed.utils import log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
@@ -146,11 +143,7 @@ class ProfilePlot(DashboardComponent):
         def cb(attr, old, new):
             with log_errors():
                 try:
-                    selected = new.indices
-                except AttributeError:
-                    selected = new["1d"]["indices"]
-                try:
-                    ind = selected[0]
+                    ind = new.indices[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -159,10 +152,7 @@ class ProfilePlot(DashboardComponent):
                 update(self.source, data)
                 self.source.selected = old
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
     @without_property_validation
     def update(self, state):
@@ -211,12 +201,8 @@ class ProfileTimePlot(DashboardComponent):
             if changing[0]:
                 return
             with log_errors():
-                if isinstance(new, list):  # bokeh >= 1.0
-                    selected = new
-                else:
-                    selected = new["1d"]["indices"]
                 try:
-                    ind = selected[0]
+                    ind = new[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -224,16 +210,10 @@ class ProfileTimePlot(DashboardComponent):
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
                 update(self.source, data)
-                if isinstance(new, list):  # bokeh >= 1.0
-                    self.source.selected.indices = old
-                else:
-                    self.source.selected = old
+                self.source.selected.indices = old
                 changing[0] = False
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
         self.ts_source = ColumnDataSource({"time": [], "count": []})
         self.ts_plot = figure(
@@ -254,10 +234,7 @@ class ProfileTimePlot(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                try:
-                    selected = self.ts_source.selected.indices
-                except AttributeError:
-                    selected = self.ts_source.selected["1d"]["indices"]
+                selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
                     stop = self.ts_source.data["time"][max(selected)] / 1000
@@ -266,10 +243,7 @@ class ProfileTimePlot(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update(update_metadata=False)
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.ts_source.selected.on_change("indices", ts_change)
-        else:
-            self.ts_source.on_change("selected", ts_change)
+        self.ts_source.selected.on_change("indices", ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state))
@@ -364,12 +338,8 @@ class ProfileServer(DashboardComponent):
             if changing[0]:
                 return
             with log_errors():
-                if isinstance(new, list):  # bokeh >= 1.0
-                    selected = new
-                else:
-                    selected = new["1d"]["indices"]
                 try:
-                    ind = selected[0]
+                    ind = new[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -377,16 +347,10 @@ class ProfileServer(DashboardComponent):
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
                 update(self.source, data)
-                if isinstance(new, list):  # bokeh >= 1.0
-                    self.source.selected.indices = old
-                else:
-                    self.source.selected = old
+                self.source.selected.indices = old
                 changing[0] = False
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.source.selected.on_change("indices", cb)
-        else:
-            self.source.on_change("selected", cb)
+        self.source.selected.on_change("indices", cb)
 
         self.ts_source = ColumnDataSource({"time": [], "count": []})
         self.ts_plot = figure(
@@ -407,10 +371,7 @@ class ProfileServer(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                try:
-                    selected = self.ts_source.selected.indices
-                except AttributeError:
-                    selected = self.ts_source.selected["1d"]["indices"]
+                selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data["time"][min(selected)] / 1000
                     stop = self.ts_source.data["time"][max(selected)] / 1000
@@ -419,10 +380,7 @@ class ProfileServer(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update()
 
-        if BOKEH_VERSION >= "1.0.0":
-            self.ts_source.selected.on_change("indices", ts_change)
-        else:
-            self.ts_source.on_change("selected", ts_change)
+        self.ts_source.selected.on_change("indices", ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state))

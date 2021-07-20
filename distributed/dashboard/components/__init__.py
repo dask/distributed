@@ -4,6 +4,7 @@ from bisect import bisect
 from operator import add
 from time import time
 
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     BoxZoomTool,
@@ -29,7 +30,6 @@ from tornado import gen
 import dask
 
 from distributed import profile
-from distributed.dashboard.utils import BOKEH_VERSION, without_property_validation
 from distributed.utils import log_errors
 
 if dask.config.get("distributed.dashboard.export-tool"):
