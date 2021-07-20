@@ -95,7 +95,6 @@ class GPUCurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 

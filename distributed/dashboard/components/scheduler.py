@@ -203,7 +203,6 @@ class ProcessingHistogram(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             self.root.quad(
@@ -280,7 +279,6 @@ class ClusterMemory(DashboardComponent):
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
@@ -401,7 +399,6 @@ class WorkersMemory(DashboardComponent):
             tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
             self.root.add_tools(tap)
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
@@ -535,7 +532,6 @@ class WorkersMemoryHistogram(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             self.root.quad(
@@ -599,7 +595,6 @@ class BandwidthTypes(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -678,7 +673,6 @@ class BandwidthWorkers(DashboardComponent):
             color_bar.ticker = AdaptiveTicker(**TICKS_1024)
             self.root.add_layout(color_bar, "right")
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -781,7 +775,6 @@ class ComputePerKey(DashboardComponent):
             fig.xaxis.minor_tick_line_alpha = 0
             fig.xgrid.visible = False
 
-            fig.toolbar.logo = None
             fig.toolbar_location = None
 
             hover = HoverTool()
@@ -949,7 +942,6 @@ class AggregateAction(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.xgrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -1033,7 +1025,6 @@ class MemoryByKey(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -1140,7 +1131,6 @@ class CurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 
