@@ -11,6 +11,8 @@ try:
 except ImportError:
     np = None
 
+import dask
+
 from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
 from distributed.protocol import (
@@ -440,6 +442,21 @@ def test_compression_numpy_list():
 
     header, frames = serialize([MyObj(), MyObj()])
     assert header["compression"] == [False, False]
+
+
+@gen_test()
+async def test_frame_split():
+    data = b"1234abcd" * (2 ** 20)  # 8 MiB
+    assert dask.sizeof.sizeof(data) == dask.utils.parse_bytes("8MiB")
+
+    size = dask.utils.parse_bytes("3MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    print(split_frames)
+    assert len(split_frames) == 3 + 2  # Three splits and two headers
+
+    size = dask.utils.parse_bytes("5MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    assert len(split_frames) == 2 + 2  # Two splits and two headers
 
 
 @pytest.mark.parametrize(

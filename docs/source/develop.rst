@@ -12,21 +12,17 @@ guidelines`_ in the main documentation.
 Install
 -------
 
-Clone this repository with git::
+1. Clone this repository with git::
 
-   git clone git@github.com:dask/distributed.git
-   cd distributed
+     git clone git@github.com:dask/distributed.git
+     cd distributed
 
-Install all dependencies:
+2. Install anaconda or miniconda (OS-dependent)
+3. ::
 
-All OS::
-
-1. Install anaconda or miniconda
-2. ::
-
-    conda env create --file continuous_integration/environment-3.8.yaml
-    conda activate dask-distributed
-    python -m pip install -e .
+     conda env create --file continuous_integration/environment-3.8.yaml
+     conda activate dask-distributed
+     python -m pip install -e .
 
 
 To keep a fork in sync with the upstream source::

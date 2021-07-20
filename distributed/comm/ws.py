@@ -12,6 +12,8 @@ from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
 
+import dask
+
 from ..utils import ensure_bytes, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
@@ -20,6 +22,11 @@ from .tcp import BaseTCPBackend, _expect_tls_context, convert_stream_closed_erro
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
+
+
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
+    dask.config.get("distributed.comm.websockets.shard")
+)
 
 
 class WSHandler(WebSocketHandler):
@@ -106,6 +113,7 @@ class WSHandlerComm(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
         try:

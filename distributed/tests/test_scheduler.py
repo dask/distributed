@@ -12,16 +12,17 @@ from time import sleep
 from unittest import mock
 
 import cloudpickle
+import psutil
 import pytest
 from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply
+from dask.utils import apply, parse_timedelta, stringify
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
-from distributed.compatibility import MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -149,6 +150,114 @@ async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c
     ]
 
 
+@pytest.mark.parametrize("ndeps", [0, 1, 4])
+@pytest.mark.parametrize(
+    "nthreads",
+    [
+        [("127.0.0.1", 1)] * 5,
+        [("127.0.0.1", 3), ("127.0.0.1", 2), ("127.0.0.1", 1)],
+    ],
+)
+def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+    @gen_cluster(
+        client=True,
+        nthreads=nthreads,
+        config={"distributed.scheduler.work-stealing": False},
+    )
+    async def test(c, s, *workers):
+        r"""
+        Ensure that sibling root tasks are scheduled to the same node, reducing future data transfer.
+
+        We generate a wide layer of "root" tasks (random NumPy arrays). All of those tasks share 0-5
+        trivial dependencies. The ``ndeps=0`` and ``ndeps=1`` cases are most common in real-world use
+        (``ndeps=1`` is basically ``da.from_array(..., inline_array=False)`` or ``da.from_zarr``).
+        The graph is structured like this (though the number of tasks and workers is different):
+
+            |-W1-|  |-W2-| |-W3-|  |-W4-|   < ---- ideal task scheduling
+
+              q       r       s       t      < --- `sum-aggregate-`
+             / \     / \     / \     / \
+            i   j   k   l   m   n   o   p    < --- `sum-`
+            |   |   |   |   |   |   |   |
+            a   b   c   d   e   f   g   h    < --- `random-`
+            \   \   \   |   |   /   /   /
+                   TRIVIAL * 0..5
+
+        Neighboring `random-` tasks should be scheduled on the same worker. We test that generally,
+        only one worker holds each row of the array, that the `random-` tasks are never transferred,
+        and that there are few transfers overall.
+        """
+        da = pytest.importorskip("dask.array")
+        np = pytest.importorskip("numpy")
+
+        if ndeps == 0:
+            x = da.random.random((100, 100), chunks=(10, 10))
+        else:
+
+            def random(**kwargs):
+                assert len(kwargs) == ndeps
+                return np.random.random((10, 10))
+
+            trivial_deps = {f"k{i}": delayed(object()) for i in range(ndeps)}
+
+            # TODO is there a simpler (non-blockwise) way to make this sort of graph?
+            x = da.blockwise(
+                random,
+                "yx",
+                new_axes={"y": (10,) * 10, "x": (10,) * 10},
+                dtype=float,
+                **trivial_deps,
+            )
+
+        xx, xsum = dask.persist(x, x.sum(axis=1, split_every=20))
+        await xsum
+
+        # Check that each chunk-row of the array is (mostly) stored on the same worker
+        primary_worker_key_fractions = []
+        secondary_worker_key_fractions = []
+        for i, keys in enumerate(x.__dask_keys__()):
+            # Iterate along rows of the array.
+            keys = set(stringify(k) for k in keys)
+
+            # No more than 2 workers should have any keys
+            assert sum(any(k in w.data for k in keys) for w in workers) <= 2
+
+            # What fraction of the keys for this row does each worker hold?
+            key_fractions = [
+                len(set(w.data).intersection(keys)) / len(keys) for w in workers
+            ]
+            key_fractions.sort()
+            # Primary worker: holds the highest percentage of keys
+            # Secondary worker: holds the second highest percentage of keys
+            primary_worker_key_fractions.append(key_fractions[-1])
+            secondary_worker_key_fractions.append(key_fractions[-2])
+
+        # There may be one or two rows that were poorly split across workers,
+        # but the vast majority of rows should only be on one worker.
+        assert np.mean(primary_worker_key_fractions) >= 0.9
+        assert np.median(primary_worker_key_fractions) == 1.0
+        assert np.mean(secondary_worker_key_fractions) <= 0.1
+        assert np.median(secondary_worker_key_fractions) == 0.0
+
+        # Check that there were few transfers
+        unexpected_transfers = []
+        for worker in workers:
+            for log in worker.incoming_transfer_log:
+                keys = log["keys"]
+                # The root-ish tasks should never be transferred
+                assert not any(k.startswith("random") for k in keys), keys
+                # `object-` keys (the trivial deps of the root random tasks) should be transferred
+                if any(not k.startswith("object") for k in keys):
+                    # But not many other things should be
+                    unexpected_transfers.append(list(keys))
+
+        # A transfer at the very end to move aggregated results is fine (necessary with unbalanced workers in fact),
+        # but generally there should be very very few transfers.
+        assert len(unexpected_transfers) <= 3, unexpected_transfers
+
+    test()
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)
@@ -244,7 +353,6 @@ async def test_remove_worker_from_scheduler(s, a, b):
     await s.remove_worker(address=a.address)
     assert a.address not in s.nthreads
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
-    s.validate_state()
 
 
 @gen_cluster()
@@ -253,7 +361,6 @@ async def test_remove_worker_by_name_from_scheduler(s, a, b):
     assert await s.remove_worker(address=a.name) == "OK"
     assert a.address not in s.nthreads
     assert await s.remove_worker(address=a.address) == "already-removed"
-    s.validate_state()
 
 
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
@@ -533,7 +640,7 @@ async def test_ready_remove_worker(s, a, b):
     assert all(len(w.processing) > w.nthreads for w in s.workers.values())
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(inc, range(20))
     await wait(futures)
@@ -657,24 +764,17 @@ async def test_config_stealing(cleanup):
             assert "stealing" not in s.extensions
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @gen_cluster(nthreads=[])
 async def test_file_descriptors_dont_leak(s):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
     before = proc.num_fds()
 
-    w = await Worker(s.address)
-    await w.close()
+    async with Worker(s.address):
+        assert proc.num_fds() > before
 
-    during = proc.num_fds()
-
-    start = time()
     while proc.num_fds() > before:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
 
 
 @gen_cluster()
@@ -742,7 +842,7 @@ async def test_scheduler_sees_memory_limits(s):
     await w.close()
 
 
-@gen_cluster(client=True, timeout=1000)
+@gen_cluster(client=True)
 async def test_retire_workers(c, s, a, b):
     [x] = await c.scatter([1], workers=a.address)
     [y] = await c.scatter([list(range(1000))], workers=b.address)
@@ -809,7 +909,7 @@ async def test_workers_to_close_grouped(c, s, *workers):
     def key(ws):
         return groups[ws.address]
 
-    assert set(s.workers_to_close(key=key)) == set(w.address for w in workers)
+    assert set(s.workers_to_close(key=key)) == {w.address for w in workers}
 
     # Assert that job in one worker blocks closure of group
     future = c.submit(slowinc, 1, delay=0.2, workers=workers[0].address)
@@ -844,13 +944,10 @@ async def test_retire_workers_no_suspicious_tasks(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="file descriptors not really a thing"
-)
-@gen_cluster(client=True, nthreads=[], timeout=240)
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@gen_cluster(client=True, nthreads=[], timeout=60)
 async def test_file_descriptors(c, s):
     await asyncio.sleep(0.1)
-    psutil = pytest.importorskip("psutil")
     da = pytest.importorskip("dask.array")
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
@@ -895,10 +992,8 @@ async def test_file_descriptors(c, s):
             assert comm.closed() or comm.peer_address != s.address, comm
     assert not s.stream_comms
 
-    start = time()
     while proc.num_fds() > num_fds_1 + N:
         await asyncio.sleep(0.01)
-        assert time() < start + 3
 
 
 @pytest.mark.slow
@@ -966,7 +1061,6 @@ async def test_learn_occupancy_multiple_workers(c, s, a, b):
     await wait(x)
 
     assert not any(v == 0.5 for w in s.workers.values() for v in w.processing.values())
-    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -1240,36 +1334,30 @@ async def test_non_existent_worker(c, s):
 async def test_correct_bad_time_estimate(c, s, *workers):
     future = c.submit(slowinc, 1, delay=0)
     await wait(future)
-
     futures = [c.submit(slowinc, future, delay=0.1, pure=False) for i in range(20)]
-
     await asyncio.sleep(0.5)
-
     await wait(futures)
-
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
-@gen_test()
-async def test_service_hosts():
-    port = 0
-    for url, expected in [
-        ("tcp://0.0.0.0", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1", ("::", "0.0.0.0")),
-        ("tcp://127.0.0.1:38275", ("::", "0.0.0.0")),
-    ]:
-        async with Scheduler(host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            if isinstance(expected, tuple):
-                assert sock.getsockname()[0] in expected
-            else:
-                assert sock.getsockname()[0] == expected
-
-    port = ("127.0.0.1", 0)
-    for url in ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]:
-        async with Scheduler(dashboard_address="127.0.0.1:0", host=url) as s:
-            sock = first(s.http_server._sockets.values())
-            assert sock.getsockname()[0] == "127.0.0.1"
+@pytest.mark.parametrize(
+    "host", ["tcp://0.0.0.0", "tcp://127.0.0.1", "tcp://127.0.0.1:38275"]
+)
+@pytest.mark.parametrize(
+    "dashboard_address,expect",
+    [
+        (None, ("::", "0.0.0.0")),
+        ("127.0.0.1:0", ("127.0.0.1",)),
+    ],
+)
+@pytest.mark.asyncio
+async def test_dashboard_host(host, dashboard_address, expect):
+    """Dashboard is accessible from any host by default, but it can be also bound to
+    localhost.
+    """
+    async with Scheduler(host=host, dashboard_address=dashboard_address) as s:
+        sock = first(s.http_server._sockets.values())
+        assert sock.getsockname()[0] in expect
 
 
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "100ms"})
@@ -1458,9 +1546,6 @@ async def test_retries(c, s, a, b):
     exc_info.match("one")
 
 
-@pytest.mark.flaky(
-    reruns=10, reruns_delay=5, reason="second worker also errant for some reason"
-)
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_missing_data_errant_worker(c, s, w1, w2, w3):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
@@ -1694,7 +1779,7 @@ async def test_bandwidth(c, s, a, b):
     assert not s.bandwidth_workers
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, timeout=60)
 async def test_bandwidth_clear(c, s, a, b):
     np = pytest.importorskip("numpy")
     x = c.submit(np.arange, 1000000, workers=[a.worker_address], pure=False)
@@ -1736,9 +1821,7 @@ async def test_close_workers(s, a, b):
     assert b.status == Status.closed
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_test()
 async def test_host_address():
     s = await Scheduler(host="127.0.0.2", port=0)
@@ -1866,6 +1949,34 @@ async def test_get_task_duration(c, s, a, b):
         assert s.get_task_duration(ts) == 0.5  # default
         assert len(s.unknown_durations) == 1
         assert len(s.unknown_durations["slowinc"]) == 1
+
+
+@gen_cluster(client=True)
+async def test_default_task_duration_splits(c, s, a, b):
+    """This test ensures that the default task durations for shuffle split tasks are, by default, aligned with the task names of dask.dask"""
+
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+
+    # We don't care about the actual computation here but we'll schedule one anyhow to verify that we're looking for the correct key
+    npart = 10
+    df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
+    graph = df.shuffle(
+        "A",
+        shuffle="tasks",
+        # If we don't have enough partitions, we'll fall back to a simple shuffle
+        max_branch=npart - 1,
+    ).sum()
+    fut = c.compute(graph)
+    await wait(fut)
+
+    split_prefix = [pre for pre in s.task_prefixes.keys() if "split" in pre]
+    assert len(split_prefix) == 1
+    split_prefix = split_prefix[0]
+    default_time = parse_timedelta(
+        dask.config.get("distributed.scheduler.default-task-durations")[split_prefix]
+    )
+    assert default_time <= 1e-6
 
 
 @pytest.mark.asyncio
@@ -2039,10 +2150,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):
@@ -2216,7 +2327,7 @@ async def test_multiple_listeners(cleanup):
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)])
 async def test_worker_name_collision(s, a):
-    # test that a name collision for workers produces the expected respsone
+    # test that a name collision for workers produces the expected response
     # and leaves the data structures of Scheduler in a good state
     # is not updated by the second worker
     with captured_logger(logging.getLogger("distributed.scheduler")) as log:
@@ -2248,7 +2359,7 @@ async def test_unknown_task_duration_config_2(s, a, b):
     assert s.idle_since == s.time_started
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_retire_state_change(c, s, a, b):
     np = pytest.importorskip("numpy")
     y = c.map(lambda x: x ** 2, range(10))
@@ -2313,13 +2424,11 @@ def test_memorystate():
         repr(m)
         == dedent(
             """
-            Managed by Dask       : 80 B
-              - in process memory : 68 B
-              - spilled to disk   : 12 B
             Process memory (RSS)  : 100 B
               - managed by Dask   : 68 B
               - unmanaged (old)   : 15 B
               - unmanaged (recent): 17 B
+            Spilled to disk       : 12 B
             """
         ).lstrip()
     )
@@ -2371,8 +2480,8 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
     t0 = time()
     while True:
         minfo = scheduler_or_workerstate.memory
-        nbytes = getattr(minfo, attr)
-        if min_ * 2 ** 20 <= nbytes <= max_ * 2 ** 20:
+        nmib = getattr(minfo, attr) / 2 ** 20
+        if min_ <= nmib <= max_:
             return
         if time() - t0 > timeout:
             raise TimeoutError(
@@ -2381,13 +2490,12 @@ async def assert_memory(scheduler_or_workerstate, attr: str, min_, max_, timeout
         await asyncio.sleep(0.1)
 
 
-# This test is heavily influenced by hard-to-control factors such as memory management
-# by the Python interpreter and the OS, so it occasionally glitches
-@pytest.mark.flaky(reruns=3, reruns_delay=5)
-# ~33s runtime, or distributed.memory.recent-to-old-time + 3s
+# ~31s runtime, or distributed.worker.memory.recent-to-old-time + 1s.
+# On Windows, it can take ~65s due to worker memory needing to stabilize first.
 @pytest.mark.slow
+@pytest.mark.flaky(condition=LINUX, reason="see comments", reruns=10, reruns_delay=5)
 @gen_cluster(
-    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=60
+    client=True, Worker=Nanny, worker_kwargs={"memory_limit": "500 MiB"}, timeout=120
 )
 async def test_memory(c, s, *_):
     pytest.importorskip("zict")
@@ -2400,14 +2508,25 @@ async def test_memory(c, s, *_):
     assert s_m0.managed == 0
     assert a.memory.managed == 0
     assert b.memory.managed == 0
-    # When a worker first goes online, its RAM is immediately counted as
-    # unmanaged_old
-    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=0)
-    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=0)
-    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=0)
 
-    f1 = c.submit(leaking, 100, 50, 5, pure=False, workers=[a.name])
-    f2 = c.submit(leaking, 100, 50, 5, pure=False, workers=[b.name])
+    # When a worker first goes online, its RAM is immediately counted as unmanaged_old.
+    # On Windows, however, there is somehow enough time between the worker start and
+    # this line for 2 heartbeats and the memory keeps growing substantially for a while.
+    # Sometimes there is a single heartbeat but on the consecutive test we observe
+    # a large unexplained increase in unmanaged_recent memory.
+    # Wait for the situation to stabilize.
+    if WINDOWS:
+        await asyncio.sleep(10)
+        initial_timeout = 40
+    else:
+        initial_timeout = 0
+
+    await assert_memory(s, "unmanaged_recent", 0, 40, timeout=initial_timeout)
+    await assert_memory(a, "unmanaged_recent", 0, 20, timeout=initial_timeout)
+    await assert_memory(b, "unmanaged_recent", 0, 20, timeout=initial_timeout)
+
+    f1 = c.submit(leaking, 100, 50, 10, pure=False, workers=[a.name])
+    f2 = c.submit(leaking, 100, 50, 10, pure=False, workers=[b.name])
     await assert_memory(s, "unmanaged_recent", 300, 380)
     await assert_memory(a, "unmanaged_recent", 150, 190)
     await assert_memory(b, "unmanaged_recent", 150, 190)
@@ -2422,19 +2541,17 @@ async def test_memory(c, s, *_):
     await assert_memory(b, "unmanaged_recent", 50, 90)
 
     # Force the output of f1 and f2 to spill to disk.
-    # With target=0.6 and memory_limit=500 MiB, we'll start spilling at 300 MiB
-    # process memory per worker, or roughly after 3~7 rounds of the below depending
-    # on how much RAM the interpreter is using.
+    # With spill=0.7 and memory_limit=500 MiB, we'll start spilling at 350 MiB process
+    # memory per worker, or up to 20 iterations of the below depending on how much RAM
+    # the interpreter is using.
     more_futs = []
-    for _ in range(8):
-        if s.memory.managed_spilled > 0:
-            break
-        more_futs += [
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[a.name]),
-            c.submit(leaking, 20, 0, 0, pure=False, workers=[b.name]),
-        ]
-        await asyncio.sleep(2)
-    await assert_memory(s, "managed_spilled", 1, 999)
+    while not s.memory.managed_spilled:
+        if a.memory.process < 0.7 * 500 * 2 ** 20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[a.name]))
+        if b.memory.process < 0.7 * 500 * 2 ** 20:
+            more_futs.append(c.submit(leaking, 10, 0, 0, pure=False, workers=[b.name]))
+        await wait(more_futs)
+        await asyncio.sleep(1)
 
     # Wait for the spilling to finish. Note that this does not make the test take
     # longer as we're waiting for recent-to-old-time anyway.
@@ -2457,24 +2574,23 @@ async def test_memory(c, s, *_):
     # transition into unmanaged_old
     await c.run(gc.collect)
     await assert_memory(s, "unmanaged_recent", 0, 90, timeout=40)
-    await assert_memory(
-        s,
-        "unmanaged_old",
-        orig_old + 90,
-        # On MacOS, the process memory of the Python interpreter does not shrink as
-        # fast as on Linux/Windows
-        9999 if MACOS else orig_old + 190,
-        timeout=40,
-    )
+    await assert_memory(s, "unmanaged_old", orig_old + 90, 9999, timeout=40)
 
-    # When the leaked memory is cleared, unmanaged and unmanaged_old drop
-    # On MacOS, the process memory of the Python interpreter does not shrink as fast
-    # as on Linux/Windows
-    if not MACOS:
-        await c.run(clear_leak)
-        await assert_memory(s, "unmanaged", 0, orig_unmanaged + 95)
-        await assert_memory(s, "unmanaged_old", 0, orig_old + 95)
-        await assert_memory(s, "unmanaged_recent", 0, 90)
+    # When the leaked memory is cleared, unmanaged and unmanaged_old drop.
+    # On MacOS and Windows, the process memory of the Python interpreter does not shrink
+    # as fast as on Linux. Note that this behaviour is heavily impacted by OS tweaks,
+    # meaning that what you observe on your local host may behave differently on CI.
+    # Even on Linux, this occasionally glitches - hence why there is a flaky marker on
+    # this test.
+    if not LINUX:
+        return
+
+    orig_unmanaged = s.memory.unmanaged / 2 ** 20
+    orig_old = s.memory.unmanaged_old / 2 ** 20
+    await c.run(clear_leak)
+    await assert_memory(s, "unmanaged", 0, orig_unmanaged - 60)
+    await assert_memory(s, "unmanaged_old", 0, orig_old - 60)
+    await assert_memory(s, "unmanaged_recent", 0, 90)
 
 
 @gen_cluster(client=True, worker_kwargs={"memory_limit": 0})
@@ -2583,7 +2699,6 @@ async def test_rebalance(c, s, *_):
     # rebalance() when there is nothing to do
     await s.rebalance()
     await assert_ndata(c, {a: (3, 7), b: (3, 7)}, total=10)
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2615,15 +2730,12 @@ async def test_rebalance_workers_and_keys(client, s, *_):
     with pytest.raises(KeyError):
         await s.rebalance(workers=["notexist"])
 
-    s.validate_state()
-
 
 @gen_cluster()
 async def test_rebalance_missing_data1(s, a, b):
     """key never existed"""
     out = await s.rebalance(keys=["notexist"])
-    assert out == {"status": "missing-data", "keys": ["notexist"]}
-    s.validate_state()
+    assert out == {"status": "partial-fail", "keys": ["notexist"]}
 
 
 @gen_cluster(client=True)
@@ -2634,32 +2746,38 @@ async def test_rebalance_missing_data2(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     await asyncio.sleep(0.1)
     out = await s.rebalance(keys=[f.key for f in futures])
-    assert out["status"] == "missing-data"
+    assert out["status"] == "partial-fail"
     assert 8 <= len(out["keys"]) <= 10
-    s.validate_state()
 
 
+@pytest.mark.parametrize("explicit", [False, True])
 @gen_cluster(client=True, Worker=Nanny, worker_kwargs={"memory_limit": "1 GiB"})
-async def test_rebalance_raises_missing_data3(c, s, *_):
+async def test_rebalance_raises_missing_data3(c, s, *_, explicit):
     """keys exist when the sync part of rebalance runs, but are gone by the time the
-    actual data movement runs
+    actual data movement runs.
+    There is an error message only if the keys are explicitly listed in the API call.
     """
     a, _ = s.workers
     futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
     await wait(futures)
     # Wait for heartbeats
     await assert_memory(s, "process", 512, 1024)
-    del futures
-    out = await s.rebalance()
-    assert out["status"] == "missing-data"
-    assert 1 <= len(out["keys"]) <= 10
-    s.validate_state()
+
+    if explicit:
+        keys = [f.key for f in futures]
+        del futures
+        out = await s.rebalance(keys=keys)
+        assert out["status"] == "partial-fail"
+        assert 1 <= len(out["keys"]) <= 10
+    else:
+        del futures
+        out = await s.rebalance()
+        assert out == {"status": "OK"}
 
 
 @gen_cluster(nthreads=[])
 async def test_rebalance_no_workers(s):
     await s.rebalance()
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2687,7 +2805,6 @@ async def test_rebalance_managed_memory(c, s, *_):
     # We can expect an exact, stable result because we are completely bypassing the
     # unpredictability of unmanaged memory.
     await assert_ndata(c, {a: 62, b: 38})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2705,7 +2822,6 @@ async def test_rebalance_no_limit(c, s, a, b):
     await s.rebalance()
     # Disabling memory_limit made us ignore all % thresholds set in the config
     await assert_ndata(c, {a.address: 50, b.address: 50})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2714,24 +2830,20 @@ async def test_rebalance_no_limit(c, s, a, b):
     worker_kwargs={"memory_limit": "1000 MiB"},
     config={
         "distributed.worker.memory.rebalance.measure": "managed",
-        "distributed.worker.memory.rebalance.recipient-max": 0.4,
+        "distributed.worker.memory.rebalance.sender-min": 0.2,
+        "distributed.worker.memory.rebalance.recipient-max": 0.1,
     },
 )
 async def test_rebalance_no_recipients(c, s, *_):
     """There are sender workers, but no recipient workers"""
     a, b = s.workers
-    futures = [
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[a]),  # 40%
-        c.submit(lambda: "x" * (400 * 2 ** 20), pure=False, workers=[b]),  # 40%
-    ] + c.map(
-        lambda _: "x" * (2 ** 21), range(100), workers=[a]
-    )  # 20%
-    await wait(futures)
-    await assert_memory(s, "managed", 1000, 1001)
-    await assert_ndata(c, {a: 101, b: 1})
+    fut_a = c.map(lambda _: "x" * (2 ** 20), range(250), workers=[a])  # 25%
+    fut_b = c.map(lambda _: "x" * (2 ** 20), range(100), workers=[b])  # 10%
+    await wait(fut_a + fut_b)
+    await assert_memory(s, "managed", 350, 351)
+    await assert_ndata(c, {a: 250, b: 100})
     await s.rebalance()
-    await assert_ndata(c, {a: 101, b: 1})
-    s.validate_state()
+    await assert_ndata(c, {a: 250, b: 100})
 
 
 @gen_cluster(
@@ -2749,7 +2861,6 @@ async def test_rebalance_skip_recipient(client, s, a, b, c):
     await assert_ndata(client, {a.address: 10, b.address: 2, c.address: 2})
     await client.rebalance(futures[:2])
     await assert_ndata(client, {a.address: 8, b.address: 2, c.address: 4})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2765,7 +2876,6 @@ async def test_rebalance_skip_all_recipients(c, s, a, b):
     await assert_ndata(c, {a.address: 10, b.address: 1})
     await c.rebalance(futures[:2])
     await assert_ndata(c, {a.address: 9, b.address: 2})
-    s.validate_state()
 
 
 @gen_cluster(
@@ -2814,7 +2924,230 @@ async def test_rebalance_least_recently_inserted_sender_min(c, s, *_):
     await assert_ndata(c, {a: 11, b: 0})
     await s.rebalance()
     await assert_ndata(c, {a: 1, b: 10})
-    assert await c.has_what() == {
-        a: (large_future.key,),
-        b: tuple(f.key for f in small_futures),
-    }
+    has_what = await c.has_what()
+    assert has_what[a] == (large_future.key,)
+    assert sorted(has_what[b]) == sorted(f.key for f in small_futures)
+
+
+@gen_cluster(client=True)
+async def test_gather_on_worker(c, s, a, b):
+    x = await c.scatter("x", workers=[a.address])
+    x_ts = s.tasks[x.key]
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+
+    assert a_ws.nbytes > 0
+    assert b_ws.nbytes == 0
+    assert x_ts in a_ws.has_what
+    assert x_ts not in b_ws.has_what
+    assert x_ts.who_has == {a_ws}
+
+    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+
+    assert b_ws.nbytes == a_ws.nbytes
+    assert x_ts in b_ws.has_what
+    assert x_ts.who_has == {a_ws, b_ws}
+
+
+@gen_cluster(client=True, scheduler_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_recipient(c, s, a, b):
+    """The recipient is missing"""
+    x = await c.scatter("x")
+    await b.close()
+    assert s.workers.keys() == {a.address}
+    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    assert out == {x.key}
+
+
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_sender(c, s, a, b):
+    """The only sender for a key is missing"""
+    out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
+    assert out == {"x"}
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
+async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first):
+    """One of the senders for a key is missing, but the key is available somewhere else"""
+    x = await c.scatter("x", workers=[a.address])
+    bad_addr = "tcp://127.0.0.1:12345"
+    # Order matters; test both
+    addrs = [bad_addr, a.address] if missing_first else [a.address, bad_addr]
+    out = await s._gather_on_worker(b.address, {x.key: addrs})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+
+
+@gen_cluster(client=True)
+async def test_gather_on_worker_key_not_on_sender(c, s, a, b):
+    """The only sender for a key does not actually hold it"""
+    out = await s._gather_on_worker(a.address, {"x": [b.address]})
+    assert out == {"x"}
+
+
+@pytest.mark.parametrize("missing_first", [False, True])
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_gather_on_worker_key_not_on_sender_replicated(
+    client, s, a, b, c, missing_first
+):
+    """One of the senders for a key does not actually hold it, but the key is available
+    somewhere else
+    """
+    x = await client.scatter("x", workers=[a.address])
+    # Order matters; test both
+    addrs = [b.address, a.address] if missing_first else [a.address, b.address]
+    out = await s._gather_on_worker(c.address, {x.key: addrs})
+    assert out == set()
+    assert a.data[x.key] == "x"
+    assert c.data[x.key] == "x"
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
+    """Race condition where the recipient worker receives the same task twice.
+    Test that the task nbytes are not double-counted on the recipient.
+    """
+    x = await client.scatter("x", workers=[a.address, b.address], broadcast=True)
+    assert a.data[x.key] == "x"
+    assert b.data[x.key] == "x"
+    assert x.key not in c.data
+
+    out = await asyncio.gather(
+        s._gather_on_worker(c.address, {x.key: [a.address]}),
+        s._gather_on_worker(c.address, {x.key: [b.address]}),
+    )
+    assert out == [set(), set()]
+    assert c.data[x.key] == "x"
+
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    c_ws = s.workers[c.address]
+    assert a_ws.nbytes > 0
+    assert c_ws.nbytes == b_ws.nbytes == a_ws.nbytes
+
+
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1)] * 3, scheduler_kwargs={"timeout": "100ms"}
+)
+async def test_rebalance_dead_recipient(client, s, a, b, c):
+    """A key fails to be rebalanced due to recipient failure.
+    The key is not deleted from the sender.
+    Unrelated, successful keys are deleted from the senders.
+    """
+    x, y = await client.scatter(["x", "y"], workers=[a.address])
+    a_ws = s.workers[a.address]
+    b_ws = s.workers[b.address]
+    c_ws = s.workers[c.address]
+    x_ts = s.tasks[x.key]
+    y_ts = s.tasks[y.key]
+    await c.close()
+    assert s.workers.keys() == {a.address, b.address}
+
+    out = await s._rebalance_move_data([(a_ws, b_ws, x_ts), (a_ws, c_ws, y_ts)])
+    assert out == {"status": "partial-fail", "keys": [y.key]}
+    assert a.data == {y.key: "y"}
+    assert b.data == {x.key: "x"}
+    assert await client.has_what() == {a.address: (y.key,), b.address: (x.key,)}
+
+
+@gen_cluster(client=True)
+async def test_delete_worker_data(c, s, a, b):
+    # delete only copy of x
+    # delete one of the copies of y
+    # don't touch z
+    x, y, z = await c.scatter(["x", "y", "z"], workers=[a.address])
+    await c.replicate(y)
+
+    assert a.data == {x.key: "x", y.key: "y", z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key, z.key}
+
+    await s._delete_worker_data(a.address, [x.key, y.key])
+    assert a.data == {z.key: "z"}
+    assert b.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key, z.key}
+    assert s.workers[a.address].nbytes == s.tasks[z.key].nbytes
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_double_delete(c, s, a):
+    """_delete_worker_data race condition where the same key is deleted twice.
+    WorkerState.nbytes is not double-decreased.
+    """
+    x, y = await c.scatter(["x", "y"])
+    await asyncio.gather(
+        s._delete_worker_data(a.address, [x.key]),
+        s._delete_worker_data(a.address, [x.key]),
+    )
+    assert a.data == {y.key: "y"}
+    a_ws = s.workers[a.address]
+    y_ts = s.tasks[y.key]
+    assert a_ws.nbytes == y_ts.nbytes
+
+
+@gen_cluster(scheduler_kwargs={"timeout": "100ms"})
+async def test_delete_worker_data_bad_worker(s, a, b):
+    """_delete_worker_data gracefully handles a non-existing worker;
+    e.g. a sender died in the middle of rebalance()
+    """
+    await a.close()
+    assert s.workers.keys() == {b.address}
+    await s._delete_worker_data(a.address, ["x"])
+
+
+@pytest.mark.parametrize("bad_first", [False, True])
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_delete_worker_data_bad_task(c, s, a, bad_first):
+    """_delete_worker_data gracefully handles a non-existing key;
+    e.g. a task was stolen by work stealing in the middle of a rebalance().
+    Other tasks on the same worker are deleted.
+    """
+    x, y = await c.scatter(["x", "y"])
+    assert a.data == {x.key: "x", y.key: "y"}
+    assert s.tasks.keys() == {x.key, y.key}
+
+    keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
+    await s._delete_worker_data(a.address, keys)
+    assert a.data == {y.key: "y"}
+    assert s.tasks.keys() == {y.key}
+    assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes
+
+
+@gen_cluster(client=True)
+async def test_transition_counter(c, s, a, b):
+    assert s.transition_counter == 0
+    await c.submit(inc, 1)
+    assert s.transition_counter > 1
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1) for _ in range(10)],
+)
+async def test_worker_heartbeat_after_cancel(c, s, *workers):
+    """This test is intended to ensure that after cancellation of a graph, the
+    worker heartbeat is always successful. The heartbeat may not be successful if
+    the worker and scheduler state drift and the scheduler doesn't handle
+    unknown information gracefully. One example would be a released/cancelled
+    computation where the worker returns metrics about duration, type, etc. and
+    the scheduler doesn't handle the forgotten task gracefully.
+
+    See also https://github.com/dask/distributed/issues/4587
+    """
+    for w in workers:
+        w.periodic_callbacks["heartbeat"].stop()
+
+    futs = c.map(slowinc, range(100), delay=0.1)
+
+    while sum(w.executing_count for w in workers) < len(workers):
+        await asyncio.sleep(0.001)
+
+    await c.cancel(futs)
+
+    while any(w.tasks for w in workers):
+        await asyncio.gather(*[w.heartbeat() for w in workers])

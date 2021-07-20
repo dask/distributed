@@ -6,7 +6,7 @@ import pytest
 
 import dask
 
-from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
+from distributed import Actor, ActorFuture, Client, Future, Nanny, get_client, wait
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -485,10 +485,8 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 30
 
 
 def test_compute_sync(client):
@@ -580,7 +578,7 @@ async def test_worker_actor_handle_is_weakref(c, s, a, b):
     start = time()
     while a.actors or b.data:
         await asyncio.sleep(0.1)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_worker_actor_handle_is_weakref_sync(client):
@@ -597,7 +595,7 @@ def test_worker_actor_handle_is_weakref_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_worker_actor_handle_is_weakref_from_compute_sync(client):
@@ -618,7 +616,7 @@ def test_worker_actor_handle_is_weakref_from_compute_sync(client):
     start = time()
     while any(client.run(worker_tasks_running).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 def test_one_thread_deadlock():
@@ -681,3 +679,20 @@ async def test_exception_async(client, s, a, b):
 
     with pytest.raises(MyException):
         await ac.prop
+
+
+@gen_cluster(client=True)
+async def test_serialize_with_pickle(c, s, a, b):
+    class Foo:
+        def __init__(self):
+            self.actor = get_client().submit(Counter, actor=True).result()
+
+        def __getstate__(self):
+            return self.actor
+
+        def __setstate__(self, state):
+            self.actor = state
+
+    future = c.submit(Foo, workers=a.address)
+    foo = await future
+    assert isinstance(foo.actor, Actor)

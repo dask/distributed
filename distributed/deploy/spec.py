@@ -11,18 +11,12 @@ from inspect import isawaitable
 from tornado import gen
 
 import dask
+from dask.utils import parse_bytes, parse_timedelta
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import (
-    LoopRunner,
-    TimeoutError,
-    import_term,
-    parse_bytes,
-    parse_timedelta,
-    silence_logging,
-)
+from ..utils import LoopRunner, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -103,7 +97,7 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return "<%s: status=%s>" % (type(self).__name__, self.status)
+        return f"<{type(self).__name__}: status={self.status}>"
 
     async def __aenter__(self):
         await self

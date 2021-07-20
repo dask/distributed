@@ -42,7 +42,7 @@ async def test_Queue(c, s, a, b):
     assert future.key == future2.key
 
 
-@gen_tls_cluster(client=True, timeout=None)
+@gen_tls_cluster(client=True)
 async def test_client_submit(c, s, a, b):
     assert s.address.startswith("tls://")
 

@@ -10,8 +10,9 @@ import struct
 import weakref
 
 import dask
+from dask.utils import parse_bytes
 
-from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes, parse_bytes
+from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
@@ -372,7 +373,7 @@ class UCXListener(Listener):
         comm_handler: None,
         deserialize=False,
         allow_offload=True,
-        **connection_args
+        **connection_args,
     ):
         if not address.startswith("ucx"):
             address = "ucx://" + address
@@ -524,7 +525,7 @@ def _scrub_ucx_config():
     for k, v in options.items():
         if k not in valid_ucx_vars:
             logger.debug(
-                "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
+                f"Key: {k} with value: {v} not a valid UCX configuration option"
             )
 
     return options

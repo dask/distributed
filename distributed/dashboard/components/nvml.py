@@ -49,7 +49,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-memory-worker-plot",
                 width=int(width / 2),
                 name="gpu_memory_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = memory.rect(
                 source=self.source,
@@ -67,7 +67,7 @@ class GPUCurrentLoad(DashboardComponent):
                 id="bk-gpu-utilization-worker-plot",
                 width=int(width / 2),
                 name="gpu_utilization_histogram",
-                **kwargs
+                **kwargs,
             )
             rect = utilization.rect(
                 source=self.source,
@@ -159,7 +159,7 @@ class GPUCurrentLoad(DashboardComponent):
                 "escaped_worker": [escape.url_escape(w) for w in worker],
             }
 
-            self.memory_figure.title.text = "GPU Memory: %s / %s" % (
+            self.memory_figure.title.text = "GPU Memory: {} / {}".format(
                 format_bytes(sum(memory)),
                 format_bytes(memory_total),
             )
