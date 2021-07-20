@@ -104,6 +104,37 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            if not os.path.exists(local_directory):
+                os.makedirs(local_directory)
+            self._original_local_dir = local_directory
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+        else:
+            self._original_local_dir = local_directory
+
+        self.local_directory = local_directory
+
+        self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
+        self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+
+        if preload_nanny is None:
+            preload_nanny = dask.config.get("distributed.nanny.preload")
+        if preload_nanny_argv is None:
+            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        self.preloads = preloading.process_preloads(
+            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
+        )
+
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
             self.scheduler_addr = cfg["address"]
@@ -130,18 +161,6 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
 
-        self.preload = preload
-        if self.preload is None:
-            self.preload = dask.config.get("distributed.worker.preload")
-        self.preload_argv = preload_argv
-        if self.preload_argv is None:
-            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-
-        if preload_nanny is None:
-            preload_nanny = dask.config.get("distributed.nanny.preload")
-        if preload_nanny_argv is None:
-            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
-
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
         self.config = config or dask.config.config
@@ -158,25 +177,6 @@ class Nanny(ServerNode):
         self.contact_address = contact_address
         self.memory_terminate_fraction = dask.config.get(
             "distributed.worker.memory.terminate"
-        )
-
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
-        if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        self.local_directory = local_directory
-
-        self.preloads = preloading.process_preloads(
-            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
         )
 
         self.services = services
@@ -384,7 +384,7 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def restart(self, comm=None, timeout=2, executor_wait=True):
+    async def restart(self, comm=None, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -393,7 +393,9 @@ class Nanny(ServerNode):
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out, returning before finished")
+            logger.error(
+                f"Restart timed out after {timeout}s; returning before finished"
+            )
             return "timed out"
         else:
             return "OK"

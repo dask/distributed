@@ -29,7 +29,6 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
-from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
@@ -110,7 +109,7 @@ async def debug_loop():
     while True:
         loop = ioloop.IOLoop.current()
         print(".", loop, loop._handlers)
-        await asyncio.sleep(0.50)
+        await asyncio.sleep(0.5)
 
 
 #
@@ -1107,7 +1106,6 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @pytest.mark.asyncio
 async def test_tcp_deserialize():
     await check_deserialize("tcp://")
