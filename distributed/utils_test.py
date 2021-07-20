@@ -25,7 +25,7 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from time import sleep
 
-from distributed.scheduler import Computation, Scheduler
+from distributed.scheduler import Scheduler
 
 try:
     import ssl
@@ -1512,7 +1512,6 @@ def check_instances():
     Scheduler._instances.clear()
     SpecCluster._instances.clear()
     Worker._initialized_clients.clear()
-    Computation._recent = None
     # assert all(n.status == "closed" for n in Nanny._instances), {
     #     n: n.status for n in Nanny._instances
     # }
@@ -1565,7 +1564,6 @@ def check_instances():
 
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
-    Computation._recent = None
 
 
 @contextmanager

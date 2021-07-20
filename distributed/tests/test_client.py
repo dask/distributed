@@ -6782,7 +6782,7 @@ def test_computation_object_code_dask_compute(client):
     test_function_code = inspect.getsource(test_computation_object_code_dask_compute)
 
     def fetch_comp_code(dask_scheduler):
-        computations = list(dask_scheduler._computations)
+        computations = list(dask_scheduler.computations)
         assert len(computations) == 1
         comp = computations[0]
         assert len(comp.code) == 1
@@ -6803,7 +6803,7 @@ async def test_computation_object_code_dask_persist(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_dask_persist.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
     assert len(comp.code) == 1
@@ -6823,7 +6823,7 @@ async def test_computation_object_code_client_submit_simple(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_client_submit_simple.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
 
@@ -6844,7 +6844,7 @@ async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_client_submit_list_comp.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
 
@@ -6866,7 +6866,7 @@ async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_client_submit_dict_comp.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
 
@@ -6886,7 +6886,7 @@ async def test_computation_object_code_client_map(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_client_map.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
     assert len(comp.code) == 1
@@ -6904,7 +6904,7 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     test_function_code = inspect.getsource(
         test_computation_object_code_client_compute.__wrapped__
     )
-    computations = list(s._computations)
+    computations = list(s.computations)
     assert len(computations) == 1
     comp = computations[0]
     assert len(comp.code) == 1

@@ -781,15 +781,14 @@ class Computation:
 
     _start: double
     _groups: set
-    _code: sortedcontainers.SortedSet
-    _recent: "Computation" = None
+    _code: object
+    _id: object
 
     def __init__(self):
         self._start = time()
         self._groups = set()
         self._code = sortedcontainers.SortedSet()
         self._id = uuid.uuid4()
-        Computation.recent = self
 
     @property
     def code(self):
@@ -1881,7 +1880,7 @@ class SchedulerState:
     _aliases: dict
     _bandwidth: double
     _clients: dict
-    _computations: deque
+    _computations: object
     _extensions: dict
     _host_info: dict
     _idle: object
@@ -4381,14 +4380,12 @@ class Scheduler(SchedulerState, ServerNode):
 
         dependencies = dependencies or {}
 
-        if (
-            parent._total_occupancy > 1e-9 and Computation._recent is not None
-        ):  # Still working on something
-            computation = Computation._recent
+        if parent._total_occupancy > 1e-9 and parent._computations:
+            # Still working on something. Assign new tasks to same computation
+            computation = cast(Computation, parent._computations[-1])
         else:
             computation = Computation()
-            Computation._recent = computation
-            self._computations.append(computation)
+            parent._computations.append(computation)
 
         if code and code not in computation._code:  # add new code blocks
             computation._code.add(code)
