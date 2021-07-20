@@ -3,11 +3,11 @@ import functools
 import threading
 from queue import Queue
 
-from .client import Future, default_client
+from .client import Future
 from .protocol import to_serialize
 from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
-from .worker import get_worker
+from .worker import get_client, get_worker
 
 
 class Actor(WrappedKey):
@@ -59,12 +59,15 @@ class Actor(WrappedKey):
             self._client = None
         else:
             try:
+                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
+                # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
             try:
-                self._client = default_client()
-                self._future = Future(key)
+                self._client = get_client()
+                self._future = Future(key, inform=self._worker is None)
+                # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
 
@@ -109,7 +112,8 @@ class Actor(WrappedKey):
         if self._client:
             return self._client.sync(func, *args, **kwargs)
         else:
-            # TODO support sync operation by checking against thread ident of loop
+            if self._asynchronous:
+                return func(*args, **kwargs)
             return sync(self._worker.loop, func, *args, **kwargs)
 
     def __dir__(self):
