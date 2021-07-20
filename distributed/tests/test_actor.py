@@ -513,7 +513,7 @@ def test_compute_sync(client):
     start = time()
     while any(client.run(check).values()):
         sleep(0.01)
-        assert time() < start + 10
+        assert time() < start + 30
 
 
 @gen_cluster(
