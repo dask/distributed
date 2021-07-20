@@ -227,10 +227,9 @@ def _memory_color(current: int, limit: int) -> str:
     """Dynamic color used by WorkersMemory and ClusterMemory"""
     if limit and current > limit:
         return "red"
-    elif limit and current > limit / 2:
+    if limit and current > limit / 2:
         return "orange"
-    else:
-        return "blue"
+    return "blue"
 
 
 class ClusterMemory(DashboardComponent):
@@ -707,8 +706,7 @@ class BandwidthWorkers(DashboardComponent):
                     return address
                 if ws.name is not None:
                     return str(ws.name)
-                else:
-                    return address
+                return address
 
             x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
 
@@ -2021,8 +2019,7 @@ class TaskGroupGraph(DashboardComponent):
 
         if self.scheduler.transition_counter == self.old_counter:
             return
-        else:
-            self.old_counter = self.scheduler.transition_counter
+        self.old_counter = self.scheduler.transition_counter
 
         if not self.scheduler.task_groups:
             self.subtitle.text = "Scheduler is empty."

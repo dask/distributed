@@ -198,14 +198,10 @@ class ProfileTimePlot(DashboardComponent):
 
         @without_property_validation
         def cb(attr, old, new):
-            if changing[0]:
+            if changing[0] or len(new) == 0:
                 return
             with log_errors():
-                try:
-                    ind = new[0]
-                except IndexError:
-                    return
-                data = profile.plot_data(self.states[ind], profile_interval)
+                data = profile.plot_data(self.states[new[0]], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
@@ -335,14 +331,10 @@ class ProfileServer(DashboardComponent):
 
         @without_property_validation
         def cb(attr, old, new):
-            if changing[0]:
+            if changing[0] or len(new) == 0:
                 return
             with log_errors():
-                try:
-                    ind = new[0]
-                except IndexError:
-                    return
-                data = profile.plot_data(self.states[ind], profile_interval)
+                data = profile.plot_data(self.states[new[0]], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback

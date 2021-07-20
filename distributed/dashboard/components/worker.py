@@ -390,11 +390,7 @@ class CrossFilter(DashboardComponent):
 
     def process_msg(self, msg):
         try:
-
-            def func(k):
-                return msg["keys"].get(k, 0)
-
-            status_key = max(msg["keys"], key=func)
+            status_key = max(msg["keys"], key=lambda x: msg["keys"].get(x, 0))
             typ = self.worker.types.get(status_key, object).__name__
             keyname = key_split(status_key)
             d = {
