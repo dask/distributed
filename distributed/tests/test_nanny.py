@@ -370,6 +370,17 @@ async def test_environment_variable(c, s):
     await asyncio.gather(a.close(), b.close())
 
 
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    config={"distributed.nanny.environ": {"ABC": 123}},
+)
+async def test_environment_variable_config(c, s):
+    async with Nanny(s.address) as n:
+        results = await c.run(lambda: os.environ["ABC"])
+        assert results[n.worker_address] == "123"
+
+
 @gen_cluster(nthreads=[], client=True)
 async def test_data_types(c, s):
     w = await Nanny(s.address, data=dict)

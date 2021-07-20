@@ -510,6 +510,11 @@ properties:
 
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
+          environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies
+
       client:
         type: object
         description: |

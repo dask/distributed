@@ -142,6 +142,10 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    environ:
+      MALLOC_TRIM_THRESHOLD_: 65536
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
