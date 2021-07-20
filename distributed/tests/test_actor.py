@@ -6,7 +6,16 @@ import pytest
 
 import dask
 
-from distributed import Actor, ActorFuture, Client, Future, Nanny, as_completed, wait
+from distributed import (
+    Actor,
+    ActorFuture,
+    Client,
+    Future,
+    Nanny,
+    as_completed,
+    get_client,
+    wait,
+)
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -485,10 +494,8 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 30
 
 
 def test_compute_sync(client):
@@ -647,3 +654,20 @@ def test_as_completed(client):
 
     assert all(fut.done() for fut in futs)
     assert max == 10
+
+
+@gen_cluster(client=True)
+async def test_serialize_with_pickle(c, s, a, b):
+    class Foo:
+        def __init__(self):
+            self.actor = get_client().submit(Counter, actor=True).result()
+
+        def __getstate__(self):
+            return self.actor
+
+        def __setstate__(self, state):
+            self.actor = state
+
+    future = c.submit(Foo, workers=a.address)
+    foo = await future
+    assert isinstance(foo.actor, Actor)

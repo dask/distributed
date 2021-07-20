@@ -73,7 +73,7 @@ body {
   height: 22px;
 }
 
-@media screen and (max-width: 650px) {
+@media screen and (max-width: 800px) {
   .navbar li:not(#dask-logo):not(#navbar-toggle-icon) a {
     display: none;
   }
@@ -82,7 +82,7 @@ body {
   }
 }
 
-@media screen and (max-width: 650px) {
+@media screen and (max-width: 800px) {
   .navbar.responsive li:not(#navbar-toggle-icon) {
     float: none;
   }

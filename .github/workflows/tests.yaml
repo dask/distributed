@@ -11,6 +11,7 @@ concurrency:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
@@ -18,9 +19,17 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.7", "3.8", "3.9"]
 
-        # Uncomment to stress-test the test suite for random failures
+        # Uncomment to stress-test the test suite for random failures.
+        # Must also change env.TEST_ID below.
         # This will take a LONG time and delay all PRs across the whole github.com/dask!
+        # To avoid hamstringing other people, change 'on: [push, pull_request]' above
+        # to just 'on: [push]'; this way the stress test will run exclusively in your
+        # branch (https://github.com/<your name>/distributed/actions).
         # run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    env:
+      TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}
+      # TEST_ID: ${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.run }}
 
     steps:
       - name: Checkout source
@@ -33,13 +42,15 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
+          condarc-file: continuous_integration/condarc
           use-mamba: true
-          channels: conda-forge,defaults
-          channel-priority: true
           python-version: ${{ matrix.python-version }}
           environment-file: continuous_integration/environment-${{ matrix.python-version }}.yaml
           activate-environment: dask-distributed
-          auto-activate-base: false
+
+      - name: Show conda options
+        shell: bash -l {0}
+        run: conda config --show
 
       - name: Install stacktrace
         shell: bash -l {0}
@@ -83,7 +94,14 @@ jobs:
         if: ${{ matrix.os != 'windows-latest' }}
         run: bash continuous_integration/scripts/setup_ssh.sh
 
+      - name: Reconfigure pytest-timeout
+        shell: bash -l {0}
+        # No SIGALRM available on Windows. On MacOS, it kills the whole test suite.
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: sed -i.bak 's/timeout_method = thread/timeout_method = signal/' setup.cfg
+
       - name: Test
+        id: run_tests
         shell: bash -l {0}
         env:
           PYTHONFAULTHANDLER: 1
@@ -93,10 +111,21 @@ jobs:
               # https://github.com/dask/distributed/issues/4514
               export DISABLE_IPV6=1
           fi
-
           source continuous_integration/scripts/set_ulimit.sh
-          pytest distributed -m "not avoid_ci" --runslow
+
+          pytest distributed -m "not avoid_ci" --runslow \
+            --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
       # - name: Debug with tmate on failure
       #   if: ${{ failure() }}
       #   uses: mxschmitt/action-tmate@v3
+
+      - name: Upload test artifacts
+        # ensure this runs even if pytest fails
+        if: >
+          always() &&
+          (steps.run_tests.outcome == 'success' || steps.run_tests.outcome == 'failure')
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ env.TEST_ID }}
+          path: reports
