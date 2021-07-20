@@ -529,13 +529,13 @@ class SystemMonitor(DashboardComponent):
     def update(self):
         with log_errors():
             self.source.stream(self.get_data(), 1000)
-            self.label_source.data["cpu"] = list(
+            self.label_source.data["cpu"] = [
                 "{}: {:.1f}%".format(f.__name__, f(self.source.data["cpu"]))
                 for f in [min, max, mean]
-            )
-            self.label_source.data["memory"] = list(
+            ]
+            self.label_source.data["memory"] = [
                 "{}: {}".format(
                     f.__name__, dask.utils.format_bytes(f(self.source.data["memory"]))
                 )
                 for f in [min, max, mean]
-            )
+            ]

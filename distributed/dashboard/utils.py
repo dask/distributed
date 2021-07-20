@@ -19,8 +19,7 @@ PROFILING = False
 
 
 def transpose(lod):
-    keys = list(lod[0].keys())
-    return {k: [d[k] for d in lod] for k in keys}
+    return {k: [d[k] for d in lod] for k in lod[0]}
 
 
 @without_property_validation

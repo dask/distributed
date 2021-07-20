@@ -486,7 +486,9 @@ class Counters(DashboardComponent):
                 tools="",
                 height=150,
                 sizing_mode=self.sizing_mode,
-                x_range=sorted(map(str, self.server.counters[name].components[0])),
+                x_range=sorted(
+                    str(x) for x in self.server.counters[name].components[0]
+                ),
             )
             fig.ygrid.visible = False
 
@@ -538,11 +540,11 @@ class Counters(DashboardComponent):
                         counts = [d[x] for x in xs]
                         ys = [factor * c for c in counts]
                         y_centers = [y / 2 for y in ys]
-                        xs = list(map(str, xs))
+                        xs = [str(x) for x in xs]
                         d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
                         self.counter_sources[name][i].data.update(d)
                     fig.title.text = "%s: %d" % (name, counter.size())
-                    fig.x_range.factors = list(map(str, xs))
+                    fig.x_range.factors = [str(x) for x in xs]
 
 
 def status_doc(worker, extra, doc):

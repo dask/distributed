@@ -616,7 +616,7 @@ class BandwidthTypes(DashboardComponent):
                 "bandwidth": list(bw.values()),
                 "bandwidth-half": [b / 2 for b in bw.values()],
                 "type": list(bw.keys()),
-                "bandwidth_text": list(map(format_bytes, bw.values())),
+                "bandwidth_text": [format_bytes(x) for x in bw.values()],
             }
             self.root.title.text = "Bandwidth: " + format_bytes(
                 self.scheduler.bandwidth
@@ -1160,7 +1160,7 @@ class CurrentLoad(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
             now = time()
             if not any(ws.processing for ws in workers) and now < self.last + 1:
                 return
