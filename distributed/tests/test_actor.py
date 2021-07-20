@@ -649,6 +649,18 @@ def test_as_completed(client):
     assert max == 10
 
 
+@gen_cluster(client=True, timeout=3)
+async def test_actor_future_awaitable(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    futures = [ac.increment() for _ in range(10)]
+
+    assert all([isinstance(future, ActorFuture) for future in futures])
+
+    out = await asyncio.gather(*futures)
+    assert all([future.done() for future in futures])
+    assert max(out) == 10
+
+
 @gen_cluster(client=True)
 async def test_serialize_with_pickle(c, s, a, b):
     class Foo:

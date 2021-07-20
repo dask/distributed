@@ -164,27 +164,14 @@ class Actor(WrappedKey):
                             raise OSError("Unable to contact Actor's worker")
                     return result
 
-                if self._asynchronous:
+                q = asyncio.Queue(loop=self._io_loop.asyncio_loop)
 
-                    async def unwrap():
-                        result = await run_actor_function_on_worker()
-                        if result["status"] == "OK":
-                            return result["result"]
-                        raise result["exception"]
+                async def wait_then_add_to_queue():
+                    x = await run_actor_function_on_worker()
+                    await q.put(x)
 
-                    return asyncio.ensure_future(unwrap())
-                else:
-                    # TODO: this mechanism is error prone
-                    # we should endeavor to make dask's standard code work here
-                    q = asyncio.Queue(loop=self._io_loop.asyncio_loop)
-
-                    async def wait_then_add_to_queue():
-                        x = await run_actor_function_on_worker()
-                        await q.put(x)
-
-                    self._io_loop.add_callback(wait_then_add_to_queue)
-
-                    return ActorFuture(q, self._io_loop)
+                self._io_loop.add_callback(wait_then_add_to_queue)
+                return ActorFuture(q, self._io_loop)
 
             return func
 
@@ -244,7 +231,7 @@ class ActorFuture:
         self.status = "pending"
 
     def __await__(self):
-        return self.result()
+        return self._result().__await__()
 
     def done(self):
         return self.status != "pending"
