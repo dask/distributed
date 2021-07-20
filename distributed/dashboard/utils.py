@@ -4,7 +4,6 @@ from numbers import Number
 import bokeh
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
-from tlz import partition
 from tlz.curried import first
 
 try:
@@ -17,15 +16,6 @@ BOKEH_VERSION = LooseVersion(bokeh.__version__)
 
 
 PROFILING = False
-
-
-def parse_args(args):
-    options = dict(partition(2, args))
-    for k, v in options.items():
-        if v.isdigit():
-            options[k] = int(v)
-
-    return options
 
 
 def transpose(lod):
