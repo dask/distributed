@@ -1719,6 +1719,7 @@ def _task_key_or_none(task: TaskState):
     return task._key if task is not None else None
 
 
+@final
 @cclass
 class SchedulerState:
     """Underlying task state of dynamic scheduler
@@ -1893,149 +1894,6 @@ class SchedulerState:
             / 2.0
         )
         self._transition_counter = 0
-
-        super().__init__(**kwargs)
-
-    @property
-    def aliases(self):
-        return self._aliases
-
-    @property
-    def bandwidth(self):
-        return self._bandwidth
-
-    @property
-    def clients(self):
-        return self._clients
-
-    @property
-    def extensions(self):
-        return self._extensions
-
-    @property
-    def host_info(self):
-        return self._host_info
-
-    @property
-    def idle(self):
-        return self._idle
-
-    @property
-    def n_tasks(self):
-        return self._n_tasks
-
-    @property
-    def resources(self):
-        return self._resources
-
-    @property
-    def saturated(self):
-        return self._saturated
-
-    @property
-    def tasks(self):
-        return self._tasks
-
-    @property
-    def task_groups(self):
-        return self._task_groups
-
-    @property
-    def task_prefixes(self):
-        return self._task_prefixes
-
-    @property
-    def task_metadata(self):
-        return self._task_metadata
-
-    @property
-    def total_nthreads(self):
-        return self._total_nthreads
-
-    @property
-    def total_occupancy(self):
-        return self._total_occupancy
-
-    @total_occupancy.setter
-    def total_occupancy(self, v: double):
-        self._total_occupancy = v
-
-    @property
-    def transition_counter(self):
-        return self._transition_counter
-
-    @property
-    def unknown_durations(self):
-        return self._unknown_durations
-
-    @property
-    def unrunnable(self):
-        return self._unrunnable
-
-    @property
-    def validate(self):
-        return self._validate
-
-    @validate.setter
-    def validate(self, v: bint):
-        self._validate = v
-
-    @property
-    def workers(self):
-        return self._workers
-
-    @property
-    def memory(self) -> MemoryState:
-        return MemoryState.sum(*(w.memory for w in self.workers.values()))
-
-    @property
-    def __pdict__(self):
-        return {
-            "bandwidth": self._bandwidth,
-            "resources": self._resources,
-            "saturated": self._saturated,
-            "unrunnable": self._unrunnable,
-            "n_tasks": self._n_tasks,
-            "unknown_durations": self._unknown_durations,
-            "validate": self._validate,
-            "tasks": self._tasks,
-            "task_groups": self._task_groups,
-            "task_prefixes": self._task_prefixes,
-            "total_nthreads": self._total_nthreads,
-            "total_occupancy": self._total_occupancy,
-            "extensions": self._extensions,
-            "clients": self._clients,
-            "workers": self._workers,
-            "idle": self._idle,
-            "host_info": self._host_info,
-        }
-
-    @ccall
-    @exceptval(check=False)
-    def new_task(self, key: str, spec: object, state: str) -> TaskState:
-        """Create a new task, and associated states"""
-        ts: TaskState = TaskState(key, spec)
-        ts._state = state
-
-        tp: TaskPrefix
-        prefix_key = key_split(key)
-        tp = self._task_prefixes.get(prefix_key)
-        if tp is None:
-            self._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
-        ts._prefix = tp
-
-        tg: TaskGroup
-        group_key = ts._group_key
-        tg = self._task_groups.get(group_key)
-        if tg is None:
-            self._task_groups[group_key] = tg = TaskGroup(group_key)
-            tg._prefix = tp
-            tp._groups.append(tg)
-        tg.add(ts)
-
-        self._tasks[key] = ts
-
-        return ts
 
     #####################
     # State Transitions #
@@ -3545,9 +3403,9 @@ class Scheduler(ServerNode):
         resources = dict()
         aliases = dict()
 
-        self._task_state_collections = [unrunnable]
+        self._task_state_collections: list = [unrunnable]
 
-        self._worker_collections = [
+        self._worker_collections: list = [
             workers,
             host_info,
             resources,
@@ -3569,7 +3427,7 @@ class Scheduler(ServerNode):
         self.event_counts = defaultdict(int)
         self.worker_plugins = dict()
 
-        worker_handlers = {
+        worker_handlers: dict = {
             "task-finished": self.handle_task_finished,
             "task-erred": self.handle_task_erred,
             "release": self.handle_release_data,
@@ -3582,7 +3440,7 @@ class Scheduler(ServerNode):
             "log-event": self.log_worker_event,
         }
 
-        client_handlers = {
+        client_handlers: dict = {
             "update-graph": self.update_graph,
             "update-graph-hlg": self.update_graph_hlg,
             "client-desires-keys": self.client_desires_keys,
@@ -3681,6 +3539,151 @@ class Scheduler(ServerNode):
         Scheduler._instances.add(self)
         self.rpc.allow_offload = False
         self.status = Status.undefined
+
+    ####################
+    # state properties #
+    ####################
+
+    @property
+    def aliases(self):
+        return self.state._aliases
+
+    @property
+    def bandwidth(self):
+        return self.state._bandwidth
+
+    @property
+    def clients(self):
+        return self.state._clients
+
+    @property
+    def extensions(self):
+        return self.state._extensions
+
+    @property
+    def host_info(self):
+        return self.state._host_info
+
+    @property
+    def idle(self):
+        return self.state._idle
+
+    @property
+    def n_tasks(self):
+        return self.state._n_tasks
+
+    @property
+    def resources(self):
+        return self.state._resources
+
+    @property
+    def saturated(self):
+        return self.state._saturated
+
+    @property
+    def tasks(self):
+        return self.state._tasks
+
+    @property
+    def task_groups(self):
+        return self.state._task_groups
+
+    @property
+    def task_prefixes(self):
+        return self.state._task_prefixes
+
+    @property
+    def task_metadata(self):
+        return self.state._task_metadata
+
+    @property
+    def total_nthreads(self):
+        return self.state._total_nthreads
+
+    @property
+    def total_occupancy(self):
+        return self.state._total_occupancy
+
+    @total_occupancy.setter
+    def total_occupancy(self, v: double):
+        self.state._total_occupancy = v
+
+    @property
+    def transition_counter(self):
+        return self.state._transition_counter
+
+    @property
+    def unknown_durations(self):
+        return self.state._unknown_durations
+
+    @property
+    def unrunnable(self):
+        return self.state._unrunnable
+
+    @property
+    def validate(self):
+        return self.state._validate
+
+    @validate.setter
+    def validate(self, v: bint):
+        self.state._validate = v
+
+    @property
+    def workers(self):
+        return self.state._workers
+
+    @property
+    def memory(self) -> MemoryState:
+        return MemoryState.sum(*(w.memory for w in self.state.workers.values()))
+
+    @property
+    def __pdict__(self):
+        return {
+            "bandwidth": self.state._bandwidth,
+            "resources": self.state._resources,
+            "saturated": self.state._saturated,
+            "unrunnable": self.state._unrunnable,
+            "n_tasks": self.state._n_tasks,
+            "unknown_durations": self.state._unknown_durations,
+            "validate": self.state._validate,
+            "tasks": self.state._tasks,
+            "task_groups": self.state._task_groups,
+            "task_prefixes": self.state._task_prefixes,
+            "total_nthreads": self.state._total_nthreads,
+            "total_occupancy": self.state._total_occupancy,
+            "extensions": self.state._extensions,
+            "clients": self.state._clients,
+            "workers": self.state._workers,
+            "idle": self.state._idle,
+            "host_info": self.state._host_info,
+        }
+
+    @ccall
+    @exceptval(check=False)
+    def new_task(self, key: str, spec: object, state: str) -> TaskState:
+        """Create a new task, and associated states"""
+        ts: TaskState = TaskState(key, spec)
+        ts._state = state
+
+        tp: TaskPrefix
+        prefix_key = key_split(key)
+        tp = self.state._task_prefixes.get(prefix_key)
+        if tp is None:
+            self.state._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
+        ts._prefix = tp
+
+        tg: TaskGroup
+        group_key = ts._group_key
+        tg = self.state._task_groups.get(group_key)
+        if tg is None:
+            self.state._task_groups[group_key] = tg = TaskGroup(group_key)
+            tg._prefix = tp
+            tp._groups.append(tg)
+        tg.add(ts)
+
+        self.state._tasks[key] = ts
+
+        return ts
 
     ##################
     # Administration #
