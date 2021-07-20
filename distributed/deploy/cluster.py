@@ -3,25 +3,17 @@ import datetime
 import logging
 import threading
 import uuid
-import warnings
 from contextlib import suppress
 from inspect import isawaitable
 
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import format_bytes
+from dask.utils import _deprecated, format_bytes, parse_timedelta
 
 from ..core import Status
 from ..objects import SchedulerInfo
-from ..utils import (
-    MultiLogs,
-    format_dashboard_link,
-    log_errors,
-    parse_timedelta,
-    sync,
-    thread_state,
-)
+from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
@@ -209,19 +201,21 @@ class Cluster:
             print(log)
 
     async def _get_logs(self, cluster=True, scheduler=True, workers=True):
-        logs = MultiLogs()
+        logs = Logs()
 
         if cluster:
-            logs["Cluster"] = self._cluster_manager_logs
+            logs["Cluster"] = Log(
+                "\n".join(line[1] for line in self._cluster_manager_logs)
+            )
 
         if scheduler:
             L = await self.scheduler_comm.get_logs()
-            logs["Scheduler"] = L
+            logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
             d = await self.scheduler_comm.worker_logs(workers=workers)
             for k, v in d.items():
-                logs[k] = v
+                logs[k] = Log("\n".join(line for level, line in v))
 
         return logs
 
@@ -248,8 +242,8 @@ class Cluster:
             self._get_logs, cluster=cluster, scheduler=scheduler, workers=workers
         )
 
+    @_deprecated(use_instead="get_logs")
     def logs(self, *args, **kwargs):
-        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
         return self.get_logs(*args, **kwargs)
 
     @property

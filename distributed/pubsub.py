@@ -4,10 +4,12 @@ import threading
 import weakref
 from collections import defaultdict, deque
 
+from dask.utils import parse_timedelta
+
 from .core import CommClosedError
 from .metrics import time
 from .protocol.serialize import to_serialize
-from .utils import TimeoutError, parse_timedelta, sync
+from .utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +350,7 @@ class Pub:
         self.loop.add_callback(self._put, msg)
 
     def __repr__(self):
-        return "<Pub: {}>".format(self.name)
+        return f"<Pub: {self.name}>"
 
     __str__ = __repr__
 
@@ -460,6 +462,6 @@ class Sub:
             self.condition.notify()
 
     def __repr__(self):
-        return "<Sub: {}>".format(self.name)
+        return f"<Sub: {self.name}>"
 
     __str__ = __repr__

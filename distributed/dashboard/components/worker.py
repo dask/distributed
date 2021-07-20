@@ -20,7 +20,7 @@ from bokeh.plotting import figure
 from bokeh.themes import Theme
 from tlz import merge, partition_all
 
-from dask.utils import format_bytes
+from dask.utils import format_bytes, format_time
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -32,7 +32,7 @@ from distributed.dashboard.components.shared import (
 from distributed.dashboard.utils import transpose, update, without_property_validation
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
-from distributed.utils import format_time, key_split, log_errors
+from distributed.utils import key_split, log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class CommunicatingStream(DashboardComponent):
                 y_range=y_range,
                 height=height,
                 tools="",
-                **kwargs
+                **kwargs,
             )
 
             fig.rect(
@@ -178,7 +178,7 @@ class CommunicatingStream(DashboardComponent):
                         self.who[msg["who"]] = len(self.who)
                         msg["y"] = self.who[msg["who"]]
 
-                    msg["hover"] = "%s / %s = %s/s" % (
+                    msg["hover"] = "{} / {} = {}/s".format(
                         format_bytes(msg["total"]),
                         format_time(msg["duration"]),
                         format_bytes(msg["total"] / msg["duration"]),
@@ -212,7 +212,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             height=150,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         fig.line(source=self.source, x="x", y="in", color="red")
         fig.line(source=self.source, x="x", y="out", color="blue")
@@ -250,7 +250,7 @@ class ExecutingTimeSeries(DashboardComponent):
             height=150,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         fig.line(source=self.source, x="x", y="y")
 
@@ -440,7 +440,7 @@ class Counters(DashboardComponent):
                     row(*pair, sizing_mode=sizing_mode)
                     for pair in partition_all(2, figures)
                 ],
-                sizing_mode=sizing_mode
+                sizing_mode=sizing_mode,
             )
 
     def add_digest_figure(self, name):

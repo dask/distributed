@@ -8,10 +8,12 @@ from timeit import default_timer
 from tlz import valmap
 from tornado.ioloop import IOLoop
 
+import dask
+
 from ..client import default_client, futures_of
 from ..core import CommClosedError, coerce_to_address, connect
 from ..protocol.pickle import dumps
-from ..utils import LoopRunner, is_kernel, key_split, parse_timedelta
+from ..utils import LoopRunner, is_kernel, key_split
 from .progress import MultiProgress, Progress, format_time
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ class ProgressBar:
                 break
 
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
-        self.interval = parse_timedelta(interval, default="s")
+        self.interval = dask.utils.parse_timedelta(interval, default="s")
         self.complete = complete
         self._start_time = default_timer()
 
