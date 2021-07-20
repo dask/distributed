@@ -6,7 +6,7 @@ import pytest
 
 import dask
 
-from distributed import Actor, ActorFuture, Client, Future, Nanny, wait
+from distributed import Actor, ActorFuture, Client, Future, Nanny, get_client, wait
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -485,10 +485,8 @@ async def test_compute(c, s, a, b):
     result = await c.compute(final, actors=counter)
     assert result == 0 + 1 + 2 + 3 + 4
 
-    start = time()
     while a.data or b.data:
         await asyncio.sleep(0.01)
-        assert time() < start + 30
 
 
 def test_compute_sync(client):
@@ -566,6 +564,61 @@ async def test_waiter(c, s, a, b):
     await c.gather(futures)
 
 
+@gen_cluster(client=True, client_kwargs=dict(set_as_default=False))
+# ^ NOTE: without `set_as_default=False`, `get_client()` within worker would return
+# the same client instance the test is using (because it's all one process).
+# Even with this, both workers will share the same client instance.
+async def test_worker_actor_handle_is_weakref(c, s, a, b):
+    counter = c.submit(Counter, actor=True, workers=[a.address])
+
+    await c.submit(lambda _: None, counter, workers=[b.address])
+
+    del counter
+
+    start = time()
+    while a.actors or b.data:
+        await asyncio.sleep(0.1)
+        assert time() < start + 30
+
+
+def test_worker_actor_handle_is_weakref_sync(client):
+    workers = list(client.run(lambda: None))
+    counter = client.submit(Counter, actor=True, workers=[workers[0]])
+
+    client.submit(lambda _: None, counter, workers=[workers[1]]).result()
+
+    del counter
+
+    def check(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(check).values()):
+        sleep(0.01)
+        assert time() < start + 30
+
+
+def test_worker_actor_handle_is_weakref_from_compute_sync(client):
+    workers = list(client.run(lambda: None))
+
+    with dask.annotate(workers=workers[0]):
+        counter = dask.delayed(Counter)()
+    with dask.annotate(workers=workers[1]):
+        intermediate = dask.delayed(lambda c: None)(counter)
+    with dask.annotate(workers=workers[0]):
+        final = dask.delayed(lambda x, c: x)(intermediate, counter)
+
+    final.compute(actors=counter, optimize_graph=False)
+
+    def worker_tasks_running(dask_worker):
+        return len(dask_worker.data) + len(dask_worker.actors)
+
+    start = time()
+    while any(client.run(worker_tasks_running).values()):
+        sleep(0.01)
+        assert time() < start + 30
+
+
 def test_one_thread_deadlock():
     with cluster(nworkers=2) as (cl, w):
         client = Client(cl["address"])
@@ -626,3 +679,20 @@ async def test_exception_async(client, s, a, b):
 
     with pytest.raises(MyException):
         await ac.prop
+
+
+@gen_cluster(client=True)
+async def test_serialize_with_pickle(c, s, a, b):
+    class Foo:
+        def __init__(self):
+            self.actor = get_client().submit(Counter, actor=True).result()
+
+        def __getstate__(self):
+            return self.actor
+
+        def __setstate__(self, state):
+            self.actor = state
+
+    future = c.submit(Foo, workers=a.address)
+    foo = await future
+    assert isinstance(foo.actor, Actor)

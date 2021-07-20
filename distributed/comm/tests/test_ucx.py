@@ -167,21 +167,11 @@ async def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame([1]).head(0),
         lambda cudf: cudf.DataFrame([1.0]).head(0),
         lambda cudf: cudf.DataFrame({"a": []}),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
-            marks=pytest.mark.skip(
-                reason="This test segfaults for some reason. So skip running it entirely."
-            ),
-        ),
+        lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
-            marks=pytest.mark.skip(
-                reason="This test segfaults for some reason. So skip running it entirely."
-            ),
-        ),
+        lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
     ],
 )
 async def test_ping_pong_cudf(g):
@@ -276,7 +266,7 @@ async def test_ucx_localcluster(processes, cleanup):
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             x = client.submit(inc, 1)
-            await x.result()
+            await x
             assert x.key in cluster.scheduler.tasks
             if not processes:
                 assert any(w.data == {x.key: 2} for w in cluster.workers.values())
