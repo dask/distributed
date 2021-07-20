@@ -636,23 +636,16 @@ async def test_exception_async(client, s, a, b):
 
 
 def test_as_completed(client):
-    class Simple:
-        state = 0
-
-        def inc(self):
-            self.state += 1
-            return self.state
-
-    ac = client.submit(Simple, actor=True).result()
-    futs = [ac.inc() for _ in range(10)]
+    ac = client.submit(Counter, actor=True).result()
+    futures = [ac.increment() for _ in range(10)]
     max = 0
 
-    for fut in as_completed(futs):
-        value = fut.result()
+    for future in as_completed(futures):
+        value = future.result()
         if value > max:
             max = value
 
-    assert all(fut.done() for fut in futs)
+    assert all(future.done() for future in futures)
     assert max == 10
 
 
