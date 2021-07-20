@@ -246,6 +246,9 @@ class ActorFuture:
     def __await__(self):
         return self.result()
 
+    def done(self):
+        return self.status != "pending"
+
     async def _result(self, raiseit=True):
         if not hasattr(self, "_cached_result"):
             out = await self.q.get()
