@@ -3628,6 +3628,7 @@ class Scheduler(SchedulerState, ServerNode):
             "retire_workers": self.retire_workers,
             "get_metadata": self.get_metadata,
             "set_metadata": self.set_metadata,
+            "set_restrictions": self.set_restrictions,
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
@@ -6735,6 +6736,10 @@ class Scheduler(SchedulerState, ServerNode):
                 return default
             else:
                 raise
+
+    def set_restrictions(self, comm=None, worker=None):
+        for key, restrictions in worker.items():
+            self.tasks[key]._worker_restrictions = set(restrictions)
 
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
