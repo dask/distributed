@@ -3,11 +3,6 @@ from urllib.parse import urljoin
 from tornado import web
 from tornado.ioloop import IOLoop
 
-try:
-    import numpy as np
-except ImportError:
-    np = False
-
 from .components.nvml import gpu_doc  # noqa: 1708
 from .components.nvml import NVML_ENABLED, gpu_memory_doc, gpu_utilization_doc
 from .components.scheduler import (
