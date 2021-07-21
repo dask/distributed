@@ -735,6 +735,96 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
+class WorkerNetworkBandwidth(DashboardComponent):
+    """Worker network bandwidth chart
+
+    Plots horizontal bars with the read_bytes and write_bytes worker state
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "y_read": [],
+                    "y_write": [],
+                    "x_read": [],
+                    "x_write": [],
+                }
+            )
+            self.root = figure(
+                title="Worker Network Bandwidth",
+                tools="",
+                id="bk-worker-net-bandwidth",
+                name="worker_network_bandwidth",
+                **kwargs,
+            )
+
+            # read_bytes
+            self.root.hbar(
+                y="y_read",
+                right="x_read",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="red",
+                legend_label="read",
+                source=self.source,
+            )
+
+            # write_bytes
+            self.root.hbar(
+                y="y_write",
+                right="x_write",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="blue",
+                legend_label="write",
+                source=self.source,
+            )
+
+            self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.x_range = Range1d(start=0)
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            workers = list(self.scheduler.workers.values())
+
+            y_read = list(np.arange(len(workers)) + 0.75)
+            y_write = list(np.arange(len(workers)) + 0.25)
+
+            x_read = []
+            x_write = []
+            max_limit = 0
+
+            for ws in workers:
+                meminfo = ws.memory
+                limit = getattr(ws, "memory_limit", 0)
+
+                x_read.append(ws.metrics["read_bytes"])
+                x_write.append(ws.metrics["write_bytes"])
+
+                # this is probably not the right max, trying to
+                # get a xrange end, ideas?
+                max_limit = max(
+                    max_limit, limit, meminfo.process + meminfo.managed_spilled
+                )
+
+            result = {
+                "y_read": y_read,
+                "y_write": y_write,
+                "x_read": x_read,
+                "x_write": x_write,
+            }
+
+            self.root.x_range.end = max_limit
+
+            update(self.source, result)
+
+
 class ComputePerKey(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
 

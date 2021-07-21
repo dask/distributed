@@ -24,6 +24,7 @@ from .components.scheduler import (
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
     WorkersMemory,
     WorkerTable,
     events_doc,
@@ -72,6 +73,9 @@ applications = {
     "/individual-workers": individual_doc(WorkerTable, 500),
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
+    "/individual-network-bandwidth-workers": individual_doc(
+        WorkerNetworkBandwidth, 500
+    ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),
     "/individual-aggregate-time-per-action": individual_doc(AggregateAction, 500),
