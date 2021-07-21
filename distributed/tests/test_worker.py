@@ -2368,3 +2368,66 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
     while len(workers[2].tasks) > 1:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True)
+async def test_worker_reconnects_mid_compute(c, s, a, b):
+    """
+    This test ensure that if a worker disconnects while computing a result, the scheduler will still accept the result.
+
+    There is also an edge case tested which ensures that the reconnect is
+    successful if a task is currently executing, see
+    https://github.com/dask/distributed/issues/5078
+    """
+    with captured_logger("distributed.scheduler") as s_logs:
+        # Let's put one task in memory to ensure the reconnect has tasks in
+        # different states
+        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
+        await f1
+        a_address = a.address
+        a.periodic_callbacks["heartbeat"].stop()
+        await a.heartbeat()
+        a.heartbeat_active = True
+
+        from distributed import Lock
+
+        def fast_on_a(lock):
+            w = get_worker()
+            import time
+
+            if w.address != a_address:
+                lock.acquire()
+            else:
+                time.sleep(1)
+
+        lock = Lock()
+        # We want to be sure that A is the only one computing this result
+        async with lock:
+
+            f2 = c.submit(
+                fast_on_a, lock, workers=[a.address], allow_other_workers=True
+            )
+
+            while f2.key not in a.tasks:
+                await asyncio.sleep(0.01)
+
+            await s.stream_comms[a.address].close()
+
+            assert len(s.workers) == 1
+            a.heartbeat_active = False
+            await a.heartbeat()
+            assert len(s.workers) == 2
+            # Since B is locked, this is ensured to originate from A
+            await f2
+
+    assert "Unexpected worker completed task" in s_logs.getvalue()
+
+    while not len(s.tasks[f2.key].who_has) == 2:
+        await asyncio.sleep(0.001)
+
+    # Ensure that all keys have been properly registered and will also be
+    # cleaned up nicely.
+    del f1, f2
+
+    while any(w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)

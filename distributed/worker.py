@@ -904,7 +904,14 @@ class Worker(ServerNode):
                         keys=list(self.data),
                         nthreads=self.nthreads,
                         name=self.name,
-                        nbytes={ts.key: ts.get_nbytes() for ts in self.tasks.values()},
+                        nbytes={
+                            ts.key: ts.get_nbytes()
+                            for ts in self.tasks.values()
+                            # Only if the task is in memory this is a sensible
+                            # result since otherwise it simply submits the
+                            # default value
+                            if ts.state == "memory"
+                        },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,

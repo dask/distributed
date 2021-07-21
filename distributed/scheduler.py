@@ -2571,7 +2571,6 @@ class SchedulerState:
                     ws,
                     key,
                 )
-                return recommendations, client_msgs, worker_msgs
 
             has_compute_startstop: bool = False
             compute_start: double
@@ -4106,17 +4105,25 @@ class Scheduler(SchedulerState, ServerNode):
             if nbytes:
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
-                    if ts is not None and ts._state in ("processing", "waiting"):
-                        t: tuple = parent._transition(
-                            key,
-                            "memory",
-                            worker=address,
-                            nbytes=nbytes[key],
-                            typename=types[key],
-                        )
-                        recommendations, client_msgs, worker_msgs = t
-                        parent._transitions(recommendations, client_msgs, worker_msgs)
-                        recommendations = {}
+                    if ts is not None:
+                        if ts._state in ("processing", "waiting"):
+                            t: tuple = parent._transition(
+                                key,
+                                "memory",
+                                worker=address,
+                                nbytes=nbytes[key],
+                                typename=types[key],
+                            )
+                            recommendations, client_msgs, worker_msgs = t
+                            parent._transitions(
+                                recommendations, client_msgs, worker_msgs
+                            )
+                            recommendations = {}
+                        else:
+                            self.add_keys(
+                                worker=address,
+                                keys=[key],
+                            )
 
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
@@ -5121,6 +5128,9 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return
         validate_key(key)
+
+        if key in self.tasks and self.tasks[key].state == "memory":
+            self.add_keys(worker=worker, keys=[key])
 
         recommendations: dict
         client_msgs: dict
