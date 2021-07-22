@@ -486,8 +486,8 @@ async def test_WorkerNetworkBandwidth(c, s, a, b):
 
     assert all(len(v) == 2 for v in d.values())
 
-    assert d["y_read"] == [0.75, 1.75]
-    assert d["y_write"] == [0.25, 1.25]
+    assert d["y_read"] == [0.75, 1.85]
+    assert d["y_write"] == [0.25, 1.35]
 
 
 @gen_cluster(client=True)

@@ -799,8 +799,9 @@ class WorkerNetworkBandwidth(DashboardComponent):
         with log_errors():
             workers = self.scheduler.workers.values()
 
-            y_read = [i + 0.75 for i in range(len(workers))]
-            y_write = [i + 0.25 for i in range(len(workers))]
+            h = 0.1
+            y_read = [i + 0.75 + i * h for i in range(len(workers))]
+            y_write = [i + 0.25 + i * h for i in range(len(workers))]
 
             x_read = []
             x_write = []
