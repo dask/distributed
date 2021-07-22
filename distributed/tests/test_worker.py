@@ -2378,6 +2378,8 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
     There is also an edge case tested which ensures that the reconnect is
     successful if a task is currently executing, see
     https://github.com/dask/distributed/issues/5078
+
+    See also distributed.tests.test_scheduler.py::test_gather_allow_worker_reconnect
     """
     with captured_logger("distributed.scheduler") as s_logs:
         # Let's put one task in memory to ensure the reconnect has tasks in

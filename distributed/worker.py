@@ -16,7 +16,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Iterable, Optional
+from typing import Dict, Hashable, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -702,6 +702,7 @@ class Worker(ServerNode):
         stream_handlers = {
             "close": self.close,
             "compute-task": self.add_task,
+            "cancel-compute": self.cancel_compute,
             "free-keys": self.handle_free_keys,
             "superfluous-data": self.handle_superfluous_data,
             "steal-request": self.steal_request,
@@ -1554,6 +1555,22 @@ class Worker(ServerNode):
     # Task Management #
     ###################
 
+    def cancel_compute(self, key, reason):
+        """
+        Cancel a task on a best effort basis. This is only possible while a task
+        is in state `waiting` or `ready`.
+        Nothing will happen otherwise.
+        """
+        ts = self.tasks.get(key)
+        if ts and ts.state in ("waiting", "ready"):
+            self.log.append((key, "cancel-compute", reason))
+            ts.scheduler_holds_ref = False
+            # All possible dependents of TS should not be in state Processing on
+            # scheduler side and therefore should not be assigned to a worker,
+            # yet.
+            assert not ts.dependents
+            self.release_key(key, reason=reason, report=False)
+
     def add_task(
         self,
         key,
@@ -1991,11 +2008,6 @@ class Worker(ServerNode):
                     out = "error"
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
-
-                # Don't release the dependency keys, but do remove them from `dependents`
-                for dependency in ts.dependencies:
-                    dependency.dependents.discard(ts)
-                ts.dependencies.clear()
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
@@ -2613,7 +2625,7 @@ class Worker(ServerNode):
 
     def release_key(
         self,
-        key: str,
+        key: Hashable,
         cause: Optional[TaskState] = None,
         reason: Optional[str] = None,
         report: bool = True,
@@ -2621,7 +2633,7 @@ class Worker(ServerNode):
         try:
 
             if self.validate:
-                assert isinstance(key, str)
+                assert not isinstance(key, TaskState)
             ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
@@ -2658,6 +2670,12 @@ class Worker(ServerNode):
                 if ts.state == "executing":
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
+
+            for d in ts.dependencies:
+                d.dependents.discard(ts)
+
+                if not d.dependents and d.state in ("flight", "fetch"):
+                    self.release_key(d.key, reason="Dependent released")
 
             if report:
                 # Inform the scheduler of keys which will have gone missing

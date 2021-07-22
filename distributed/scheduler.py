@@ -2571,6 +2571,13 @@ class SchedulerState:
                     ws,
                     key,
                 )
+                worker_msgs[ts._processing_on.address] = [
+                    {
+                        "op": "cancel-compute",
+                        "key": key,
+                        "reason": "Finished on different worker",
+                    }
+                ]
 
             has_compute_startstop: bool = False
             compute_start: double
@@ -4103,27 +4110,17 @@ class Scheduler(SchedulerState, ServerNode):
             client_msgs: dict = {}
             worker_msgs: dict = {}
             if nbytes:
+                assert isinstance(nbytes, dict)
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
                     if ts is not None:
-                        if ts._state in ("processing", "waiting"):
-                            t: tuple = parent._transition(
-                                key,
-                                "memory",
-                                worker=address,
-                                nbytes=nbytes[key],
-                                typename=types[key],
-                            )
-                            recommendations, client_msgs, worker_msgs = t
-                            parent._transitions(
-                                recommendations, client_msgs, worker_msgs
-                            )
-                            recommendations = {}
-                        else:
-                            self.add_keys(
-                                worker=address,
-                                keys=[key],
-                            )
+                        self.handle_task_finished(
+                            key=key,
+                            worker=address,
+                            nbytes=nbytes[key],
+                            typename=types[key],
+                            metadata=ts.metadata,
+                        )
 
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
@@ -4516,7 +4513,7 @@ class Scheduler(SchedulerState, ServerNode):
         ws: WorkerState = parent._workers_dv[worker]
         ts._metadata.update(kwargs["metadata"])
 
-        if ts._state == "processing":
+        if ts._state != "released":
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
@@ -5434,12 +5431,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # Remove suspicious workers from the scheduler but allow them to
                 # reconnect.
                 await asyncio.gather(
-                    *[
+                    *(
                         self.remove_worker(address=worker, close=False)
                         for worker in missing_workers
-                    ]
+                    )
                 )
-
                 recommendations: dict
                 client_msgs: dict = {}
                 worker_msgs: dict = {}
