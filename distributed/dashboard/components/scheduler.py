@@ -147,7 +147,7 @@ class Occupancy(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
 
             y = list(range(len(workers)))
             occupancy = [ws.occupancy for ws in workers]
@@ -797,10 +797,10 @@ class WorkerNetworkBandwidth(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
 
-            y_read = list(np.arange(len(workers)) + 0.75)
-            y_write = list(np.arange(len(workers)) + 0.25)
+            y_read = [i + 0.75 for i in range(len(workers))]
+            y_write = [i + 0.25 for i in range(len(workers))]
 
             x_read = []
             x_write = []
@@ -809,7 +809,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
                 x_read.append(ws.metrics["read_bytes"])
                 x_write.append(ws.metrics["write_bytes"])
 
-            max_limit = max(
+            self.root.x_range.end = max(
                 max(x_read),
                 max(x_write),
                 100_000_000,
@@ -822,8 +822,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
                 "x_read": x_read,
                 "x_write": x_write,
             }
-
-            self.root.x_range.end = max_limit
 
             update(self.source, result)
 
@@ -1260,7 +1258,7 @@ class CurrentLoad(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
             now = time()
             if not any(ws.processing for ws in workers) and now < self.last + 1:
                 return
