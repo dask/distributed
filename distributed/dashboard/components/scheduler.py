@@ -804,19 +804,17 @@ class WorkerNetworkBandwidth(DashboardComponent):
 
             x_read = []
             x_write = []
-            max_limit = 0
-            limit = 104857600  # 100MB
 
             for ws in workers:
                 x_read.append(ws.metrics["read_bytes"])
                 x_write.append(ws.metrics["write_bytes"])
 
-                max_limit = max(
-                    0.95 * max_limit,
-                    limit,
-                    ws.metrics["read_bytes"],
-                    ws.metrics["write_bytes"],
-                )
+            max_limit = max(
+                max(x_read),
+                max(x_write),
+                100_000_000,
+                0.95 * self.root.x_range.end,
+            )
 
             result = {
                 "y_read": y_read,
