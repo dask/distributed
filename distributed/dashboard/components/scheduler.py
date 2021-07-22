@@ -786,7 +786,13 @@ class WorkerNetworkBandwidth(DashboardComponent):
 
             self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.root.xaxis.minor_tick_line_alpha = 0
             self.root.x_range = Range1d(start=0)
+            self.root.yaxis.visible = False
+            self.root.ygrid.visible = False
+            self.root.toolbar_location = None
+            self.root.yaxis.visible = False
 
     @without_property_validation
     def update(self):
@@ -799,18 +805,17 @@ class WorkerNetworkBandwidth(DashboardComponent):
             x_read = []
             x_write = []
             max_limit = 0
+            limit = 104857600  # 100MB
 
             for ws in workers:
-                meminfo = ws.memory
-                limit = getattr(ws, "memory_limit", 0)
-
                 x_read.append(ws.metrics["read_bytes"])
                 x_write.append(ws.metrics["write_bytes"])
 
-                # this is probably not the right max, trying to
-                # get a xrange end, ideas?
                 max_limit = max(
-                    max_limit, limit, meminfo.process + meminfo.managed_spilled
+                    0.95 * max_limit,
+                    limit,
+                    ws.metrics["read_bytes"],
+                    ws.metrics["write_bytes"],
                 )
 
             result = {
