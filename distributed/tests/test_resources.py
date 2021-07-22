@@ -430,4 +430,4 @@ async def test_client_get_worker_resources(c, s, a, b):
     resources = await c.get_worker_resources()
     resources = {k: sum(d.values()) for k, d in resources.items()}
     resources = sorted(resources.items())
-    assert resources == [('A', 6), ('B', 1)]
+    assert resources == [("A", 6), ("B", 1)]
