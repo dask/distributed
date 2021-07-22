@@ -417,3 +417,17 @@ async def test_resources_from_python_override_config(c, s, a, b):
     info = c.scheduler_info()
     for worker in [a, b]:
         assert info["workers"][worker.address]["resources"] == {"my_resources": 10}
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[
+        ("127.0.0.1", 1, {"resources": {"A": 5}}),
+        ("127.0.0.1", 1, {"resources": {"A": 1, "B": 1}}),
+    ],
+)
+async def test_client_get_worker_resources(c, s, a, b):
+    resources = await c.get_worker_resources()
+    resources = {k: sum(d.values()) for k, d in resources.items()}
+    resources = sorted(resources.items())
+    assert resources == [('A', 6), ('B', 1)]
