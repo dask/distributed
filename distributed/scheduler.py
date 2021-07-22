@@ -3510,6 +3510,7 @@ class Scheduler(SchedulerState, ServerNode):
             "start_ipython": self.start_ipython,
             "run_function": self.run_function,
             "update_data": self.update_data,
+            "get_resources": self.get_resources,
             "set_resources": self.add_resources,
             "retire_workers": self.retire_workers,
             "get_metadata": self.get_metadata,
@@ -6375,6 +6376,9 @@ class Scheduler(SchedulerState, ServerNode):
     #####################
     # Utility functions #
     #####################
+
+    def get_resources(self, comm=None):
+        return self.resources
 
     def add_resources(self, comm=None, worker=None, resources=None):
         parent: SchedulerState = cast(SchedulerState, self)

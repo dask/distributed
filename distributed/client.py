@@ -3529,6 +3529,16 @@ class Client:
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
+    def get_worker_resources(self):
+        """Get worker resources from all workers on the cluster
+
+        Returns
+        -------
+        Dictionary mapping resource name to another dictionary,
+        which maps worker to the amount of that resource available.
+        """
+        return self.sync(self.scheduler.get_resources)
+
     def log_event(self, topic, msg):
         """Log an event under a given topic
 
