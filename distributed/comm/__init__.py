@@ -14,9 +14,13 @@ from .utils import get_tcp_server_address
 
 
 def _register_transports():
-    from . import mpi
     from . import inproc
     from . import tcp
+
+    try:
+        from . import mpi
+    except ImportError:
+        pass
 
     try:
         from . import ucx

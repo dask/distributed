@@ -118,3 +118,69 @@ def ensure_concrete_host(host):
         return get_ipv6()
     else:
         return host
+
+def get_array_types():
+    """
+    Find the correct library and object type for declaring new host and
+    device arrays.
+    """
+    # Find the function, `host_array()`, to use when allocating new host arrays
+    try:
+        import numpy
+
+        host_array = lambda n: numpy.empty((n,), dtype="u1")
+    except ImportError:
+        host_array = lambda n: bytearray(n)
+
+    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
+    try:
+        import rmm
+
+        if hasattr(rmm, "DeviceBuffer"):
+            device_array = lambda n: rmm.DeviceBuffer(size=n)
+        else:  # pre-0.11.0
+            import numba.cuda
+            import weakref
+
+            def rmm_device_array(n):
+                a = rmm.device_array(n, dtype="u1")
+                weakref.finalize(a, numba.cuda.current_context)
+                return a
+
+            device_array = rmm_device_array
+    except ImportError:
+        try:
+            import numba.cuda
+            import weakref
+
+            def numba_device_array(n):
+                a = numba.cuda.device_array((n,), dtype="u1")
+                weakref.finalize(a, numba.cuda.current_context)
+                return a
+
+            device_array = numba_device_array
+        except ImportError:
+            def device_array(n):
+                raise RuntimeError(
+                    "In order to send/recv CUDA arrays, Numba or RMM is required"
+                )
+
+    return host_array, device_array
+
+def init_rmm_pool():
+    """
+    Initialize an RMM pool based on Dask configuration parameters.
+    """
+    try:
+        import rmm
+
+        pool_size_str = dask.config.get("rmm.pool-size")
+        if pool_size_str is not None:
+            pool_size = parse_bytes(pool_size_str)
+            rmm.reinitialize(
+                pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+            )
+    except ImportError:
+        raise RuntimeError(
+            "RMM import failed.  RMM library is required to create an RMM pool."
+        )
