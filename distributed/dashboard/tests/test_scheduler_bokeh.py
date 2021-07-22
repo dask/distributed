@@ -35,6 +35,7 @@ from distributed.dashboard.components.scheduler import (
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
     WorkersMemory,
     WorkersMemoryHistogram,
     WorkerTable,
@@ -474,6 +475,37 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
     assert wt.source.data["name"][0] == "Total (2)"
     assert wt.source.data["memory_limit"][0] == 0
     assert wt.source.data["memory_percent"][0] == ""
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth(c, s, a, b):
+    cl = WorkerNetworkBandwidth(s)
+
+    cl.update()
+    d = dict(cl.source.data)
+
+    assert all(len(v) == 2 for v in d.values())
+
+    assert d["y_read"] == [0.75, 1.75]
+    assert d["y_write"] == [0.25, 1.25]
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
+    cl = WorkerNetworkBandwidth(s)
+
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    cl.update()
+    d = dict(cl.source.data)
+
+    assert s.workers[a.address].metrics["read_bytes"] == d["x_read"][0]
+    assert s.workers[b.address].metrics["read_bytes"] == d["x_read"][1]
+
+    assert s.workers[a.address].metrics["write_bytes"] == d["x_write"][0]
+    assert s.workers[b.address].metrics["write_bytes"] == d["x_write"][1]
 
 
 @gen_cluster(client=True)
