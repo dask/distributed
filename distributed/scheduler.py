@@ -10,6 +10,7 @@ import operator
 import os
 import random
 import sys
+import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
@@ -767,6 +768,114 @@ class WorkerState:
 
 @final
 @cclass
+class Computation:
+    """
+    Collection tracking a single compute or persist call
+
+    See also
+    --------
+    TaskPrefix
+    TaskGroup
+    TaskState
+    """
+
+    _start: double
+    _groups: set
+    _code: object
+    _id: object
+
+    def __init__(self):
+        self._start = time()
+        self._groups = set()
+        self._code = sortedcontainers.SortedSet()
+        self._id = uuid.uuid4()
+
+    @property
+    def code(self):
+        return self._code
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        if self.groups:
+            return max(tg.stop for tg in self.groups)
+        else:
+            return -1
+
+    @property
+    def states(self):
+        tg: TaskGroup
+        return merge_with(sum, [tg._states for tg in self._groups])
+
+    @property
+    def groups(self):
+        return self._groups
+
+    def __repr__(self):
+        return (
+            f"<Computation {self._id}: "
+            + "Tasks: "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
+
+    def _repr_html_(self):
+        text = f"""<b>Computation</b> {self._id}
+
+        <table>
+            <tr>
+                <td style="text-align: left;"><strong>Duration: </strong>{self.stop - self.start:.3f}</td>
+                <td style="text-align: left;"></td>
+            </tr>
+            <tr>
+                <td style="text-align: left;"><strong>Start: </strong>{self.start}</td>
+                <td style="text-align: left;"></td>
+            </tr>
+            <tr>
+                <td style="text-align: left;"><strong>Groups: </strong>{len(self.groups)}</td>
+                <td style="text-align: left;"></td>
+            </tr>
+            <tr>
+                <td style="text-align: left;"><strong>Tasks: </strong>
+                {", ".join(
+                    "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+                )}</td>
+                <td style="text-align: left;"></td>
+            </tr>
+        </table>
+
+        <details>
+        <summary style="margin-bottom": 20px><h4 style="display:inline">Code</h4></summary>
+        """
+
+        for ix, code in enumerate(self.code):
+            text += f"<h5>Code segment {ix + 1} / {len(self.code)}</h5>"
+            text += f"<code>{code}</code>"
+
+        text += """
+        </details>
+        <details>
+        <summary style="margin-bottom": 20px><h4 style="display:inline">Task Groups</h4></summary>
+        <ul>
+        """
+        for gr in self.groups:
+            text += f"""
+            <li> {gr._repr_html_()} </li>
+            """
+        text += """
+        </ul>
+        </details>
+        """
+        return text
+
+
+@final
+@cclass
 class TaskPrefix:
     """Collection tracking all tasks within a group
 
@@ -1027,6 +1136,9 @@ class TaskGroup:
             )
             + ">"
         )
+
+    def _repr_html_(self):
+        return repr(self)[1:-1]
 
     def __len__(self):
         return sum(self._states.values())
@@ -1768,6 +1880,7 @@ class SchedulerState:
     _aliases: dict
     _bandwidth: double
     _clients: dict
+    _computations: object
     _extensions: dict
     _host_info: dict
     _idle: object
@@ -1838,6 +1951,9 @@ class SchedulerState:
             self._tasks = tasks
         else:
             self._tasks = dict()
+        self._computations = deque(
+            maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
+        )
         self._task_groups = dict()
         self._task_prefixes = dict()
         self._task_metadata = dict()
@@ -1906,6 +2022,10 @@ class SchedulerState:
     @property
     def clients(self):
         return self._clients
+
+    @property
+    def computations(self):
+        return self._computations
 
     @property
     def extensions(self):
@@ -2011,7 +2131,9 @@ class SchedulerState:
 
     @ccall
     @exceptval(check=False)
-    def new_task(self, key: str, spec: object, state: str) -> TaskState:
+    def new_task(
+        self, key: str, spec: object, state: str, computation: Computation = None
+    ) -> TaskState:
         """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
         ts._state = state
@@ -2028,6 +2150,8 @@ class SchedulerState:
         tg = self._task_groups.get(group_key)
         if tg is None:
             self._task_groups[group_key] = tg = TaskGroup(group_key)
+            if computation:
+                computation.groups.add(tg)
             tg._prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
@@ -4175,6 +4299,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        code=None,
     ):
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
@@ -4213,6 +4338,7 @@ class Scheduler(SchedulerState, ServerNode):
             actors,
             fifo_timeout,
             annotations,
+            code=code,
         )
 
     def update_graph(
@@ -4231,6 +4357,7 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         annotations=None,
+        code=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -4252,6 +4379,16 @@ class Scheduler(SchedulerState, ServerNode):
                 del tasks[k]
 
         dependencies = dependencies or {}
+
+        if parent._total_occupancy > 1e-9 and parent._computations:
+            # Still working on something. Assign new tasks to same computation
+            computation = cast(Computation, parent._computations[-1])
+        else:
+            computation = Computation()
+            parent._computations.append(computation)
+
+        if code and code not in computation._code:  # add new code blocks
+            computation._code.add(code)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -4314,7 +4451,9 @@ class Scheduler(SchedulerState, ServerNode):
             # XXX Have a method get_task_state(self, k) ?
             ts = parent._tasks.get(k)
             if ts is None:
-                ts = parent.new_task(k, tasks.get(k), "released")
+                ts = parent.new_task(
+                    k, tasks.get(k), "released", computation=computation
+                )
             elif not ts._run_spec:
                 ts._run_spec = tasks.get(k)
 
