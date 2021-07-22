@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import inspect
 import logging
 import os
 import pickle
@@ -5144,30 +5145,25 @@ async def test_secede_simple(c, s, a):
     assert result == 2
 
 
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, timeout=120)
+@gen_cluster(client=True)
 async def test_secede_balances(c, s, a, b):
     count = threading.active_count()
 
     def f(x):
         client = get_client()
-        sleep(0.01)  # do some work
         secede()
-        futures = client.map(slowinc, range(10), pure=False, delay=0.01)
+        futures = client.map(inc, range(10), pure=False)
         total = client.submit(sum, futures).result()
         return total
 
     futures = c.map(f, range(100))
-    start = time()
-    while not all(f.status == "finished" for f in futures):
-        await asyncio.sleep(0.01)
-        assert threading.active_count() < count + 50
-        assert time() < start + 60
-
-    assert len(a.log) < 2 * len(b.log)
-    assert len(b.log) < 2 * len(a.log)
 
     results = await c.gather(futures)
+
+    assert a.executed_count + b.executed_count == 1100
+    assert a.executed_count > 200
+    assert b.executed_count > 200
+
     assert results == [sum(map(inc, range(10)))] * 100
 
 
@@ -6734,3 +6730,171 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
 
     c_default = default_client()
     assert c is c_default
+
+
+def test_computation_code_walk_frames():
+
+    test_function_code = inspect.getsource(test_computation_code_walk_frames)
+    code = Client._get_computation_code()
+
+    assert test_function_code == code
+
+    def nested_call():
+        return Client._get_computation_code()
+
+    assert nested_call() == inspect.getsource(nested_call)
+
+    with pytest.raises(TypeError, match="Ignored modules must be a list"):
+        with dask.config.set(
+            {"distributed.diagnostics.computations.ignore-modules": "test_client"}
+        ):
+            code = Client._get_computation_code()
+
+    with dask.config.set(
+        {"distributed.diagnostics.computations.ignore-modules": ["test_client"]}
+    ):
+        import sys
+
+        upper_frame_code = inspect.getsource(sys._getframe(1))
+        code = Client._get_computation_code()
+        assert code == upper_frame_code
+        assert nested_call() == upper_frame_code
+
+
+def test_computation_object_code_dask_compute(client):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    future = x.sum().compute()
+    y = future
+
+    test_function_code = inspect.getsource(test_computation_object_code_dask_compute)
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert len(comp.code) == 1
+        return comp.code[0]
+
+    code = client.run_on_scheduler(fetch_comp_code)
+
+    assert code == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_dask_persist(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    future = x.sum().persist()
+    await future
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_dask_persist.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_client_submit_simple(c, s, a, b):
+    def func(x):
+        return x
+
+    fut = c.submit(func, 1)
+
+    await fut
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_client_submit_simple.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_client_submit_list_comp(c, s, a, b):
+    def func(x):
+        return x
+
+    futs = [c.submit(func, x) for x in range(10)]
+
+    await c.gather(futs)
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_client_submit_list_comp.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+
+    # Code is deduplicated
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_client_submit_dict_comp(c, s, a, b):
+    def func(x):
+        return x
+
+    futs = {x: c.submit(func, x) for x in range(10)}
+
+    await c.gather(futs)
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_client_submit_dict_comp.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+
+    # Code is deduplicated
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_client_map(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    future = c.compute(x.sum(), retries=2)
+    y = await future
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_client_map.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True)
+async def test_computation_object_code_client_compute(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.ones((10, 10), chunks=(3, 3))
+    future = c.compute(x.sum(), retries=2)
+    y = await future
+
+    test_function_code = inspect.getsource(
+        test_computation_object_code_client_compute.__wrapped__
+    )
+    computations = list(s.computations)
+    assert len(computations) == 1
+    comp = computations[0]
+    assert len(comp.code) == 1
+
+    assert comp.code[0] == test_function_code

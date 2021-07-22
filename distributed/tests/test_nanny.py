@@ -9,6 +9,9 @@ from time import sleep
 
 import psutil
 import pytest
+
+pytestmark = pytest.mark.gpu
+
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
 

@@ -2,6 +2,7 @@ import logging
 import math
 import os
 
+from bokeh.core.properties import without_property_validation
 from bokeh.layouts import column, row
 from bokeh.models import (
     BoxZoomTool,
@@ -29,7 +30,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, update, without_property_validation
+from distributed.dashboard.utils import transpose, update
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
 from distributed.utils import key_split, log_errors
@@ -47,6 +48,23 @@ env = Environment(
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
 
 template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
+
+
+def standard_doc(title, active_page, *, template="simple.html"):
+    def decorator(f):
+        def wrapper(arg, extra, doc):
+            with log_errors():
+                doc.title = title
+                doc.template = env.get_template(template)
+                if active_page is not None:
+                    doc.template_variables["active_page"] = active_page
+                doc.template_variables.update(extra)
+                doc.theme = BOKEH_THEME
+                return f(arg, extra, doc)
+
+        return wrapper
+
+    return decorator
 
 
 class StateTable(DashboardComponent):
@@ -389,11 +407,7 @@ class CrossFilter(DashboardComponent):
 
     def process_msg(self, msg):
         try:
-
-            def func(k):
-                return msg["keys"].get(k, 0)
-
-            status_key = max(msg["keys"], key=func)
+            status_key = max(msg["keys"], key=lambda x: msg["keys"].get(x, 0))
             typ = self.worker.types.get(status_key, object).__name__
             keyname = key_split(status_key)
             d = {
@@ -471,7 +485,6 @@ class Counters(DashboardComponent):
                 )
 
             fig.xaxis.major_label_orientation = math.pi / 12
-            fig.toolbar.logo = None
             self.digest_sources[name] = sources
             self.digest_figures[name] = fig
             return fig
@@ -489,7 +502,9 @@ class Counters(DashboardComponent):
                 tools="",
                 height=150,
                 sizing_mode=self.sizing_mode,
-                x_range=sorted(map(str, self.server.counters[name].components[0])),
+                x_range=sorted(
+                    str(x) for x in self.server.counters[name].components[0]
+                ),
             )
             fig.ygrid.visible = False
 
@@ -509,8 +524,6 @@ class Counters(DashboardComponent):
                 )
                 fig.add_tools(hover)
                 fig.xaxis.major_label_orientation = math.pi / 12
-
-            fig.toolbar.logo = None
 
             self.counter_sources[name] = sources
             self.counter_figures[name] = fig
@@ -541,107 +554,71 @@ class Counters(DashboardComponent):
                         counts = [d[x] for x in xs]
                         ys = [factor * c for c in counts]
                         y_centers = [y / 2 for y in ys]
-                        xs = list(map(str, xs))
+                        xs = [str(x) for x in xs]
                         d = {"x": xs, "y": ys, "y-center": y_centers, "counts": counts}
                         self.counter_sources[name][i].data.update(d)
                     fig.title.text = "%s: %d" % (name, counter.size())
-                    fig.x_range.factors = list(map(str, xs))
+                    fig.x_range.factors = [str(x) for x in xs]
 
 
+@standard_doc("Dask Worker Internal Monitor", active_page="status")
 def status_doc(worker, extra, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        executing_ts = ExecutingTimeSeries(worker, sizing_mode="scale_width")
-        communicating_ts = CommunicatingTimeSeries(worker, sizing_mode="scale_width")
-        communicating_stream = CommunicatingStream(worker, sizing_mode="scale_width")
+    statetable = StateTable(worker)
+    executing_ts = ExecutingTimeSeries(worker, sizing_mode="scale_width")
+    communicating_ts = CommunicatingTimeSeries(worker, sizing_mode="scale_width")
+    communicating_stream = CommunicatingStream(worker, sizing_mode="scale_width")
 
-        xr = executing_ts.root.x_range
-        communicating_ts.root.x_range = xr
-        communicating_stream.root.x_range = xr
+    xr = executing_ts.root.x_range
+    communicating_ts.root.x_range = xr
+    communicating_stream.root.x_range = xr
 
-        doc.title = "Dask Worker Internal Monitor"
-        add_periodic_callback(doc, statetable, 200)
-        add_periodic_callback(doc, executing_ts, 200)
-        add_periodic_callback(doc, communicating_ts, 200)
-        add_periodic_callback(doc, communicating_stream, 200)
-        doc.add_root(
-            column(
-                statetable.root,
-                executing_ts.root,
-                communicating_ts.root,
-                communicating_stream.root,
-                sizing_mode="scale_width",
-            )
+    add_periodic_callback(doc, statetable, 200)
+    add_periodic_callback(doc, executing_ts, 200)
+    add_periodic_callback(doc, communicating_ts, 200)
+    add_periodic_callback(doc, communicating_stream, 200)
+    doc.add_root(
+        column(
+            statetable.root,
+            executing_ts.root,
+            communicating_ts.root,
+            communicating_stream.root,
+            sizing_mode="scale_width",
         )
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "status"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    )
 
 
+@standard_doc("Dask Worker Cross-filter", active_page="crossfilter")
 def crossfilter_doc(worker, extra, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        crossfilter = CrossFilter(worker)
-
-        doc.title = "Dask Worker Cross-filter"
-        add_periodic_callback(doc, statetable, 500)
-        add_periodic_callback(doc, crossfilter, 500)
-
-        doc.add_root(column(statetable.root, crossfilter.root))
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "crossfilter"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    statetable = StateTable(worker)
+    crossfilter = CrossFilter(worker)
+    add_periodic_callback(doc, statetable, 500)
+    add_periodic_callback(doc, crossfilter, 500)
+    doc.add_root(column(statetable.root, crossfilter.root))
 
 
+@standard_doc("Dask Worker Monitor", active_page="system")
 def systemmonitor_doc(worker, extra, doc):
-    with log_errors():
-        sysmon = SystemMonitor(worker, sizing_mode="scale_width")
-        doc.title = "Dask Worker Monitor"
-        add_periodic_callback(doc, sysmon, 500)
-
-        doc.add_root(sysmon.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "system"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    sysmon = SystemMonitor(worker, sizing_mode="scale_width")
+    add_periodic_callback(doc, sysmon, 500)
+    doc.add_root(sysmon.root)
 
 
+@standard_doc("Dask Work Counters", active_page="counters")
 def counters_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask Worker Counters"
-        counter = Counters(server, sizing_mode="stretch_both")
-        add_periodic_callback(doc, counter, 500)
-
-        doc.add_root(counter.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "counters"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    counter = Counters(server, sizing_mode="stretch_both")
+    add_periodic_callback(doc, counter, 500)
+    doc.add_root(counter.root)
 
 
+@standard_doc("Dask Worker Profile", active_page="profile")
 def profile_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask Worker Profile"
-        profile = ProfileTimePlot(server, sizing_mode="stretch_both", doc=doc)
-        profile.trigger_update()
-
-        doc.add_root(profile.root)
-        doc.template = env.get_template("simple.html")
-        doc.template_variables["active_page"] = "profile"
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
+    profile = ProfileTimePlot(server, sizing_mode="stretch_both", doc=doc)
+    doc.add_root(profile.root)
+    profile.trigger_update()
 
 
+@standard_doc("Dask: Profile of Event Loop", active_page=None)
 def profile_server_doc(server, extra, doc):
-    with log_errors():
-        doc.title = "Dask: Profile of Event Loop"
-        prof = ProfileServer(server, sizing_mode="stretch_both", doc=doc)
-        doc.add_root(prof.root)
-        doc.template = env.get_template("simple.html")
-        # doc.template_variables['active_page'] = ''
-        doc.template_variables.update(extra)
-        doc.theme = BOKEH_THEME
-
-        prof.trigger_update()
+    profile = ProfileServer(server, sizing_mode="stretch_both", doc=doc)
+    doc.add_root(profile.root)
+    profile.trigger_update()

@@ -896,6 +896,7 @@ def gen_cluster(
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
+        @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             result = None
             workers = []
