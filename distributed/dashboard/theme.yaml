@@ -3,3 +3,5 @@ attrs:
     Plot:
         background_fill_color: null
         border_fill_color: null
+    Toolbar:
+      logo: null

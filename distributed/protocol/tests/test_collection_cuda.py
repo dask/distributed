@@ -1,5 +1,7 @@
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 from dask.dataframe.utils import assert_eq
 
 from distributed.protocol import deserialize, serialize

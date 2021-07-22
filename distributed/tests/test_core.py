@@ -9,6 +9,7 @@ import pytest
 
 import dask
 
+from distributed.comm.core import CommClosedError
 from distributed.core import (
     ConnectionPool,
     Server,
@@ -39,10 +40,6 @@ from distributed.utils_test import (
     throws,
     tls_security,
 )
-
-
-def echo(comm, x):
-    return x
 
 
 class CountedObject:
@@ -442,16 +439,16 @@ async def test_rpc_with_many_connections_inproc():
 
 async def check_large_packets(listen_arg):
     """tornado has a 100MB cap by default"""
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(listen_arg)
 
     data = b"0" * int(200e6)  # slightly more than 100MB
     async with rpc(server.address) as conn:
-        result = await conn.echo(x=data)
+        result = await conn.echo(data=data)
         assert result == data
 
         d = {"x": data}
-        result = await conn.echo(x=d)
+        result = await conn.echo(data=d)
         assert result == d
 
     server.stop()
@@ -543,17 +540,17 @@ async def test_connect_raises():
 
 @pytest.mark.asyncio
 async def test_send_recv_args():
-    server = Server({"echo": echo})
+    server = Server({})
     await server.listen(0)
 
     comm = await connect(server.address)
-    result = await send_recv(comm, op="echo", x=b"1")
+    result = await send_recv(comm, op="echo", data=b"1")
     assert result == b"1"
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"2", reply=False)
+    result = await send_recv(comm, op="echo", data=b"2", reply=False)
     assert result is None
     assert not comm.closed()
-    result = await send_recv(comm, op="echo", x=b"3", close=True)
+    result = await send_recv(comm, op="echo", data=b"3", close=True)
     assert result == b"3"
     assert comm.closed()
 
@@ -612,6 +609,55 @@ async def test_connection_pool():
         assert time() < start + 2
 
     await rpc.close()
+
+
+@pytest.mark.asyncio
+async def test_connection_pool_close_while_connecting(monkeypatch):
+    """
+    Ensure a closed connection pool guarantees to have no connections left open
+    even if it is closed mid-connecting
+    """
+    from distributed.comm.registry import backends
+    from distributed.comm.tcp import TCPBackend, TCPConnector
+
+    class SlowConnector(TCPConnector):
+        async def connect(self, address, deserialize, **connection_args):
+            await asyncio.sleep(0.1)
+            return await super().connect(
+                address, deserialize=deserialize, **connection_args
+            )
+
+    class SlowBackend(TCPBackend):
+        _connector_class = SlowConnector
+
+    monkeypatch.setitem(backends, "tcp", SlowBackend())
+
+    server = Server({})
+    await server.listen("tcp://")
+
+    pool = await ConnectionPool(limit=2)
+
+    async def connect_to_server():
+        comm = await pool.connect(server.address)
+        pool.reuse(server.address, comm)
+
+    tasks = [asyncio.create_task(connect_to_server()) for _ in range(30)]
+
+    await asyncio.sleep(0)
+    assert pool._connecting
+    close_fut = asyncio.create_task(pool.close())
+
+    with pytest.raises(
+        CommClosedError, match="ConnectionPool not running.  Status: Status.closed"
+    ):
+        await asyncio.gather(*tasks)
+
+    await close_fut
+    assert not pool.open
+    assert not pool._n_connecting
+
+    for t in tasks:
+        t.cancel()
 
 
 @pytest.mark.asyncio
