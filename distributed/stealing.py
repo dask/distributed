@@ -230,7 +230,15 @@ class WorkStealing(SchedulerPlugin):
                 return
 
             # Victim had already started execution, reverse stealing
-            if state in ("memory", "executing", "long-running", None):
+            if state in (
+                "memory",
+                "executing",
+                "long-running",
+                "released",
+                "cancelled",
+                "resumed",
+                None,
+            ):
                 self.log(("already-computing", key, victim.address, thief.address))
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
@@ -256,7 +264,7 @@ class WorkStealing(SchedulerPlugin):
                     await self.scheduler.remove_worker(thief.address)
                 self.log(("confirm", key, victim.address, thief.address))
             else:
-                raise ValueError("Unexpected task state: %s" % state)
+                raise ValueError(f"Unexpected task state: {ts}")
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

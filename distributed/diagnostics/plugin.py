@@ -157,24 +157,6 @@ class WorkerPlugin:
         kwargs : More options passed when transitioning
         """
 
-    def release_key(self, key, state, cause, reason, report):
-        """
-        Called when the worker releases a task.
-
-        Parameters
-        ----------
-        key : string
-        state : string
-            State of the released task.
-            One of waiting, ready, executing, long-running, memory, error.
-        cause : string or None
-            Additional information on what triggered the release of the task.
-        reason : None
-            Not used.
-        report : bool
-            Whether the worker should report the released task to the scheduler.
-        """
-
 
 class NannyPlugin:
     """Interface to extend the Nanny
