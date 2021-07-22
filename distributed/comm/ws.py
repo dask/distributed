@@ -7,10 +7,12 @@ from ssl import SSLError
 from typing import Callable
 
 from tornado import web
-from tornado.httpclient import HTTPRequest
+from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.httpserver import HTTPServer
 from tornado.iostream import StreamClosedError
 from tornado.websocket import WebSocketClosedError, WebSocketHandler, websocket_connect
+
+import dask
 
 from ..utils import ensure_bytes, nbytes
 from .addressing import parse_host_port, unparse_host_port
@@ -20,6 +22,11 @@ from .tcp import BaseTCPBackend, _expect_tls_context, convert_stream_closed_erro
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
+
+
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
+    dask.config.get("distributed.comm.websockets.shard")
+)
 
 
 class WSHandler(WebSocketHandler):
@@ -106,6 +113,7 @@ class WSHandlerComm(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
         try:
@@ -380,6 +388,8 @@ class WSConnector(Connector):
                 "TLS expects a `ssl_context` argument of type "
                 "ssl.SSLContext (perhaps check your TLS configuration?)"
             ) from err
+        except HTTPClientError as e:
+            raise CommClosedError(f"in {self}: {e}") from e
         return self.comm_class(sock, deserialize=deserialize)
 
     def _get_connect_args(self, **connection_args):

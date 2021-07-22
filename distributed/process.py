@@ -6,7 +6,6 @@ import threading
 import weakref
 from queue import Queue as PyQueue
 
-from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
@@ -53,7 +52,7 @@ class AsyncProcess:
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
-            raise TypeError("`target` needs to be callable, not %r" % (type(target),))
+            raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
         self._loop = loop or IOLoop.current(instance=False)
 
@@ -92,7 +91,7 @@ class AsyncProcess:
         self._start_threads()
 
     def __repr__(self):
-        return "<%s %s>" % (self.__class__.__name__, self._name)
+        return f"<{self.__class__.__name__} {self._name}>"
 
     def _check_closed(self):
         if self._closed:
@@ -212,11 +211,11 @@ class AsyncProcess:
 
             state.is_alive = True
             state.pid = process.pid
-            logger.debug("[%s] created process with pid %r" % (r, state.pid))
+            logger.debug(f"[{r}] created process with pid {state.pid!r}")
 
         while True:
             msg = q.get()
-            logger.debug("[%s] got message %r" % (r, msg))
+            logger.debug(f"[{r}] got message {msg!r}")
             op = msg["op"]
             if op == "start":
                 _call_and_set_future(loop, msg["future"], _start)
@@ -268,8 +267,7 @@ class AsyncProcess:
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
         return fut
 
-    @gen.coroutine
-    def join(self, timeout=None):
+    async def join(self, timeout=None):
         """
         Wait for the child process to exit.
 
@@ -280,10 +278,12 @@ class AsyncProcess:
         if self._state.exitcode is not None:
             return
         if timeout is None:
-            yield self._exit_future
+            await self._exit_future
         else:
             try:
-                yield asyncio.wait_for(self._exit_future, timeout)
+                # Shield otherwise the timeout cancels the future and our
+                # on_exit callback will try to set a result on a canceled future
+                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
             except TimeoutError:
                 pass
 
@@ -338,7 +338,7 @@ class AsyncProcess:
 def _asyncprocess_finalizer(proc):
     if proc.is_alive():
         try:
-            logger.info("reaping stray process %s" % (proc,))
+            logger.info(f"reaping stray process {proc}")
             proc.terminate()
         except OSError:
             pass

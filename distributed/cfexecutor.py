@@ -4,8 +4,10 @@ import weakref
 from tlz import merge
 from tornado import gen
 
+from dask.utils import parse_timedelta
+
 from .metrics import time
-from .utils import TimeoutError, parse_timedelta, sync
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine

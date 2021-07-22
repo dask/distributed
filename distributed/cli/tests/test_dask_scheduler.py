@@ -1,3 +1,4 @@
+import psutil
 import pytest
 
 pytest.importorskip("requests")
@@ -14,9 +15,9 @@ from click.testing import CliRunner
 import distributed
 import distributed.cli.dask_scheduler
 from distributed import Client, Scheduler
+from distributed.compatibility import LINUX
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ip_interface, tmpfile
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     assert_can_connect_from_everywhere_4_6,
     assert_can_connect_locally_4,
@@ -119,9 +120,7 @@ def test_dashboard_non_standard_ports(loop):
         requests.get("http://localhost:4832/status/")
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 def test_dashboard_whitelist(loop):
     pytest.importorskip("bokeh")
     with pytest.raises(Exception):
@@ -144,19 +143,7 @@ def test_dashboard_whitelist(loop):
                 assert time() < start + 20
 
 
-def test_multiple_workers(loop):
-    with popen(["dask-scheduler", "--no-dashboard"]) as s:
-        with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as a:
-            with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as b:
-                with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
-                    start = time()
-                    while len(c.nthreads()) < 2:
-                        sleep(0.1)
-                        assert time() < start + 10
-
-
 def test_interface(loop):
-    psutil = pytest.importorskip("psutil")
     if_names = sorted(psutil.net_if_addrs())
     for if_name in if_names:
         try:
@@ -180,25 +167,24 @@ def test_interface(loop):
                 start = time()
                 while not len(c.nthreads()):
                     sleep(0.1)
-                    assert time() - start < 5
+                    assert time() - start < 30
                 info = c.scheduler_info()
                 assert "tcp://127.0.0.1" in info["address"]
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
         while not os.path.exists(pidfile):
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 30
 
         text = False
         start = time()
         while not text:
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 30
             with open(pidfile) as f:
                 text = f.read()
         pid = int(text)
@@ -418,7 +404,7 @@ def test_idle_timeout(loop):
     assert 1 < stop - start < 10
 
 
-def test_multiple_workers(loop):
+def test_multiple_workers_2(loop):
     text = """
 def dask_setup(worker):
     worker.foo = 'setup'
@@ -441,3 +427,14 @@ def dask_setup(worker):
                 assert foo == "setup"
                 [foo] = c.run(lambda dask_worker: dask_worker.foo, nanny=True).values()
                 assert foo == "setup"
+
+
+def test_multiple_workers(loop):
+    with popen(["dask-scheduler", "--no-dashboard"]) as s:
+        with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as a:
+            with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as b:
+                with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
+                    start = time()
+                    while len(c.nthreads()) < 2:
+                        sleep(0.1)
+                        assert time() < start + 10

@@ -3,11 +3,11 @@ import functools
 import threading
 from queue import Queue
 
-from .client import Future, default_client
+from .client import Future
 from .protocol import to_serialize
 from .utils import iscoroutinefunction, sync, thread_state
 from .utils_comm import WrappedKey
-from .worker import get_worker
+from .worker import get_client, get_worker
 
 
 class Actor(WrappedKey):
@@ -59,17 +59,20 @@ class Actor(WrappedKey):
             self._client = None
         else:
             try:
+                # TODO: `get_worker` may return the wrong worker instance for async local clusters (most tests)
+                # when run outside of a task (when deserializing a key pointing to an Actor, etc.)
                 self._worker = get_worker()
             except ValueError:
                 self._worker = None
             try:
-                self._client = default_client()
-                self._future = Future(key)
+                self._client = get_client()
+                self._future = Future(key, inform=self._worker is None)
+                # ^ When running on a worker, only hold a weak reference to the key, otherwise the key could become unreleasable.
             except ValueError:
                 self._client = None
 
     def __repr__(self):
-        return "<Actor: %s, key=%s>" % (self._cls.__name__, self.key)
+        return f"<Actor: {self._cls.__name__}, key={self.key}>"
 
     def __reduce__(self):
         return (Actor, (self._cls, self._address, self.key))
@@ -109,7 +112,8 @@ class Actor(WrappedKey):
         if self._client:
             return self._client.sync(func, *args, **kwargs)
         else:
-            # TODO support sync operation by checking against thread ident of loop
+            if self._asynchronous:
+                return func(*args, **kwargs)
             return sync(self._worker.loop, func, *args, **kwargs)
 
     def __dir__(self):
@@ -162,10 +166,17 @@ class Actor(WrappedKey):
                             await self._future
                         else:
                             raise OSError("Unable to contact Actor's worker")
-                    return result["result"]
+                    return result
 
                 if self._asynchronous:
-                    return asyncio.ensure_future(run_actor_function_on_worker())
+
+                    async def unwrap():
+                        result = await run_actor_function_on_worker()
+                        if result["status"] == "OK":
+                            return result["result"]
+                        raise result["exception"]
+
+                    return asyncio.ensure_future(unwrap())
                 else:
                     # TODO: this mechanism is error prone
                     # we should endeavor to make dask's standard code work here
@@ -187,7 +198,10 @@ class Actor(WrappedKey):
                 x = await self._worker_rpc.actor_attribute(
                     attribute=key, actor=self.key
                 )
-                return x["result"]
+                if x["status"] == "OK":
+                    return x["result"]
+                else:
+                    raise x["exception"]
 
             return self._sync(get_actor_attribute_from_worker)
 
@@ -237,10 +251,16 @@ class ActorFuture:
 
     def result(self, timeout=None):
         try:
+            if isinstance(self._cached_result, Exception):
+                raise self._cached_result
             return self._cached_result
         except AttributeError:
-            self._cached_result = self.q.get(timeout=timeout)
-            return self._cached_result
+            out = self.q.get(timeout=timeout)
+            if out["status"] == "OK":
+                self._cached_result = out["result"]
+            else:
+                self._cached_result = out["exception"]
+        return self.result()
 
     def __repr__(self):
         return "<ActorFuture>"

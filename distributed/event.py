@@ -4,8 +4,10 @@ import uuid
 from collections import defaultdict
 from contextlib import suppress
 
+from dask.utils import parse_timedelta
+
 from .client import Client
-from .utils import TimeoutError, log_errors, parse_timedelta
+from .utils import TimeoutError, log_errors
 from .worker import get_worker
 
 logger = logging.getLogger(__name__)
@@ -132,14 +134,14 @@ class EventExtension:
             return self._events[name].is_set()
 
     def _normalize_name(self, name):
-        """ Helper function to normalize an event name """
+        """Helper function to normalize an event name"""
         if isinstance(name, list):
             name = tuple(name)
 
         return name
 
     def _delete_event(self, name):
-        """ Helper function to delete an event """
+        """Helper function to delete an event"""
         # suppress key errors to make calling this method
         # also possible if we do not even have such an event
         with suppress(KeyError):
@@ -242,7 +244,7 @@ class Event:
         return result
 
     def is_set(self):
-        """ Check if the event is set """
+        """Check if the event is set"""
         result = self.client.sync(self.client.scheduler.event_is_set, name=self.name)
         return result
 

@@ -8,11 +8,12 @@ from abc import ABC, abstractmethod, abstractproperty
 from contextlib import suppress
 
 import dask
+from dask.utils import parse_timedelta
 
 from ..metrics import time
 from ..protocol import pickle
 from ..protocol.compression import get_default_compression
-from ..utils import TimeoutError, parse_timedelta
+from ..utils import TimeoutError
 from . import registry
 from .addressing import parse_address
 
@@ -156,9 +157,9 @@ class Comm(ABC):
     def __repr__(self):
         clsname = self.__class__.__name__
         if self.closed():
-            return "<closed %s>" % (clsname,)
+            return f"<closed {clsname}>"
         else:
-            return "<%s %s local=%s remote=%s>" % (
+            return "<{} {} local={} remote={}>".format(
                 clsname,
                 self.name or "",
                 self.local_address,
@@ -219,7 +220,7 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            write = await asyncio.wait_for(comm.write(local_info), timeout=timeout)
+            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
             handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
@@ -301,10 +302,12 @@ async def connect(
             upper_cap = min(time_left(), backoff_base * (2 ** attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
-            logger.debug("Could not connect, waiting for %s before retrying", backoff)
+            logger.debug(
+                "Could not connect to %s, waiting for %s before retrying", loc, backoff
+            )
             await asyncio.sleep(backoff)
     else:
-        raise IOError(
+        raise OSError(
             f"Timed out trying to connect to {addr} after {timeout} s"
         ) from active_exception
 
@@ -320,7 +323,7 @@ async def connect(
     except Exception as exc:
         with suppress(Exception):
             await comm.close()
-        raise IOError(
+        raise OSError(
             f"Timed out during handshake while connecting to {addr} after {timeout} s"
         ) from exc
 

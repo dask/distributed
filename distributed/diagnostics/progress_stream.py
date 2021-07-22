@@ -21,6 +21,12 @@ def counts(scheduler, allprogress):
     )
 
 
+def remove_plugin(*args, **kwargs):
+    # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
+    # `PicklingError` when using a cythonized scheduler
+    return Scheduler.remove_plugin(*args, **kwargs)
+
+
 async def progress_stream(address, interval):
     """Open a TCP connection to scheduler, receive progress messages
 
@@ -47,7 +53,7 @@ async def progress_stream(address, interval):
             "setup": dumps_function(AllProgress),
             "function": dumps_function(counts),
             "interval": interval,
-            "teardown": dumps_function(Scheduler.remove_plugin),
+            "teardown": dumps_function(remove_plugin),
         }
     )
     return comm

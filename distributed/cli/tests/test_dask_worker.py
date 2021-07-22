@@ -6,7 +6,6 @@ from click.testing import CliRunner
 pytest.importorskip("requests")
 
 import os
-import sys
 from multiprocessing import cpu_count
 from time import sleep
 
@@ -14,16 +13,11 @@ import requests
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
+from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import parse_ports, sync, tmpfile
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
-    loop,
-    popen,
-    terminate_process,
-    wait_for_port,
-)
+from distributed.utils_test import popen, terminate_process, wait_for_port
 
 
 def test_nanny_worker_ports(loop):
@@ -281,9 +275,7 @@ def test_nprocs_expands_name(loop):
                     assert len(set(names)) == 4
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize(
     "listen_address", ["tcp://0.0.0.0:39837", "tcp://127.0.0.2:39837"]
@@ -317,9 +309,7 @@ def test_contact_listen_address(loop, nanny, listen_address):
                 assert client.run(func) == {"tcp://127.0.0.2:39837": listen_address}
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("host", ["127.0.0.2", "0.0.0.0"])
 def test_respect_host_listen_address(loop, nanny, host):

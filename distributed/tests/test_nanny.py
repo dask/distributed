@@ -4,23 +4,26 @@ import logging
 import multiprocessing as mp
 import os
 import random
-import sys
 from contextlib import suppress
+from time import sleep
 
+import psutil
 import pytest
+
+pytestmark = pytest.mark.gpu
+
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker, rpc, wait, worker
-from distributed.compatibility import MACOS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
-from distributed.utils_test import cleanup  # noqa: F401
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 
@@ -74,12 +77,11 @@ async def test_str(s, a, b):
 
 @gen_cluster(nthreads=[], client=True)
 async def test_nanny_process_failure(c, s):
-    n = await Nanny(s.address, nthreads=2, loop=s.loop)
+    n = await Nanny(s.address, nthreads=2)
     first_dir = n.worker_dir
 
     assert os.path.exists(first_dir)
 
-    original_address = n.worker_address
     ww = rpc(n.worker_address)
     await ww.update_data(data=valmap(dumps, {"x": 1, "y": 2}))
     pid = n.pid
@@ -87,23 +89,17 @@ async def test_nanny_process_failure(c, s):
     with suppress(CommClosedError):
         await c.run(os._exit, 0, workers=[n.worker_address])
 
-    start = time()
     while n.pid == pid:  # wait while process dies and comes back
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
-    start = time()
     await asyncio.sleep(1)
     while not n.is_alive():  # wait while process comes back
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
     # assert n.worker_address != original_address  # most likely
 
-    start = time()
     while n.worker_address not in s.nthreads or n.worker_dir is None:
         await asyncio.sleep(0.01)
-        assert time() - start < 5
 
     second_dir = n.worker_dir
 
@@ -117,7 +113,6 @@ async def test_nanny_process_failure(c, s):
 
 @gen_cluster(nthreads=[])
 async def test_run(s):
-    pytest.importorskip("psutil")
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
     with rpc(n.address) as nn:
@@ -175,7 +170,7 @@ async def test_nanny_alt_worker_class(c, s, w1, w2):
 
 
 @pytest.mark.slow
-@gen_cluster(client=False, nthreads=[])
+@gen_cluster(nthreads=[])
 async def test_nanny_death_timeout(s):
     await s.close()
     w = Nanny(s.address, death_timeout=1)
@@ -200,12 +195,9 @@ async def test_random_seed(c, s, a, b):
     await check_func(lambda a, b: np.random.randint(a, b))
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"), reason="num_fds not supported on windows"
-)
-@gen_cluster(client=False, nthreads=[])
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@gen_cluster(nthreads=[])
 async def test_num_fds(s):
-    psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
 
     # Warm up
@@ -221,16 +213,12 @@ async def test_num_fds(s):
         await asyncio.sleep(0.1)
         await w.close()
 
-    start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
         await asyncio.sleep(0.1)
-        assert time() < start + 10
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[])
 async def test_worker_uses_same_host_as_nanny(c, s):
     for host in ["tcp://0.0.0.0", "tcp://127.0.0.2"]:
@@ -275,29 +263,24 @@ async def test_nanny_timeout(c, s, a):
     nthreads=[("127.0.0.1", 1)],
     client=True,
     Worker=Nanny,
-    worker_kwargs={"memory_limit": 1e8},
-    timeout=20,
-    clean_kwargs={"threads": False},
+    worker_kwargs={"memory_limit": "400 MiB"},
 )
 async def test_nanny_terminate(c, s, a):
-    from time import sleep
-
     def leak():
         L = []
         while True:
-            L.append(b"0" * 5000000)
+            L.append(b"0" * 5_000_000)
             sleep(0.01)
 
-    proc = a.process.pid
+    before = a.process.pid
     with captured_logger(logging.getLogger("distributed.nanny")) as logger:
         future = c.submit(leak)
-        start = time()
-        while a.process.pid == proc:
-            await asyncio.sleep(0.1)
-            assert time() < start + 10
-        out = logger.getvalue()
-        assert "restart" in out.lower()
-        assert "memory" in out.lower()
+        while a.process.pid == before:
+            await asyncio.sleep(0.01)
+
+    out = logger.getvalue()
+    assert "restart" in out.lower()
+    assert "memory" in out.lower()
 
 
 @gen_cluster(
@@ -367,7 +350,7 @@ async def test_scheduler_address_config(c, s):
 
 
 @pytest.mark.slow
-@gen_test(timeout=20)
+@gen_test()
 async def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")
@@ -479,7 +462,7 @@ async def test_lifetime(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_nanny_closes_cleanly(cleanup):
+async def test_nanny_closes_cleanly_2(cleanup):
     async with Scheduler() as s:
         async with Nanny(s.address) as n:
             async with Client(s.address, asynchronous=True) as client:
@@ -565,10 +548,19 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @pytest.mark.asyncio
 async def test_worker_start_exception(cleanup):
     # make sure this raises the right Exception:
     with pytest.raises(StartException):
         async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
             await n.start()
+
+
+@pytest.mark.asyncio
+async def test_failure_during_worker_initialization(cleanup):
+    with captured_logger(logger="distributed.nanny", level=logging.WARNING) as logs:
+        async with Scheduler() as s:
+            with pytest.raises(Exception):
+                async with Nanny(s.address, foo="bar") as n:
+                    await n
+        assert "Restarting worker" not in logs.getvalue()

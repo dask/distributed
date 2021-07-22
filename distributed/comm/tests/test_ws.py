@@ -12,8 +12,7 @@ from distributed.comm import connect, listen, ws
 from distributed.comm.core import FatalCommClosedError
 from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
-from distributed.utils_test import (  # noqa: F401
-    cleanup,
+from distributed.utils_test import (
     gen_cluster,
     get_client_ssl_context,
     get_server_ssl_context,
@@ -123,9 +122,9 @@ async def test_collections(cleanup):
 async def test_large_transfer(cleanup):
     np = pytest.importorskip("numpy")
     async with Scheduler(protocol="ws://") as s:
-        async with Worker(s.address, protocol="ws://") as w:
+        async with Worker(s.address, protocol="ws://"):
             async with Client(s.address, asynchronous=True) as c:
-                future = await c.scatter(np.random.random(1000000))
+                await c.scatter(np.random.random(1_000_000))
 
 
 @pytest.mark.asyncio

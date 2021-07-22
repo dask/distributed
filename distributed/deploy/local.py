@@ -29,7 +29,8 @@ class LocalCluster(SpecCluster):
     n_workers: int
         Number of workers to start
     processes: bool
-        Whether to use processes (True) or threads (False).  Defaults to True
+        Whether to use processes (True) or threads (False).  Defaults to True, unless
+        worker_class=Worker, in which case it defaults to False.
     threads_per_worker: int
         Number of threads per each worker
     scheduler_port: int
@@ -71,7 +72,8 @@ class LocalCluster(SpecCluster):
     interface: str (optional)
         Network interface to use.  Defaults to lo/localhost
     worker_class: Worker
-        Worker class used to instantiate workers from.
+        Worker class used to instantiate workers from. Defaults to Worker if
+        processes=False and Nanny if processes=True or omitted.
     **worker_kwargs:
         Extra worker arguments. Any additional keyword arguments will be passed
         to the ``Worker`` class constructor.
@@ -98,7 +100,7 @@ class LocalCluster(SpecCluster):
         name=None,
         n_workers=None,
         threads_per_worker=None,
-        processes=True,
+        processes=None,
         loop=None,
         start=None,
         host=None,
@@ -118,7 +120,7 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
-        **worker_kwargs
+        **worker_kwargs,
     ):
         if ip is not None:
             # In the future we should warn users about this move
@@ -134,8 +136,8 @@ class LocalCluster(SpecCluster):
 
         if threads_per_worker == 0:
             warnings.warn(
-                "Setting `threads_per_worker` to 0 is discouraged. "
-                "Please set to None or to a specific int to get best behavior."
+                "Setting `threads_per_worker` to 0 has been deprecated. "
+                "Please set to None or to a specific int."
             )
             threads_per_worker = None
 
@@ -145,6 +147,11 @@ class LocalCluster(SpecCluster):
                 "Please set `dashboard_address` to affect the scheduler (more common) "
                 "and `worker_dashboard_address` for the worker (less common)."
             )
+
+        if processes is None:
+            processes = worker_class is None or issubclass(worker_class, Nanny)
+        if worker_class is None:
+            worker_class = Nanny if processes else Worker
 
         self.status = None
         self.processes = processes
@@ -182,7 +189,7 @@ class LocalCluster(SpecCluster):
                 n_workers = 1
                 threads_per_worker = CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, CPU_COUNT // threads_per_worker)
+            n_workers = max(1, CPU_COUNT // threads_per_worker) if processes else 1
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
@@ -221,11 +228,7 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        worker = {
-            "cls": worker_class or (Worker if not processes else Nanny),
-            "options": worker_kwargs,
-        }
-
+        worker = {"cls": worker_class, "options": worker_kwargs}
         workers = {i: worker for i in range(n_workers)}
 
         super().__init__(
@@ -244,6 +247,17 @@ class LocalCluster(SpecCluster):
             "The `cluster.start_worker` function has been removed. "
             "Please see the `cluster.scale` method instead."
         )
+
+    def _repr_html_(self, cluster_status=None):
+        if cluster_status is None:
+            cluster_status = ""
+        cluster_status += f"""
+            <tr>
+                <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
+                <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
+            </tr>
+        """
+        return super()._repr_html_(cluster_status=cluster_status)
 
 
 clusters_to_close = weakref.WeakSet()

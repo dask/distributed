@@ -324,14 +324,14 @@ def serialize(
     tb = ""
 
     for name in serializers:
-        dumps, loads, wants_context = families[name]
+        dumps, _, wants_context = families[name]
         try:
             header, frames = dumps(x, context=context) if wants_context else dumps(x)
             header["serializer"] = name
             return header, frames
         except NotImplementedError:
             continue
-        except Exception as e:
+        except Exception:
             tb = traceback.format_exc()
             break
 
@@ -406,7 +406,9 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-def serialize_and_split(x, serializers=None, on_error="message", context=None):
+def serialize_and_split(
+    x, serializers=None, on_error="message", context=None, size=None
+):
     """Serialize and split compressable frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
@@ -428,7 +430,7 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
         frames, header.get("compression") or [None] * len(frames)
     ):
         if compression is None:  # default behavior
-            sub_frames = frame_split_size(frame)
+            sub_frames = frame_split_size(frame, n=size)
             num_sub_frames.append(len(sub_frames))
             offsets.append(len(out_frames))
             out_frames.extend(sub_frames)
