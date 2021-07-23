@@ -1,10 +1,6 @@
 Actors
 ======
 
-.. note:: This is an experimental feature and is subject to change without notice
-.. note:: This is an advanced feature and may not be suitable for beginning users.
-   It is rarely necessary for common workloads.
-
 Actors enable stateful computations within a Dask workflow.  They are useful
 for some rare algorithms that require additional performance and are willing to
 sacrifice resilience.
