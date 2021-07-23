@@ -128,6 +128,16 @@ async def test_large_transfer(cleanup):
 
 
 @pytest.mark.asyncio
+async def test_large_transfer_with_no_compression(cleanup):
+    np = pytest.importorskip("numpy")
+    with dask.config.set({"distributed.comm.compression": None}):
+        async with Scheduler(protocol="ws://") as s:
+            async with Worker(s.address, protocol="ws://"):
+                async with Client(s.address, asynchronous=True) as c:
+                    await c.scatter(np.random.random(1_500_000))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "dashboard,protocol,security,port",
     [
