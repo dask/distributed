@@ -185,11 +185,13 @@ def test_dumps_serialize_numpy_large():
     frames = dumps([to_serialize(x)])
     dtype, shape = x.dtype, x.shape
     checksum = crc32(x)
-    del x
     [y] = loads(frames)
 
     assert (y.dtype, y.shape) == (dtype, shape)
     assert crc32(y) == checksum, "Arrays are unequal"
+
+    x[:] = 2  # shared buffer; serialization is zero-copy
+    assert (x == y).all(), "Data was copied"
 
 
 @pytest.mark.parametrize(
