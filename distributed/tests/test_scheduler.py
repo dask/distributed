@@ -2269,14 +2269,18 @@ async def test_gather_allow_worker_reconnect(
     assert res == a.address
     await lock.release()
 
-    while any(w.executing_count for w in [a, b]):
+    while not all(all(ts.state == "memory" for ts in w.tasks.values()) for w in [a, b]):
         await asyncio.sleep(0.01)
 
     assert z.key in a.tasks
     assert z.key not in b.tasks
     assert b.executed_count == 1
+    for w in [a, b]:
+        assert x.key in w.tasks
+        assert w.tasks[x.key].state == "memory"
+    while not len(s.tasks[x.key].who_has) == 2:
+        await asyncio.sleep(0.01)
     assert len(s.tasks[z.key].who_has) == 1
-    assert len(s.tasks[x.key].who_has) == 2
 
     sched_logger = sched_logger.getvalue()
     client_logger = client_logger.getvalue()
