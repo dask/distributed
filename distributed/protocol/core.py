@@ -100,12 +100,23 @@ def loads(frames, deserialize=True, deserializers=None):
                 if deserialize:
                     if "compression" in sub_header:
                         sub_frames = decompress(sub_header, sub_frames)
+
+                    # HACK: check for memoryviews in preceding frames that share an underlying
+                    # buffer with these sub-frames, to figure out what offset in the underlying
+                    # buffer the sub-frames start at.
+                    memoryview_offset = 0
+                    if sub_frames and isinstance(sub_frames[0], memoryview):
+                        obj = sub_frames[0].obj
+                        for f in reversed(frames[:offset]):
+                            if not (isinstance(f, memoryview) and f.obj is obj):
+                                break
+                            memoryview_offset += len(f)
+
                     return merge_and_deserialize(
                         sub_header,
                         sub_frames,
                         deserializers=deserializers,
-                        memoryview_offset=sum(len(f) for f in frames[:offset]),
-                        # ^ TODO: what if not all frames are memoryviews?
+                        memoryview_offset=memoryview_offset,
                     )
                 else:
                     return Serialized(sub_header, sub_frames)
