@@ -783,6 +783,20 @@ properties:
               not a problem and will be automatically disabled if no GPUs are found in the
               system, but in certain cases it may be desirable to completely disable NVML
               diagnostics.
+          computations:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of Computations to remember.
+              ignore-modules:
+                type: array
+                description: |
+                  A list of modules which are ignored when trying to collect the
+                  code context when submitting a computation. Accepts regular
+                  expressions.
 
       dashboard:
         type: object

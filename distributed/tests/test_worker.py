@@ -2433,3 +2433,22 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
 
     while any(w.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_forget_dependents_after_release(c, s, a):
+
+    fut = c.submit(inc, 1, key="f-1")
+    fut2 = c.submit(inc, fut, key="f-2")
+
+    await asyncio.wait([fut, fut2])
+
+    assert fut.key in a.tasks
+    assert fut2.key in a.tasks
+    assert fut2.key in {d.key for d in a.tasks[fut.key].dependents}
+
+    fut2.release()
+
+    while fut2.key in a.tasks:
+        await asyncio.sleep(0.001)
+    assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}

@@ -106,10 +106,7 @@ class TaskState:
     * **dependencies**: ``set(TaskState instances)``
         The data needed by this key to run
     * **dependents**: ``set(TaskState instances)``
-        The keys that use this dependency. Only keys which are not available
-        already are tracked in this structure and dependents made available are
-        actively removed. Only after all dependents have been removed, this task
-        is allowed to be forgotten
+        The keys that use this dependency.
     * **duration**: ``float``
         Expected duration the a task
     * **priority**: ``tuple``
@@ -1420,7 +1417,7 @@ class Worker(ServerNode):
                 if k in self.actors:
                     from .actor import Actor
 
-                    data[k] = Actor(type(self.actors[k]), self.address, k)
+                    data[k] = Actor(type(self.actors[k]), self.address, k, worker=self)
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
         nbytes = {k: self.tasks[k].nbytes for k in data if k in self.tasks}
@@ -2631,7 +2628,6 @@ class Worker(ServerNode):
         report: bool = True,
     ):
         try:
-
             if self.validate:
                 assert not isinstance(key, TaskState)
             ts = self.tasks.get(key, None)

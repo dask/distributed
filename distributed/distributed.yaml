@@ -201,6 +201,16 @@ distributed:
 
   diagnostics:
     nvml: True
+    computations:
+      max-history: 100
+      ignore-modules:
+        - distributed
+        - dask
+        - xarray
+        - cudf
+        - cuml
+        - prefect
+        - xgboost
 
   ###################
   # Bokeh dashboard #
