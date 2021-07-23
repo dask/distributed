@@ -1,4 +1,5 @@
 import importlib
+import itertools
 import traceback
 from array import array
 from enum import Enum
@@ -450,7 +451,7 @@ def serialize_and_split(
     return header, out_frames
 
 
-def merge_and_deserialize(header, frames, deserializers=None):
+def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=0):
     """Merge and deserialize frames
 
     This function is a drop-in replacement of `deserialize()` that merges
@@ -460,18 +461,59 @@ def merge_and_deserialize(header, frames, deserializers=None):
     --------
     deserialize
     serialize_and_split
+    merge_subframes
     """
     merged_frames = []
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
+        # TODO delay until there's a multi-frame section?
+        frame_byte_offsets = list(itertools.accumulate(map(len, frames)))
         for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
             if n == 1:
-                merged_frames.append(frames[offset])
+                merged = frames[offset]
             else:
-                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+                subframes = frames[offset : offset + n]
+                merged = merge_subframes(
+                    subframes,
+                    memoryview_offset=memoryview_offset
+                    + (frame_byte_offsets[offset - 1] if offset else 0),
+                )
+            merged_frames.append(merged)
+            memoryview_offset += len(merged)
 
     return deserialize(header, merged_frames, deserializers=deserializers)
+
+
+def merge_subframes(
+    subframes: "list[memoryview | bytearray | bytes]", memoryview_offset: int = 0
+) -> "memoryview | bytearray":
+    """Merge a list of frames into one buffer.
+
+    If all frames are memoryviews backed by the same underlying buffer,
+    this is zero-copy. ``memoryview_offset`` must be the index into that
+    underlying buffer where the subframes start (in bytes, not frame counts),
+    such that ``memoryview(subframes[0].obj)[memoryview_offset] == subframes[0][0]``.
+
+    Otherwise, all frames are copied into a new contiguous bytearray.
+
+    See Also
+    --------
+    merge_and_deserialize
+    """
+    if subframes:
+        first = subframes[0]
+        if isinstance(first, memoryview) and first.contiguous:
+            obj = first.obj
+            try:
+                same_buffer = all(f.obj is obj for f in subframes[1:])
+            except AttributeError:
+                same_buffer = False
+            if same_buffer:
+                end_offset = memoryview_offset + sum(len(f) for f in subframes)
+                return memoryview(obj)[memoryview_offset:end_offset]
+
+    return bytearray().join(subframes)
 
 
 class Serialize:

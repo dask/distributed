@@ -101,7 +101,11 @@ def loads(frames, deserialize=True, deserializers=None):
                     if "compression" in sub_header:
                         sub_frames = decompress(sub_header, sub_frames)
                     return merge_and_deserialize(
-                        sub_header, sub_frames, deserializers=deserializers
+                        sub_header,
+                        sub_frames,
+                        deserializers=deserializers,
+                        memoryview_offset=sum(len(f) for f in frames[:offset]),
+                        # ^ TODO: what if not all frames are memoryviews?
                     )
                 else:
                     return Serialized(sub_header, sub_frames)
