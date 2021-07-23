@@ -2485,6 +2485,7 @@ class SchedulerState:
         if (
             valid_workers is None
             and len(group) > self._total_nthreads * 2
+            and len(group._dependencies) < 5
             and sum(map(len, group._dependencies)) < 5
         ):
             ws: WorkerState = group._last_worker
