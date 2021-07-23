@@ -639,7 +639,7 @@ class WorkerProcess:
             assert r is not None
             if r != 0:
                 msg = self._death_message(self.process.pid, r)
-                logger.warn(msg)
+                logger.warning(msg)
             self.status = Status.stopped
             self.stopped.set()
             # Release resources

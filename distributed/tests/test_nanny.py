@@ -571,6 +571,9 @@ def _exitcode_tester(_):
     return 1
 
 
+@pytest.mark.skipif(
+    WINDOWS, reason="sys.exit(1) kills the entire pytest process on windows"
+)
 @gen_cluster(client=True, Worker=Nanny)
 async def test_warn_exitcode(client, scheduler, worker_a, worker_b):
     with captured_logger("distributed.nanny", logging.WARNING) as log:
