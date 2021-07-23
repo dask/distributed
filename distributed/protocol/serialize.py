@@ -454,8 +454,12 @@ def serialize_and_split(
 def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=0):
     """Merge and deserialize frames
 
-    This function is a drop-in replacement of `deserialize()` that merges
-    frames that were split by `serialize_and_split()`
+    This function is a replacement for `deserialize()` that merges
+    frames that were split by `serialize_and_split()`.
+
+    When ``frames`` contains memoryviews that share an underlying buffer,
+    ``memoryview_offset`` must be the index into that underlying buffer
+    where the ``frames`` starts (in bytes, not frame counts).
 
     See Also
     --------
@@ -467,7 +471,6 @@ def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
-        # TODO delay until there's a multi-frame section?
         frame_byte_offsets = list(itertools.accumulate(map(len, frames)))
         for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
             if n == 1:

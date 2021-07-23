@@ -101,9 +101,9 @@ def loads(frames, deserialize=True, deserializers=None):
                     if "compression" in sub_header:
                         sub_frames = decompress(sub_header, sub_frames)
 
-                    # HACK: check for memoryviews in preceding frames that share an underlying
-                    # buffer with these sub-frames, to figure out what offset in the underlying
-                    # buffer the sub-frames start at.
+                    # Check for memoryviews in preceding frames that share an underlying
+                    # buffer with these sub-frames, to figure out what offset in that buffer
+                    # `sub_frames` starts at.
                     memoryview_offset = 0
                     if sub_frames and isinstance(sub_frames[0], memoryview):
                         obj = sub_frames[0].obj
