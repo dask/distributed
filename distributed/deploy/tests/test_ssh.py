@@ -179,7 +179,8 @@ async def test_list_of_worker_options():
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
             d = client.scheduler_info()["workers"]
-            assert all(v["threads"] == 1 for v in d.values())
+            assert all(v["nthreads"] == 1 for v in d.values())
+            assert len(d) == 6
 
 
 @pytest.mark.asyncio
