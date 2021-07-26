@@ -822,7 +822,11 @@ class ComputePerKey(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+            es = [
+                p
+                for p in self.scheduler.plugins.values()
+                if isinstance(p, TaskStreamPlugin)
+            ]
             if not es:
                 self.plugin = TaskStreamPlugin(self.scheduler)
             else:
@@ -989,7 +993,11 @@ class AggregateAction(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+            es = [
+                p
+                for p in self.scheduler.plugins.values()
+                if isinstance(p, TaskStreamPlugin)
+            ]
             if not es:
                 self.plugin = TaskStreamPlugin(self.scheduler)
             else:
@@ -1517,7 +1525,11 @@ class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
-        es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+        es = [
+            p
+            for p in self.scheduler.plugins.values()
+            if isinstance(p, TaskStreamPlugin)
+        ]
         if not es:
             self.plugin = TaskStreamPlugin(self.scheduler)
         else:

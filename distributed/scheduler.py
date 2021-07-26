@@ -5427,6 +5427,13 @@ class Scheduler(SchedulerState, ServerNode):
                 "otherwise removal must be by name argument."
             )
 
+    def has_plugin(self, test):
+        """Check if plugin exists by name."""
+        if hasattr(test, "name"):
+            return test.name in self.plugins.keys()
+        else:
+            return test in self.plugins.keys()
+
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
