@@ -175,6 +175,37 @@ class WorkerPlugin:
         """
 
 
+class NannyPlugin:
+    """Interface to extend the Nanny
+
+    A worker plugin enables custom code to run at different stages of the Workers'
+    lifecycle. A nanny plugin does the same thing, but benefits from being able
+    to run code before the worker is started, or to restart the worker if
+    necessary.
+
+    To implement a plugin implement some of the methods of this class and register
+    the plugin to your client in order to have it attached to every existing and
+    future workers with ``Client.register_nanny_plugin``.
+
+    See Also
+    --------
+    WorkerPlugin
+    SchedulerPlugin
+    """
+
+    restart = False
+
+    def setup(self, nanny):
+        """
+        Run when the plugin is attached to a worker. This happens when the plugin is registered
+        and attached to existing workers, or when a worker is created after the plugin has been
+        registered.
+        """
+
+    def teardown(self, nanny):
+        """Run when the worker to which the plugin is attached to is closed"""
+
+
 def _get_worker_plugin_name(plugin) -> str:
     """Returns the worker plugin name. If plugin has no name attribute
     a random name is used."""
@@ -289,3 +320,13 @@ class UploadFile(WorkerPlugin):
             comm=None, filename=self.filename, data=self.data, load=True
         )
         assert len(self.data) == response["nbytes"]
+
+
+class Environ(NannyPlugin):
+    restart = True
+
+    def __init__(self, environ={}):
+        self.environ = {k: str(v) for k, v in environ.items()}
+
+    async def setup(self, nanny):
+        nanny.env.update(self.environ)

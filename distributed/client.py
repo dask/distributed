@@ -59,7 +59,12 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
+from .diagnostics.plugin import (
+    NannyPlugin,
+    UploadFile,
+    WorkerPlugin,
+    _get_worker_plugin_name,
+)
 from .metrics import time
 from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
@@ -4089,10 +4094,13 @@ class Client:
         """
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
-    async def _register_worker_plugin(self, plugin=None, name=None):
-        responses = await self.scheduler.register_worker_plugin(
-            plugin=dumps(plugin, protocol=4), name=name
-        )
+    async def _register_worker_plugin(self, plugin=None, name=None, nanny=None):
+        if nanny or nanny is None and isinstance(plugin, NannyPlugin):
+            method = self.scheduler.register_nanny_plugin
+        else:
+            method = self.scheduler.register_worker_plugin
+
+        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
@@ -4100,7 +4108,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
+    def register_worker_plugin(self, plugin=None, name=None, nanny=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4174,10 +4182,15 @@ class Client:
 
         assert name
 
-        return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+        return self.sync(
+            self._register_worker_plugin, plugin=plugin, name=name, nanny=nanny
+        )
 
-    async def _unregister_worker_plugin(self, name):
-        responses = await self.scheduler.unregister_worker_plugin(name=name)
+    async def _unregister_worker_plugin(self, name, nanny=None):
+        if nanny:
+            responses = await self.scheduler.unregister_nanny_plugin(name=name)
+        else:
+            responses = await self.scheduler.unregister_worker_plugin(name=name)
 
         for response in responses.values():
             if response["status"] == "error":
