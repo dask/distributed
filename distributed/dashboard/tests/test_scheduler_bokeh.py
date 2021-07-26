@@ -503,11 +503,9 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     nb = WorkerNetworkBandwidth(s)
     nb.update()
 
-    assert s.workers[a.address].metrics["read_bytes"] == nb.source.data["x_read"][0]
-    assert s.workers[b.address].metrics["read_bytes"] == nb.source.data["x_read"][1]
-
-    assert s.workers[a.address].metrics["write_bytes"] == nb.source.data["x_write"][0]
-    assert s.workers[b.address].metrics["write_bytes"] == nb.source.data["x_write"][1]
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
 
 
 @gen_cluster(client=True)
