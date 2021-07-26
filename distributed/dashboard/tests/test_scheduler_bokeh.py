@@ -479,33 +479,33 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_WorkerNetworkBandwidth(c, s, a, b):
-    cl = WorkerNetworkBandwidth(s)
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
 
-    cl.update()
-    d = dict(cl.source.data)
+    assert all(len(v) == 2 for v in nb.source.data.values())
 
-    assert all(len(v) == 2 for v in d.values())
-
-    assert d["y_read"] == [0.75, 1.85]
-    assert d["y_write"] == [0.25, 1.35]
+    assert nb.source.data["y_read"] == [0.75, 1.85]
+    assert nb.source.data["y_write"] == [0.25, 1.35]
 
 
 @gen_cluster(client=True)
 async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
-    cl = WorkerNetworkBandwidth(s)
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
 
+    # Update worker system monitors and send updated metrics to the scheduler
     a.monitor.update()
     b.monitor.update()
     await asyncio.gather(a.heartbeat(), b.heartbeat())
 
-    cl.update()
-    d = dict(cl.source.data)
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
 
-    assert s.workers[a.address].metrics["read_bytes"] == d["x_read"][0]
-    assert s.workers[b.address].metrics["read_bytes"] == d["x_read"][1]
-
-    assert s.workers[a.address].metrics["write_bytes"] == d["x_write"][0]
-    assert s.workers[b.address].metrics["write_bytes"] == d["x_write"][1]
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
 
 
 @gen_cluster(client=True)
