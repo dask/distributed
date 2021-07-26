@@ -1,6 +1,7 @@
 import asyncio
 import gc
 import math
+from multiprocessing.context import ProcessError
 from time import sleep
 
 import pytest
@@ -12,16 +13,34 @@ from distributed.metrics import time
 from distributed.utils_test import async_wait_for, clean, gen_test, slowinc, captured_logger
 
 class MyAdaptive(Adaptive):
-    def __init__(self, *args, interval=None, **kwargs):
-        super().__init__(*args, interval=interval, **kwargs)
+    def __init__(self, interval=None, cluster = None, *args,  **kwargs):
+        super().__init__(interval=interval, cluster = cluster, *args,  **kwargs)
         self._target = 0
         self._log = []
+        self._plan = set()
+        self._requested = set()
+
+    @property
+    def plan(self):
+        return self._plan
+
+    @plan.setter
+    def plan(self, value):
+        self._plan = value
+
+    @property
+    def requested(self):
+        return self._requested
+    
+    @requested.setter
+    def requested(self, value):
+        self._requested = value
 
     async def target(self):
         return self._target
 
     async def scale_up(self, n=0):
-        self.plan = self.requested = set(range(n))
+        self.plan = self.requested = set(range(n))  # TODO: we already have plan as a property: FIX: Adding a setter
 
     async def scale_down(self, workers=()):
         for collection in [self.plan, self.requested, self.observed]:
@@ -30,69 +49,101 @@ class MyAdaptive(Adaptive):
 
 @pytest.mark.asyncio
 async def test_safe_target():
-    adapt = MyAdaptive(minimum=1, maximum=4)
-    assert await adapt.safe_target() == 1
-    adapt._target = 10
-    assert await adapt.safe_target() == 4
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        adapt = MyAdaptive(cluster = cluster, minimum=1, maximum=4)
+        assert await adapt.safe_target() == 1
+        adapt._target = 10
+        assert await adapt.safe_target() == 4
 
 
 @pytest.mark.asyncio
 async def test_scale_up():
-    adapt = MyAdaptive(minimum=1, maximum=4)
-    await adapt.adapt()
-    assert adapt.log[-1][1] == {"status": "up", "n": 1}
-    assert adapt.plan == {0}
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        adapt = MyAdaptive(cluster = cluster, minimum=1, maximum=4)
+        await adapt.adapt()
+        assert adapt.log[-1][1] == {"status": "up", "n": 1}
+        assert adapt.plan == {0}
 
-    adapt._target = 10
-    await adapt.adapt()
-    assert adapt.log[-1][1] == {"status": "up", "n": 4}
-    assert adapt.plan == {0, 1, 2, 3}
+        adapt._target = 10
+        await adapt.adapt()
+        assert adapt.log[-1][1] == {"status": "up", "n": 4}
+        assert adapt.plan == {0, 1, 2, 3}
 
 
 @pytest.mark.asyncio
 async def test_scale_down():
-    adapt = MyAdaptive(minimum=1, maximum=4, wait_count=2)
-    adapt._target = 10
-    await adapt.adapt()
-    assert len(adapt.log) == 1
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        adapt = MyAdaptive(cluster=cluster, minimum=1, maximum=4, wait_count=2)
+        adapt._target = 10
+        await adapt.adapt()
+        assert len(adapt.log) == 1
 
-    adapt.observed = {0, 1, 3}  # all but 2 have arrived
+        adapt.observed = {0, 1, 3}  # all but 2 have arrived
 
-    adapt._target = 2
-    await adapt.adapt()
-    assert len(adapt.log) == 1  # no change after only one call
-    await adapt.adapt()
-    assert len(adapt.log) == 2  # no change after only one call
-    assert adapt.log[-1][1]["status"] == "down"
-    assert 2 in adapt.log[-1][1]["workers"]
-    assert len(adapt.log[-1][1]["workers"]) == 2
+        adapt._target = 2
+        await adapt.adapt()
+        assert len(adapt.log) == 1  # no change after only one call
+        await adapt.adapt()
+        assert len(adapt.log) == 2  # no change after only one call
+        assert adapt.log[-1][1]["status"] == "down"
+        assert 2 in adapt.log[-1][1]["workers"]
+        assert len(adapt.log[-1][1]["workers"]) == 2
 
-    old = list(adapt.log)
-    await adapt.adapt()
-    await adapt.adapt()
-    await adapt.adapt()
-    await adapt.adapt()
-    assert list(adapt.log) == old
+        old = list(adapt.log)
+        await adapt.adapt()
+        await adapt.adapt()
+        await adapt.adapt()
+        await adapt.adapt()
+        assert list(adapt.log) == old
 
 
 @pytest.mark.asyncio
 async def test_interval():
-    adapt = MyAdaptive(interval="5 ms")
-    assert not adapt.plan
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        adapt = MyAdaptive(interval="5 ms", cluster = cluster)
+        assert not adapt.plan
 
-    for i in [0, 3, 1]:
-        start = time()
-        adapt._target = i
-        while len(adapt.plan) != i:
-            await asyncio.sleep(0.001)
-            assert time() < start + 2
+        for i in [0, 3, 1]:
+            start = time()
+            adapt._target = i
+            while len(adapt.plan) != i:
+                await asyncio.sleep(0.001)
+                assert time() < start + 2
 
-    adapt.stop()
-    await asyncio.sleep(0.050)
+        adapt.stop()
+        await asyncio.sleep(0.050)
 
-    adapt._target = 10
-    await asyncio.sleep(0.020)
-    assert len(adapt.plan) == 1  # last value from before, unchanged
+        adapt._target = 10
+        await asyncio.sleep(0.020)
+        assert len(adapt.plan) == 1  # last value from before, unchanged
 
 
 @pytest.mark.asyncio
@@ -102,18 +153,48 @@ async def test_adapt_oserror_safe_target():
 
         We use this to check that error handling works properly
         """
+        
+        def __init__(self, interval=None, cluster = None, *args,  **kwargs):
+            super().__init__(interval=interval, cluster = cluster, *args,  **kwargs)
+            self._plan = set()
+            self._requested = set()
+
+        @property
+        def plan(self):
+            return self._plan
+
+        @plan.setter
+        def plan(self, value):
+            self._plan = value
+
+        @property
+        def requested(self):
+            return self._requested
+        
+        @requested.setter
+        def requested(self, value):
+            self._requested = value
 
         def safe_target(self):
             raise OSError()
 
-    with captured_logger("distributed.deploy.adaptive_core") as log:
-        adapt = BadAdaptive(minimum=1, maximum=4)
-        await adapt.adapt()
-    text = log.getvalue()
-    assert "Adaptive stopping due to error" in text
-    assert "Adaptive stop" in text
-    assert not adapt._adapting
-    assert not adapt.periodic_callback
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+
+        with captured_logger("distributed.deploy.adaptive_core") as log:
+            adapt = BadAdaptive(cluster=cluster, minimum=1, maximum=4)
+            await adapt.adapt()
+        text = log.getvalue()
+        assert "Adaptive stopping due to error" in text
+        assert "Adaptive stop" in text
+        assert not adapt._adapting
+        assert not adapt.periodic_callback
 
 
 @pytest.mark.asyncio
@@ -132,22 +213,30 @@ async def test_adapt_oserror_scale():
         async def scale_down(self, workers=None):
             raise OSError()
 
-    adapt = BadAdaptive(minimum=1, maximum=4, wait_count=0, interval="10ms")
-    adapt._target = 2
-    while not adapt.periodic_callback.is_running():
-        await asyncio.sleep(0.01)
-    await adapt.adapt()
-    assert len(adapt.plan) == 2
-    assert len(adapt.requested) == 2
-    with captured_logger("distributed.deploy.adaptive_core") as log:
-        adapt._target = 0
+    async with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        processes=False,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        adapt = BadAdaptive(interval="10ms", cluster = cluster, minimum=1, maximum=4, wait_count=0)
+        adapt._target = 2
+        while not adapt.periodic_callback.is_running():
+            await asyncio.sleep(0.01)
         await adapt.adapt()
-    text = log.getvalue()
-    assert "Error during adaptive downscaling" in text
-    assert not adapt._adapting
-    assert adapt.periodic_callback
-    assert adapt.periodic_callback.is_running()
-    adapt.stop()
+        assert len(adapt.plan) == 2
+        assert len(adapt.requested) == 2
+        with captured_logger("distributed.deploy.adaptive_core") as log:
+            adapt._target = 0
+            await adapt.adapt()
+        text = log.getvalue()
+        assert "Error during adaptive downscaling" in text
+        assert not adapt._adapting
+        assert adapt.periodic_callback
+        assert adapt.periodic_callback.is_running()
+        adapt.stop()
 
 
 @pytest.mark.asyncio

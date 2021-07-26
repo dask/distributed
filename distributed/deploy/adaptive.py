@@ -94,7 +94,7 @@ class Adaptive():
         worker_key=None,
         **kwargs,
     ):
-        self.cluster = cluster
+        self.cluster = cluster  
         self.worker_key = worker_key
         self._workers_to_close_kwargs = kwargs
 
@@ -138,12 +138,6 @@ class Adaptive():
             except AttributeError:
                 IOLoop.current().add_callback(f)
 
-        try:
-            self.plan = set()
-            self.requested = set()
-            self.observed = set()
-        except Exception:
-            pass
 
         # internal state 
         self.close_counts = collections.defaultdict(int)
