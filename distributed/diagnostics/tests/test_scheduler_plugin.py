@@ -109,6 +109,18 @@ async def test_async_add_remove_worker(s):
         pass
     assert events == []
 
+    class UnnamedPlugin(SchedulerPlugin):
+        async def start(self, scheduler):
+            self.scheduler = scheduler
+
+    plugin = UnnamedPlugin()
+    s.add_plugin(plugin)
+    with pytest.raises(ValueError) as excinfo:
+        s.remove_plugin(plugin)
+
+    msg = str(excinfo.value)
+    assert "otherwise removal must be by name argument." in msg
+
 
 @pytest.mark.asyncio
 async def test_lifecycle(cleanup):
