@@ -51,7 +51,7 @@ from .comm import (
 )
 from .comm.addressing import addresses_from_user_args
 from .core import CommClosedError, Status, clean_exception, rpc, send_recv
-from .diagnostics.plugin import SchedulerPlugin
+from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
 from .http import get_handlers
 from .lock import LockExtension
@@ -2279,7 +2279,7 @@ class SchedulerState:
                     ts._dependents = dependents
                     ts._dependencies = dependencies
                     parent._tasks[ts._key] = ts
-                for plugin in list(self.plugins):
+                for plugin in self.plugins.values():
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
@@ -3677,7 +3677,7 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.plugins = list(plugins)
+        self.plugins = {}
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -3928,7 +3928,7 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             await preload.start()
 
-        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
+        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins.values()])
 
         self.start_periodic_callbacks()
 
@@ -3967,7 +3967,7 @@ class Scheduler(SchedulerState, ServerNode):
                 else:
                     break
 
-        await asyncio.gather(*[plugin.close() for plugin in self.plugins])
+        await asyncio.gather(*[plugin.close() for plugin in self.plugins.values()])
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -4218,7 +4218,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ws._nthreads > len(ws._processing):
                 parent._idle[ws._address] = ws
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     result = plugin.add_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
@@ -4606,7 +4606,7 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts._key] = "erred"
                     break
 
-        for plugin in self.plugins[:]:
+        for plugin in self.plugins.values():
             try:
                 plugin.update_graph(
                     self,
@@ -4868,7 +4868,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.transitions(recommendations)
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     result = plugin.remove_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
@@ -5169,7 +5169,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(["all", client], {"action": "add-client", "client": client})
         parent._clients[client] = ClientState(client, versions=versions)
 
-        for plugin in self.plugins[:]:
+        for plugin in self.plugins.values():
             try:
                 plugin.add_client(scheduler=self, client=client)
             except Exception as e:
@@ -5224,7 +5224,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             del parent._clients[client]
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     plugin.remove_client(scheduler=self, client=client)
                 except Exception as e:
@@ -5398,7 +5398,7 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_comm.abort()
                 await self.remove_worker(address=worker)
 
-    def add_plugin(self, plugin=None, idempotent=False, **kwargs):
+    def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
         """
         Add external plugin to scheduler
 
@@ -5407,16 +5407,19 @@ class Scheduler(SchedulerState, ServerNode):
         if isinstance(plugin, type):
             plugin = plugin(self, **kwargs)
 
+        if name is None:
+            name = _get_plugin_name(plugin)
+
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
             return
 
-        self.plugins.append(plugin)
+        self.plugins[name] = plugin
 
-    def remove_plugin(self, plugin):
+    def remove_plugin(self, name):
         """Remove external plugin from scheduler"""
-        self.plugins.remove(plugin)
+        self.plugins.pop(name)
 
-    async def register_scheduler_plugin(self, comm=None, plugin=None):
+    async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5432,7 +5435,7 @@ class Scheduler(SchedulerState, ServerNode):
             if inspect.isawaitable(result):
                 result = await result
 
-        self.add_plugin(plugin=plugin)
+        self.add_plugin(plugin=plugin, name=name)
 
     def worker_send(self, worker, msg):
         """Send message to worker
@@ -5641,7 +5644,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.clear_task_state()
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     plugin.restart(self)
                 except Exception as e:
@@ -6895,7 +6898,7 @@ class Scheduler(SchedulerState, ServerNode):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
         self.add_plugin(TaskStreamPlugin, idempotent=True)
-        tsp = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
+        tsp = [p for p in self.plugins.values() if isinstance(p, TaskStreamPlugin)][0]
         return tsp.collect(start=start, stop=stop, count=count)
 
     def start_task_metadata(self, comm=None, name=None):
@@ -6906,7 +6909,7 @@ class Scheduler(SchedulerState, ServerNode):
     def stop_task_metadata(self, comm=None, name=None):
         plugins = [
             p
-            for p in self.plugins
+            for p in self.plugins.values()
             if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
         ]
         if len(plugins) != 1:

@@ -175,9 +175,8 @@ class WorkerPlugin:
         """
 
 
-def _get_worker_plugin_name(plugin) -> str:
-    """Returns the worker plugin name. If plugin has no name attribute
-    a random name is used."""
+def _get_plugin_name(plugin) -> str:
+    """Returns the plugin name; a name is generated if necessary."""
     if hasattr(plugin, "name"):
         return plugin.name
     else:
