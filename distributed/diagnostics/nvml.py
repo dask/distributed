@@ -26,7 +26,11 @@ def init_once():
     nvmlOwnerPID = os.getpid()
     try:
         pynvml.nvmlInit()
-    except (pynvml.NVMLError_LibraryNotFound, pynvml.NVMLError_DriverNotLoaded):
+    except (
+        pynvml.NVMLError_LibraryNotFound,
+        pynvml.NVMLError_DriverNotLoaded,
+        pynvml.NVMLError_Unknown,
+    ):
         nvmlLibraryNotFound = True
 
 
