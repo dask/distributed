@@ -375,8 +375,8 @@ async def test_environment_variable(c, s):
     client=True,
     config={"distributed.nanny.environ": {"A": 1, "B": 2, "D": 4}},
 )
-async def test_environment_variable_config(c, s):
-    os.environ["D"] = "123"
+async def test_environment_variable_config(c, s, monkeypatch):
+    monkeypatch.setenv("D", "123")
     async with Nanny(s.address, env={"B": 3, "C": 4}) as n:
         results = await c.run(lambda: os.environ)
         assert results[n.worker_address]["A"] == "1"
