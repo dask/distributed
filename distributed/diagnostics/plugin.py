@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import uuid
+import zipfile
 
 from dask.utils import funcname
 
@@ -330,3 +331,71 @@ class Environ(NannyPlugin):
 
     async def setup(self, nanny):
         nanny.env.update(self.environ)
+
+
+class UploadDirectory(NannyPlugin):
+    """A WorkerPlugin to upload a local file to workers.
+
+    Parameters
+    ----------
+    filepath: str
+        A path to the file (.py, egg, or zip) to upload
+
+    Examples
+    --------
+    >>> from distributed.diagnostics.plugin import UploadFile
+
+    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    """
+
+    name = "upload_directory"
+
+    def __init__(
+        self,
+        path,
+        restart=False,
+        update_path=False,
+        skip_words=(".git", ".github", ".pytest_cache", "tests"),
+        skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",),
+    ):
+        """
+        Initialize the plugin by reading in the data from the given file.
+        """
+        path = os.path.expanduser(path)
+        self.path = os.path.split(path)[-1]
+        self.restart = restart
+        self.update_path = update_path
+
+        with zipfile.ZipFile("tmp.zip", "w", zipfile.ZIP_DEFLATED) as z:
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    if any(predicate(filename) for predicate in skip):
+                        continue
+                    dirs = filename.split(os.sep)
+                    if any(word in dirs for word in skip_words):
+                        continue
+
+                    archive_name = os.path.relpath(
+                        os.path.join(root, file), os.path.join(path, "..")
+                    )
+                    print(filename, archive_name)
+                    z.write(filename, archive_name)
+
+        with open("tmp.zip", "rb") as f:
+            self.data = f.read()
+
+    async def setup(self, nanny):
+        fn = os.path.join(nanny.local_directory, "tmp.zip")  # TODO: add random suffix
+        with open(fn, "wb") as f:
+            f.write(self.data)
+
+        import zipfile
+
+        with zipfile.ZipFile(fn) as z:
+            z.extractall(path=nanny.local_directory)
+
+        if self.update_path:
+            path = os.path.join(nanny.local_directory, self.path)
+            if path not in sys.path:
+                sys.path.insert(0, path)
