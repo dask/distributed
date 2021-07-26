@@ -162,7 +162,13 @@ class Nanny(ServerNode):
         self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = env or {}
+        self.env = dask.config.get("distributed.nanny.environ")
+        for k in self.env:
+            if k in os.environ:
+                self.env[k] = os.environ[k]
+        if env:
+            self.env.update(env)
+        self.env = {k: str(v) for k, v in self.env.items()}
         self.config = config or dask.config.config
         worker_kwargs.update(
             {
