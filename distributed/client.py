@@ -4199,7 +4199,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def unregister_worker_plugin(self, name):
+    def unregister_worker_plugin(self, name, nanny=None):
         """Unregisters a lifecycle worker plugin
 
         This unregisters an existing worker plugin. As part of the unregistration process
@@ -4233,7 +4233,7 @@ class Client:
         --------
         register_worker_plugin
         """
-        return self.sync(self._unregister_worker_plugin, name=name)
+        return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):

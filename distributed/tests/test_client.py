@@ -6927,3 +6927,7 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     results = await c.run(f)
     assert results[a.worker_address] == 123
     assert results[b.worker_address] == 123
+
+    async with Nanny(s.address, local_directory=tmp_path / "foo", name="foo") as n:
+        results = await c.run(f)
+        assert results[n.worker_address] == 123

@@ -309,6 +309,9 @@ class Nanny(ServerNode):
         )
         self._pending_plugins = ()
 
+        if not os.path.exists(self.local_directory):
+            os.makedirs(self.local_directory, exist_ok=True)
+
         msg = await self.scheduler.register_nanny()
         for name, plugin in msg["nanny-plugins"].items():
             await self.plugin_add(plugin=plugin, name=name)

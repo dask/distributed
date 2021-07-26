@@ -355,7 +355,7 @@ class UploadDirectory(NannyPlugin):
         path,
         restart=False,
         update_path=False,
-        skip_words=(".git", ".github", ".pytest_cache", "tests"),
+        skip_words=(".git", ".github", ".pytest_cache", "tests", "docs"),
         skip=(lambda fn: os.path.splitext(fn)[1] == ".pyc",),
     ):
         """
@@ -379,7 +379,6 @@ class UploadDirectory(NannyPlugin):
                     archive_name = os.path.relpath(
                         os.path.join(root, file), os.path.join(path, "..")
                     )
-                    print(filename, archive_name)
                     z.write(filename, archive_name)
 
         with open("tmp.zip", "rb") as f:
