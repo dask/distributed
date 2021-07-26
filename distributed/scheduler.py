@@ -3677,7 +3677,7 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.plugins = {}
+        self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -5415,9 +5415,17 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.plugins[name] = plugin
 
-    def remove_plugin(self, name):
+    def remove_plugin(self, plugin=None, name=None):
         """Remove external plugin from scheduler"""
-        self.plugins.pop(name)
+        if plugin is None and name is not None:
+            self.plugins.pop(name)
+        elif hasattr(plugin, "name"):
+            self.plugins.pop(plugin.name)
+        else:
+            raise ValueError(
+                "Plugins removed by instance must have a name attribute, "
+                "otherwise removal must be by name argument."
+            )
 
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""

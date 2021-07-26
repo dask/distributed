@@ -9,7 +9,7 @@ async def test_simple(c, s, a, b):
     class Counter(SchedulerPlugin):
         def start(self, scheduler):
             self.scheduler = scheduler
-            scheduler.add_plugin(self)
+            scheduler.add_plugin(self, name="counter")
             self.count = 0
 
         def transition(self, key, start, finish, *args, **kwargs):
@@ -18,7 +18,7 @@ async def test_simple(c, s, a, b):
 
     counter = Counter()
     counter.start(s)
-    assert counter in s.plugins
+    assert counter in s.plugins.values()
 
     assert counter.count == 0
 
@@ -29,7 +29,7 @@ async def test_simple(c, s, a, b):
     await z
 
     assert counter.count == 3
-    s.remove_plugin(counter)
+    s.remove_plugin(name="counter")
     assert counter not in s.plugins
 
 
@@ -38,6 +38,8 @@ async def test_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
+        name = "MyPlugin"
+
         def add_worker(self, worker, scheduler):
             assert scheduler is s
             events.append(("add_worker", worker))
@@ -76,6 +78,8 @@ async def test_async_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
+        name = "MyPlugin"
+
         async def add_worker(self, worker, scheduler):
             assert scheduler is s
             events.append(("add_worker", worker))
