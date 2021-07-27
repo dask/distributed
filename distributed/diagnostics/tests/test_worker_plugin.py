@@ -223,9 +223,9 @@ async def test_default_name(c, s, w):
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_PipInstall_name(c, s, w):
     x = PipInstall(packages=["foo"])
+    x2 = PipInstall(packages=["foo"])
+    assert x.name == x2.name
     y = PipInstall(packages=["foo", "bar"])
     z = PipInstall(packages=["foo", "bar"], restart=True)
     assert all("pipinstall" in p.name for p in (x, y, z))
-    for p in [x, y, z]:
-        assert p.name == p.name
     assert len(set([x.name, y.name, z.name])) == 3
