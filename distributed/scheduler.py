@@ -5410,6 +5410,9 @@ class Scheduler(SchedulerState, ServerNode):
         if name is None:
             name = _get_plugin_name(plugin)
 
+        if self.has_plugin(name):
+            return
+
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
             return
 
@@ -5427,12 +5430,9 @@ class Scheduler(SchedulerState, ServerNode):
                 "otherwise removal must be by name argument."
             )
 
-    def has_plugin(self, test):
+    def has_plugin(self, name):
         """Check if plugin exists by name."""
-        if hasattr(test, "name"):
-            return test.name in self.plugins.keys()
-        else:
-            return test in self.plugins.keys()
+        return name in self.plugins.keys()
 
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""

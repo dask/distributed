@@ -121,7 +121,7 @@ class Progress(SchedulerPlugin):
         self.stop()
 
     def stop(self, exception=None, key=None):
-        if self.scheduler.has_plugin(self):
+        if self.scheduler.has_plugin(self.name):
             self.scheduler.remove_plugin(self)
         if exception:
             self.status = "error"

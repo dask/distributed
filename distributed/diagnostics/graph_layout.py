@@ -12,6 +12,7 @@ class GraphLayout(SchedulerPlugin):
     """
 
     def __init__(self, scheduler):
+        self.name = "GraphLayout"
         self.x = {}
         self.y = {}
         self.collision = {}
