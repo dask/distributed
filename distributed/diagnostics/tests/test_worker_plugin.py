@@ -225,5 +225,7 @@ async def test_PipInstall_name(c, s, w):
     x = PipInstall(packages=["foo"])
     y = PipInstall(packages=["foo", "bar"])
     z = PipInstall(packages=["foo", "bar"], restart=True)
-    assert all("pipinstall" in i.name for i in (x, y, z))
+    assert all("pipinstall" in p.name for p in (x, y, z))
+    for p in [x, y, z]:
+        assert p.name == p.name
     assert len(set([x.name, y.name, z.name])) == 3
