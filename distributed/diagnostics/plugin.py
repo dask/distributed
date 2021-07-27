@@ -186,10 +186,11 @@ class NannyPlugin:
 
     To implement a plugin implement some of the methods of this class and register
     the plugin to your client in order to have it attached to every existing and
-    future workers with ``Client.register_nanny_plugin``.
+    future nanny by passing ``nanny=True`` to
+    :meth:`Client.register_worker_plugin<distributed.Client.register_worker_plugin>`.
 
-    The attribute `restart` is used to control whether or not a running Worker needs
-    to be restarted when registering the plugin.
+    The ``restart`` attribute is used to control whether or not a running ``Worker``
+    needs to be restarted when registering the plugin.
 
     See Also
     --------
@@ -201,13 +202,13 @@ class NannyPlugin:
 
     def setup(self, nanny):
         """
-        Run when the plugin is attached to a worker. This happens when the plugin is registered
-        and attached to existing workers, or when a worker is created after the plugin has been
+        Run when the plugin is attached to a nanny. This happens when the plugin is registered
+        and attached to existing nannies, or when a nanny is created after the plugin has been
         registered.
         """
 
     def teardown(self, nanny):
-        """Run when the worker to which the plugin is attached to is closed"""
+        """Run when the nanny to which the plugin is attached to is closed"""
 
 
 def _get_worker_plugin_name(plugin) -> str:
@@ -337,18 +338,17 @@ class Environ(NannyPlugin):
 
 
 class UploadDirectory(NannyPlugin):
-    """A WorkerPlugin to upload a local file to workers.
+    """A NannyPlugin to upload a local file to workers.
 
     Parameters
     ----------
-    filepath: str
-        A path to the file (.py, egg, or zip) to upload
+    path: str
+        A path to the directory to upload
 
     Examples
     --------
-    >>> from distributed.diagnostics.plugin import UploadFile
-
-    >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
+    >>> from distributed.diagnostics.plugin import UploadDirectory
+    >>> client.register_worker_plugin(UploadDirectory("/path/to/directory"), nanny=True)  # doctest: +SKIP
     """
 
     def __init__(

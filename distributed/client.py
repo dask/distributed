@@ -4132,12 +4132,14 @@ class Client:
 
         Parameters
         ----------
-        plugin : WorkerPlugin
-            The plugin object to pass to the workers
+        plugin : WorkerPlugin or NannyPlugin
+            The plugin object to register.
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
             If plugin has no name attribute a random name is used.
+        nanny : bool, optional
+            Whether to register the plugin with workers or nannies.
         **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
