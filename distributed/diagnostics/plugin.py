@@ -188,6 +188,9 @@ class NannyPlugin:
     the plugin to your client in order to have it attached to every existing and
     future workers with ``Client.register_nanny_plugin``.
 
+    The attribute `restart` is used to control whether or not a running Worker needs
+    to be restarted when registering the plugin.
+
     See Also
     --------
     WorkerPlugin
@@ -195,6 +198,7 @@ class NannyPlugin:
     """
 
     restart = False
+    
 
     def setup(self, nanny):
         """
