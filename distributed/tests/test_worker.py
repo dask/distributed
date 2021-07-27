@@ -19,6 +19,7 @@ import dask
 from dask import delayed
 from dask.system import CPU_COUNT
 
+import distributed
 from distributed import (
     Client,
     Nanny,
@@ -32,6 +33,7 @@ from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
 from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
+from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
@@ -2011,18 +2013,18 @@ async def test_multiple_executors(cleanup):
             s.address,
             nthreads=2,
             executor={
-                "GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")
+                "foo": ThreadPoolExecutor(1, thread_name_prefix="Dask-Foo-Threads")
             },
         ) as w:
             async with Client(s.address, asynchronous=True) as c:
                 futures = []
                 with dask.annotate(executor="default"):
                     futures.append(c.submit(get_thread_name, pure=False))
-                with dask.annotate(executor="GPU"):
+                with dask.annotate(executor="foo"):
                     futures.append(c.submit(get_thread_name, pure=False))
-                default_result, gpu_result = await c.gather(futures)
+                default_result, foo_result = await c.gather(futures)
                 assert "Dask-Default-Threads" in default_result
-                assert "Dask-GPU-Threads" in gpu_result
+                assert "Dask-Foo-Threads" in foo_result
 
 
 @gen_cluster(client=True)
@@ -2051,6 +2053,17 @@ async def test_process_executor_kills_process(c, s, a, b):
 
         exc = await future.exception()
         assert "SystemExit(1)" in repr(exc)
+
+
+@pytest.mark.gpu
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_gpu_executor(c, s, w):
+    if nvml.device_get_count() > 0:
+        e = w.executors["gpu"]
+        assert isinstance(e, distributed.threadpoolexecutor.ThreadPoolExecutor)
+        assert e._max_workers == 1
+    else:
+        assert "gpu" not in w.executors
 
 
 def assert_task_states_on_worker(expected, worker):
