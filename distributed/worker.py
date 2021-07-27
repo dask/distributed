@@ -635,15 +635,10 @@ class Worker(ServerNode):
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
-        try:
-            import pynvml
-        except ImportError:
-            pass
-        else:
-            if pynvml.nvmlDeviceGetCount():
-                self.executors["gpu"] = ThreadPoolExecutor(
-                    1, thread_name_prefix="Dask-GPU-Threads"
-                )
+        if nvml.device_get_count() > 0:
+            self.executors["gpu"] = ThreadPoolExecutor(
+                1, thread_name_prefix="Dask-GPU-Threads"
+            )
 
         # Find the default executor
         if executor == "offload":
