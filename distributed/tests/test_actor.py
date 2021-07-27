@@ -6,7 +6,16 @@ import pytest
 
 import dask
 
-from distributed import Actor, ActorFuture, Client, Future, Nanny, get_client, wait
+from distributed import (
+    Actor,
+    ActorFuture,
+    Client,
+    Future,
+    Nanny,
+    as_completed,
+    get_client,
+    wait,
+)
 from distributed.metrics import time
 from distributed.utils_test import cluster, gen_cluster
 
@@ -680,6 +689,32 @@ async def test_exception_async(client, s, a, b):
 
     with pytest.raises(MyException):
         await ac.prop
+
+
+def test_as_completed(client):
+    ac = client.submit(Counter, actor=True).result()
+    futures = [ac.increment() for _ in range(10)]
+    max = 0
+
+    for future in as_completed(futures):
+        value = future.result()
+        if value > max:
+            max = value
+
+    assert all(future.done() for future in futures)
+    assert max == 10
+
+
+@gen_cluster(client=True, timeout=3)
+async def test_actor_future_awaitable(client, s, a, b):
+    ac = await client.submit(Counter, actor=True)
+    futures = [ac.increment() for _ in range(10)]
+
+    assert all([isinstance(future, ActorFuture) for future in futures])
+
+    out = await asyncio.gather(*futures)
+    assert all([future.done() for future in futures])
+    assert max(out) == 10
 
 
 @gen_cluster(client=True)

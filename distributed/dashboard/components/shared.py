@@ -482,8 +482,20 @@ class SystemMonitor(DashboardComponent):
             tools=tools,
             **kwargs,
         )
-        self.bandwidth.line(source=self.source, x="time", y="read_bytes", color="red")
-        self.bandwidth.line(source=self.source, x="time", y="write_bytes", color="blue")
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="read_bytes",
+            color="red",
+            legend_label="read",
+        )
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="write_bytes",
+            color="blue",
+            legend_label="write",
+        )
         self.bandwidth.yaxis.axis_label = "Bytes / second"
 
         # self.cpu.yaxis[0].formatter = NumeralTickFormatter(format='0%')
