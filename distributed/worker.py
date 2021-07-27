@@ -16,10 +16,9 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Iterable, Optional
+from typing import Dict, Hashable, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
-from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
@@ -107,10 +106,7 @@ class TaskState:
     * **dependencies**: ``set(TaskState instances)``
         The data needed by this key to run
     * **dependents**: ``set(TaskState instances)``
-        The keys that use this dependency. Only keys which are not available
-        already are tracked in this structure and dependents made available are
-        actively removed. Only after all dependents have been removed, this task
-        is allowed to be forgotten
+        The keys that use this dependency.
     * **duration**: ``float``
         Expected duration the a task
     * **priority**: ``tuple``
@@ -438,6 +434,7 @@ class Worker(ServerNode):
 
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
+        self.active_keys = set()
         self.profile_keys = defaultdict(profile.create)
         self.profile_keys_history = deque(maxlen=3600)
         self.profile_recent = profile.create()
@@ -968,8 +965,6 @@ class Worker(ServerNode):
         logger.debug("Heartbeat: %s", self.address)
         try:
             start = time()
-            with self.active_threads_lock:
-                active_keys = list(self.active_threads.values())
             response = await retry_operation(
                 self.scheduler.heartbeat_worker,
                 address=self.contact_address,
@@ -977,7 +972,7 @@ class Worker(ServerNode):
                 metrics=await self.get_metrics(),
                 executing={
                     key: start - self.tasks[key].start_time
-                    for key in active_keys
+                    for key in self.active_keys
                     if key in self.tasks
                 },
             )
@@ -1414,7 +1409,7 @@ class Worker(ServerNode):
                 if k in self.actors:
                     from .actor import Actor
 
-                    data[k] = Actor(type(self.actors[k]), self.address, k)
+                    data[k] = Actor(type(self.actors[k]), self.address, k, worker=self)
 
         msg = {"status": "OK", "data": {k: to_serialize(v) for k, v in data.items()}}
         nbytes = {k: self.tasks[k].nbytes for k in data if k in self.tasks}
@@ -1986,11 +1981,6 @@ class Worker(ServerNode):
                     out = "error"
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
-
-                # Don't release the dependency keys, but do remove them from `dependents`
-                for dependency in ts.dependencies:
-                    dependency.dependents.discard(ts)
-                ts.dependencies.clear()
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
@@ -2608,15 +2598,14 @@ class Worker(ServerNode):
 
     def release_key(
         self,
-        key: str,
+        key: Hashable,
         cause: Optional[TaskState] = None,
         reason: Optional[str] = None,
         report: bool = True,
     ):
         try:
-
             if self.validate:
-                assert isinstance(key, str)
+                assert not isinstance(key, TaskState)
             ts = self.tasks.get(key, None)
             # If the scheduler holds a reference which is usually the
             # case when it instructed the task to be computed here or if
@@ -2654,6 +2643,12 @@ class Worker(ServerNode):
                     for resource, quantity in ts.resource_restrictions.items():
                         self.available_resources[resource] += quantity
 
+            for d in ts.dependencies:
+                d.dependents.discard(ts)
+
+                if not d.dependents and d.state in ("flight", "fetch"):
+                    self.release_key(d.key, reason="Dependent released")
+
             if report:
                 # Inform the scheduler of keys which will have gone missing
                 # We are releasing them before they have completed
@@ -2685,41 +2680,6 @@ class Worker(ServerNode):
     ################
     # Execute Task #
     ################
-
-    # FIXME: this breaks if changed to async def...
-    # xref: https://github.com/dask/distributed/issues/3938
-    @gen.coroutine
-    def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
-        """Safely run function in thread pool executor
-
-        We've run into issues running concurrent.future futures within
-        tornado.  Apparently it's advantageous to use timeouts and periodic
-        callbacks to ensure things run smoothly.  This can get tricky, so we
-        pull it off into an separate method.
-        """
-        executor = executor or self.executors["default"]
-        job_counter[0] += 1
-        # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
-        kwargs = kwargs or {}
-        future = executor.submit(function, *args, **kwargs)
-        pc = PeriodicCallback(
-            lambda: logger.debug("future state: %s - %s", key, future._state), 1000
-        )
-        ts = self.tasks.get(key)
-        if ts is not None:
-            ts.start_time = time()
-        pc.start()
-        try:
-            yield future
-        finally:
-            pc.stop()
-            if ts is not None:
-                ts.stop_time = time()
-
-        result = future.result()
-
-        # logger.info("Finish job %d, %s", i, key)
-        raise gen.Return(result)
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         return run(self, comm, function=function, args=args, kwargs=kwargs, wait=wait)
@@ -2782,19 +2742,16 @@ class Worker(ServerNode):
             if iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             elif separate_thread:
-                result = await self.executor_submit(
-                    name,
+                result = await self.loop.run_in_executor(
+                    self.executors["actor"],
                     apply_function_actor,
-                    args=(
-                        func,
-                        args,
-                        kwargs,
-                        self.execution_state,
-                        name,
-                        self.active_threads,
-                        self.active_threads_lock,
-                    ),
-                    executor=self.executors["actor"],
+                    func,
+                    args,
+                    kwargs,
+                    self.execution_state,
+                    name,
+                    self.active_threads,
+                    self.active_threads_lock,
                 )
             else:
                 result = func(*args, **kwargs)
@@ -2946,11 +2903,14 @@ class Worker(ServerNode):
                 executor,
             )  # TODO: comment out?
             assert key == ts.key
+            self.active_keys.add(ts.key)
             try:
-                result = await self.executor_submit(
-                    ts.key,
-                    apply_function,
-                    args=(
+                e = self.executors[executor]
+                ts.start_time = time()
+                if "ThreadPoolExecutor" in str(type(e)):
+                    result = await self.loop.run_in_executor(
+                        e,
+                        apply_function,
                         function,
                         args2,
                         kwargs2,
@@ -2959,12 +2919,32 @@ class Worker(ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
-                    ),
-                    executor=self.executors[executor],
-                )
+                    )
+                else:
+                    try:
+                        start = time() + self.scheduler_delay
+                        result = await self.loop.run_in_executor(
+                            e,
+                            apply_function_simple,
+                            function,
+                            args2,
+                            kwargs2,
+                            self.scheduler_delay,
+                        )
+                    except BaseException as e:
+                        msg = error_message(e)
+                        msg["op"] = "task-erred"
+                        msg["actual-exception"] = e
+                        msg["start"] = start
+                        msg["stop"] = time() + self.scheduler_delay
+                        msg["thread"] = None
+                        result = msg
+
             except RuntimeError as e:
                 executor_error = e
                 raise
+            finally:
+                self.active_keys.discard(ts.key)
 
             # We'll need to check again for the task state since it may have
             # changed since the execution was kicked off. In particular, it may
@@ -3854,6 +3834,27 @@ def apply_function(
     thread_state.start_time = time()
     thread_state.execution_state = execution_state
     thread_state.key = key
+
+    msg = apply_function_simple(function, args, kwargs, time_delay)
+
+    with active_threads_lock:
+        del active_threads[ident]
+    return msg
+
+
+def apply_function_simple(
+    function,
+    args,
+    kwargs,
+    time_delay,
+):
+    """Run a function, collect information
+
+    Returns
+    -------
+    msg: dictionary with status, result/error, timings, etc..
+    """
+    ident = threading.get_ident()
     start = time()
     try:
         result = function(*args, **kwargs)
@@ -3874,8 +3875,6 @@ def apply_function(
     msg["start"] = start + time_delay
     msg["stop"] = end + time_delay
     msg["thread"] = ident
-    with active_threads_lock:
-        del active_threads[ident]
     return msg
 
 
@@ -4020,9 +4019,8 @@ except (Exception, RuntimeError):
     pass
 else:
 
-    @gen.coroutine
-    def gpu_metric(worker):
-        result = yield offload(nvml.real_time)
+    async def gpu_metric(worker):
+        result = await offload(nvml.real_time)
         return result
 
     DEFAULT_METRICS["gpu"] = gpu_metric

@@ -5,7 +5,7 @@ import os
 import sys
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from numbers import Number
 from operator import add
 from time import sleep
@@ -510,17 +510,14 @@ async def test_run_coroutine_dask_worker(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_Executor(c, s):
     with ThreadPoolExecutor(2) as e:
-        w = Worker(s.address, executor=e)
-        assert w.executor is e
-        w = await w
+        async with Worker(s.address, executor=e) as w:
+            assert w.executor is e
 
-        future = c.submit(inc, 1)
-        result = await future
-        assert result == 2
+            future = c.submit(inc, 1)
+            result = await future
+            assert result == 2
 
-        assert e._threads  # had to do some work
-
-        await w.close()
+            assert e._threads  # had to do some work
 
 
 @pytest.mark.skip(
@@ -2030,6 +2027,34 @@ async def test_multiple_executors(cleanup):
                 assert "Dask-GPU-Threads" in gpu_result
 
 
+@gen_cluster(client=True)
+async def test_process_executor(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+
+        future = c.submit(os.getpid, pure=False)
+        assert (await future) == os.getpid()
+
+        with dask.annotate(executor="processes"):
+            future = c.submit(os.getpid, pure=False)
+
+        assert (await future) != os.getpid()
+
+
+@gen_cluster(client=True)
+async def test_process_executor_kills_process(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(sys.exit, 1)
+
+        exc = await future.exception()
+        assert "SystemExit(1)" in repr(exc)
+
+
 def assert_task_states_on_worker(expected, worker):
     for dep_key, expected_state in expected.items():
         assert dep_key in worker.tasks, (worker.name, dep_key, worker.tasks)
@@ -2345,3 +2370,22 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
     while len(workers[2].tasks) > 1:
         await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_forget_dependents_after_release(c, s, a):
+
+    fut = c.submit(inc, 1, key="f-1")
+    fut2 = c.submit(inc, fut, key="f-2")
+
+    await asyncio.wait([fut, fut2])
+
+    assert fut.key in a.tasks
+    assert fut2.key in a.tasks
+    assert fut2.key in {d.key for d in a.tasks[fut.key].dependents}
+
+    fut2.release()
+
+    while fut2.key in a.tasks:
+        await asyncio.sleep(0.001)
+    assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}

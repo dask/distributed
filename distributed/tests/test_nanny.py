@@ -9,6 +9,9 @@ from time import sleep
 
 import psutil
 import pytest
+
+pytestmark = pytest.mark.gpu
+
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
@@ -370,6 +373,21 @@ async def test_environment_variable(c, s):
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
     await asyncio.gather(a.close(), b.close())
+
+
+@gen_cluster(
+    nthreads=[],
+    client=True,
+    config={"distributed.nanny.environ": {"A": 1, "B": 2, "D": 4}},
+)
+async def test_environment_variable_config(c, s, monkeypatch):
+    monkeypatch.setenv("D", "123")
+    async with Nanny(s.address, env={"B": 3, "C": 4}) as n:
+        results = await c.run(lambda: os.environ)
+        assert results[n.worker_address]["A"] == "1"
+        assert results[n.worker_address]["B"] == "3"
+        assert results[n.worker_address]["C"] == "4"
+        assert results[n.worker_address]["D"] == "123"
 
 
 @gen_cluster(nthreads=[], client=True)

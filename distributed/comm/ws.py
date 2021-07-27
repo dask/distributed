@@ -23,6 +23,7 @@ from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to
 
 logger = logging.getLogger(__name__)
 
+MAX_MESSAGE_SIZE = 10_000_000_000
 
 BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(
     dask.config.get("distributed.comm.websockets.shard")
@@ -75,6 +76,10 @@ class WSHandler(WebSocketHandler):
     def close(self):
         super().close()
         self.closed = True
+
+    @property
+    def max_message_size(self) -> int:
+        return self.settings.get("websocket_max_message_size", MAX_MESSAGE_SIZE)
 
 
 class WSHandlerComm(Comm):
@@ -378,7 +383,7 @@ class WSConnector(Connector):
         kwargs = self._get_connect_args(**connection_args)
         try:
             request = HTTPRequest(f"{self.prefix}{address}", **kwargs)
-            sock = await websocket_connect(request, max_message_size=10_000_000_000)
+            sock = await websocket_connect(request, max_message_size=MAX_MESSAGE_SIZE)
             if sock.stream.closed() and sock.stream.error:
                 raise StreamClosedError(sock.stream.error)
         except StreamClosedError as e:
