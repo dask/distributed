@@ -563,12 +563,12 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
-@pytest.mark.asyncio
-async def test_worker_start_exception(cleanup):
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception(s):
     # make sure this raises the right Exception:
     with pytest.raises(StartException):
-        async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
-            await n.start()
+        async with Nanny(s.address, worker_class=BrokenWorker) as n:
+            pass
 
 
 @pytest.mark.asyncio
@@ -579,3 +579,16 @@ async def test_failure_during_worker_initialization(cleanup):
                 async with Nanny(s.address, foo="bar") as n:
                     await n
         assert "Restarting worker" not in logs.getvalue()
+
+
+@gen_cluster(client=True, Worker=Nanny, timeout=10000000)
+async def test_environ_plugin(c, s, a, b):
+    from dask.distributed import Environ
+
+    await c.register_worker_plugin(Environ({"ABC": 123}))
+
+    async with Nanny(s.address, name="new") as n:
+        results = await c.run(os.getenv, "ABC")
+        assert results[a.worker_address] == "123"
+        assert results[b.worker_address] == "123"
+        assert results[n.worker_address] == "123"
