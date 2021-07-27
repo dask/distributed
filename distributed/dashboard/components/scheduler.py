@@ -851,14 +851,14 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
                 x="time",
                 y="read_bytes",
                 color="red",
-                legend_label="read (avg)",
+                legend_label="read (sum)",
             )
             self.root.line(
                 source=self.source,
                 x="time",
                 y="write_bytes",
                 color="blue",
-                legend_label="write (avg)",
+                legend_label="write (sum)",
             )
 
         self.root.yaxis.axis_label = "bytes / second"
@@ -877,9 +877,9 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
             time += ws.metrics["time"]
 
         result = {
-            "time": [time / len(workers)],
-            "read_bytes": [read_bytes / len(workers)],
-            "write_bytes": [write_bytes / len(workers)],
+            "time": [time / (len(workers) or 1)],  # avoid ZeroDivision when no workers
+            "read_bytes": [read_bytes],
+            "write_bytes": [write_bytes],
         }
         return result
 

@@ -527,10 +527,10 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     assert all(len(v) == 1 for v in nbts.source.data.values())
     assert nbts.source.data["read_bytes"][0] == sum(
         [ws.metrics["read_bytes"] for ws in workers]
-    ) / len(workers)
+    )
     assert nbts.source.data["write_bytes"][0] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
-    ) / len(workers)
+    )
     assert nbts.source.data["time"][0] == sum(
         [ws.metrics["time"] for ws in workers]
     ) / len(workers)
@@ -544,10 +544,10 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     assert all(len(v) == 2 for v in nbts.source.data.values())
     assert nbts.source.data["read_bytes"][1] == sum(
         [ws.metrics["read_bytes"] for ws in workers]
-    ) / len(workers)
+    )
     assert nbts.source.data["write_bytes"][1] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
-    ) / len(workers)
+    )
     assert nbts.source.data["time"][1] == sum(
         [ws.metrics["time"] for ws in workers]
     ) / len(workers)
