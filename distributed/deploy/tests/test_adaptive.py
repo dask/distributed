@@ -19,6 +19,7 @@ class MyAdaptive(Adaptive):
         self._log = []
         self._plan = set()
         self._requested = set()
+        self._observed = set()
 
     @property
     def plan(self):
@@ -36,11 +37,26 @@ class MyAdaptive(Adaptive):
     def requested(self, value):
         self._requested = value
 
+    @property
+    def observed(self):
+        return self._observed
+
+    @observed.setter
+    def observed(self, value):
+        self._observed = value
+
     async def target(self):
         return self._target
 
+    async def workers_to_close(self, target: int) -> list: 
+        """
+        Give a list of workers to close that brings us down to target workers
+        """
+        # TODO, improve me with something that thinks about current load
+        return list(self.observed)[target:]
+
     async def scale_up(self, n=0):
-        self.plan = self.requested = set(range(n))  # TODO: we already have plan as a property: FIX: Adding a setter
+        self.plan = self.requested = set(range(n)) 
 
     async def scale_down(self, workers=()):
         for collection in [self.plan, self.requested, self.observed]:
@@ -105,7 +121,7 @@ async def test_scale_down():
         await adapt.adapt()
         assert len(adapt.log) == 1  # no change after only one call
         await adapt.adapt()
-        assert len(adapt.log) == 2  # no change after only one call
+        assert len(adapt.log) == 2  # no change after two calls
         assert adapt.log[-1][1]["status"] == "down"
         assert 2 in adapt.log[-1][1]["workers"]
         assert len(adapt.log[-1][1]["workers"]) == 2
@@ -187,7 +203,7 @@ async def test_adapt_oserror_safe_target():
         asynchronous=True,
     ) as cluster:
 
-        with captured_logger("distributed.deploy.adaptive_core") as log:
+        with captured_logger("distributed.deploy.adaptive") as log:
             adapt = BadAdaptive(cluster=cluster, minimum=1, maximum=4)
             await adapt.adapt()
         text = log.getvalue()
@@ -228,7 +244,7 @@ async def test_adapt_oserror_scale():
         await adapt.adapt()
         assert len(adapt.plan) == 2
         assert len(adapt.requested) == 2
-        with captured_logger("distributed.deploy.adaptive_core") as log:
+        with captured_logger("distributed.deploy.adaptive") as log:
             adapt._target = 0
             await adapt.adapt()
         text = log.getvalue()

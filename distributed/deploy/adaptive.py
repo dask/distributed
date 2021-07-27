@@ -190,16 +190,8 @@ class Adaptive():
         return await self.scheduler.adaptive_target(
             target_duration=self.target_duration
         )
-
-    async def recommendations(self, target: int) -> dict:
-        """
-        Make scale up/down recommendations based on current state and target
-        """
-        if len(self.plan) != len(self.requested):
-            # Ensure that the number of planned and requested workers
-            # are in sync before making recommendations.
-            await self.cluster
-
+    
+    async def recommendations_helper(self, target: int) -> dict:
         plan = self.plan
         requested = self.requested
         observed = self.observed
@@ -236,6 +228,19 @@ class Adaptive():
                 return {"status": "down", "workers": list(firmly_close)}
             else:
                 return {"status": "same"}
+
+
+    async def recommendations(self, target: int) -> dict:
+        """
+        Make scale up/down recommendations based on current state and target
+        """
+        if len(self.plan) != len(self.requested):
+            # Ensure that the number of planned and requested workers
+            # are in sync before making recommendations.
+            await self.cluster
+
+        return await self.recommendations_helper(target)
+
 
     async def workers_to_close(self, target: int):
         """
