@@ -97,7 +97,6 @@ class Nanny(ServerNode):
         port=None,
         protocol=None,
         config=None,
-        plugins=(),
         **worker_kwargs,
     ):
         self._setup_logging(logger)
@@ -209,7 +208,6 @@ class Nanny(ServerNode):
         }
 
         self.plugins = {}
-        self._pending_plugins = plugins
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
@@ -303,11 +301,6 @@ class Nanny(ServerNode):
 
         for preload in self.preloads:
             await preload.start()
-
-        await asyncio.gather(
-            *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
-        )
-        self._pending_plugins = ()
 
         if not os.path.exists(self.local_directory):
             os.makedirs(self.local_directory, exist_ok=True)
