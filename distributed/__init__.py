@@ -23,6 +23,7 @@ from .core import Status, connect, rpc
 from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
 from .diagnostics.plugin import (
     Environ,
+    NannyPlugin,
     PipInstall,
     SchedulerPlugin,
     UploadDirectory,
