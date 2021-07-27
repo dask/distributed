@@ -837,7 +837,7 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
             x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
             self.root = figure(
-                title="Worker Network Bandwidth Timeseries",
+                title="Workers Network Bandwidth Timeseries",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
@@ -851,17 +851,17 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
                 x="time",
                 y="read_bytes",
                 color="red",
-                legend_label="read",
+                legend_label="read (avg)",
             )
             self.root.line(
                 source=self.source,
                 x="time",
                 y="write_bytes",
                 color="blue",
-                legend_label="write",
+                legend_label="write (avg)",
             )
 
-        self.root.yaxis.axis_label = "Bytes / second"
+        self.root.yaxis.axis_label = "bytes / second"
 
         self.root.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
 
