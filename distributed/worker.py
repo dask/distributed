@@ -2814,11 +2814,6 @@ class Worker(ServerNode):
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
-                    try:
-                        # Ensure task is deserialized prior to execution
-                        ts.runspec = await self._maybe_deserialize_task(ts)
-                    except Exception:
-                        continue
                     self.transition(ts, "executing")
                 else:
                     break
@@ -2833,11 +2828,6 @@ class Worker(ServerNode):
                 elif ts.key in self.data:
                     self.transition(ts, "memory")
                 elif ts.state in READY:
-                    try:
-                        # Ensure task is deserialized prior to execution
-                        ts.runspec = await self._maybe_deserialize_task(ts)
-                    except Exception:
-                        continue
                     self.transition(ts, "executing")
         except Exception as e:
             logger.exception(e)
@@ -2868,7 +2858,7 @@ class Worker(ServerNode):
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
 
-            function, args, kwargs = ts.runspec
+            function, args, kwargs = await self._maybe_deserialize_task(ts)
 
             start = time()
             data = {}
