@@ -548,12 +548,12 @@ class BrokenWorker(worker.Worker):
         raise StartException("broken")
 
 
-@pytest.mark.asyncio
-async def test_worker_start_exception(cleanup):
+@gen_cluster(nthreads=[])
+async def test_worker_start_exception(s):
     # make sure this raises the right Exception:
     with pytest.raises(StartException):
-        async with Nanny("tcp://localhost:1", worker_class=BrokenWorker) as n:
-            await n.start()
+        async with Nanny(s.address, worker_class=BrokenWorker) as n:
+            pass
 
 
 @pytest.mark.asyncio
