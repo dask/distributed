@@ -114,14 +114,14 @@ class Nanny(ServerNode):
 
         if local_directory is None:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
         else:
             self._original_local_dir = local_directory
 
         self.local_directory = local_directory
+        if not os.path.exists(self.local_directory):
+            os.makedirs(self.local_directory, exist_ok=True)
 
         self.preload = preload
         if self.preload is None:
@@ -301,9 +301,6 @@ class Nanny(ServerNode):
 
         for preload in self.preloads:
             await preload.start()
-
-        if not os.path.exists(self.local_directory):
-            os.makedirs(self.local_directory, exist_ok=True)
 
         msg = await self.scheduler.register_nanny()
         for name, plugin in msg["nanny-plugins"].items():
