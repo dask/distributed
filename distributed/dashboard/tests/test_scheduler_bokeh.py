@@ -531,9 +531,10 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     assert nbts.source.data["write_bytes"][0] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
     )
-    assert nbts.source.data["time"][0] == sum(
-        [ws.metrics["time"] for ws in workers]
-    ) / len(workers)
+    assert (
+        nbts.source.data["time"][0]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
 
     # Update worker system monitors and send updated metrics to the scheduler
     a.monitor.update()
@@ -548,9 +549,10 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     assert nbts.source.data["write_bytes"][1] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
     )
-    assert nbts.source.data["time"][1] == sum(
-        [ws.metrics["time"] for ws in workers]
-    ) / len(workers)
+    assert (
+        nbts.source.data["time"][1]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
 
 
 @gen_cluster(client=True)

@@ -817,7 +817,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
 class WorkerNetworkBandwidthTimeseries(DashboardComponent):
     """Timeseries for worker network bandwidth
 
-    Plots average read_bytes and write_bytes for the workers
+    Plots the sum of read_bytes and write_bytes for the workers
     as a function of time.
     """
 
@@ -877,7 +877,8 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
             time += ws.metrics["time"]
 
         result = {
-            "time": [time / (len(workers) or 1)],  # avoid ZeroDivision when no workers
+            # use or avoid ZeroDivision when no workers
+            "time": [time / (len(workers) or 1) * 1000],
             "read_bytes": [read_bytes],
             "write_bytes": [write_bytes],
         }
