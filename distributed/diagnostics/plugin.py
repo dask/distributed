@@ -389,7 +389,7 @@ class UploadDirectory(NannyPlugin):
                 self.data = f.read()
 
     async def setup(self, nanny):
-        fn = os.path.join(nanny.local_directory, "tmp.zip")  # TODO: add random suffix
+        fn = os.path.join(nanny.local_directory, f"tmp-{str(uuid.uuid4())}.zip")
         with open(fn, "wb") as f:
             f.write(self.data)
 
