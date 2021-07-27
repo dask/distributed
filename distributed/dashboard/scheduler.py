@@ -20,6 +20,7 @@ from .components.scheduler import (
     TaskProgress,
     TaskStream,
     WorkerNetworkBandwidth,
+    WorkerNetworkBandwidthTimeseries,
     WorkersMemory,
     WorkerTable,
     events_doc,
@@ -70,6 +71,9 @@ applications = {
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
     "/individual-workers-network-bandwidth": individual_doc(
         WorkerNetworkBandwidth, 500
+    ),
+    "/individual-workers-network-bandwidth-timeseries": individual_doc(
+        WorkerNetworkBandwidthTimeseries, 500
     ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),

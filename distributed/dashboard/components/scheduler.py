@@ -814,6 +814,81 @@ class WorkerNetworkBandwidth(DashboardComponent):
             update(self.source, result)
 
 
+class WorkerNetworkBandwidthTimeseries(DashboardComponent):
+    """Timeseries for worker network bandwidth
+
+    Plots average read_bytes and write_bytes for the workers
+    as a function of time.
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "time": [],
+                    "read_bytes": [],
+                    "write_bytes": [],
+                }
+            )
+
+            update(self.source, self.get_data())
+
+            x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
+
+            self.root = figure(
+                title="Worker Network Bandwidth Timeseries",
+                x_axis_type="datetime",
+                tools="",
+                x_range=x_range,
+                id="bk-worker-net-bandwidth-ts",
+                name="worker_network_bandwidth-timeseries",
+                **kwargs,
+            )
+
+            self.root.line(
+                source=self.source,
+                x="time",
+                y="read_bytes",
+                color="red",
+                legend_label="read",
+            )
+            self.root.line(
+                source=self.source,
+                x="time",
+                y="write_bytes",
+                color="blue",
+                legend_label="write",
+            )
+
+        self.root.yaxis.axis_label = "Bytes / second"
+
+        self.root.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+
+    def get_data(self):
+        workers = self.scheduler.workers.values()
+
+        read_bytes = 0
+        write_bytes = 0
+        time = 0
+        for ws in workers:
+            read_bytes += ws.metrics["read_bytes"]
+            write_bytes += ws.metrics["write_bytes"]
+            time += ws.metrics["time"]
+
+        result = {
+            "time": [time / len(workers)],
+            "read_bytes": [read_bytes / len(workers)],
+            "write_bytes": [write_bytes / len(workers)],
+        }
+        return result
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            self.source.stream(self.get_data(), 1000)
+
+
 class ComputePerKey(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
 
