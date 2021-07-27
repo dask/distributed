@@ -409,24 +409,21 @@ class Nanny(ServerNode):
 
             assert name
 
-            if name in self.plugins:
-                return {"status": "repeat"}
-            else:
-                self.plugins[name] = plugin
+            self.plugins[name] = plugin
 
-                logger.info("Starting Nanny plugin %s" % name)
-                if hasattr(plugin, "setup"):
-                    try:
-                        result = plugin.setup(nanny=self)
-                        if isawaitable(result):
-                            result = await result
-                    except Exception as e:
-                        msg = error_message(e)
-                        return msg
-                if getattr(plugin, "restart", False):
-                    await self.restart()
+            logger.info("Starting Nanny plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+            if getattr(plugin, "restart", False):
+                await self.restart()
 
-                return {"status": "OK"}
+            return {"status": "OK"}
 
     async def plugin_remove(self, comm=None, name=None):
         with log_errors(pdb=False):
