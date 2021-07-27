@@ -6,7 +6,7 @@ import sys
 import uuid
 import zipfile
 
-from dask.utils import funcname
+from dask.utils import funcname, tmpfile
 
 logger = logging.getLogger(__name__)
 
@@ -366,23 +366,24 @@ class UploadDirectory(NannyPlugin):
         self.restart = restart
         self.update_path = update_path
 
-        with zipfile.ZipFile("tmp.zip", "w", zipfile.ZIP_DEFLATED) as z:
-            for root, dirs, files in os.walk(path):
-                for file in files:
-                    filename = os.path.join(root, file)
-                    if any(predicate(filename) for predicate in skip):
-                        continue
-                    dirs = filename.split(os.sep)
-                    if any(word in dirs for word in skip_words):
-                        continue
+        with tmpfile(extension="zip") as fn:
+            with zipfile.ZipFile(fn, "w", zipfile.ZIP_DEFLATED) as z:
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        filename = os.path.join(root, file)
+                        if any(predicate(filename) for predicate in skip):
+                            continue
+                        dirs = filename.split(os.sep)
+                        if any(word in dirs for word in skip_words):
+                            continue
 
-                    archive_name = os.path.relpath(
-                        os.path.join(root, file), os.path.join(path, "..")
-                    )
-                    z.write(filename, archive_name)
+                        archive_name = os.path.relpath(
+                            os.path.join(root, file), os.path.join(path, "..")
+                        )
+                        z.write(filename, archive_name)
 
-        with open("tmp.zip", "rb") as f:
-            self.data = f.read()
+            with open(fn, "rb") as f:
+                self.data = f.read()
 
     async def setup(self, nanny):
         fn = os.path.join(nanny.local_directory, "tmp.zip")  # TODO: add random suffix
@@ -398,3 +399,5 @@ class UploadDirectory(NannyPlugin):
             path = os.path.join(nanny.local_directory, self.path)
             if path not in sys.path:
                 sys.path.insert(0, path)
+
+        os.remove(fn)

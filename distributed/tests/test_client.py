@@ -6911,6 +6911,8 @@ async def test_computation_object_code_client_compute(c, s, a, b):
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
 
+    files = set(os.listdir())
+
     with open(tmp_path / "foo.py", "w") as f:
         f.write("x = 123")
     with open(tmp_path / "bar.py", "w") as f:
@@ -6931,3 +6933,5 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     async with Nanny(s.address, local_directory=tmp_path / "foo", name="foo") as n:
         results = await c.run(f)
         assert results[n.worker_address] == 123
+
+    assert files == set(os.listdir())  # no change
