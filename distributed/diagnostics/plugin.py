@@ -198,7 +198,6 @@ class NannyPlugin:
     """
 
     restart = False
-    
 
     def setup(self, nanny):
         """
@@ -352,8 +351,6 @@ class UploadDirectory(NannyPlugin):
     >>> client.register_worker_plugin(UploadFile("/path/to/file.py"))  # doctest: +SKIP
     """
 
-    name = "upload_directory"
-
     def __init__(
         self,
         path,
@@ -369,6 +366,8 @@ class UploadDirectory(NannyPlugin):
         self.path = os.path.split(path)[-1]
         self.restart = restart
         self.update_path = update_path
+
+        self.name = "upload-directory-" + os.path.split(path)[-1]
 
         with tmpfile(extension="zip") as fn:
             with zipfile.ZipFile(fn, "w", zipfile.ZIP_DEFLATED) as z:

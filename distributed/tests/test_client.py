@@ -6921,6 +6921,9 @@ async def test_upload_directory(c, s, a, b, tmp_path):
     plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
     await c.register_worker_plugin(plugin)
 
+    [name] = a.plugins
+    assert os.path.split(tmp_path)[-1] in name
+
     def f():
         import bar
 
