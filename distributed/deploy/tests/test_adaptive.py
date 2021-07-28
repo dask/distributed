@@ -1,7 +1,6 @@
 import asyncio
 import gc
 import math
-from multiprocessing.context import ProcessError
 from time import sleep
 
 import pytest
@@ -10,11 +9,18 @@ import dask
 
 from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
 from distributed.metrics import time
-from distributed.utils_test import async_wait_for, clean, gen_test, slowinc, captured_logger
+from distributed.utils_test import (
+    async_wait_for,
+    captured_logger,
+    clean,
+    gen_test,
+    slowinc,
+)
+
 
 class MyAdaptive(Adaptive):
-    def __init__(self, interval=None, cluster = None, *args,  **kwargs):
-        super().__init__(interval=interval, cluster = cluster, *args,  **kwargs)
+    def __init__(self, interval=None, cluster=None, *args, **kwargs):
+        super().__init__(interval=interval, cluster=cluster, *args, **kwargs)
         self._target = 0
         self._log = []
         self._plan = set()
@@ -32,7 +38,7 @@ class MyAdaptive(Adaptive):
     @property
     def requested(self):
         return self._requested
-    
+
     @requested.setter
     def requested(self, value):
         self._requested = value
@@ -48,7 +54,7 @@ class MyAdaptive(Adaptive):
     async def target(self):
         return self._target
 
-    async def workers_to_close(self, target: int) -> list: 
+    async def workers_to_close(self, target: int) -> list:
         """
         Give a list of workers to close that brings us down to target workers
         """
@@ -56,12 +62,13 @@ class MyAdaptive(Adaptive):
         return list(self.observed)[target:]
 
     async def scale_up(self, n=0):
-        self.plan = self.requested = set(range(n)) 
+        self.plan = self.requested = set(range(n))
 
     async def scale_down(self, workers=()):
         for collection in [self.plan, self.requested, self.observed]:
             for w in workers:
                 collection.discard(w)
+
 
 @pytest.mark.asyncio
 async def test_safe_target():
@@ -73,7 +80,7 @@ async def test_safe_target():
         dashboard_address=None,
         asynchronous=True,
     ) as cluster:
-        adapt = MyAdaptive(cluster = cluster, minimum=1, maximum=4)
+        adapt = MyAdaptive(cluster=cluster, minimum=1, maximum=4)
         assert await adapt.safe_target() == 1
         adapt._target = 10
         assert await adapt.safe_target() == 4
@@ -89,7 +96,7 @@ async def test_scale_up():
         dashboard_address=None,
         asynchronous=True,
     ) as cluster:
-        adapt = MyAdaptive(cluster = cluster, minimum=1, maximum=4)
+        adapt = MyAdaptive(cluster=cluster, minimum=1, maximum=4)
         await adapt.adapt()
         assert adapt.log[-1][1] == {"status": "up", "n": 1}
         assert adapt.plan == {0}
@@ -144,7 +151,7 @@ async def test_interval():
         dashboard_address=None,
         asynchronous=True,
     ) as cluster:
-        adapt = MyAdaptive(interval="5 ms", cluster = cluster)
+        adapt = MyAdaptive(interval="5 ms", cluster=cluster)
         assert not adapt.plan
 
         for i in [0, 3, 1]:
@@ -169,9 +176,9 @@ async def test_adapt_oserror_safe_target():
 
         We use this to check that error handling works properly
         """
-        
-        def __init__(self, interval=None, cluster = None, *args,  **kwargs):
-            super().__init__(interval=interval, cluster = cluster, *args,  **kwargs)
+
+        def __init__(self, interval=None, cluster=None, *args, **kwargs):
+            super().__init__(interval=interval, cluster=cluster, *args, **kwargs)
             self._plan = set()
             self._requested = set()
 
@@ -186,7 +193,7 @@ async def test_adapt_oserror_safe_target():
         @property
         def requested(self):
             return self._requested
-        
+
         @requested.setter
         def requested(self, value):
             self._requested = value
@@ -237,7 +244,9 @@ async def test_adapt_oserror_scale():
         dashboard_address=None,
         asynchronous=True,
     ) as cluster:
-        adapt = BadAdaptive(interval="10ms", cluster = cluster, minimum=1, maximum=4, wait_count=0)
+        adapt = BadAdaptive(
+            interval="10ms", cluster=cluster, minimum=1, maximum=4, wait_count=0
+        )
         adapt._target = 2
         while not adapt.periodic_callback.is_running():
             await asyncio.sleep(0.01)

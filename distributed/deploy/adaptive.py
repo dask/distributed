@@ -1,23 +1,21 @@
 import collections
-
 import logging
 from inspect import isawaitable
+
+import tlz as toolz
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
 from dask.utils import parse_timedelta
 
-from tornado.ioloop import IOLoop, PeriodicCallback
-import tlz as toolz
-
+from ..metrics import time
 from ..protocol import pickle
 from ..utils import log_errors
-
-from ..metrics import time
 
 logger = logging.getLogger(__name__)
 
 
-class Adaptive():
+class Adaptive:
     '''
     Adaptively allocate workers based on scheduler load.  A superclass.
 
@@ -94,7 +92,7 @@ class Adaptive():
         worker_key=None,
         **kwargs,
     ):
-        self.cluster = cluster  
+        self.cluster = cluster
         self.worker_key = worker_key
         self._workers_to_close_kwargs = kwargs
 
@@ -138,14 +136,12 @@ class Adaptive():
             except AttributeError:
                 IOLoop.current().add_callback(f)
 
-
-        # internal state 
+        # internal state
         self.close_counts = collections.defaultdict(int)
         self._adapting = False
         self.log = collections.deque(maxlen=10000)
 
         logger.info("Adaptive scaling started: minimum=%s maximum=%s", minimum, maximum)
-
 
     @property
     def scheduler(self):
@@ -190,7 +186,7 @@ class Adaptive():
         return await self.scheduler.adaptive_target(
             target_duration=self.target_duration
         )
-    
+
     async def recommendations_helper(self, target: int) -> dict:
         plan = self.plan
         requested = self.requested
@@ -229,7 +225,6 @@ class Adaptive():
             else:
                 return {"status": "same"}
 
-
     async def recommendations(self, target: int) -> dict:
         """
         Make scale up/down recommendations based on current state and target
@@ -240,7 +235,6 @@ class Adaptive():
             await self.cluster
 
         return await self.recommendations_helper(target)
-
 
     async def workers_to_close(self, target: int):
         """
