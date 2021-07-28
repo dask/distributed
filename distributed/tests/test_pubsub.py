@@ -10,7 +10,7 @@ from distributed.metrics import time
 from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_speed(c, s, a, b):
     """
     This tests how quickly we can move messages back and forth

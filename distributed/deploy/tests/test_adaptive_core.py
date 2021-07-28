@@ -85,10 +85,10 @@ async def test_interval():
             assert time() < start + 2
 
     adapt.stop()
-    await asyncio.sleep(0.050)
+    await asyncio.sleep(0.05)
 
     adapt._target = 10
-    await asyncio.sleep(0.020)
+    await asyncio.sleep(0.02)
     assert len(adapt.plan) == 1  # last value from before, unchanged
 
 

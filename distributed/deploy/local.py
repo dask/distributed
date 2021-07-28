@@ -136,8 +136,8 @@ class LocalCluster(SpecCluster):
 
         if threads_per_worker == 0:
             warnings.warn(
-                "Setting `threads_per_worker` to 0 is discouraged. "
-                "Please set to None or to a specific int to get best behavior."
+                "Setting `threads_per_worker` to 0 has been deprecated. "
+                "Please set to None or to a specific int."
             )
             threads_per_worker = None
 

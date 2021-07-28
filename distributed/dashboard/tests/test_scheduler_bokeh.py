@@ -17,7 +17,6 @@ from dask.core import flatten
 from dask.utils import stringify
 
 from distributed.client import wait
-from distributed.compatibility import MACOS
 from distributed.dashboard import scheduler
 from distributed.dashboard.components.scheduler import (
     AggregateAction,
@@ -36,6 +35,7 @@ from distributed.dashboard.components.scheduler import (
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
     WorkersMemory,
     WorkersMemoryHistogram,
     WorkerTable,
@@ -58,7 +58,7 @@ async def test_simple(c, s, a, b):
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
-        response = await http_client.fetch("http://localhost:%d%s" % (port, suffix))
+        response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
@@ -93,10 +93,8 @@ async def test_counters(c, s, a, b):
     await asyncio.sleep(0.1)
     ss.update()
 
-    start = time()
     while not len(ss.digest_sources["tick-duration"][0].data["x"]):
-        await asyncio.sleep(1)
-        assert time() < start + 5
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -184,7 +182,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
 
     await wait(c.map(inc, range(10)))
     ts.update()
-    await asyncio.sleep(0.010)
+    await asyncio.sleep(0.01)
     await wait(c.map(dec, range(10)))
     ts.update()
 
@@ -192,7 +190,7 @@ async def test_task_stream_clear_interval(c, s, a, b):
     assert ts.source.data["name"].count("inc") == 10
     assert ts.source.data["name"].count("dec") == 10
 
-    await asyncio.sleep(0.300)
+    await asyncio.sleep(0.3)
     await wait(c.map(inc, range(10, 20)))
     ts.update()
 
@@ -477,6 +475,37 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
     assert wt.source.data["name"][0] == "Total (2)"
     assert wt.source.data["memory_limit"][0] == 0
     assert wt.source.data["memory_percent"][0] == ""
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth(c, s, a, b):
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    assert all(len(v) == 2 for v in nb.source.data.values())
+
+    assert nb.source.data["y_read"] == [0.75, 1.85]
+    assert nb.source.data["y_write"] == [0.25, 1.35]
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
 
 
 @gen_cluster(client=True)
@@ -848,7 +877,6 @@ async def test_aggregate_action(c, s, a, b):
     assert ("compute") in mbk.action_source.data["names"]
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=MACOS)
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})
 async def test_compute_per_key(c, s, a, b):
     mbk = ComputePerKey(s)

@@ -26,6 +26,8 @@ from distributed.utils_test import (
     slowinc,
 )
 
+pytestmark = pytest.mark.ci1
+
 
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
@@ -65,6 +67,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
     assert result == sum(map(inc, range(10)))
 
 
+@pytest.mark.slow
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -75,12 +78,8 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
-@gen_cluster(
-    client=True,
-    Worker=Nanny,
-    nthreads=[("127.0.0.1", 1)] * 4,
-    config={"distributed.comm.timeouts.connect": "1s"},
-)
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1)] * 4, timeout=60)
 async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     L = c.map(inc, range(20))
     await wait(L)
@@ -88,7 +87,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     w.process.process._process.terminate()
     total = c.submit(sum, L)
 
-    for i in range(3):
+    for _ in range(3):
         await wait(total)
         addr = first(s.tasks[total.key].who_has).address
         for worker in [x, y, z]:
@@ -101,7 +100,7 @@ async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
 
 
 @pytest.mark.xfail(COMPILED, reason="Fails with cythonized scheduler")
-@gen_cluster(Worker=Nanny, timeout=60, client=True)
+@gen_cluster(Worker=Nanny, client=True, timeout=60)
 async def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
     await wait(L)
@@ -298,18 +297,20 @@ async def test_multiple_clients_restart(s, a, b):
     await c2.close()
 
 
-@pytest.mark.flaky(reruns=10, reruns_timeout=5, condition=MACOS)
 @gen_cluster(Worker=Nanny, timeout=60)
 async def test_restart_scheduler(s, a, b):
-    import gc
-
-    gc.collect()
-    addrs = (a.worker_address, b.worker_address)
-    await s.restart()
     assert len(s.nthreads) == 2
-    addrs2 = (a.worker_address, b.worker_address)
+    pids = (a.pid, b.pid)
+    assert pids[0]
+    assert pids[1]
 
-    assert addrs != addrs2
+    await s.restart()
+
+    assert len(s.nthreads) == 2
+    pids2 = (a.pid, b.pid)
+    assert pids2[0]
+    assert pids2[1]
+    assert pids != pids2
 
 
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
@@ -325,6 +326,8 @@ async def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     await y
 
 
+@pytest.mark.slow
+@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 async def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
@@ -404,14 +407,13 @@ class SlowTransmitData:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     n = await Nanny(s.address, nthreads=2, loop=s.loop)
 
-    start = time()
     while len(s.nthreads) < 3:
         await asyncio.sleep(0.01)
-        assert time() < start + 5
 
     def slow_ser(x, delay):
         return SlowTransmitData(x, delay=delay)
@@ -497,7 +499,7 @@ async def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger("distributed.scheduler") as sio:
         future = c.submit(sleep, 3600)
         await asyncio.sleep(0.1)
-        await c.restart(timeout=20)
+        await c.restart()
 
     text = sio.getvalue()
     assert "timeout" not in text.lower()
@@ -547,7 +549,7 @@ class SlowDeserialize:
         return parse_bytes(dask.config.get("distributed.comm.offload")) + 1
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_handle_superfluous_data(c, s, a, b):
     """
     See https://github.com/dask/distributed/pull/4784#discussion_r649210094
