@@ -75,13 +75,13 @@ applications = {
     "/individual-workers-network-bandwidth-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="bandwidth"
     ),
-    "/individual-workers-network-cpu-timeseries": individual_doc(
+    "/individual-workers-cpu-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="cpu"
     ),
-    "/individual-workers-network-memory-timeseries": individual_doc(
+    "/individual-workers-memory-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="memory"
     ),
-    "/individual-workers-network-disk-timeseries": individual_doc(
+    "/individual-workers-disk-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="disk"
     ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
