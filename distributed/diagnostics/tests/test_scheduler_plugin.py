@@ -115,11 +115,12 @@ async def test_async_add_remove_worker(s):
 
     plugin = UnnamedPlugin()
     s.add_plugin(plugin)
+    s.add_plugin(plugin, name="another")
     with pytest.raises(ValueError) as excinfo:
         s.remove_plugin(plugin)
 
     msg = str(excinfo.value)
-    assert "otherwise removal must be by name argument." in msg
+    assert "Multiple instances of" in msg
 
 
 @pytest.mark.asyncio
@@ -146,6 +147,8 @@ async def test_lifecycle(cleanup):
 @gen_cluster(client=True)
 async def test_register_scheduler_plugin(c, s, a, b):
     class Dummy1(SchedulerPlugin):
+        name = "Dummy1"
+
         def start(self, scheduler):
             scheduler.foo = "bar"
 
@@ -153,7 +156,13 @@ async def test_register_scheduler_plugin(c, s, a, b):
     await c.register_scheduler_plugin(Dummy1)
     assert s.foo == "bar"
 
+    with pytest.warns(UserWarning) as w:
+        await c.register_scheduler_plugin(Dummy1)
+    assert "Scheduler already contains" in w[0].message.args[0]
+
     class Dummy2(SchedulerPlugin):
+        name = "Dummy2"
+
         def start(self, scheduler):
             raise RuntimeError("raising in start method")
 

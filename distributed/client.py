@@ -4059,6 +4059,9 @@ class Client:
         ----------
         plugin : SchedulerPlugin
             Plugin class or object to pass to the scheduler.
+        name : str
+            Name for the plugin; if None, a name is taken from the
+            plugin instance or automatically generated if not present.
         **kwargs : Any
             Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).

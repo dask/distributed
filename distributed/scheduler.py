@@ -5399,10 +5399,25 @@ class Scheduler(SchedulerState, ServerNode):
                 await self.remove_worker(address=worker)
 
     def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
-        """
-        Add external plugin to scheduler
+        """Add external plugin to scheduler.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
+
+        Paramters
+        ---------
+        plugin : SchedulerPlugin
+            SchedulerPlugin class to add (can also be an instance)
+        idempotent : bool
+            If true, the plugin is assumed to already exist and no
+            action is taken.
+        name : str
+            A name for the plugin, if None, the name attribute is
+            checked on the Plugin instance and generated if not
+            discovered.
+        **kwargs
+            Additional arguments passed to the `plugin` class if it is
+            not already an instance.
+
         """
         if isinstance(plugin, type):
             plugin = plugin(self, **kwargs)
@@ -5410,7 +5425,12 @@ class Scheduler(SchedulerState, ServerNode):
         if name is None:
             name = _get_plugin_name(plugin)
 
-        if self.has_plugin(name):
+        if name in self.plugins:
+            warnings.warn(
+                f"Scheduler already contains a plugin with name {name}; "
+                "no action is being taken.",
+                category=UserWarning,
+            )
             return
 
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
@@ -5419,20 +5439,41 @@ class Scheduler(SchedulerState, ServerNode):
         self.plugins[name] = plugin
 
     def remove_plugin(self, plugin=None, name=None):
-        """Remove external plugin from scheduler"""
-        if plugin is None and name is not None:
+        """Remove external plugin from scheduler
+
+        Paramters
+        ---------
+        plugin : SchedulerPlugin
+            Deprecated; use `name` argument instead. Instance of a
+            SchedulerPlugin class to remove;
+        name : str
+            Name of the plugin to remove
+
+        """
+        if plugin is not None:
+            warnings.warn(
+                "Removing scheduler plugins by value is deprecated and will be disabled "
+                "in a future release. Please remove scheduler plugins by name instead.",
+                category=FutureWarning,
+            )
+        if name is not None:
             self.plugins.pop(name)
         elif hasattr(plugin, "name"):
             self.plugins.pop(plugin.name)
         else:
-            raise ValueError(
-                "Plugins removed by instance must have a name attribute, "
-                "otherwise removal must be by name argument."
-            )
-
-    def has_plugin(self, name):
-        """Check if plugin exists by name."""
-        return name in self.plugins.keys()
+            # TODO: Remove this block of code once removing plugins by value is disabled
+            if plugin in self.plugins.values():
+                if sum(plugin is p for p in self.plugins.values()) > 1:
+                    raise ValueError(
+                        f"Multiple instances of {plugin} were found in the current scheduler "
+                        "plugins, we cannot remove this plugin."
+                    )
+                else:
+                    warnings.warn(
+                        "Removing scheduler plugins by value is deprecated and will be disabled "
+                        "in a future release. Please remove scheduler plugins by name instead.",
+                        category=FutureWarning,
+                    )
 
     async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
