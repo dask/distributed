@@ -43,7 +43,7 @@ from distributed.utils_test import (
     tls_only_security,
     varying,
 )
-from distributed.worker import dumps_function, dumps_task
+from distributed.worker import dumps_function, dumps_task, get_worker
 
 if sys.version_info < (3, 8):
     try:
@@ -2182,8 +2182,13 @@ async def test_gather_no_workers(c, s, a, b):
     assert list(res["keys"]) == ["x"]
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("reschedule_different_worker", [True, False])
+@pytest.mark.parametrize("swap_data_insert_order", [True, False])
 @gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
-async def test_gather_allow_worker_reconnect(c, s, a, b):
+async def test_gather_allow_worker_reconnect(
+    c, s, a, b, reschedule_different_worker, swap_data_insert_order
+):
     """
     Test that client resubmissions allow failed workers to reconnect and re-use
     their results. Failure scenario would be a connection issue during result
@@ -2191,29 +2196,53 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     Upon connection failure, the worker is flagged as suspicious and removed
     from the scheduler. If the worker is healthy and reconnencts we want to use
     its results instead of recomputing them.
+
+    See also distributed.tests.test_worker.py::test_worker_reconnects_mid_compute
     """
     # GH3246
-    already_calculated = []
+    if reschedule_different_worker:
+        from distributed.diagnostics.plugin import SchedulerPlugin
 
-    import time
+        class SwitchRestrictions(SchedulerPlugin):
+            def __init__(self, scheduler):
+                self.scheduler = scheduler
 
-    def inc_slow(x):
-        # Once the graph below is rescheduled this computation runs again. We
-        # need to sleep for at least 0.5 seconds to give the worker a chance to
-        # reconnect (Heartbeat timing). In slow CI situations, the actual
-        # reconnect might take a bit longer, therefore wait more
-        if x in already_calculated:
-            time.sleep(2)
-        already_calculated.append(x)
+            def transition(self, key, start, finish, **kwargs):
+                if key in ("reducer", "final") and finish == "memory":
+                    self.scheduler.tasks[key]._worker_restrictions = {b.address}
+
+        plugin = SwitchRestrictions(s)
+        s.add_plugin(plugin)
+
+    from distributed import Lock
+
+    b_address = b.address
+
+    def inc_slow(x, lock):
+        w = get_worker()
+        if w.address == b_address:
+            with lock:
+                return x + 1
         return x + 1
 
-    x = c.submit(inc_slow, 1)
-    y = c.submit(inc_slow, 2)
+    lock = Lock()
 
-    def reducer(x, y):
-        return x + y
+    await lock.acquire()
 
-    z = c.submit(reducer, x, y)
+    x = c.submit(inc_slow, 1, lock, workers=[a.address], allow_other_workers=True)
+
+    def reducer(*args):
+        return get_worker().address
+
+    def finalizer(addr):
+        if swap_data_insert_order:
+            w = get_worker()
+            new_data = {k: w.data[k] for k in list(w.data.keys())[::-1]}
+            w.data = new_data
+        return addr
+
+    z = c.submit(reducer, x, key="reducer", workers=[a.address])
+    fin = c.submit(finalizer, z, key="final", workers=[a.address])
 
     s.rpc = await FlakyConnectionPool(failing_connections=1)
 
@@ -2227,9 +2256,31 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
         ) as client_logger:
             # Gather using the client (as an ordinary user would)
             # Upon a missing key, the client will reschedule the computations
-            res = await c.gather(z)
+            res = None
+            while not res:
+                try:
+                    # This reduces test runtime by about a second since we're
+                    # depending on a worker heartbeat for a reconnect.
+                    res = await asyncio.wait_for(fin, 0.1)
+                except asyncio.TimeoutError:
+                    await a.heartbeat()
 
-    assert res == 5
+    # Ensure that we're actually reusing the result
+    assert res == a.address
+    await lock.release()
+
+    while not all(all(ts.state == "memory" for ts in w.tasks.values()) for w in [a, b]):
+        await asyncio.sleep(0.01)
+
+    assert z.key in a.tasks
+    assert z.key not in b.tasks
+    assert b.executed_count == 1
+    for w in [a, b]:
+        assert x.key in w.tasks
+        assert w.tasks[x.key].state == "memory"
+    while not len(s.tasks[x.key].who_has) == 2:
+        await asyncio.sleep(0.01)
+    assert len(s.tasks[z.key].who_has) == 1
 
     sched_logger = sched_logger.getvalue()
     client_logger = client_logger.getvalue()
@@ -2244,24 +2295,6 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     # There will also be a `Unexpected worker completed task` message but this
     # is rather an artifact and not the intention
     assert "Workers don't have promised key" in sched_logger
-
-    # Once the worker reconnects, it will also submit the keys it holds such
-    # that the scheduler again knows about the result.
-    # The final reduce step should then be used from the re-connected worker
-    # instead of recomputing it.
-    transitions_to_processing = [
-        (key, start, timestamp)
-        for key, start, finish, recommendations, timestamp in s.transition_log
-        if finish == "processing" and "reducer" in key
-    ]
-    assert len(transitions_to_processing) == 1
-
-    finish_processing_transitions = 0
-    for transition in s.transition_log:
-        key, start, finish, recommendations, timestamp = transition
-        if "reducer" in key and finish == "processing":
-            finish_processing_transitions += 1
-    assert finish_processing_transitions == 1
 
 
 @gen_cluster(client=True)
