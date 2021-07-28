@@ -459,7 +459,7 @@ def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=
 
     When ``frames`` contains memoryviews that share an underlying buffer,
     ``memoryview_offset`` must be the index into that underlying buffer
-    where the ``frames`` starts (in bytes, not frame counts).
+    where the ``frames`` start (in bytes, not frame counts).
 
     See Also
     --------

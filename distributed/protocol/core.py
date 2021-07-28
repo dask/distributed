@@ -108,7 +108,7 @@ def loads(frames, deserialize=True, deserializers=None):
                     if sub_frames and isinstance(sub_frames[0], memoryview):
                         obj = sub_frames[0].obj
                         for f in reversed(frames[:offset]):
-                            if not (isinstance(f, memoryview) and f.obj is obj):
+                            if not isinstance(f, memoryview) or f.obj is not obj:
                                 break
                             memoryview_offset += len(f)
 
