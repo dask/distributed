@@ -183,7 +183,8 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert result.count(False) == 9
 
 
-@gen_cluster(client=True)
+@pytest.mark.slow
+@gen_cluster(client=True, timeout=120)
 async def test_close_async(c, s, a, b):
     sem = await Semaphore(name="test")
 
@@ -515,7 +516,9 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
             "distributed.scheduler.locks.lease-timeout": 0.1,
         }
     ):
-        with Client(processes=False, threads_per_worker=4) as client:
+        with Client(
+            processes=False, dashboard_address=":0", threads_per_worker=4
+        ) as client:
             sem = Semaphore(max_leases=1, name="database")
             protected_resource = []
 

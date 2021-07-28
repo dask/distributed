@@ -48,8 +48,7 @@ async def test_dataframes(c, s, a, b):
     )
     ldf = dd.from_pandas(df, npartitions=10)
 
-    rdf = c.persist(ldf)
-
+    rdf = await c.persist(ldf)
     assert rdf.divisions == ldf.divisions
 
     remote = c.compute(rdf)

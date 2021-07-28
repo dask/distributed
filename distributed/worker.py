@@ -699,6 +699,7 @@ class Worker(ServerNode):
         stream_handlers = {
             "close": self.close,
             "compute-task": self.add_task,
+            "cancel-compute": self.cancel_compute,
             "free-keys": self.handle_free_keys,
             "superfluous-data": self.handle_superfluous_data,
             "steal-request": self.steal_request,
@@ -901,7 +902,14 @@ class Worker(ServerNode):
                         keys=list(self.data),
                         nthreads=self.nthreads,
                         name=self.name,
-                        nbytes={ts.key: ts.get_nbytes() for ts in self.tasks.values()},
+                        nbytes={
+                            ts.key: ts.get_nbytes()
+                            for ts in self.tasks.values()
+                            # Only if the task is in memory this is a sensible
+                            # result since otherwise it simply submits the
+                            # default value
+                            if ts.state == "memory"
+                        },
                         types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
@@ -1543,6 +1551,22 @@ class Worker(ServerNode):
     ###################
     # Task Management #
     ###################
+
+    def cancel_compute(self, key, reason):
+        """
+        Cancel a task on a best effort basis. This is only possible while a task
+        is in state `waiting` or `ready`.
+        Nothing will happen otherwise.
+        """
+        ts = self.tasks.get(key)
+        if ts and ts.state in ("waiting", "ready"):
+            self.log.append((key, "cancel-compute", reason))
+            ts.scheduler_holds_ref = False
+            # All possible dependents of TS should not be in state Processing on
+            # scheduler side and therefore should not be assigned to a worker,
+            # yet.
+            assert not ts.dependents
+            self.release_key(key, reason=reason, report=False)
 
     def add_task(
         self,

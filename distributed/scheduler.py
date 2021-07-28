@@ -2696,7 +2696,13 @@ class SchedulerState:
                     ws,
                     key,
                 )
-                return recommendations, client_msgs, worker_msgs
+                worker_msgs[ts._processing_on.address] = [
+                    {
+                        "op": "cancel-compute",
+                        "key": key,
+                        "reason": "Finished on different worker",
+                    }
+                ]
 
             has_compute_startstop: bool = False
             compute_start: double
@@ -3691,6 +3697,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         self.event_counts = defaultdict(int)
         self.worker_plugins = dict()
+        self.nanny_plugins = dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3721,6 +3728,7 @@ class Scheduler(SchedulerState, ServerNode):
             "register-client": self.add_client,
             "scatter": self.scatter,
             "register-worker": self.add_worker,
+            "register_nanny": self.add_nanny,
             "unregister": self.remove_worker,
             "gather": self.gather,
             "cancel": self.stimulus_cancel,
@@ -3760,6 +3768,8 @@ class Scheduler(SchedulerState, ServerNode):
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
+            "register_nanny_plugin": self.register_nanny_plugin,
+            "unregister_nanny_plugin": self.unregister_nanny_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -4230,19 +4240,25 @@ class Scheduler(SchedulerState, ServerNode):
             client_msgs: dict = {}
             worker_msgs: dict = {}
             if nbytes:
+                assert isinstance(nbytes, dict)
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
-                    if ts is not None and ts._state in ("processing", "waiting"):
-                        t: tuple = parent._transition(
-                            key,
-                            "memory",
-                            worker=address,
-                            nbytes=nbytes[key],
-                            typename=types[key],
-                        )
-                        recommendations, client_msgs, worker_msgs = t
-                        parent._transitions(recommendations, client_msgs, worker_msgs)
-                        recommendations = {}
+                    if ts is not None:
+                        if ts.state == "memory":
+                            self.add_keys(worker=address, keys=[key])
+                        else:
+                            t: tuple = parent._transition(
+                                key,
+                                "memory",
+                                worker=address,
+                                nbytes=nbytes[key],
+                                typename=types[key],
+                            )
+                            recommendations, client_msgs, worker_msgs = t
+                            parent._transitions(
+                                recommendations, client_msgs, worker_msgs
+                            )
+                            recommendations = {}
 
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
@@ -4284,7 +4300,15 @@ class Scheduler(SchedulerState, ServerNode):
 
             if comm:
                 await comm.write(msg)
+
             await self.handle_worker(comm=comm, worker=address)
+
+    async def add_nanny(self, comm):
+        msg = {
+            "status": "OK",
+            "nanny-plugins": self.nanny_plugins,
+        }
+        return msg
 
     def update_graph_hlg(
         self,
@@ -4647,10 +4671,15 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return recommendations, client_msgs, worker_msgs
+
+        if ts.state == "memory":
+            self.add_keys(worker=worker, keys=[key])
+            return recommendations, client_msgs, worker_msgs
+
         ws: WorkerState = parent._workers_dv[worker]
         ts._metadata.update(kwargs["metadata"])
 
-        if ts._state == "processing":
+        if ts._state != "released":
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
@@ -5627,12 +5656,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # Remove suspicious workers from the scheduler but allow them to
                 # reconnect.
                 await asyncio.gather(
-                    *[
+                    *(
                         self.remove_worker(address=worker, close=False)
                         for worker in missing_workers
-                    ]
+                    )
                 )
-
                 recommendations: dict
                 client_msgs: dict = {}
                 worker_msgs: dict = {}
@@ -6995,6 +7023,28 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError(f"The worker plugin {name} does not exists")
 
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
+        return responses
+
+    async def register_nanny_plugin(self, comm, plugin, name=None):
+        """Registers a setup function, and call it on every worker"""
+        self.nanny_plugins[name] = plugin
+
+        responses = await self.broadcast(
+            msg=dict(op="plugin_add", plugin=plugin, name=name),
+            nanny=True,
+        )
+        return responses
+
+    async def unregister_nanny_plugin(self, comm, name):
+        """Unregisters a worker plugin"""
+        try:
+            self.nanny_plugins.pop(name)
+        except KeyError:
+            raise ValueError(f"The nanny plugin {name} does not exists")
+
+        responses = await self.broadcast(
+            msg=dict(op="plugin_remove", name=name), nanny=True
+        )
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):

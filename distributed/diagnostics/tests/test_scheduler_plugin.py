@@ -1,7 +1,7 @@
 import pytest
 
 from distributed import Scheduler, SchedulerPlugin, Worker
-from distributed.utils_test import gen_cluster, inc
+from distributed.utils_test import gen_cluster, gen_test, inc
 
 
 @gen_cluster(client=True)
@@ -123,8 +123,8 @@ async def test_async_add_remove_worker(s):
     assert "Multiple instances of" in msg
 
 
-@pytest.mark.asyncio
-async def test_lifecycle(cleanup):
+@gen_test()
+async def test_lifecycle():
     class LifeCycle(SchedulerPlugin):
         def __init__(self):
             self.history = []
@@ -137,7 +137,7 @@ async def test_lifecycle(cleanup):
             self.history.append("closed")
 
     plugin = LifeCycle()
-    async with Scheduler(plugins=[plugin]) as s:
+    async with Scheduler(plugins=[plugin], dashboard_address=":0") as s:
         pass
 
     assert plugin.history == ["started", "closed"]
