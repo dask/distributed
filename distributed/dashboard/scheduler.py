@@ -81,6 +81,9 @@ applications = {
     "/individual-workers-network-memory-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="memory"
     ),
+    "/individual-workers-network-disk-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="disk"
+    ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),
     "/individual-aggregate-time-per-action": individual_doc(AggregateAction, 500),

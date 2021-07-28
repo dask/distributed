@@ -535,6 +535,12 @@ async def test_SystemTimeseries(c, s, a, b):
     assert systs.source.data["memory"][0] == sum(
         [ws.metrics["memory"] for ws in workers]
     )
+    assert systs.source.data["read_bytes_disk"][0] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    )
+    assert systs.source.data["write_bytes_disk"][0] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
+    )
     assert (
         systs.source.data["time"][0]
         == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
@@ -556,6 +562,12 @@ async def test_SystemTimeseries(c, s, a, b):
     assert systs.source.data["cpu"][1] == sum([ws.metrics["cpu"] for ws in workers])
     assert systs.source.data["memory"][1] == sum(
         [ws.metrics["memory"] for ws in workers]
+    )
+    assert systs.source.data["read_bytes_disk"][1] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    )
+    assert systs.source.data["write_bytes_disk"][1] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
     )
     assert (
         systs.source.data["time"][1]

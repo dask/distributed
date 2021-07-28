@@ -815,12 +815,14 @@ class WorkerNetworkBandwidth(DashboardComponent):
 
 
 class SystemTimeseries(DashboardComponent):
-    """Timeseries for worker network bandwidth, cpu and memory
+    """Timeseries for worker network bandwidth, cpu, memory and disk.
 
     bandwidth: plots the sum of read_bytes and write_bytes for the workers
     as a function of time.
     cpu: plots the sum of cpu for the workers as a function of time.
     memory: plots the sum of memory for the workers as a function of time.
+    disk: plots the sum of read_bytes_disk and write_bytes_disk for the workers
+    as a function of time.
 
     The metrics plotted comme from the aggregation of
     from ws.metrics["val"] for ws in scheduler.workers.values()
@@ -836,6 +838,8 @@ class SystemTimeseries(DashboardComponent):
                     "write_bytes": [],
                     "cpu": [],
                     "memory": [],
+                    "read_bytes_disk": [],
+                    "write_bytes_disk": [],
                 }
             )
 
@@ -909,6 +913,35 @@ class SystemTimeseries(DashboardComponent):
             self.memory.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.memory.y_range.start = 0
 
+            self.disk = figure(
+                title="Workers Network Disk Timeseries",
+                x_axis_type="datetime",
+                tools="",
+                x_range=x_range,
+                id="bk-worker-network-disk-ts",
+                name="worker_network_disk-timeseries",
+                **kwargs,
+            )
+
+            self.disk.line(
+                source=self.source,
+                x="time",
+                y="read_bytes_disk",
+                color="red",
+                legend_label="read (sum)",
+            )
+            self.disk.line(
+                source=self.source,
+                x="time",
+                y="write_bytes_disk",
+                color="blue",
+                legend_label="write (sum)",
+            )
+
+            self.disk.yaxis.axis_label = "bytes / second"
+            self.disk.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.disk.y_range.start = 0
+
     def get_data(self):
         workers = self.scheduler.workers.values()
 
@@ -916,21 +949,27 @@ class SystemTimeseries(DashboardComponent):
         write_bytes = 0
         cpu = 0
         memory = 0
+        read_bytes_disk = 0
+        write_bytes_disk = 0
         time = 0
         for ws in workers:
             read_bytes += ws.metrics["read_bytes"]
             write_bytes += ws.metrics["write_bytes"]
             cpu += ws.metrics["cpu"]
             memory += ws.metrics["memory"]
+            read_bytes_disk += ws.metrics["read_bytes_disk"]
+            write_bytes_disk += ws.metrics["write_bytes_disk"]
             time += ws.metrics["time"]
 
         result = {
-            # use or avoid ZeroDivision when no workers
+            # use `or` to avoid ZeroDivision when no workers
             "time": [time / (len(workers) or 1) * 1000],
             "read_bytes": [read_bytes],
             "write_bytes": [write_bytes],
             "cpu": [cpu],
             "memory": [memory],
+            "read_bytes_disk": [read_bytes_disk],
+            "write_bytes_disk": [write_bytes_disk],
         }
         return result
 
