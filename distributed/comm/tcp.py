@@ -274,7 +274,7 @@ class TCP(Comm):
                     if isinstance(each_frame, memoryview):
                         # Make sure that `len(data) == data.nbytes`
                         # See <https://github.com/tornadoweb/tornado/pull/2996>
-                        each_frame = memoryview(each_frame).cast("B")
+                        each_frame = each_frame.cast("B")
 
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes
