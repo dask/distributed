@@ -59,12 +59,7 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import (
-    NannyPlugin,
-    UploadFile,
-    WorkerPlugin,
-    _get_plugin_name,
-)
+from .diagnostics.plugin import NannyPlugin, UploadFile, WorkerPlugin, _get_plugin_name
 from .metrics import time
 from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
