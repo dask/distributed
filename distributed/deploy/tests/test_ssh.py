@@ -176,6 +176,7 @@ async def test_list_of_worker_options():
         worker_options=[{"nprocs": 4, "nthreads": 1}, {"nprocs": 2, "nthreads": 1}],
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
+            await client.wait_for_workers(6)
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
             d = client.scheduler_info()["workers"]
