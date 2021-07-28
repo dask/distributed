@@ -202,7 +202,7 @@ class TCP(Comm):
                 2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
             ):
                 chunk = frames[i:j]
-                chunk_nbytes = len(chunk)
+                chunk_nbytes = chunk.nbytes
                 n = await stream.read_into(chunk)
                 assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
