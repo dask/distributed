@@ -277,8 +277,14 @@ class TCP(Comm):
                     # See <https://github.com/tornadoweb/tornado/pull/2996>
                     each_frame = each_frame.cast("B")
 
-                    stream._write_buffer.append(each_frame)
-                    stream._total_write_index += each_frame_nbytes
+                    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+                    for i, j in sliding_window(
+                        2, range(0, each_frame_nbytes + C_INT_MAX, C_INT_MAX)
+                    ):
+                        chunk = each_frame[i:j]
+                        chunk_nbytes = chunk.nbytes
+                        stream._write_buffer.append(chunk)
+                        stream._total_write_index += chunk_nbytes
 
             # start writing frames
             stream.write(b"")
