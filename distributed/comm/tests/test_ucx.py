@@ -4,12 +4,12 @@ import pytest
 
 ucp = pytest.importorskip("ucp")
 
-from distributed import Client, Scheduler, Worker, wait
+from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.protocol import to_serialize
-from distributed.utils_test import gen_test, inc
+from distributed.utils_test import gen_cluster, gen_test, inc
 
 try:
     HOST = ucp.get_address()
@@ -167,21 +167,11 @@ async def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame([1]).head(0),
         lambda cudf: cudf.DataFrame([1.0]).head(0),
         lambda cudf: cudf.DataFrame({"a": []}),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
-            marks=pytest.mark.skip(
-                reason="This test segfaults for some reason. So skip running it entirely."
-            ),
-        ),
+        lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
-        pytest.param(
-            lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
-            marks=pytest.mark.skip(
-                reason="This test segfaults for some reason. So skip running it entirely."
-            ),
-        ),
+        lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
     ],
 )
 async def test_ping_pong_cudf(g):
@@ -276,7 +266,7 @@ async def test_ucx_localcluster(processes, cleanup):
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             x = client.submit(inc, 1)
-            await x.result()
+            await x
             assert x.key in cluster.scheduler.tasks
             if not processes:
                 assert any(w.data == {x.key: 2} for w in cluster.workers.values())
@@ -310,31 +300,25 @@ async def test_stress(cleanup):
                 await wait(x)
 
 
-@pytest.mark.asyncio
-async def test_simple(cleanup):
-    async with Scheduler(protocol="ucx") as s:
-        async with Worker(s.address) as a:
-            async with Client(s.address, asynchronous=True) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
+async def test_simple(c, s, a, b):
+    assert s.address.startswith("ucx://")
+    assert await c.submit(lambda x: x + 1, 10) == 11
 
 
-@pytest.mark.asyncio
-async def test_transpose(cleanup):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
+async def test_transpose(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
-    async with Scheduler(protocol="ucx") as s:
-        async with Worker(s.address) as a, Worker(s.address) as b:
-            async with Client(s.address, asynchronous=True) as c:
-                x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
-                await x
-
-                y = (x + x.T).sum()
-                await y
+    assert s.address.startswith("ucx://")
+    x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
+    await x
+    y = (x + x.T).sum()
+    await y
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("port", [0, 1234])
 async def test_ucx_protocol(cleanup, port):
-    async with Scheduler(protocol="ucx", port=port) as s:
+    async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")

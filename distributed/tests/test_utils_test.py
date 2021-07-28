@@ -141,7 +141,7 @@ def test_gen_cluster_cleans_up_client(loop):
     assert not dask.config.get("get", None)
 
 
-@gen_cluster(client=False)
+@gen_cluster()
 async def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)
     for w in [a, b]:
@@ -265,5 +265,7 @@ def test_tls_cluster(tls_client):
 
 @pytest.mark.asyncio
 async def test_tls_scheduler(security, cleanup):
-    async with Scheduler(security=security, host="localhost") as s:
+    async with Scheduler(
+        security=security, host="localhost", dashboard_address=":0"
+    ) as s:
         assert s.address.startswith("tls")
