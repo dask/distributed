@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib
 import itertools
 import traceback
@@ -489,8 +491,8 @@ def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=
 
 
 def merge_subframes(
-    subframes: "list[memoryview | bytearray | bytes]", memoryview_offset: int = 0
-) -> "memoryview | bytearray":
+    subframes: list[memoryview | bytearray | bytes], memoryview_offset: int = 0
+) -> memoryview | bytearray:
     """Merge a list of frames into one buffer.
 
     If all frames are memoryviews backed by the same underlying buffer,
