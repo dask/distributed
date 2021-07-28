@@ -15,12 +15,12 @@ from .components.scheduler import (
     MemoryByKey,
     Occupancy,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
     WorkerNetworkBandwidth,
-    WorkerNetworkBandwidthTimeseries,
     WorkersMemory,
     WorkerTable,
     events_doc,
@@ -73,7 +73,13 @@ applications = {
         WorkerNetworkBandwidth, 500
     ),
     "/individual-workers-network-bandwidth-timeseries": individual_doc(
-        WorkerNetworkBandwidthTimeseries, 500
+        SystemTimeseries, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-network-cpu-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="cpu"
+    ),
+    "/individual-workers-network-memory-timeseries": individual_doc(
+        SystemTimeseries, 500, fig_attr="memory"
     ),
     "/individual-memory-by-key": individual_doc(MemoryByKey, 500),
     "/individual-compute-time-per-key": individual_doc(ComputePerKey, 500),

@@ -31,12 +31,12 @@ from distributed.dashboard.components.scheduler import (
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
     WorkerNetworkBandwidth,
-    WorkerNetworkBandwidthTimeseries,
     WorkersMemory,
     WorkersMemoryHistogram,
     WorkerTable,
@@ -510,7 +510,7 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
 
 
 @gen_cluster(client=True)
-async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
+async def test_SystemTimeseries(c, s, a, b):
     # Disable system monitor periodic callback to allow us to manually control
     # when it is called below
     a.periodic_callbacks["monitor"].stop()
@@ -521,18 +521,22 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     b.monitor.update()
     await asyncio.gather(a.heartbeat(), b.heartbeat())
 
-    nbts = WorkerNetworkBandwidthTimeseries(s)
+    systs = SystemTimeseries(s)
     workers = s.workers.values()
 
-    assert all(len(v) == 1 for v in nbts.source.data.values())
-    assert nbts.source.data["read_bytes"][0] == sum(
+    assert all(len(v) == 1 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][0] == sum(
         [ws.metrics["read_bytes"] for ws in workers]
     )
-    assert nbts.source.data["write_bytes"][0] == sum(
+    assert systs.source.data["write_bytes"][0] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
     )
+    assert systs.source.data["cpu"][0] == sum([ws.metrics["cpu"] for ws in workers])
+    assert systs.source.data["memory"][0] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    )
     assert (
-        nbts.source.data["time"][0]
+        systs.source.data["time"][0]
         == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
     )
 
@@ -540,17 +544,21 @@ async def test_WorkerNetworkBandwidthTimeseries(c, s, a, b):
     a.monitor.update()
     b.monitor.update()
     await asyncio.gather(a.heartbeat(), b.heartbeat())
-    nbts.update()
+    systs.update()
 
-    assert all(len(v) == 2 for v in nbts.source.data.values())
-    assert nbts.source.data["read_bytes"][1] == sum(
+    assert all(len(v) == 2 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][1] == sum(
         [ws.metrics["read_bytes"] for ws in workers]
     )
-    assert nbts.source.data["write_bytes"][1] == sum(
+    assert systs.source.data["write_bytes"][1] == sum(
         [ws.metrics["write_bytes"] for ws in workers]
     )
+    assert systs.source.data["cpu"][1] == sum([ws.metrics["cpu"] for ws in workers])
+    assert systs.source.data["memory"][1] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    )
     assert (
-        nbts.source.data["time"][1]
+        systs.source.data["time"][1]
         == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
     )
 

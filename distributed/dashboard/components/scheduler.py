@@ -814,11 +814,16 @@ class WorkerNetworkBandwidth(DashboardComponent):
             update(self.source, result)
 
 
-class WorkerNetworkBandwidthTimeseries(DashboardComponent):
-    """Timeseries for worker network bandwidth
+class SystemTimeseries(DashboardComponent):
+    """Timeseries for worker network bandwidth, cpu and memory
 
-    Plots the sum of read_bytes and write_bytes for the workers
+    bandwidth: plots the sum of read_bytes and write_bytes for the workers
     as a function of time.
+    cpu: plots the sum of cpu for the workers as a function of time.
+    memory: plots the sum of memory for the workers as a function of time.
+
+    The metrics plotted comme from the aggregation of
+    from ws.metrics["val"] for ws in scheduler.workers.values()
     """
 
     def __init__(self, scheduler, **kwargs):
@@ -829,6 +834,8 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
                     "time": [],
                     "read_bytes": [],
                     "write_bytes": [],
+                    "cpu": [],
+                    "memory": [],
                 }
             )
 
@@ -836,24 +843,24 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
 
             x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
-            self.root = figure(
+            self.bandwidth = figure(
                 title="Workers Network Bandwidth Timeseries",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
-                id="bk-worker-net-bandwidth-ts",
+                id="bk-worker-network-bandwidth-ts",
                 name="worker_network_bandwidth-timeseries",
                 **kwargs,
             )
 
-            self.root.line(
+            self.bandwidth.line(
                 source=self.source,
                 x="time",
                 y="read_bytes",
                 color="red",
                 legend_label="read (sum)",
             )
-            self.root.line(
+            self.bandwidth.line(
                 source=self.source,
                 x="time",
                 y="write_bytes",
@@ -861,19 +868,60 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
                 legend_label="write (sum)",
             )
 
-        self.root.yaxis.axis_label = "bytes / second"
+            self.bandwidth.yaxis.axis_label = "bytes / second"
+            self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.bandwidth.y_range.start = 0
 
-        self.root.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.cpu = figure(
+                title="Workers CPU Timeseries",
+                x_axis_type="datetime",
+                tools="",
+                x_range=x_range,
+                id="bk-worker-network-cpu-ts",
+                name="worker_network_cpu-timeseries",
+                **kwargs,
+            )
+
+            self.cpu.line(
+                source=self.source,
+                x="time",
+                y="cpu",
+            )
+            self.cpu.yaxis.axis_label = "Utilization"
+            self.cpu.y_range.start = 0
+
+            self.memory = figure(
+                title="Workers Memory Timeseries",
+                x_axis_type="datetime",
+                tools="",
+                x_range=x_range,
+                id="bk-worker-network-mem-ts",
+                name="worker_network_mem-timeseries",
+                **kwargs,
+            )
+
+            self.memory.line(
+                source=self.source,
+                x="time",
+                y="memory",
+            )
+            self.memory.yaxis.axis_label = "Bytes"
+            self.memory.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.memory.y_range.start = 0
 
     def get_data(self):
         workers = self.scheduler.workers.values()
 
         read_bytes = 0
         write_bytes = 0
+        cpu = 0
+        memory = 0
         time = 0
         for ws in workers:
             read_bytes += ws.metrics["read_bytes"]
             write_bytes += ws.metrics["write_bytes"]
+            cpu += ws.metrics["cpu"]
+            memory += ws.metrics["memory"]
             time += ws.metrics["time"]
 
         result = {
@@ -881,6 +929,8 @@ class WorkerNetworkBandwidthTimeseries(DashboardComponent):
             "time": [time / (len(workers) or 1) * 1000],
             "read_bytes": [read_bytes],
             "write_bytes": [write_bytes],
+            "cpu": [cpu],
+            "memory": [memory],
         }
         return result
 

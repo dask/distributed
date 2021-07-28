@@ -67,6 +67,8 @@ Individual bokeh plots
 - ``/individual-bandwidth-workers``
 - ``/individual-workers-network-bandwidth``
 - ``/individual-workers-network-bandwidth-timeseries``
+- ``/individual-workers-network-cpu-timeseries``
+- ``/individual-workers-network-memory-timeseries``
 - ``/individual-memory-by-key``
 - ``/individual-compute-time-per-key``
 - ``/individual-aggregate-time-per-action``
