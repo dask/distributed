@@ -24,7 +24,7 @@ from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
 from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
-from .diagnostics.plugin import _get_worker_plugin_name
+from .diagnostics.plugin import _get_plugin_name
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
@@ -408,7 +408,7 @@ class Nanny(ServerNode):
                 plugin = pickle.loads(plugin)
 
             if name is None:
-                name = _get_worker_plugin_name(plugin)
+                name = _get_plugin_name(plugin)
 
             assert name
 
