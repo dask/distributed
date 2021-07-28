@@ -116,7 +116,7 @@ def test_cancellation(client):
 
 def test_cancellation_wait(client):
     with client.get_executor(pure=False) as e:
-        fs = [e.submit(slowinc, i, delay=0.02) for i in range(10)]
+        fs = [e.submit(slowinc, i, delay=0.1) for i in range(10)]
         fs[3].cancel()
         res = wait(fs, return_when=FIRST_COMPLETED, timeout=30)
         assert len(res.not_done) > 0
@@ -128,7 +128,7 @@ def test_cancellation_wait(client):
 
 def test_cancellation_as_completed(client):
     with client.get_executor(pure=False) as e:
-        fs = [e.submit(slowinc, i, delay=0.02) for i in range(10)]
+        fs = [e.submit(slowinc, i, delay=0.1) for i in range(10)]
         fs[3].cancel()
         fs[8].cancel()
 
