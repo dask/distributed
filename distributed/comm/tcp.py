@@ -1,3 +1,4 @@
+import ctypes
 import errno
 import functools
 import logging
@@ -5,7 +6,7 @@ import socket
 import struct
 import sys
 import weakref
-from ssl import SSLError
+from ssl import SSLCertVerificationError, SSLError
 
 from tornado import gen
 
@@ -14,6 +15,7 @@ try:
 except ImportError:
     ssl = None
 
+from tlz import sliding_window
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
@@ -34,6 +36,7 @@ from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to
 logger = logging.getLogger(__name__)
 
 
+C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -193,9 +196,15 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = bytearray(frames_nbytes)
-            n = await stream.read_into(frames)
-            assert n == frames_nbytes, (n, frames_nbytes)
+            frames = memoryview(bytearray(frames_nbytes))
+            # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+            for i, j in sliding_window(
+                2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
+            ):
+                chunk = frames[i:j]
+                chunk_nbytes = len(chunk)
+                n = await stream.read_into(chunk)
+                assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -386,6 +395,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLCertVerificationError as err:
+            raise FatalCommClosedError(
+                "TLS certificate does not match. Check your security settings. "
+                "More info at https://distributed.dask.org/en/latest/tls.html"
+            ) from err
         except SSLError as err:
             raise FatalCommClosedError() from err
 

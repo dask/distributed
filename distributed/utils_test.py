@@ -764,6 +764,10 @@ def gen_test(timeout=_TEST_TIMEOUT):
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
 
     def _(func):
         def test_func():
@@ -809,8 +813,6 @@ async def start_cluster(
         )
         for i, ncore in enumerate(nthreads)
     ]
-    # for w in workers:
-    #     w.rpc = workers[0].rpc
 
     await asyncio.gather(*workers)
 
@@ -819,10 +821,10 @@ async def start_cluster(
         comm.comm is None for comm in s.stream_comms.values()
     ):
         await asyncio.sleep(0.01)
-        if time() - start > 5:
+        if time() > start + 30:
             await asyncio.gather(*[w.close(timeout=1) for w in workers])
             await s.close(fast=True)
-            raise Exception("Cluster creation timeout")
+            raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
@@ -875,18 +877,26 @@ def gen_cluster(
         start
         end
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
     if ncores is not None:
         warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
+    scheduler_kwargs = merge(
+        {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
+    )
     worker_kwargs = merge(
-        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 10}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
 
     def _(func):
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
+        @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             result = None
             workers = []
@@ -930,8 +940,7 @@ def gen_cluster(
                             args = [c] + args
                         try:
                             future = func(*args, *outer_args, **kwargs)
-                            if timeout:
-                                future = asyncio.wait_for(future, timeout)
+                            future = asyncio.wait_for(future, timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()
@@ -1024,7 +1033,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(10)
+            proc.wait(30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):

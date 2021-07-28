@@ -142,6 +142,10 @@ distributed:
   nanny:
     preload: []             # Run custom modules with Nanny
     preload-argv: []        # See https://docs.dask.org/en/latest/setup/custom-startup.html
+    environ:
+      MALLOC_TRIM_THRESHOLD_: 65536
+      OMP_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
 
   client:
     heartbeat: 5s  # Interval between client heartbeats
@@ -170,13 +174,21 @@ distributed:
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+    ucx:
+      cuda_copy: False  # enable cuda-copy
+      tcp: False  # enable tcp
+      nvlink: False  # enable cuda_ipc
+      infiniband: False # enable Infiniband
+      rdmacm: False # enable RDMACM
+      net-devices: null  # define what interface to use for UCX comm
+      reuse-endpoints: null  # enable endpoint reuse
 
     zstd:
       level: 3      # Compression level, between 1 and 22.
       threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
-      connect: 10s          # time before connecting fails
+      connect: 30s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
     require-encryption: null # Whether to require encryption on non-local comms
@@ -196,8 +208,21 @@ distributed:
         key: null
         cert: null
 
+    websockets:
+      shard: 8MiB
+
   diagnostics:
     nvml: True
+    computations:
+      max-history: 100
+      ignore-modules:
+        - distributed
+        - dask
+        - xarray
+        - cudf
+        - cuml
+        - prefect
+        - xgboost
 
   ###################
   # Bokeh dashboard #
@@ -226,13 +251,5 @@ distributed:
     system-monitor:
       interval: 500ms
     event-loop: tornado
-rmm:
-  pool-size: null
-ucx:
-  cuda_copy: False  # enable cuda-copy
-  tcp: False  # enable tcp
-  nvlink: False  # enable cuda_ipc
-  infiniband: False # enable Infiniband
-  rdmacm: False # enable RDMACM
-  net-devices: null  # define what interface to use for UCX comm
-  reuse-endpoints: null  # enable endpoint reuse
+  rmm:
+    pool-size: null

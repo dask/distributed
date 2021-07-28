@@ -19,19 +19,18 @@ if isinstance(OFFLOAD_THRESHOLD, str):
 
 
 async def to_frames(
-    msg, serializers=None, on_error="message", context=None, allow_offload=True
+    msg,
+    allow_offload=True,
+    **kwargs,
 ):
     """
     Serialize a message into a list of Distributed protocol frames.
+    Any kwargs are forwarded to protocol.dumps().
     """
 
     def _to_frames():
         try:
-            return list(
-                protocol.dumps(
-                    msg, serializers=serializers, on_error=on_error, context=context
-                )
-            )
+            return list(protocol.dumps(msg, **kwargs))
         except Exception as e:
             logger.info("Unserializable Message: %s", msg)
             logger.exception(e)

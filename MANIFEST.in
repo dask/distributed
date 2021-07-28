@@ -8,15 +8,14 @@ recursive-include distributed *.svg
 recursive-include distributed *.ico
 recursive-include distributed *.yaml
 recursive-include docs *.rst
+recursive-exclude distributed **/tests/*
 
 include setup.py
 include README.rst
 include LICENSE.txt
 include MANIFEST.in
 include requirements.txt
-include distributed/tests/testegg-1.0.0-py3.4.egg
-include distributed/tests/mytest.pyz
-include distributed/tests/*.pem
+exclude distributed/pytest_resourceleaks.py
 
 prune docs/_build
 include versioneer.py
