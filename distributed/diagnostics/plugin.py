@@ -7,7 +7,7 @@ import uuid
 import zipfile
 
 from dask.base import tokenize
-from dask.utils import funcname
+from dask.utils import funcname, tmpfile
 
 logger = logging.getLogger(__name__)
 
