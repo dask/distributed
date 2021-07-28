@@ -2793,12 +2793,8 @@ class Worker(ServerNode):
                     {"action": "deserialize", "start": start, "stop": stop}
                 )
             return function, args, kwargs
-        except Exception as e:
-            logger.warning("Could not deserialize task", exc_info=True)
-            emsg = error_message(e)
-            emsg["key"] = ts.key
-            emsg["op"] = "task-erred"
-            self.batched_stream.send(emsg)
+        except Exception:
+            logger.error("Could not deserialize task", exc_info=True)
             self.log.append((ts.key, "deserialize-error"))
             raise
 
@@ -2837,61 +2833,38 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    async def execute(self, key, report=False):
-        executor_error = None
+    async def execute(self, key):
         if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
             return
+
+        if key not in self.tasks:
+            return
+
+        ts = self.tasks[key]
+
+        if ts.state != "executing":
+            # This might happen if keys are canceled
+            logger.debug(
+                "Trying to execute a task %s which is not in executing state anymore"
+                % ts
+            )
+            return
+
         try:
-            if key not in self.tasks:
-                return
-            ts = self.tasks[key]
-            if ts.state != "executing":
-                # This might happen if keys are canceled
-                logger.debug(
-                    "Trying to execute a task %s which is not in executing state anymore"
-                    % ts
-                )
-                return
-            if ts.runspec is None:
-                logger.critical("No runspec available for task %s." % ts)
             if self.validate:
                 assert not ts.waiting_for_data
                 assert ts.state == "executing"
+                assert ts.runspec is not None
 
             function, args, kwargs = await self._maybe_deserialize_task(ts)
 
-            start = time()
-            data = {}
-            for dep in ts.dependencies:
-                k = dep.key
-                try:
-                    data[k] = self.data[k]
-                except KeyError:
-                    from .actor import Actor  # TODO: create local actor
-
-                    data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, str))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
-            stop = time()
-            if stop - start > 0.005:
-                ts.startstops.append(
-                    {"action": "disk-read", "start": start, "stop": stop}
-                )
-                if self.digests is not None:
-                    self.digests["disk-load-duration"].add(stop - start)
+            args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
             if ts.annotations is not None and "executor" in ts.annotations:
                 executor = ts.annotations["executor"]
             else:
                 executor = "default"
             assert executor in self.executors
-
-            logger.debug(
-                "Execute key: %s worker: %s, executor: %s",
-                ts.key,
-                self.address,
-                executor,
-            )  # TODO: comment out?
             assert key == ts.key
             self.active_keys.add(ts.key)
             try:
@@ -2911,28 +2884,14 @@ class Worker(ServerNode):
                         self.scheduler_delay,
                     )
                 else:
-                    try:
-                        start = time() + self.scheduler_delay
-                        result = await self.loop.run_in_executor(
-                            e,
-                            apply_function_simple,
-                            function,
-                            args2,
-                            kwargs2,
-                            self.scheduler_delay,
-                        )
-                    except BaseException as e:
-                        msg = error_message(e)
-                        msg["op"] = "task-erred"
-                        msg["actual-exception"] = e
-                        msg["start"] = start
-                        msg["stop"] = time() + self.scheduler_delay
-                        msg["thread"] = None
-                        result = msg
-
-            except RuntimeError as e:
-                executor_error = e
-                raise
+                    result = await self.loop.run_in_executor(
+                        e,
+                        apply_function_simple,
+                        function,
+                        args2,
+                        kwargs2,
+                        self.scheduler_delay,
+                    )
             finally:
                 self.active_keys.discard(ts.key)
 
@@ -2940,12 +2899,11 @@ class Worker(ServerNode):
             # changed since the execution was kicked off. In particular, it may
             # have been canceled and released already in which case we'll have
             # to drop the result immediately
-            key = ts.key
-            ts = self.tasks.get(key)
 
-            if ts is None:
+            if ts.key not in self.tasks:
                 logger.debug(
-                    "Dropping result for %s since task has already been released." % key
+                    "Dropping result for %s since task has already been released."
+                    % ts.key
                 )
                 return
 
@@ -2988,18 +2946,37 @@ class Worker(ServerNode):
                 assert ts.state != "executing"
                 assert not ts.waiting_for_data
 
+        except Exception as exc:
+            logger.error(
+                "Exception during execution of task %s.", ts.key, exc_info=True
+            )
+            emsg = error_message(exc)
+            ts.exception = emsg["exception"]
+            ts.traceback = emsg["traceback"]
+            self.transition(ts, "error")
+        finally:
             await self.ensure_computing()
             self.ensure_communicating()
-        except Exception as e:
-            if executor_error is e:
-                logger.error("Thread Pool Executor error: %s", e)
-            else:
-                logger.exception(e)
-                if LOG_PDB:
-                    import pdb
 
-                    pdb.set_trace()
-                raise
+    def _prepare_args_for_execution(self, ts, args, kwargs):
+        start = time()
+        data = {}
+        for dep in ts.dependencies:
+            k = dep.key
+            try:
+                data[k] = self.data[k]
+            except KeyError:
+                from .actor import Actor  # TODO: create local actor
+
+                data[k] = Actor(type(self.actors[k]), self.address, k, self)
+        args2 = pack_data(args, data, key_types=(bytes, str))
+        kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
+        stop = time()
+        if stop - start > 0.005:
+            ts.startstops.append({"action": "disk-read", "start": start, "stop": stop})
+            if self.digests is not None:
+                self.digests["disk-load-duration"].add(stop - start)
+        return args2, kwargs2
 
     ##################
     # Administrative #

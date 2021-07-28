@@ -6,6 +6,7 @@ import sys
 import threading
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
 from time import sleep
@@ -2040,17 +2041,53 @@ async def test_process_executor(c, s, a, b):
         assert (await future) != os.getpid()
 
 
+def kill_yourself():
+    import os
+    import signal
+
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
 @gen_cluster(client=True)
 async def test_process_executor_kills_process(c, s, a, b):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(kill_yourself)
+
+        with pytest.raises(
+            BrokenProcessPool,
+            match="A child process terminated abruptly, the process pool is not usable anymore",
+        ):
+            await future
 
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(sys.exit, 1)
+            future = c.submit(inc, 1)
 
-        exc = await future.exception()
-        assert "SystemExit(1)" in repr(exc)
+        # FIXME: The processpool is now unusable and the worker is effectively
+        # dead
+        with pytest.raises(
+            BrokenProcessPool,
+            match="A child process terminated abruptly, the process pool is not usable anymore",
+        ):
+            assert await future == 2
+
+
+def raise_exc():
+    raise RuntimeError("foo")
+
+
+@gen_cluster(client=True)
+async def test_process_executor_raise_exception(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(raise_exc)
+
+        with pytest.raises(RuntimeError, match="foo"):
+            await future
 
 
 def assert_task_states_on_worker(expected, worker):
