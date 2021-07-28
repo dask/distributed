@@ -35,27 +35,13 @@ nvidia-smi
 
 gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
-conda activate rapids
-
-gpuci_logger "Install dask dependencies"
-gpuci_conda_retry env update -y --name rapids --file "$WORKSPACE/continuous_integration/environment-3.8.yaml"
-
-gpuci_logger "Install testing dependencies"
-gpuci_conda_retry install -y \
-                  cudf=21.08 \
-                  cupy \
-                  numba \
-                  pynvml \
-                  rmm=21.08 \
-                  ucx-py=0.21
+conda activate dask
 
 gpuci_logger "Install distributed"
 python setup.py install
 
 gpuci_logger "Check compiler versions"
 python --version
-$CC --version
-$CXX --version
 
 gpuci_logger "Check conda environment"
 conda info
@@ -63,4 +49,4 @@ conda config --show-sources
 conda list --show-channel-urls
 
 gpuci_logger "Python py.test for dask"
-py.test $WORKSPACE -n 4 --junitxml="$WORKSPACE/junit-distributed.xml" -v --cov-config="$WORKSPACE/.coveragerc" --cov=distributed --cov-report=xml:"$WORKSPACE/distributed-coverage.xml" --cov-report term
+py.test $WORKSPACE -n 4 -v -m gpu --junitxml="$WORKSPACE/junit-distributed.xml" --cov-config="$WORKSPACE/.coveragerc" --cov=distributed --cov-report=xml:"$WORKSPACE/distributed-coverage.xml" --cov-report term
