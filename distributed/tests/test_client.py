@@ -6898,3 +6898,36 @@ async def test_computation_object_code_client_compute(c, s, a, b):
     assert len(comp.code) == 1
 
     assert comp.code[0] == test_function_code
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_upload_directory(c, s, a, b, tmp_path):
+    from dask.distributed import UploadDirectory
+
+    files = set(os.listdir())
+
+    with open(tmp_path / "foo.py", "w") as f:
+        f.write("x = 123")
+    with open(tmp_path / "bar.py", "w") as f:
+        f.write("from foo import x")
+
+    plugin = UploadDirectory(tmp_path, restart=True, update_path=True)
+    await c.register_worker_plugin(plugin)
+
+    [name] = a.plugins
+    assert os.path.split(tmp_path)[-1] in name
+
+    def f():
+        import bar
+
+        return bar.x
+
+    results = await c.run(f)
+    assert results[a.worker_address] == 123
+    assert results[b.worker_address] == 123
+
+    async with Nanny(s.address, local_directory=tmp_path / "foo", name="foo") as n:
+        results = await c.run(f)
+        assert results[n.worker_address] == 123
+
+    assert files == set(os.listdir())  # no change
