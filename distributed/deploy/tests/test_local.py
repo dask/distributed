@@ -40,8 +40,7 @@ from distributed.utils_test import (
 
 def test_simple(loop):
     with LocalCluster(
-        4,
-        scheduler_port=0,
+        n_workers=4,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
@@ -88,7 +87,6 @@ def test_close_twice():
 def test_procs():
     with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         processes=False,
         threads_per_worker=3,
         dashboard_address=":0",
@@ -103,7 +101,6 @@ def test_procs():
 
     with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         processes=True,
         threads_per_worker=3,
         dashboard_address=":0",
@@ -141,7 +138,7 @@ def test_transports_inproc():
     Test the transport chosen by LocalCluster depending on arguments.
     """
     with LocalCluster(
-        1, processes=False, silence_logs=False, dashboard_address=":0"
+        n_workers=1, processes=False, silence_logs=False, dashboard_address=":0"
     ) as c:
         assert c.scheduler_address.startswith("inproc://")
         assert c.workers[0].address.startswith("inproc://")
@@ -152,7 +149,7 @@ def test_transports_inproc():
 def test_transports_tcp():
     # Have nannies => need TCP
     with LocalCluster(
-        1, processes=True, silence_logs=False, dashboard_address=":0"
+        n_workers=1, processes=True, silence_logs=False, dashboard_address=":0"
     ) as c:
         assert c.scheduler_address.startswith("tcp://")
         assert c.workers[0].address.startswith("tcp://")
@@ -163,7 +160,7 @@ def test_transports_tcp():
 def test_transports_tcp_port():
     # Scheduler port specified => need TCP
     with LocalCluster(
-        1,
+        n_workers=1,
         processes=False,
         scheduler_port=8786,
         silence_logs=False,
@@ -183,7 +180,7 @@ class LocalTest(ClusterTest, unittest.TestCase):
 
 def test_Client_with_local(loop):
     with LocalCluster(
-        1, scheduler_port=0, silence_logs=False, dashboard_address=":0", loop=loop
+        n_workers=1, silence_logs=False, dashboard_address=":0", loop=loop
     ) as c:
         with Client(c) as e:
             assert len(e.nthreads()) == len(c.workers)
@@ -277,7 +274,7 @@ async def test_client_constructor_with_temporary_security():
 @gen_test()
 async def test_defaults():
     async with LocalCluster(
-        scheduler_port=0, silence_logs=False, dashboard_address=":0", asynchronous=True
+        silence_logs=False, dashboard_address=":0", asynchronous=True
     ) as c:
         assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
         assert all(isinstance(w, Nanny) for w in c.workers.values())
@@ -287,7 +284,6 @@ async def test_defaults():
 async def test_defaults_2():
     async with LocalCluster(
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -301,7 +297,6 @@ async def test_defaults_2():
 async def test_defaults_3():
     async with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -318,7 +313,6 @@ async def test_defaults_3():
 async def test_defaults_4():
     async with LocalCluster(
         threads_per_worker=CPU_COUNT * 2,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -330,7 +324,6 @@ async def test_defaults_4():
 async def test_defaults_5():
     async with LocalCluster(
         n_workers=CPU_COUNT * 2,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -343,7 +336,6 @@ async def test_defaults_6():
     async with LocalCluster(
         threads_per_worker=2,
         n_workers=3,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -357,7 +349,6 @@ async def test_worker_params():
     async with LocalCluster(
         processes=False,
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         memory_limit=500,
@@ -370,7 +361,6 @@ async def test_worker_params():
 async def test_memory_limit_none():
     async with LocalCluster(
         n_workers=2,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",
@@ -384,13 +374,11 @@ async def test_memory_limit_none():
 
 def test_cleanup():
     with clean(threads=False):
-        c = LocalCluster(
-            2, scheduler_port=0, silence_logs=False, dashboard_address=":0"
-        )
+        c = LocalCluster(n_workers=2, silence_logs=False, dashboard_address=":0")
         port = c.scheduler.port
         c.close()
         c2 = LocalCluster(
-            2, scheduler_port=port, silence_logs=False, dashboard_address=":0"
+            n_workers=2, scheduler_port=port, silence_logs=False, dashboard_address=":0"
         )
         c2.close()
 
@@ -398,12 +386,12 @@ def test_cleanup():
 def test_repeated():
     with clean(threads=False):
         with LocalCluster(
-            0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
-        ) as c:
+            n_workers=0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
+        ):
             pass
         with LocalCluster(
-            0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
-        ) as c:
+            n_workers=0, scheduler_port=8448, silence_logs=False, dashboard_address=":0"
+        ):
             pass
 
 
@@ -413,7 +401,6 @@ def test_bokeh(loop, processes):
     requests = pytest.importorskip("requests")
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         processes=processes,
@@ -445,7 +432,6 @@ def test_blocks_until_full(loop):
 async def test_scale_up_and_down():
     async with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
@@ -478,7 +464,7 @@ def test_silent_startup():
         from distributed import LocalCluster
 
         if __name__ == "__main__":
-            with LocalCluster(1, dashboard_address=":0", scheduler_port=0):
+            with LocalCluster(n_workers=1, dashboard_address=":0"):
                 sleep(.1)
         """
 
@@ -496,15 +482,14 @@ def test_silent_startup():
 
 def test_only_local_access(loop):
     with LocalCluster(
-        0, scheduler_port=0, silence_logs=False, dashboard_address=":0", loop=loop
+        n_workers=0, silence_logs=False, dashboard_address=":0", loop=loop
     ) as c:
         sync(loop, assert_can_connect_locally_4, c.scheduler.port)
 
 
 def test_remote_access(loop):
     with LocalCluster(
-        0,
-        scheduler_port=0,
+        n_workers=0,
         silence_logs=False,
         dashboard_address=":0",
         host="",
@@ -517,7 +502,6 @@ def test_remote_access(loop):
 def test_memory(loop, n_workers):
     with LocalCluster(
         n_workers=n_workers,
-        scheduler_port=0,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
@@ -530,7 +514,6 @@ def test_memory(loop, n_workers):
 def test_memory_nanny(loop, n_workers):
     with LocalCluster(
         n_workers=n_workers,
-        scheduler_port=0,
         processes=True,
         silence_logs=False,
         dashboard_address=":0",
@@ -546,7 +529,6 @@ def test_memory_nanny(loop, n_workers):
 def test_death_timeout_raises(loop):
     with pytest.raises(TimeoutError):
         with LocalCluster(
-            scheduler_port=0,
             silence_logs=False,
             death_timeout=1e-10,
             dashboard_address=":0",
@@ -561,7 +543,6 @@ async def test_bokeh_kwargs():
     pytest.importorskip("bokeh")
     async with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         asynchronous=True,
@@ -575,9 +556,7 @@ async def test_bokeh_kwargs():
 
 
 def test_io_loop_periodic_callbacks(loop):
-    with LocalCluster(
-        loop=loop, port=0, dashboard_address=":0", silence_logs=False
-    ) as cluster:
+    with LocalCluster(loop=loop, dashboard_address=":0", silence_logs=False) as cluster:
         assert cluster.scheduler.loop is loop
         for pc in cluster.scheduler.periodic_callbacks.values():
             assert pc.io_loop is loop
@@ -590,7 +569,7 @@ def test_logging():
     """
     Workers and scheduler have logs even when silenced
     """
-    with LocalCluster(1, processes=False, dashboard_address=":0") as c:
+    with LocalCluster(n_workers=1, processes=False, dashboard_address=":0") as c:
         assert c.scheduler._deque_handler.deque
         assert c.workers[0]._deque_handler.deque
 
@@ -599,7 +578,6 @@ def test_ipywidgets(loop):
     ipywidgets = pytest.importorskip("ipywidgets")
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         dashboard_address=":0",
@@ -620,7 +598,6 @@ def test_no_ipywidgets(loop, monkeypatch):
 
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         dashboard_address=":0",
@@ -638,7 +615,6 @@ def test_no_ipywidgets(loop, monkeypatch):
 def test_scale(loop):
     """Directly calling scale both up and down works as expected"""
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         dashboard_address=":0",
@@ -665,7 +641,6 @@ def test_scale(loop):
 
 def test_adapt(loop):
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         dashboard_address=":0",
@@ -697,7 +672,6 @@ def test_adapt(loop):
 def test_adapt_then_manual(loop):
     """We can revert from adaptive, back to manual"""
     with LocalCluster(
-        scheduler_port=0,
         silence_logs=False,
         loop=loop,
         dashboard_address=":0",
@@ -773,7 +747,6 @@ async def test_scale_retires_workers():
     loop = IOLoop.current()
     cluster = await MyCluster(
         n_workers=0,
-        scheduler_port=0,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
@@ -827,8 +800,7 @@ def test_local_tls_restart(loop):
 
 def test_asynchronous_property(loop):
     with LocalCluster(
-        4,
-        scheduler_port=0,
+        n_workers=4,
         processes=False,
         silence_logs=False,
         dashboard_address=":0",
@@ -877,7 +849,6 @@ def test_worker_class_worker(loop):
         loop=loop,
         worker_class=MyWorker,
         processes=False,
-        scheduler_port=0,
         dashboard_address=":0",
     ) as cluster:
         assert all(isinstance(w, MyWorker) for w in cluster.workers.values())
@@ -891,7 +862,6 @@ def test_worker_class_nanny(loop):
         n_workers=2,
         loop=loop,
         worker_class=MyNanny,
-        scheduler_port=0,
         dashboard_address=":0",
     ) as cluster:
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
@@ -905,7 +875,6 @@ async def test_worker_class_nanny_async():
     async with LocalCluster(
         n_workers=2,
         worker_class=MyNanny,
-        scheduler_port=0,
         dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
@@ -917,7 +886,6 @@ def test_starts_up_sync(loop):
         n_workers=2,
         loop=loop,
         processes=False,
-        scheduler_port=0,
         dashboard_address=":0",
     )
     try:

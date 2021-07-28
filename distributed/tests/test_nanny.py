@@ -235,7 +235,7 @@ async def test_worker_uses_same_host_as_nanny(c, s):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        s = await Scheduler(scheduler_file=fn, port=0, dashboard_address=":0")
+        s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
         w = await Nanny(scheduler_file=fn)
         assert set(s.workers) == {w.worker_address}
         await w.close()
@@ -531,7 +531,7 @@ async def test_nanny_closed_by_keyboard_interrupt(cleanup, protocol):
     if protocol == "ucx":  # Skip if UCX isn't available
         pytest.importorskip("ucp")
 
-    async with Scheduler(protocol=protocol, port=0, dashboard_address=":0") as s:
+    async with Scheduler(protocol=protocol, dashboard_address=":0") as s:
         async with Nanny(
             s.address, nthreads=1, worker_class=KeyboardInterruptWorker
         ) as n:

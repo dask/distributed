@@ -120,7 +120,7 @@ async def test_lifecycle():
             self.history.append("closed")
 
     plugin = LifeCycle()
-    async with Scheduler(plugins=[plugin], port=0, dashboard_address=":0") as s:
+    async with Scheduler(plugins=[plugin], dashboard_address=":0") as s:
         pass
 
     assert plugin.history == ["started", "closed"]

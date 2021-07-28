@@ -1049,7 +1049,7 @@ async def test_start_services(s):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        async with Scheduler(scheduler_file=fn, port=0, dashboard_address=":0") as s:
+        async with Scheduler(scheduler_file=fn, dashboard_address=":0") as s:
             async with Worker(scheduler_file=fn) as w:
                 assert set(s.workers) == {w.address}
 
@@ -1494,7 +1494,7 @@ async def test_interface_async(cleanup, loop, Worker):
             "Available interfaces are: %s." % (if_names,)
         )
 
-    async with Scheduler(port=0, dashboard_address=":0", interface=if_name) as s:
+    async with Scheduler(dashboard_address=":0", interface=if_name) as s:
         assert s.address.startswith("tcp://127.0.0.1")
         async with Worker(s.address, interface=if_name) as w:
             assert w.address.startswith("tcp://127.0.0.1")
@@ -1510,7 +1510,7 @@ async def test_interface_async(cleanup, loop, Worker):
 async def test_protocol_from_scheduler_address(cleanup, Worker):
     pytest.importorskip("ucp")
 
-    async with Scheduler(protocol="ucx", port=0, dashboard_address=":0") as s:
+    async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
         async with Worker(s.address) as w:
             assert w.address.startswith("ucx://")
@@ -1531,7 +1531,7 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
     monkeypatch.setitem(backends, "foo", BadBackend())
 
     with dask.config.set({"distributed.comm.default-scheme": "foo"}):
-        async with Scheduler(protocol="tcp", port=0, dashboard_address=":0") as s:
+        async with Scheduler(protocol="tcp", dashboard_address=":0") as s:
             async with Worker(s.address):
                 # Ensure that worker is able to properly start up
                 # without BadBackend.get_address_host raising a ValueError
@@ -1541,7 +1541,7 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
-    async with Scheduler(host="localhost", port=0, dashboard_address=":0") as s:
+    async with Scheduler(host="localhost", dashboard_address=":0") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
             assert s.ip == w.ip

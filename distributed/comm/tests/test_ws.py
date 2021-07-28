@@ -173,7 +173,7 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
 )
 async def test_connection_made_with_extra_conn_args(cleanup, protocol, security):
     async with Scheduler(
-        protocol=protocol, security=security, port=0, dashboard_address=":0"
+        protocol=protocol, security=security, dashboard_address=":0"
     ) as s:
         connection_args = security.get_connection_args("worker")
         comm = await connect(s.address, **connection_args)

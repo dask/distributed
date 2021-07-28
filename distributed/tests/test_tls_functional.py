@@ -203,7 +203,7 @@ async def test_retire_workers(c, s, a, b):
 
 @gen_test()
 async def test_security_dict_input_no_security():
-    async with Scheduler(port=0, dashboard_address=":0", security={}) as s:
+    async with Scheduler(dashboard_address=":0", security={}) as s:
         async with Worker(s.address, security={}):
             async with Client(s.address, security={}, asynchronous=True) as c:
                 result = await c.submit(inc, 1)
@@ -220,7 +220,6 @@ async def test_security_dict_input():
 
     async with Scheduler(
         host="localhost",
-        port=0,
         dashboard_address=":0",
         security={"tls_ca_file": ca_file, "tls_scheduler_cert": scheduler},
     ) as s:

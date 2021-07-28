@@ -2007,7 +2007,7 @@ async def test_repr_no_memory_limit(c, s, a, b):
 @gen_test()
 async def test_repr_localcluster():
     cluster = await LocalCluster(
-        processes=False, port=0, dashboard_address=":0", asynchronous=True
+        processes=False, dashboard_address=":0", asynchronous=True
     )
     client = await Client(cluster, asynchronous=True)
     try:
@@ -2960,7 +2960,7 @@ async def test_rebalance_workers_and_keys(client, s, *_):
 
 def test_rebalance_sync():
     # can't use the 'c' fixture because we need workers to run in a separate process
-    with Client(n_workers=2, memory_limit="1 GiB", port=0, dashboard_address=":0") as c:
+    with Client(n_workers=2, memory_limit="1 GiB", dashboard_address=":0") as c:
         s = c.cluster.scheduler
         a, b = [ws.address for ws in s.workers.values()]
         futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
@@ -3041,7 +3041,7 @@ async def test_unrunnable_task_runs(c, s, a, b):
 @gen_cluster(client=True, nthreads=[])
 async def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
-    n = await Nanny(s.address, nthreads=2, loop=s.loop, port=0)
+    n = await Nanny(s.address, nthreads=2, loop=s.loop)
     await c.gather(futures)
     await n.close()
 
@@ -4973,7 +4973,6 @@ def test_quiet_client_close(loop):
         with Client(
             loop=loop,
             processes=False,
-            port=0,
             dashboard_address=":0",
             threads_per_worker=4,
         ) as c:
@@ -5305,9 +5304,7 @@ def test_use_synchronous_client_in_async_context(loop, c):
 
 def test_quiet_quit_when_cluster_leaves(loop_in_thread):
     loop = loop_in_thread
-    with LocalCluster(
-        loop=loop, scheduler_port=0, dashboard_address=":0", silence_logs=False
-    ) as cluster:
+    with LocalCluster(loop=loop, dashboard_address=":0", silence_logs=False) as cluster:
         with captured_logger("distributed.comm") as sio:
             with Client(cluster, loop=loop) as client:
                 futures = client.map(lambda x: x + 1, range(10))
@@ -5643,9 +5640,7 @@ def test_dashboard_link(loop, monkeypatch):
 
 @gen_test()
 async def test_dashboard_link_inproc():
-    async with Client(
-        processes=False, asynchronous=True, port=0, dashboard_address=":0"
-    ) as c:
+    async with Client(processes=False, asynchronous=True, dashboard_address=":0") as c:
         with dask.config.set({"distributed.dashboard.link": "{host}"}):
             assert "/" not in c.dashboard_link
 
@@ -5766,7 +5761,7 @@ async def test_client_repr_closed(s, a, b):
 
 
 def test_client_repr_closed_sync(loop):
-    with Client(loop=loop, processes=False, port=0, dashboard_address=":0") as c:
+    with Client(loop=loop, processes=False, dashboard_address=":0") as c:
         pass
     c._repr_html_()
 
@@ -6039,7 +6034,7 @@ async def test_file_descriptors_dont_leak(Worker):
 
     proc = psutil.Process()
     before = proc.num_fds()
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address), Worker(s.address), Client(
             s.address, asynchronous=True
         ):
@@ -6060,7 +6055,7 @@ async def test_dashboard_link_cluster():
             return "http://foo.com"
 
     async with MyCluster(
-        processes=False, asynchronous=True, port=0, dashboard_address=":0"
+        processes=False, asynchronous=True, dashboard_address=":0"
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert "http://foo.com" in client._repr_html_()
@@ -6068,7 +6063,7 @@ async def test_dashboard_link_cluster():
 
 @gen_test()
 async def test_shutdown():
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address) as w:
             async with Client(s.address, asynchronous=True) as c:
                 await c.shutdown()
@@ -6080,7 +6075,7 @@ async def test_shutdown():
 @pytest.mark.asyncio
 async def test_shutdown_localcluster(cleanup):
     async with LocalCluster(
-        n_workers=1, asynchronous=True, processes=False, port=0, dashboard_address=":0"
+        n_workers=1, asynchronous=True, processes=False, dashboard_address=":0"
     ) as lc:
         async with Client(lc, asynchronous=True) as c:
             await c.shutdown()
@@ -6095,7 +6090,6 @@ async def test_config_inherited_by_subprocess():
             n_workers=1,
             asynchronous=True,
             processes=True,
-            port=0,
             dashboard_address=":0",
         ) as lc:
             async with Client(lc, asynchronous=True) as c:
@@ -6211,9 +6205,7 @@ async def test_as_completed_async_for_cancel(c, s, a, b):
 
 @gen_test()
 async def test_async_with():
-    async with Client(
-        processes=False, port=0, dashboard_address=":0", asynchronous=True
-    ) as c:
+    async with Client(processes=False, dashboard_address=":0", asynchronous=True) as c:
         assert await c.submit(lambda x: x + 1, 10) == 11
     assert c.status == "closed"
     assert c.cluster.status == Status.closed
@@ -6709,11 +6701,9 @@ async def test_get_client_functions_spawn_clusters(c, s, a):
     scheduler_addr = c.scheduler.address
 
     def f(x):
-        ref = None
         with LocalCluster(
             n_workers=1,
             processes=False,
-            port=0,
             dashboard_address=":0",
             worker_dashboard_address=":0",
         ) as cluster2:

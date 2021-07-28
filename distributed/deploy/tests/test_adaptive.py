@@ -24,7 +24,6 @@ from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
 def test_adaptive_local_cluster(loop):
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
         loop=loop,
@@ -53,7 +52,6 @@ def test_adaptive_local_cluster(loop):
 async def test_adaptive_local_cluster_multi_workers():
     async with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",
@@ -120,7 +118,6 @@ async def test_adaptive_scale_down_override():
 async def test_min_max():
     cluster = await LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",
@@ -177,7 +174,6 @@ async def test_avoid_churn(cleanup):
         n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
     ) as cluster:
@@ -202,7 +198,6 @@ async def test_adapt_quickly():
         n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
     )
@@ -252,10 +247,9 @@ async def test_adapt_quickly():
 async def test_adapt_down():
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
         dashboard_address=":0",
     ) as cluster:
@@ -280,8 +274,7 @@ async def test_no_more_workers_than_tasks():
         {"distributed.scheduler.default-task-durations": {"slowinc": 1000}}
     ):
         async with LocalCluster(
-            0,
-            scheduler_port=0,
+            n_workers=0,
             silence_logs=False,
             processes=False,
             dashboard_address=":0",
@@ -297,7 +290,7 @@ def test_basic_no_loop(loop):
     with clean(threads=False):
         try:
             with LocalCluster(
-                0, scheduler_port=0, silence_logs=False, dashboard_address=":0"
+                n_workers=0, silence_logs=False, dashboard_address=":0"
             ) as cluster:
                 with Client(cluster) as client:
                     cluster.adapt()
@@ -319,7 +312,6 @@ async def test_target_duration():
             n_workers=0,
             asynchronous=True,
             processes=False,
-            scheduler_port=0,
             silence_logs=False,
             dashboard_address=":0",
         ) as cluster:
@@ -337,7 +329,7 @@ async def test_target_duration():
 async def test_worker_keys(cleanup):
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
-        scheduler={"cls": Scheduler, "options": {"port": 0, "dashboard_address": ":0"}},
+        scheduler={"cls": Scheduler, "options": {"dashboard_address": ":0"}},
         workers={
             "a-1": {"cls": Worker},
             "a-2": {"cls": Worker},
@@ -365,10 +357,9 @@ async def test_worker_keys(cleanup):
 @pytest.mark.asyncio
 async def test_adapt_cores_memory(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         threads_per_worker=2,
         memory_limit="3 GB",
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",
@@ -406,10 +397,9 @@ def test_adaptive_config():
 @pytest.mark.asyncio
 async def test_update_adaptive(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         threads_per_worker=2,
         memory_limit="3 GB",
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=":0",

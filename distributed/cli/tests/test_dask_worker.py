@@ -434,7 +434,7 @@ class MyWorker(Worker):
     else:
         env["PYTHONPATH"] = tmpdir
 
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         async with Client(s.address, asynchronous=True) as c:
             with popen(
                 [

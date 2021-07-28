@@ -517,7 +517,7 @@ def test_threadpoolworkers_pick_correct_ioloop(cleanup):
         }
     ):
         with Client(
-            processes=False, port=0, dashboard_address=":0", threads_per_worker=4
+            processes=False, dashboard_address=":0", threads_per_worker=4
         ) as client:
             sem = Semaphore(max_leases=1, name="database")
             protected_resource = []

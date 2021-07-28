@@ -51,7 +51,7 @@ async def test_worker_preload_text():
 def dask_setup(worker):
     worker.foo = 'setup'
 """
-    async with Scheduler(port=0, dashboard_address=":0", preload=text) as s:
+    async with Scheduler(dashboard_address=":0", preload=text) as s:
         assert s.foo == "setup"
         async with Worker(s.address, preload=[text]) as w:
             assert w.foo == "setup"
@@ -141,9 +141,7 @@ from distributed.comm.tcp import TCPBackend
 backends["foo"] = TCPBackend()
 """.strip()
     try:
-        async with Scheduler(
-            port=0, dashboard_address=":0", preload=text, protocol="foo"
-        ) as s:
+        async with Scheduler(dashboard_address=":0", preload=text, protocol="foo") as s:
             async with Nanny(s.address, preload=text, protocol="foo") as n:
                 async with Client(s.address, asynchronous=True) as c:
                     await c.wait_for_workers(1)
@@ -169,7 +167,6 @@ def dask_setup(dask_server):
     try:
         with captured_logger("distributed.preloading") as log:
             async with Scheduler(
-                port=0,
                 dashboard_address=":0",
                 preload=["http://localhost:12345/preload"],
             ) as s:

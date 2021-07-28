@@ -34,7 +34,7 @@ worker_spec = {
     1: {"cls": Worker, "options": {"nthreads": 2}},
     "my-worker": {"cls": MyWorker, "options": {"nthreads": 3}},
 }
-scheduler = {"cls": Scheduler, "options": {"port": 0, "dashboard_address": ":0"}}
+scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
 
 
 @gen_test()
@@ -329,10 +329,7 @@ async def test_scheduler_info():
 async def test_dashboard_link():
     async with SpecCluster(
         workers=worker_spec,
-        scheduler={
-            "cls": Scheduler,
-            "options": {"port": 0, "dashboard_address": ":12345"},
-        },
+        scheduler={"cls": Scheduler, "options": {"dashboard_address": ":12345"}},
         asynchronous=True,
     ) as cluster:
         assert "12345" in cluster.dashboard_link

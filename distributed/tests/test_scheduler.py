@@ -764,7 +764,7 @@ async def test_update_graph_culls(s, a, b):
 
 
 def test_io_loop(loop):
-    s = Scheduler(loop=loop, port=0, dashboard_address=":0", validate=True)
+    s = Scheduler(loop=loop, dashboard_address=":0", validate=True)
     assert s.io_loop is loop
 
 
@@ -1277,7 +1277,7 @@ async def test_fifo_submission(c, s, w):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        s = await Scheduler(scheduler_file=fn, port=0, dashboard_address=":0")
+        s = await Scheduler(scheduler_file=fn, dashboard_address=":0")
         with open(fn) as f:
             data = json.load(f)
         assert data["address"] == s.address
@@ -1325,7 +1325,7 @@ async def test_dashboard_host(host, dashboard_address, expect):
     """Dashboard is accessible from any host by default, but it can be also bound to
     localhost.
     """
-    async with Scheduler(host=host, port=0, dashboard_address=dashboard_address) as s:
+    async with Scheduler(host=host, dashboard_address=dashboard_address) as s:
         sock = first(s.http_server._sockets.values())
         assert sock.getsockname()[0] in expect
 
@@ -1794,7 +1794,7 @@ async def test_close_workers(s, a, b):
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_test()
 async def test_host_address():
-    s = await Scheduler(host="127.0.0.2", port=0, dashboard_address=":0")
+    s = await Scheduler(host="127.0.0.2", dashboard_address=":0")
     assert "127.0.0.2" in s.address
     await s.close()
 
@@ -1802,21 +1802,19 @@ async def test_host_address():
 @gen_test()
 async def test_dashboard_address():
     pytest.importorskip("bokeh")
-    async with Scheduler(dashboard_address="127.0.0.1:8901", port=0) as s:
+    async with Scheduler(dashboard_address="127.0.0.1:8901") as s:
         assert s.services["dashboard"].port == 8901
 
-    async with Scheduler(dashboard_address="127.0.0.1", port=0) as s:
+    async with Scheduler(dashboard_address="127.0.0.1") as s:
         assert s.services["dashboard"].port
 
-    async with Scheduler(
-        dashboard_address="127.0.0.1:8901,127.0.0.1:8902", port=0
-    ) as s:
+    async with Scheduler(dashboard_address="127.0.0.1:8901,127.0.0.1:8902") as s:
         assert s.services["dashboard"].port == 8901
 
-    async with Scheduler(dashboard_address=":8901,:8902", port=0) as s:
+    async with Scheduler(dashboard_address=":8901,:8902") as s:
         assert s.services["dashboard"].port == 8901
 
-    async with Scheduler(dashboard_address=[8901, 8902], port=0) as s:
+    async with Scheduler(dashboard_address=[8901, 8902]) as s:
         assert s.services["dashboard"].port == 8901
 
 
@@ -1848,7 +1846,7 @@ async def test_adaptive_target(c, s, a, b):
 
 @gen_test()
 async def test_async_context_manager():
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         assert s.status == Status.running
         async with Worker(s.address) as w:
             assert w.status == Status.running
@@ -1858,21 +1856,21 @@ async def test_async_context_manager():
 
 @gen_test()
 async def test_allowed_failures_config():
-    async with Scheduler(port=0, dashboard_address=":0", allowed_failures=10) as s:
+    async with Scheduler(dashboard_address=":0", allowed_failures=10) as s:
         assert s.allowed_failures == 10
 
     with dask.config.set({"distributed.scheduler.allowed_failures": 100}):
-        async with Scheduler(port=0, dashboard_address=":0") as s:
+        async with Scheduler(dashboard_address=":0") as s:
             assert s.allowed_failures == 100
 
     with dask.config.set({"distributed.scheduler.allowed_failures": 0}):
-        async with Scheduler(port=0, dashboard_address=":0") as s:
+        async with Scheduler(dashboard_address=":0") as s:
             assert s.allowed_failures == 0
 
 
 @gen_test()
 async def test_finished():
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address) as w:
             pass
 
@@ -1946,7 +1944,7 @@ async def test_default_task_duration_splits(c, s, a, b):
 @gen_test()
 async def test_no_danglng_asyncio_tasks():
     start = asyncio.all_tasks()
-    async with Scheduler(port=0, dashboard_address=":0") as s:
+    async with Scheduler(dashboard_address=":0") as s:
         async with Worker(s.address, name="0"):
             async with Client(s.address, asynchronous=True) as c:
                 await c.submit(lambda: 1)
@@ -2266,9 +2264,7 @@ async def test_too_many_groups(c, s, a, b):
 @gen_test()
 async def test_multiple_listeners():
     with captured_logger(logging.getLogger("distributed.scheduler")) as log:
-        async with Scheduler(
-            port=0, dashboard_address=":0", protocol=["inproc", "tcp"]
-        ) as s:
+        async with Scheduler(dashboard_address=":0", protocol=["inproc", "tcp"]) as s:
             async with Worker(s.listeners[0].contact_address) as a:
                 async with Worker(s.listeners[1].contact_address) as b:
                     assert a.address.startswith("inproc")
