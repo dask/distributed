@@ -283,8 +283,10 @@ class TCP(Comm):
                     ):
                         chunk = each_frame[i:j]
                         chunk_nbytes = chunk.nbytes
-                        stream._write_buffer.append(chunk)
-                        stream._total_write_index += chunk_nbytes
+
+                        if chunk_nbytes:
+                            stream._write_buffer.append(chunk)
+                            stream._total_write_index += chunk_nbytes
 
             # start writing frames
             stream.write(b"")
