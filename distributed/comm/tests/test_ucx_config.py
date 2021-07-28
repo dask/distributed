@@ -2,6 +2,8 @@ from time import sleep
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 import dask
 from dask.utils import format_bytes
 
