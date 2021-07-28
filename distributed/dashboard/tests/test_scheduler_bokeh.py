@@ -58,7 +58,7 @@ async def test_simple(c, s, a, b):
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
-        response = await http_client.fetch("http://localhost:%d%s" % (port, suffix))
+        response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links

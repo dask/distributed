@@ -26,20 +26,17 @@ from distributed.utils_test import (
 
 
 def test_defaults(loop):
-    with popen(["dask-scheduler", "--no-dashboard"]) as proc:
+    with popen(["dask-scheduler"]):
 
         async def f():
             # Default behaviour is to listen on all addresses
             await assert_can_connect_from_everywhere_4_6(8786, timeout=5.0)
 
-        with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop) as c:
             c.sync(f)
 
         response = requests.get("http://127.0.0.1:8787/status/")
-        assert response.status_code == 404
-
-    with pytest.raises(Exception):
-        response = requests.get("http://127.0.0.1:9786/info.json")
+        response.raise_for_status()
 
 
 def test_hostport(loop):
@@ -55,9 +52,8 @@ def test_hostport(loop):
 
 
 def test_no_dashboard(loop):
-    pytest.importorskip("bokeh")
-    with popen(["dask-scheduler", "--no-dashboard"]) as proc:
-        with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with Client(f"127.0.0.1:{Scheduler.default_port}", loop=loop):
             response = requests.get("http://127.0.0.1:8787/status/")
             assert response.status_code == 404
 

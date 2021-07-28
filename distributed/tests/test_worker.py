@@ -30,7 +30,7 @@ from distributed import (
 )
 from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
-from distributed.compatibility import LINUX, MACOS, WINDOWS
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
@@ -54,11 +54,10 @@ from distributed.worker import Worker, error_message, logger, parse_memory_limit
 pytestmark = pytest.mark.ci1
 
 
-@pytest.mark.asyncio
-async def test_worker_nthreads(cleanup):
-    async with Scheduler() as s:
-        async with Worker(s.address) as w:
-            assert w.executor._max_workers == CPU_COUNT
+@gen_cluster(nthreads=[])
+async def test_worker_nthreads(s):
+    async with Worker(s.address) as w:
+        assert w.executor._max_workers == CPU_COUNT
 
 
 @gen_cluster()
@@ -70,15 +69,14 @@ async def test_str(s, a, b):
     assert str(a.executing_count) in repr(a)
 
 
-@pytest.mark.asyncio
-async def test_identity(cleanup):
-    async with Scheduler() as s:
-        async with Worker(s.address) as w:
-            ident = w.identity(None)
-            assert "Worker" in ident["type"]
-            assert ident["scheduler"] == s.address
-            assert isinstance(ident["nthreads"], int)
-            assert isinstance(ident["memory_limit"], Number)
+@gen_cluster(nthreads=[])
+async def test_identity(s):
+    async with Worker(s.address) as w:
+        ident = w.identity(None)
+        assert "Worker" in ident["type"]
+        assert ident["scheduler"] == s.address
+        assert isinstance(ident["nthreads"], int)
+        assert isinstance(ident["memory_limit"], Number)
 
 
 @gen_cluster(client=True)
@@ -282,34 +280,30 @@ async def test_broadcast(s, a, b):
         assert results == {a.address: b"pong", b.address: b"pong"}
 
 
-@gen_test()
-async def test_worker_with_port_zero():
-    s = await Scheduler(port=8007)
-    w = await Worker(s.address)
-    assert isinstance(w.port, int)
-    assert w.port > 1024
-
-    await w.close()
+@gen_cluster(nthreads=[])
+async def test_worker_with_port_zero(s):
+    async with Worker(s.address) as w:
+        assert isinstance(w.port, int)
+        assert w.port > 1024
 
 
-@pytest.mark.asyncio
-async def test_worker_port_range(cleanup):
-    async with Scheduler() as s:
-        port = "9867:9868"
-        async with Worker(s.address, port=port) as w1:
-            assert w1.port == 9867  # Selects first port in range
-            async with Worker(s.address, port=port) as w2:
-                assert w2.port == 9868  # Selects next port in range
-                with pytest.raises(
-                    ValueError, match="Could not start Worker"
-                ):  # No more ports left
-                    async with Worker(s.address, port=port):
-                        pass
+@gen_cluster(nthreads=[])
+async def test_worker_port_range(s):
+    port = "9867:9868"
+    async with Worker(s.address, port=port) as w1:
+        assert w1.port == 9867  # Selects first port in range
+        async with Worker(s.address, port=port) as w2:
+            assert w2.port == 9868  # Selects next port in range
+            with pytest.raises(
+                ValueError, match="Could not start Worker"
+            ):  # No more ports left
+                async with Worker(s.address, port=port):
+                    pass
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_worker_waits_for_scheduler(cleanup):
+@gen_test(timeout=60)
+async def test_worker_waits_for_scheduler():
     w = Worker("127.0.0.1:8724")
     try:
         await asyncio.wait_for(w, 3)
@@ -438,11 +432,10 @@ async def test_gather_missing_workers_replicated(c, s, a, b, missing_first):
     assert a.data[x.key] == b.data[x.key] == "x"
 
 
-@pytest.mark.asyncio
-async def test_io_loop(cleanup):
-    async with Scheduler(port=0) as s:
-        async with Worker(s.address, loop=s.loop) as w:
-            assert w.io_loop is s.loop
+@gen_cluster(nthreads=[])
+async def test_io_loop(s):
+    async with Worker(s.address, loop=s.loop) as w:
+        assert w.io_loop is s.loop
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -547,21 +540,18 @@ async def test_close_on_disconnect(s, w):
         assert time() < start + 5
 
 
-@pytest.mark.asyncio
-async def test_memory_limit_auto():
-    async with Scheduler() as s:
-        async with Worker(s.address, nthreads=1) as a, Worker(
-            s.address, nthreads=2
-        ) as b, Worker(s.address, nthreads=100) as c, Worker(
-            s.address, nthreads=200
-        ) as d:
-            assert isinstance(a.memory_limit, Number)
-            assert isinstance(b.memory_limit, Number)
+@gen_cluster(nthreads=[])
+async def test_memory_limit_auto(s):
+    async with Worker(s.address, nthreads=1) as a, Worker(
+        s.address, nthreads=2
+    ) as b, Worker(s.address, nthreads=100) as c, Worker(s.address, nthreads=200) as d:
+        assert isinstance(a.memory_limit, Number)
+        assert isinstance(b.memory_limit, Number)
 
-            if CPU_COUNT > 1:
-                assert a.memory_limit < b.memory_limit
+        if CPU_COUNT > 1:
+            assert a.memory_limit < b.memory_limit
 
-            assert c.memory_limit == d.memory_limit
+        assert c.memory_limit == d.memory_limit
 
 
 @gen_cluster(client=True)
@@ -799,19 +789,16 @@ async def test_hold_onto_dependents(c, s, a, b):
         await asyncio.sleep(0.1)
 
 
+# Normally takes >2s but it has been observed to take >30s occasionally
 @pytest.mark.slow
-@gen_cluster(nthreads=[])
-async def test_worker_death_timeout(s):
-    with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
-        await s.close()
-        w = Worker(s.address, death_timeout=1)
-
+@gen_test(timeout=120)
+async def test_worker_death_timeout():
+    w = Worker("tcp://127.0.0.1:12345", death_timeout=0.1)
     with pytest.raises(TimeoutError) as info:
         await w
 
     assert "Worker" in str(info.value)
     assert "timed out" in str(info.value) or "failed to start" in str(info.value)
-
     assert w.status == Status.closed
 
 
@@ -1064,11 +1051,9 @@ async def test_start_services(s):
 @gen_test()
 async def test_scheduler_file():
     with tmpfile() as fn:
-        s = await Scheduler(scheduler_file=fn, port=8009)
-        w = await Worker(scheduler_file=fn)
-        assert set(s.workers) == {w.address}
-        await w.close()
-        s.stop()
+        async with Scheduler(scheduler_file=fn, dashboard_address=":0") as s:
+            async with Worker(scheduler_file=fn) as w:
+                assert set(s.workers) == {w.address}
 
 
 @gen_cluster(client=True)
@@ -1226,18 +1211,17 @@ async def test_reschedule(c, s, a, b):
     assert all(f.key in b.data for f in futures)
 
 
-@pytest.mark.asyncio
-async def test_deque_handler(cleanup):
+@gen_cluster(nthreads=[])
+async def test_deque_handler(s):
     from distributed.worker import logger
 
-    async with Scheduler() as s:
-        async with Worker(s.address) as w:
-            deque_handler = w._deque_handler
-            logger.info("foo456")
-            assert deque_handler.deque
-            msg = deque_handler.deque[-1]
-            assert "distributed.worker" in deque_handler.format(msg)
-            assert any(msg.msg == "foo456" for msg in deque_handler.deque)
+    async with Worker(s.address) as w:
+        deque_handler = w._deque_handler
+        logger.info("foo456")
+        assert deque_handler.deque
+        msg = deque_handler.deque[-1]
+        assert "distributed.worker" in deque_handler.format(msg)
+        assert any(msg.msg == "foo456" for msg in deque_handler.deque)
 
 
 @gen_cluster(nthreads=[], client=True)
@@ -1493,7 +1477,7 @@ def test_resource_limit(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_interface_async(loop, Worker):
+async def test_interface_async(cleanup, loop, Worker):
     from distributed.utils import get_ip_interface
 
     psutil = pytest.importorskip("psutil")
@@ -1512,7 +1496,7 @@ async def test_interface_async(loop, Worker):
             "Available interfaces are: %s." % (if_names,)
         )
 
-    async with Scheduler(interface=if_name) as s:
+    async with Scheduler(dashboard_address=":0", interface=if_name) as s:
         assert s.address.startswith("tcp://127.0.0.1")
         async with Worker(s.address, interface=if_name) as w:
             assert w.address.startswith("tcp://127.0.0.1")
@@ -1525,10 +1509,10 @@ async def test_interface_async(loop, Worker):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_protocol_from_scheduler_address(Worker):
-    ucp = pytest.importorskip("ucp")
+async def test_protocol_from_scheduler_address(cleanup, Worker):
+    pytest.importorskip("ucp")
 
-    async with Scheduler(protocol="ucx") as s:
+    async with Scheduler(protocol="ucx", dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
         async with Worker(s.address) as w:
             assert w.address.startswith("ucx://")
@@ -1549,8 +1533,8 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
     monkeypatch.setitem(backends, "foo", BadBackend())
 
     with dask.config.set({"distributed.comm.default-scheme": "foo"}):
-        async with Scheduler(protocol="tcp") as s:
-            async with Worker(s.address) as w:
+        async with Scheduler(protocol="tcp", dashboard_address=":0") as s:
+            async with Worker(s.address):
                 # Ensure that worker is able to properly start up
                 # without BadBackend.get_address_host raising a ValueError
                 pass
@@ -1558,8 +1542,8 @@ async def test_host_uses_scheduler_protocol(cleanup, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
-async def test_worker_listens_on_same_interface_by_default(Worker):
-    async with Scheduler(host="localhost") as s:
+async def test_worker_listens_on_same_interface_by_default(cleanup, Worker):
+    async with Scheduler(host="localhost", dashboard_address=":0") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
             assert s.ip == w.ip
@@ -1584,46 +1568,41 @@ async def test_close_gracefully(c, s, a, b):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_lifetime(cleanup):
-    async with Scheduler() as s:
-        async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
-            async with Client(s.address, asynchronous=True) as c:
-                futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
-                await asyncio.sleep(1.5)
-                assert b.status != Status.running
-                await b.finished()
-
-                assert set(b.data) == set(a.data)  # successfully moved data over
+@gen_cluster(client=True, nthreads=[])
+async def test_lifetime(c, s):
+    async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
+        futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
+        await asyncio.sleep(1.5)
+        assert b.status != Status.running
+        await b.finished()
+        assert set(b.data) == set(a.data)  # successfully moved data over
 
 
-@gen_cluster(client=True, worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
-async def test_lifetime_stagger(c, s, a, b):
+@gen_cluster(worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
+async def test_lifetime_stagger(s, a, b):
     assert a.lifetime != b.lifetime
     assert 8 <= a.lifetime <= 12
     assert 8 <= b.lifetime <= 12
 
 
-@pytest.mark.asyncio
-async def test_bad_metrics(cleanup):
+@gen_cluster(nthreads=[])
+async def test_bad_metrics(s):
     def bad_metric(w):
         raise Exception("Hello")
 
-    async with Scheduler() as s:
-        async with Worker(s.address, metrics={"bad": bad_metric}) as w:
-            assert "bad" not in s.workers[w.address].metrics
+    async with Worker(s.address, metrics={"bad": bad_metric}) as w:
+        assert "bad" not in s.workers[w.address].metrics
 
 
-@pytest.mark.asyncio
-async def test_bad_startup(cleanup):
+@gen_cluster(nthreads=[])
+async def test_bad_startup(s):
     def bad_startup(w):
         raise Exception("Hello")
 
-    async with Scheduler() as s:
-        try:
-            w = await Worker(s.address, startup_information={"bad": bad_startup})
-        except Exception:
-            pytest.fail("Startup exception was raised")
+    try:
+        await Worker(s.address, startup_information={"bad": bad_startup})
+    except Exception:
+        pytest.fail("Startup exception was raised")
 
 
 @gen_cluster(client=True)
@@ -1673,97 +1652,87 @@ async def test_pip_install_fails(c, s, a, b):
 #             assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
 
 
-@pytest.mark.asyncio
-async def test_update_latency(cleanup):
-    async with await Scheduler() as s:
-        async with await Worker(s.address) as w:
-            original = w.latency
-            await w.heartbeat()
-            assert original != w.latency
+@gen_cluster(nthreads=[])
+async def test_update_latency(s):
+    async with await Worker(s.address) as w:
+        original = w.latency
+        await w.heartbeat()
+        assert original != w.latency
 
-            if w.digests is not None:
-                assert w.digests["latency"].size() > 0
-
-
-@pytest.mark.skipif(MACOS, reason="frequently hangs")
-@pytest.mark.asyncio
-async def test_workerstate_executing(cleanup):
-    async with await Scheduler() as s:
-        async with await Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                ws = s.workers[w.address]
-                # Initially there are no active tasks
-                assert not ws.executing
-                # Submit a task and ensure the WorkerState is updated with the task
-                # it's executing
-                f = c.submit(slowinc, 1, delay=1)
-                while not ws.executing:
-                    await asyncio.sleep(0.01)
-                assert s.tasks[f.key] in ws.executing
-                await f
+        if w.digests is not None:
+            assert w.digests["latency"].size() > 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.slow
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_workerstate_executing(c, s, a):
+    ws = s.workers[a.address]
+    # Initially there are no active tasks
+    assert not ws.executing
+    # Submit a task and ensure the WorkerState is updated with the task
+    # it's executing
+    f = c.submit(slowinc, 1, delay=3)
+    while not ws.executing:
+        assert f.status == "pending"
+        await asyncio.sleep(0.01)
+    assert s.tasks[f.key] in ws.executing
+    await f
+
+
 @pytest.mark.parametrize("reconnect", [True, False])
-async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
+@gen_cluster(nthreads=[])
+async def test_heartbeat_comm_closed(s, monkeypatch, reconnect):
     with captured_logger("distributed.worker", level=logging.WARNING) as logger:
-        async with await Scheduler() as s:
 
-            def bad_heartbeat_worker(*args, **kwargs):
-                raise CommClosedError()
+        def bad_heartbeat_worker(*args, **kwargs):
+            raise CommClosedError()
 
-            async with await Worker(s.address, reconnect=reconnect) as w:
-                # Trigger CommClosedError during worker heartbeat
-                monkeypatch.setattr(
-                    w.scheduler, "heartbeat_worker", bad_heartbeat_worker
-                )
+        async with await Worker(s.address, reconnect=reconnect) as w:
+            # Trigger CommClosedError during worker heartbeat
+            monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
 
-                await w.heartbeat()
-                if reconnect:
-                    assert w.status == Status.running
-                else:
-                    assert w.status == Status.closed
+            await w.heartbeat()
+            if reconnect:
+                assert w.status == Status.running
+            else:
+                assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
 
 
-@pytest.mark.asyncio
-async def test_bad_local_directory(cleanup):
-    async with await Scheduler() as s:
-        try:
-            async with Worker(s.address, local_directory="/not/a/valid-directory"):
-                pass
-        except OSError:
-            # On Linux: [Errno 13] Permission denied: '/not'
-            # On MacOSX: [Errno 30] Read-only file system: '/not'
+@gen_cluster(nthreads=[])
+async def test_bad_local_directory(s):
+    try:
+        async with Worker(s.address, local_directory="/not/a/valid-directory"):
             pass
-        else:
-            assert WINDOWS
+    except OSError:
+        # On Linux: [Errno 13] Permission denied: '/not'
+        # On MacOSX: [Errno 30] Read-only file system: '/not'
+        pass
+    else:
+        assert WINDOWS
 
-        assert not any("error" in log for log in s.get_logs())
-
-
-@pytest.mark.asyncio
-async def test_taskstate_metadata(cleanup):
-
-    async with await Scheduler() as s:
-        async with await Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                await c.register_worker_plugin(TaskStateMetadataPlugin())
-
-                f = c.submit(inc, 1)
-                await f
-
-                ts = w.tasks[f.key]
-                assert "start_time" in ts.metadata
-                assert "stop_time" in ts.metadata
-                assert ts.metadata["stop_time"] > ts.metadata["start_time"]
-
-                # Check that Scheduler TaskState.metadata was also updated
-                assert s.tasks[f.key].metadata == ts.metadata
+    assert not any("error" in log for log in s.get_logs())
 
 
-@pytest.mark.asyncio
-async def test_executor_offload(cleanup, monkeypatch):
+@gen_cluster(client=True, nthreads=[])
+async def test_taskstate_metadata(c, s):
+    async with await Worker(s.address) as w:
+        await c.register_worker_plugin(TaskStateMetadataPlugin())
+
+        f = c.submit(inc, 1)
+        await f
+
+        ts = w.tasks[f.key]
+        assert "start_time" in ts.metadata
+        assert "stop_time" in ts.metadata
+        assert ts.metadata["stop_time"] > ts.metadata["start_time"]
+
+        # Check that Scheduler TaskState.metadata was also updated
+        assert s.tasks[f.key].metadata == ts.metadata
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_executor_offload(c, s, monkeypatch):
     class SameThreadClass:
         def __getstate__(self):
             return ()
@@ -1774,19 +1743,17 @@ async def test_executor_offload(cleanup, monkeypatch):
 
     monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
 
-    async with Scheduler() as s:
-        async with Worker(s.address, executor="offload") as w:
-            from distributed.utils import _offload_executor
+    async with Worker(s.address, executor="offload") as w:
+        from distributed.utils import _offload_executor
 
-            assert w.executor is _offload_executor
+        assert w.executor is _offload_executor
 
-            async with Client(s.address, asynchronous=True) as c:
-                x = SameThreadClass()
+        x = SameThreadClass()
 
-                def f(x):
-                    return threading.get_ident() == x._thread_ident
+        def f(x):
+            return threading.get_ident() == x._thread_ident
 
-                assert await c.submit(f, x)
+        assert await c.submit(f, x)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
@@ -2003,28 +1970,24 @@ async def test_worker_client_closes_if_created_on_worker_last_worker_alive(s, a,
             default_client()
 
 
-@pytest.mark.asyncio
-async def test_multiple_executors(cleanup):
+@gen_cluster(client=True, nthreads=[])
+async def test_multiple_executors(c, s):
     def get_thread_name():
         return threading.current_thread().name
 
-    async with Scheduler() as s:
-        async with Worker(
-            s.address,
-            nthreads=2,
-            executor={
-                "GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")
-            },
-        ) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                futures = []
-                with dask.annotate(executor="default"):
-                    futures.append(c.submit(get_thread_name, pure=False))
-                with dask.annotate(executor="GPU"):
-                    futures.append(c.submit(get_thread_name, pure=False))
-                default_result, gpu_result = await c.gather(futures)
-                assert "Dask-Default-Threads" in default_result
-                assert "Dask-GPU-Threads" in gpu_result
+    async with Worker(
+        s.address,
+        nthreads=2,
+        executor={"GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")},
+    ):
+        futures = []
+        with dask.annotate(executor="default"):
+            futures.append(c.submit(get_thread_name, pure=False))
+        with dask.annotate(executor="GPU"):
+            futures.append(c.submit(get_thread_name, pure=False))
+        default_result, gpu_result = await c.gather(futures)
+        assert "Dask-Default-Threads" in default_result
+        assert "Dask-GPU-Threads" in gpu_result
 
 
 @gen_cluster(client=True)

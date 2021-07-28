@@ -110,7 +110,7 @@ def test_picklability_sync(client):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=60)
 async def test_race(c, s, *workers):
     def f(i):
         with worker_client() as c:

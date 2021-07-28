@@ -1474,10 +1474,10 @@ class Client:
                 pc.stop()
 
         if self.asynchronous:
-            future = self._close()
+            coro = self._close()
             if timeout:
-                future = asyncio.wait_for(future, timeout)
-            return future
+                coro = asyncio.wait_for(coro, timeout)
+            return coro
 
         if self._start_arg is None:
             with suppress(AttributeError):
