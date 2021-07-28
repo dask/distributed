@@ -212,8 +212,11 @@ class NannyPlugin:
 
 
 def _get_plugin_name(plugin) -> str:
-    """Returns the worker plugin name. If plugin has no name attribute
-    a random name is used."""
+    """Return plugin name.
+
+    If plugin has no name attribute a random name is used.
+
+    """
     if hasattr(plugin, "name"):
         return plugin.name
     else:
