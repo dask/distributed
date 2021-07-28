@@ -51,6 +51,8 @@ from distributed.utils_test import (
 )
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
 
+pytestmark = pytest.mark.ci1
+
 
 @pytest.mark.asyncio
 async def test_worker_nthreads(cleanup):

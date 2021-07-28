@@ -95,6 +95,8 @@ from distributed.utils_test import (
     wait_for,
 )
 
+pytestmark = pytest.mark.ci1
+
 
 @gen_cluster(client=True)
 async def test_submit(c, s, a, b):

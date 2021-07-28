@@ -53,6 +53,8 @@ if sys.version_info < (3, 8):
 else:
     import pickle
 
+pytestmark = pytest.mark.ci1
+
 
 alice = "alice:1234"
 bob = "bob:1234"
