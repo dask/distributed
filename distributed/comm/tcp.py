@@ -268,9 +268,6 @@ class TCP(Comm):
             # trick to enque all frames for writing beforehand
             for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
-                    if stream._write_buffer is None:
-                        raise StreamClosedError()
-
                     each_frame = memoryview(each_frame)
 
                     # Make sure that `len(data) == data.nbytes`
@@ -285,6 +282,9 @@ class TCP(Comm):
                         chunk_nbytes = chunk.nbytes
 
                         if chunk_nbytes:
+                            if stream._write_buffer is None:
+                                raise StreamClosedError()
+
                             stream._write_buffer.append(chunk)
                             stream._total_write_index += chunk_nbytes
 
