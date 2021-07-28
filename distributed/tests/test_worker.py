@@ -2484,36 +2484,3 @@ async def test_steak_during_task_deserialization(c, s, a, b, monkeypatch):
 
     finally:
         threadpool.shutdown()
-
-
-@pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
-async def test_release_during_exeucte_threadcount(c, s, a):
-    # FIXME: This is not intended behaviour but it is what is currently happening
-
-    # We are only allowed to have one thread therefore this will suffer head of
-    # line blocking
-    delay = 1
-    f1 = c.submit(slowinc, 1, delay=delay)
-    start = time()
-    await asyncio.sleep(0.2)
-
-    # This allows for temporary threadpool oversubscription since the execution
-    # counter is decremented immediately but the threadpool is still running
-    # therefore a task will be in state executing even though the threadpool is
-    # still busy
-    f1.release()
-
-    await c.submit(inc, 1) == 1
-
-    async def observe(dask_worker):
-        while time() - start < delay:
-            assert dask_worker.tasks[f1.key].status == "executing"
-            assert dask_worker.executing_count == 1
-            # Work queue are queued up tasks. once the task is actually executing it should not be in here
-            assert len(dask_worker.executors["default"]._work_queue) == 1
-
-    await c.run(observe)
-
-    end = time()
-    assert end - start > delay, end - start
