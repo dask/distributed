@@ -348,7 +348,7 @@ async def test_dont_optimize_out(c, s, a, b):
         assert "executing" in str(a.story(key))
 
 
-@pytest.mark.xfail(reason="atop fusion seemed to break this")
+@pytest.mark.skip(reason="atop fusion seemed to break this")
 @gen_cluster(
     client=True,
     nthreads=[

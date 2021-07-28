@@ -21,7 +21,15 @@ from .client import (
 )
 from .core import Status, connect, rpc
 from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
-from .diagnostics.plugin import PipInstall, SchedulerPlugin, WorkerPlugin
+from .diagnostics.plugin import (
+    Environ,
+    NannyPlugin,
+    PipInstall,
+    SchedulerPlugin,
+    UploadDirectory,
+    UploadFile,
+    WorkerPlugin,
+)
 from .diagnostics.progressbar import progress
 from .event import Event
 from .lock import Lock

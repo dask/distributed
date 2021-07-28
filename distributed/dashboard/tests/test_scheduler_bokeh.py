@@ -35,6 +35,7 @@ from distributed.dashboard.components.scheduler import (
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
     WorkersMemory,
     WorkersMemoryHistogram,
     WorkerTable,
@@ -57,7 +58,7 @@ async def test_simple(c, s, a, b):
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
-        response = await http_client.fetch("http://localhost:%d%s" % (port, suffix))
+        response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
@@ -474,6 +475,37 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
     assert wt.source.data["name"][0] == "Total (2)"
     assert wt.source.data["memory_limit"][0] == 0
     assert wt.source.data["memory_percent"][0] == ""
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth(c, s, a, b):
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    assert all(len(v) == 2 for v in nb.source.data.values())
+
+    assert nb.source.data["y_read"] == [0.75, 1.85]
+    assert nb.source.data["y_write"] == [0.25, 1.35]
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
 
 
 @gen_cluster(client=True)

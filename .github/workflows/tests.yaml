@@ -18,6 +18,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.7", "3.8", "3.9"]
+        # Cherry-pick test modules to split the overall runtime roughly in half
+        partition: [ci1, not ci1]
 
         # Uncomment to stress-test the test suite for random failures.
         # Must also change env.TEST_ID below.
@@ -113,7 +115,7 @@ jobs:
           fi
           source continuous_integration/scripts/set_ulimit.sh
 
-          pytest distributed -m "not avoid_ci" --runslow \
+          pytest distributed -m "not avoid_ci and ${{ matrix.partition }}" --runslow \
             --junitxml reports/pytest.xml -o junit_suite_name=$TEST_ID
 
       # - name: Debug with tmate on failure

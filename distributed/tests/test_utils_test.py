@@ -265,5 +265,7 @@ def test_tls_cluster(tls_client):
 
 @pytest.mark.asyncio
 async def test_tls_scheduler(security, cleanup):
-    async with Scheduler(security=security, host="localhost") as s:
+    async with Scheduler(
+        security=security, host="localhost", dashboard_address=":0"
+    ) as s:
         assert s.address.startswith("tls")
