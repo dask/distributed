@@ -779,7 +779,6 @@ class WorkerNetworkBandwidth(DashboardComponent):
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
             self.root.toolbar_location = None
-            self.root.yaxis.visible = False
 
     @without_property_validation
     def update(self):
@@ -848,7 +847,7 @@ class SystemTimeseries(DashboardComponent):
             x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 
             self.bandwidth = figure(
-                title="Workers Network Bandwidth Timeseries",
+                title="Workers Network Bandwidth",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
@@ -875,14 +874,16 @@ class SystemTimeseries(DashboardComponent):
             self.bandwidth.yaxis.axis_label = "bytes / second"
             self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.bandwidth.y_range.start = 0
+            self.bandwidth.yaxis.minor_tick_line_alpha = 0
+            self.bandwidth.xgrid.visible = False
 
             self.cpu = figure(
-                title="Workers CPU Timeseries",
+                title="Workers CPU",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
-                id="bk-worker-network-cpu-ts",
-                name="worker_network_cpu-timeseries",
+                id="bk-worker-cpu-ts",
+                name="worker_cpu-timeseries",
                 **kwargs,
             )
 
@@ -893,14 +894,16 @@ class SystemTimeseries(DashboardComponent):
             )
             self.cpu.yaxis.axis_label = "Utilization"
             self.cpu.y_range.start = 0
+            self.cpu.yaxis.minor_tick_line_alpha = 0
+            self.cpu.xgrid.visible = False
 
             self.memory = figure(
-                title="Workers Memory Timeseries",
+                title="Workers Memory",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
-                id="bk-worker-network-mem-ts",
-                name="worker_network_mem-timeseries",
+                id="bk-worker-memory-ts",
+                name="worker_memory-timeseries",
                 **kwargs,
             )
 
@@ -912,14 +915,16 @@ class SystemTimeseries(DashboardComponent):
             self.memory.yaxis.axis_label = "Bytes"
             self.memory.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.memory.y_range.start = 0
+            self.memory.yaxis.minor_tick_line_alpha = 0
+            self.memory.xgrid.visible = False
 
             self.disk = figure(
-                title="Workers Network Disk Timeseries",
+                title="Workers Disk",
                 x_axis_type="datetime",
                 tools="",
                 x_range=x_range,
-                id="bk-worker-network-disk-ts",
-                name="worker_network_disk-timeseries",
+                id="bk-worker-disk-ts",
+                name="worker_disk-timeseries",
                 **kwargs,
             )
 
@@ -941,6 +946,8 @@ class SystemTimeseries(DashboardComponent):
             self.disk.yaxis.axis_label = "bytes / second"
             self.disk.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.disk.y_range.start = 0
+            self.disk.yaxis.minor_tick_line_alpha = 0
+            self.disk.xgrid.visible = False
 
     def get_data(self):
         workers = self.scheduler.workers.values()
