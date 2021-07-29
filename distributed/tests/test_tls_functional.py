@@ -4,13 +4,12 @@ Most are taken from other test files and adapted.
 """
 import asyncio
 
-import pytest
-
 from distributed import Client, Nanny, Queue, Scheduler, Worker, wait, worker_client
 from distributed.core import Status
 from distributed.metrics import time
 from distributed.utils_test import (
     double,
+    gen_test,
     gen_tls_cluster,
     inc,
     slowadd,
@@ -202,17 +201,17 @@ async def test_retire_workers(c, s, a, b):
         assert time() < start + 5
 
 
-@pytest.mark.asyncio
-async def test_security_dict_input_no_security(cleanup):
-    async with Scheduler(security={}) as s:
-        async with Worker(s.address, security={}) as w:
+@gen_test()
+async def test_security_dict_input_no_security():
+    async with Scheduler(dashboard_address=":0", security={}) as s:
+        async with Worker(s.address, security={}):
             async with Client(s.address, security={}, asynchronous=True) as c:
                 result = await c.submit(inc, 1)
                 assert result == 2
 
 
-@pytest.mark.asyncio
-async def test_security_dict_input(cleanup):
+@gen_test()
+async def test_security_dict_input():
     conf = tls_config()
     ca_file = conf["distributed"]["comm"]["tls"]["ca-file"]
     client = conf["distributed"]["comm"]["tls"]["client"]["cert"]
@@ -221,6 +220,7 @@ async def test_security_dict_input(cleanup):
 
     async with Scheduler(
         host="localhost",
+        dashboard_address=":0",
         security={"tls_ca_file": ca_file, "tls_scheduler_cert": scheduler},
     ) as s:
         assert s.address.startswith("tls://")

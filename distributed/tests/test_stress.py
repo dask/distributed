@@ -89,7 +89,7 @@ def test_cancel_stress_sync(loop):
 @gen_cluster(
     nthreads=[],
     client=True,
-    timeout=120,
+    timeout=180,
     scheduler_kwargs={"allowed_failures": 100_000},
 )
 async def test_stress_creation_and_deletion(c, s):
@@ -220,7 +220,7 @@ async def test_stress_steal(c, s, *workers):
 
 
 @pytest.mark.slow
-@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=120)
+@gen_cluster(nthreads=[("127.0.0.1", 1)] * 10, client=True, timeout=180)
 async def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")
     x = da.random.random(size=(1000, 1000), chunks=(1000, 1))

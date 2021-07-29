@@ -821,10 +821,10 @@ async def start_cluster(
         comm.comm is None for comm in s.stream_comms.values()
     ):
         await asyncio.sleep(0.01)
-        if time() - start > 5:
+        if time() > start + 30:
             await asyncio.gather(*[w.close(timeout=1) for w in workers])
             await s.close(fast=True)
-            raise Exception("Cluster creation timeout")
+            raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
@@ -885,6 +885,9 @@ def gen_cluster(
         warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
+    scheduler_kwargs = merge(
+        {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
+    )
     worker_kwargs = merge(
         {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
@@ -893,6 +896,7 @@ def gen_cluster(
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
+        @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             result = None
             workers = []
@@ -1029,7 +1033,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(10)
+            proc.wait(30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):

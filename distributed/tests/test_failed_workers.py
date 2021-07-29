@@ -26,6 +26,8 @@ from distributed.utils_test import (
     slowinc,
 )
 
+pytestmark = pytest.mark.ci1
+
 
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
@@ -65,6 +67,7 @@ async def test_submit_after_failed_worker(c, s, a, b):
     assert result == sum(map(inc, range(10)))
 
 
+@pytest.mark.slow
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
@@ -75,7 +78,8 @@ def test_gather_after_failed_worker(loop):
             assert result == list(map(inc, range(10)))
 
 
-@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1)] * 4)
+@pytest.mark.slow
+@gen_cluster(client=True, Worker=Nanny, nthreads=[("127.0.0.1", 1)] * 4, timeout=60)
 async def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     L = c.map(inc, range(20))
     await wait(L)
