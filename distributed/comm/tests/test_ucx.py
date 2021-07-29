@@ -2,6 +2,8 @@ import asyncio
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 ucp = pytest.importorskip("ucp")
 
 from distributed import Client, Scheduler, wait
