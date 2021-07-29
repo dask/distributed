@@ -1629,8 +1629,8 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         y_range=y_range,
         toolbar_location="above",
         x_axis_type="datetime",
+        y_axis_location=None,
         tools="",
-        min_border_left=50,
         min_border_bottom=50,
         **kwargs,
     )
@@ -2336,7 +2336,6 @@ class TaskProgress(DashboardComponent):
             y_range=y_range,
             toolbar_location=None,
             tools="",
-            min_border_left=50,
             min_border_bottom=50,
             **kwargs,
         )
