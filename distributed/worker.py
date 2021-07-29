@@ -2721,22 +2721,19 @@ class Worker(ServerNode):
 
             assert name
 
-            if name in self.plugins:
-                return {"status": "repeat"}
-            else:
-                self.plugins[name] = plugin
+            self.plugins[name] = plugin
 
-                logger.info("Starting Worker plugin %s" % name)
-                if hasattr(plugin, "setup"):
-                    try:
-                        result = plugin.setup(worker=self)
-                        if isawaitable(result):
-                            result = await result
-                    except Exception as e:
-                        msg = error_message(e)
-                        return msg
+            logger.info("Starting Worker plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(worker=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
 
-                return {"status": "OK"}
+            return {"status": "OK"}
 
     async def plugin_remove(self, comm=None, name=None):
         with log_errors(pdb=False):

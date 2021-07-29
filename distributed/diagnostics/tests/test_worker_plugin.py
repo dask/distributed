@@ -188,18 +188,23 @@ async def test_dependent_tasks(c, s, w):
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_registering_with_name_arg(c, s, w):
     class FooWorkerPlugin:
+        def __init__(self, value):
+            self.value = value
+
         def setup(self, worker):
-            if hasattr(worker, "foo"):
-                raise RuntimeError(f"Worker {worker.address} already has foo!")
+            worker.foo = self.value
 
-            worker.foo = True
-
-    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
+    responses = await c.register_worker_plugin(FooWorkerPlugin(23), name="foo")
     assert list(responses.values()) == [{"status": "OK"}]
+    results = await c.run(lambda dask_worker: dask_worker.foo)
+    assert results[w.address] == 23
 
     async with Worker(s.address, loop=s.loop):
-        responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-        assert list(responses.values()) == [{"status": "repeat"}] * 2
+        responses = await c.register_worker_plugin(FooWorkerPlugin(42), name="foo")
+        assert list(responses.values()) == [{"status": "OK"}] * 2
+        results = await c.run(lambda dask_worker: dask_worker.foo)
+        assert len(results) == 2
+        assert all(v == 42 for v in results.values())
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
