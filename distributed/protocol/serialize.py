@@ -639,12 +639,13 @@ def serialize_bytes(x, **kwargs):
 def deserialize_bytes(b):
     frames = unpack_frames(b)
     header, frames = frames[0], frames[1:]
+    header_bytes = len(header)
     if header:
         header = msgpack.loads(header, raw=False, use_list=False)
     else:
         header = {}
     frames = decompress(header, frames)
-    return merge_and_deserialize(header, frames)
+    return merge_and_deserialize(header, frames, memoryview_offset=header_bytes)
 
 
 ################################
