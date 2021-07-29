@@ -345,7 +345,7 @@ class SpecCluster(Cluster):
                 if name in self.workers:
                     del self.workers[name]
 
-            to_open = set(self.worker_spec) - set(self.workers)
+            to_open = list(set(self.worker_spec) - set(self.workers))
             workers = []
             for name in to_open:
                 d = self.worker_spec[name]
