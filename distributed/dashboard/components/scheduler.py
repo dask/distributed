@@ -985,6 +985,20 @@ class SystemTimeseries(DashboardComponent):
         with log_errors():
             self.source.stream(self.get_data(), 1000)
 
+            if self.scheduler.workers:
+                y_end_cpu = sum(
+                    ws.nthreads or 1 for ws in self.scheduler.workers.values()
+                )
+                y_end_mem = sum(
+                    ws.memory_limit for ws in self.scheduler.workers.values()
+                )
+            else:
+                y_end_cpu = 1
+                y_end_mem = 100_000_000
+
+            self.cpu.y_range.end = y_end_cpu * 100
+            self.memory.y_range.end = y_end_mem
+
 
 class ComputePerKey(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
