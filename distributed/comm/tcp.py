@@ -338,6 +338,7 @@ class TLS(TCP):
     A TLS-specific version of TCP.
     """
 
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
     max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
 
     def _read_extra(self):
