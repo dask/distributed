@@ -358,6 +358,12 @@ performance.
 .. note::
    The variable must be set before starting the ``dask-worker`` process.
 
+.. note::
+   If using a :ref:`nanny`, the ``MALLOC_TRIM_THRESHOLD_`` environment variable
+   will automatically be set to ``65536`` for the worker process which the nanny is
+   monitoring. You can modify this behavior using the ``distributed.nanny.environ``
+   configuration value.
+
 jemalloc
 ~~~~~~~~
 *Linux and MacOS workers*
@@ -401,6 +407,8 @@ in its decision-making:
 This of course will be problematic if you have a genuine issue with unmanaged memory,
 e.g. memory leaks and/or suffer from heavy fragmentation.
 
+
+.. _nanny:
 
 Nanny
 -----
