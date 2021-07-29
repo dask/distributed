@@ -2959,7 +2959,7 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
 
 def individual_profile_doc(scheduler, extra, doc):
     with log_errors():
-        prof = ProfileTimePlot(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME
@@ -2967,7 +2967,7 @@ def individual_profile_doc(scheduler, extra, doc):
 
 def individual_profile_server_doc(scheduler, extra, doc):
     with log_errors():
-        prof = ProfileServer(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME
