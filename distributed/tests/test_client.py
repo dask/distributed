@@ -6923,3 +6923,19 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         assert results[n.worker_address] == 123
 
     assert files == set(os.listdir())  # no change
+
+
+@gen_cluster(client=True)
+async def test_exception_text(c, s, a, b):
+    def bad(x):
+        raise Exception(x)
+
+    future = c.submit(bad, 123)
+    await wait(future)
+
+    ts = s.tasks[future.key]
+
+    assert isinstance(ts.exception_text, str)
+    assert "123" in ts.exception_text
+    assert "Exception(x)" in ts.traceback_text
+    assert "bad" in ts.traceback_text

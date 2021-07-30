@@ -170,7 +170,9 @@ class TaskState:
         self.waiting_for_data = set()
         self.resource_restrictions = None
         self.exception = None
+        self.exception_text = ""
         self.traceback = None
+        self.traceback_text = ""
         self.type = None
         self.suspicious_count = 0
         self.startstops = list()
@@ -1600,7 +1602,9 @@ class Worker(ServerNode):
                     return
                 if ts.state == "error":
                     ts.exception = None
+                    ts.exception_text = ""
                     ts.traceback = None
+                    ts.traceback_text = ""
                 else:
                     # This is a scheduler re-assignment
                     # Either `fetch` -> `waiting` or `flight` -> `waiting`
@@ -1960,6 +1964,8 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.exception is not None
             assert ts.traceback is not None
+            assert ts.exception_text
+            assert ts.traceback_text
         self.send_task_state_to_scheduler(ts)
 
     def transition_ready_memory(self, ts, value=no_value):
@@ -2000,7 +2006,9 @@ class Worker(ServerNode):
                     logger.info("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
                     ts.exception = msg["exception"]
+                    ts.exception_text = msg["exception_text"]
                     ts.traceback = msg["traceback"]
+                    ts.traceback_text = msg["traceback_text"]
                     ts.state = "error"
                     out = "error"
                     for d in ts.dependents:
@@ -2226,6 +2234,8 @@ class Worker(ServerNode):
                 "thread": self.threads.get(ts.key),
                 "exception": ts.exception,
                 "traceback": ts.traceback,
+                "exception_text": ts.exception_text,
+                "traceback_text": ts.traceback_text,
             }
         else:
             logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
@@ -2485,6 +2495,8 @@ class Worker(ServerNode):
             msg = error_message(exc)
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
+            ts.exception_text = msg["exception_text"]
+            ts.traceback_text = msg["traceback_text"]
             self.transition(ts, "error")
         self.release_key(dep.key, reason="bad dep")
 
@@ -2951,6 +2963,8 @@ class Worker(ServerNode):
             else:
                 ts.exception = result["exception"]
                 ts.traceback = result["traceback"]
+                ts.exception_text = result["exception_text"]
+                ts.traceback_text = result["traceback_text"]
                 logger.warning(
                     "Compute Failed\n"
                     "Function:  %s\n"
@@ -2977,6 +2991,8 @@ class Worker(ServerNode):
             emsg = error_message(exc)
             ts.exception = emsg["exception"]
             ts.traceback = emsg["traceback"]
+            ts.exception_text = emsg["exception_text"]
+            ts.traceback_text = emsg["traceback_text"]
             self.transition(ts, "error")
         finally:
             await self.ensure_computing()
