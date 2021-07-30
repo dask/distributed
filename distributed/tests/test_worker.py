@@ -2041,7 +2041,7 @@ async def test_process_executor(c, s, a, b):
         assert (await future) != os.getpid()
 
 
-def kill_yourself():
+def kill_process():
     import os
     import signal
 
@@ -2054,7 +2054,7 @@ async def test_process_executor_kills_process(c, s, a, b):
         a.executors["processes"] = e
         b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(kill_yourself)
+            future = c.submit(kill_process)
 
         with pytest.raises(
             BrokenProcessPool,
