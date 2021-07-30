@@ -218,3 +218,19 @@ def test_maybe_compress_memoryviews():
     else:
         assert compression == "blosc"
         assert len(payload) < x.nbytes / 10
+
+
+def test_loads_multiple_memoryviews_error():
+    msg = [Serialize(b"abcd"), b"wxyz"]
+    frames = dumps(msg)
+    header = frames[0]
+    assert not isinstance(header, memoryview)
+    assert any(isinstance(f, memoryview) for f in frames)
+
+    prelude = b"foobar"
+    new_header = memoryview(prelude + header)[len(prelude) :]
+    assert new_header.obj is not header
+    frames[0] = new_header
+
+    with pytest.raises(AssertionError, match="backed by multiple buffers"):
+        loads(frames, memoryview_offset=len(prelude))
