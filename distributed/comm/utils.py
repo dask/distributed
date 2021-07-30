@@ -50,16 +50,29 @@ async def to_frames(
         return _to_frames()
 
 
-async def from_frames(frames, deserialize=True, deserializers=None, allow_offload=True):
+async def from_frames(
+    frames,
+    deserialize=True,
+    deserializers=None,
+    allow_offload=True,
+    memoryview_offset: int = 0,
+):
     """
     Unserialize a list of Distributed protocol frames.
+
+    When ``frames`` contains memoryviews that share an underlying buffer,
+    ``memoryview_offset`` must be the index into that underlying buffer
+    where the ``frames`` start (in bytes, not frame counts).
     """
     size = False
 
     def _from_frames():
         try:
             return protocol.loads(
-                frames, deserialize=deserialize, deserializers=deserializers
+                frames,
+                deserialize=deserialize,
+                deserializers=deserializers,
+                memoryview_offset=memoryview_offset,
             )
         except EOFError:
             if size > 1000:

@@ -59,7 +59,9 @@ def unpack_frames(b):
     """Unpack bytes into a sequence of frames
 
     This assumes that length information is at the front of the bytestring,
-    as performed by pack_frames
+    as performed by pack_frames.
+    Returns the number of bytes in that length information header, and a list
+    of frames as zero-copy memoryview objects into ``b``.
 
     See Also
     --------
@@ -74,10 +76,10 @@ def unpack_frames(b):
     lengths = struct.unpack_from(f"{n_frames}{fmt}", b, fmt_size)
 
     frames = []
-    start = fmt_size * (1 + n_frames)
+    start = prelude_size = fmt_size * (1 + n_frames)
     for length in lengths:
         end = start + length
         frames.append(b[start:end])
         start = end
 
-    return frames
+    return prelude_size, frames

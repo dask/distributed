@@ -210,13 +210,14 @@ class TCP(Comm):
             raise
         else:
             try:
-                frames = unpack_frames(frames)
+                prelude_size, frames = unpack_frames(frames)
 
                 msg = await from_frames(
                     frames,
                     deserialize=self.deserialize,
                     deserializers=deserializers,
                     allow_offload=self.allow_offload,
+                    memoryview_offset=prelude_size,
                 )
             except EOFError:
                 # Frames possibly garbled or truncated by communication error

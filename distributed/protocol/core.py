@@ -81,9 +81,13 @@ def dumps(
         raise
 
 
-def loads(frames, deserialize=True, deserializers=None):
-    """Transform bytestream back into Python value"""
+def loads(frames, deserialize=True, deserializers=None, memoryview_offset: int = 0):
+    """Transform bytestream back into Python value
 
+    When ``frames`` contains memoryviews that share an underlying buffer,
+    ``memoryview_offset`` must be the index into that underlying buffer
+    where the ``frames`` start (in bytes, not frame counts).
+    """
     try:
 
         def _decode_default(obj):
@@ -104,19 +108,35 @@ def loads(frames, deserialize=True, deserializers=None):
                     # Check for memoryviews in preceding frames that share an underlying
                     # buffer with these sub-frames, to figure out what offset in that buffer
                     # `sub_frames` starts at.
-                    memoryview_offset = 0
+                    subframe_memoryview_offset = memoryview_offset
                     if sub_frames and isinstance(sub_frames[0], memoryview):
                         obj = sub_frames[0].obj
                         for f in reversed(frames[:offset]):
                             if not isinstance(f, memoryview) or f.obj is not obj:
+                                # Walking backwards from the start of `sub_frames`, reached a frame that doesn't
+                                # belong to the same memoryview
+                                if memoryview_offset != 0:
+                                    # If given an initial offset for `frames[0]`, but we're working with a different
+                                    # buffer, something is wrong. We don't know if there's an initial offset for this buffer too,
+                                    # so to be safe, copy all sub-frames to new memory to prevent faulty zero-copy deserialization.
+                                    subframe_buffer = memoryview(b"".join(sub_frames))
+                                    i = 0
+                                    new_subframes = []
+                                    for frame in sub_frames:
+                                        new_subframes.append(
+                                            subframe_buffer[i : i + len(frame)]
+                                        )
+                                        i += len(frame)
+                                    subframe_memoryview_offset = 0
+
                                 break
-                            memoryview_offset += len(f)
+                            subframe_memoryview_offset += len(f)
 
                     return merge_and_deserialize(
                         sub_header,
                         sub_frames,
                         deserializers=deserializers,
-                        memoryview_offset=memoryview_offset,
+                        memoryview_offset=subframe_memoryview_offset,
                     )
                 else:
                     return Serialized(sub_header, sub_frames)

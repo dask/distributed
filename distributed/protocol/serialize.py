@@ -485,7 +485,6 @@ def merge_and_deserialize(header, frames, deserializers=None, memoryview_offset=
                     + (frame_byte_offsets[offset - 1] if offset else 0),
                 )
             merged_frames.append(merged)
-            memoryview_offset += len(merged)
 
     return deserialize(header, merged_frames, deserializers=deserializers)
 
@@ -637,7 +636,7 @@ def serialize_bytes(x, **kwargs):
 
 
 def deserialize_bytes(b):
-    frames = unpack_frames(b)
+    prelude_size, frames = unpack_frames(b)
     header, frames = frames[0], frames[1:]
     header_bytes = len(header)
     if header:
@@ -645,7 +644,9 @@ def deserialize_bytes(b):
     else:
         header = {}
     frames = decompress(header, frames)
-    return merge_and_deserialize(header, frames, memoryview_offset=header_bytes)
+    return merge_and_deserialize(
+        header, frames, memoryview_offset=prelude_size + header_bytes
+    )
 
 
 ################################

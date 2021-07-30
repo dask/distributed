@@ -5,6 +5,7 @@ def test_pack_frames():
     frames = [b"123", b"asdf"]
     b = pack_frames(frames)
     assert isinstance(b, bytes)
-    frames2 = unpack_frames(b)
+    prelude_size, frames2 = unpack_frames(b)
 
     assert frames == frames2
+    assert prelude_size == len(b) - sum(len(x) for x in frames)
