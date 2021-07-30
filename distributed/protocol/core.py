@@ -115,10 +115,20 @@ def loads(frames, deserialize=True, deserializers=None, memoryview_offset: int =
                             if not isinstance(f, memoryview) or f.obj is not obj:
                                 # Walking backwards from the start of `sub_frames`, reached a frame that doesn't
                                 # belong to the same memoryview
-                                assert memoryview_offset == 0, (
-                                    f"Given an initial offset of {memoryview_offset} into the frames' underlying buffer "
-                                    "but the frames are backed by multiple buffers. This should not happen."
-                                )
+                                if memoryview_offset != 0:
+                                    # If given an initial offset for `frames[0]`, but we're working with a different
+                                    # buffer, something is wrong. We don't know if there's an initial offset for this buffer too,
+                                    # so to be safe, copy all sub-frames to new memory to prevent faulty zero-copy deserialization.
+                                    subframe_buffer = memoryview(b"".join(sub_frames))
+                                    i = 0
+                                    new_subframes = []
+                                    for frame in sub_frames:
+                                        new_subframes.append(
+                                            subframe_buffer[i : i + len(frame)]
+                                        )
+                                        i += len(frame)
+                                    subframe_memoryview_offset = 0
+
                                 break
                             subframe_memoryview_offset += len(f)
 
