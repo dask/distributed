@@ -14,6 +14,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.security import Security
 from distributed.utils_test import (
     gen_cluster,
+    gen_test,
     get_client_ssl_context,
     get_server_ssl_context,
     inc,
@@ -30,8 +31,8 @@ def test_registered():
     assert isinstance(backend, ws.WSBackend)
 
 
-@pytest.mark.asyncio
-async def test_listen_connect(cleanup):
+@gen_test()
+async def test_listen_connect():
     async def handle_comm(comm):
         while True:
             msg = await comm.read()
@@ -46,8 +47,8 @@ async def test_listen_connect(cleanup):
         await comm.close()
 
 
-@pytest.mark.asyncio
-async def test_listen_connect_wss(cleanup):
+@gen_test()
+async def test_listen_connect_wss():
     async def handle_comm(comm):
         while True:
             msg = await comm.read()
@@ -66,8 +67,8 @@ async def test_listen_connect_wss(cleanup):
         await comm.close()
 
 
-@pytest.mark.asyncio
-async def test_expect_ssl_context(cleanup):
+@gen_test()
+async def test_expect_ssl_context():
     server_ctx = get_server_ssl_context()
 
     async with listen("wss://", lambda comm: comm, ssl_context=server_ctx) as listener:
@@ -75,8 +76,8 @@ async def test_expect_ssl_context(cleanup):
             comm = await connect(listener.contact_address)
 
 
-@pytest.mark.asyncio
-async def test_expect_scheduler_ssl_when_sharing_server(cleanup):
+@gen_test()
+async def test_expect_scheduler_ssl_when_sharing_server():
     with tempfile.TemporaryDirectory() as tempdir:
         key_path = os.path.join(tempdir, "dask.pem")
         cert_path = os.path.join(tempdir, "dask.crt")
@@ -90,41 +91,30 @@ async def test_expect_scheduler_ssl_when_sharing_server(cleanup):
         }
         with dask.config.set(c):
             with pytest.raises(RuntimeError):
-                async with Scheduler(protocol="ws://", dashboard=True, port=8787) as s:
+                async with Scheduler(protocol="ws://", dashboard=True, port=8787):
                     pass
 
 
-@pytest.mark.asyncio
-async def test_roundtrip(cleanup):
-    async with Scheduler(protocol="ws://") as s:
-        async with Worker(s.address) as w:
-            async with Client(s.address, asynchronous=True) as c:
-                assert c.scheduler.address.startswith("ws://")
-                assert w.address.startswith("ws://")
-                future = c.submit(inc, 1)
-                result = await future
-                assert result == 2
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_roundtrip(c, s, a, b):
+    assert a.address.startswith("ws://")
+    assert b.address.startswith("ws://")
+    assert c.scheduler.address.startswith("ws://")
+    assert await c.submit(inc, 1) == 2
 
 
-@pytest.mark.asyncio
-async def test_collections(cleanup):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_collections(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    async with Scheduler(protocol="ws://") as s:
-        async with Worker(s.address) as a:
-            async with Worker(s.address) as b:
-                async with Client(s.address, asynchronous=True) as c:
-                    x = da.random.random((1000, 1000), chunks=(100, 100))
-                    x = x + x.T
-                    await x.persist()
+    x = da.random.random((1000, 1000), chunks=(100, 100))
+    x = x + x.T
+    await x.persist()
 
 
-@pytest.mark.asyncio
-async def test_large_transfer(cleanup):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_large_transfer(c, s, a, b):
     np = pytest.importorskip("numpy")
-    async with Scheduler(protocol="ws://") as s:
-        async with Worker(s.address, protocol="ws://"):
-            async with Client(s.address, asynchronous=True) as c:
-                await c.scatter(np.random.random(1_000_000))
+    await c.scatter(np.random.random(1_000_000))
 
 
 @pytest.mark.asyncio
@@ -182,17 +172,21 @@ async def test_http_and_comm_server(cleanup, dashboard, protocol, security, port
     ],
 )
 async def test_connection_made_with_extra_conn_args(cleanup, protocol, security):
-    async with Scheduler(protocol=protocol, security=security) as s:
+    async with Scheduler(
+        protocol=protocol, security=security, dashboard_address=":0"
+    ) as s:
         connection_args = security.get_connection_args("worker")
         comm = await connect(s.address, **connection_args)
         assert comm.sock.request.headers.get("Authorization") == "Token abcd"
         await comm.close()
 
 
-@pytest.mark.asyncio
-async def test_quiet_close(cleanup):
+@gen_test()
+async def test_quiet_close():
     with warnings.catch_warnings(record=True) as record:
-        async with Client(protocol="ws", processes=False, asynchronous=True) as c:
+        async with Client(
+            protocol="ws", processes=False, asynchronous=True, dashboard_address=":0"
+        ):
             pass
 
     # For some reason unrelated @coroutine warnings are showing up
@@ -201,10 +195,7 @@ async def test_quiet_close(cleanup):
     assert not record, record[0].message
 
 
-@gen_cluster(
-    client=True,
-    scheduler_kwargs={"protocol": "ws://"},
-)
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
 async def test_ws_roundtrip(c, s, a, b):
     x = np.arange(100)
     future = await c.scatter(x)
@@ -212,11 +203,7 @@ async def test_ws_roundtrip(c, s, a, b):
     assert (x == y).all()
 
 
-@gen_cluster(
-    client=True,
-    security=security,
-    scheduler_kwargs={"protocol": "wss://"},
-)
+@gen_cluster(client=True, security=security, scheduler_kwargs={"protocol": "wss://"})
 async def test_wss_roundtrip(c, s, a, b):
     x = np.arange(100)
     future = await c.scatter(x)

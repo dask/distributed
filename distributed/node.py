@@ -158,9 +158,7 @@ class ServerNode(Server):
         ):
             if expected != actual and expected > 0:
                 warnings.warn(
-                    "Port {} is already in use.\n"
+                    f"Port {expected} is already in use.\n"
                     "Perhaps you already have a cluster running?\n"
-                    "Hosting the HTTP server on port {} instead".format(
-                        expected, actual
-                    )
+                    f"Hosting the HTTP server on port {actual} instead"
                 )

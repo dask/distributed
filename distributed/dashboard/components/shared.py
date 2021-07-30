@@ -435,6 +435,7 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
             **kwargs,
         )
@@ -457,6 +458,7 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
             **kwargs,
         )
@@ -480,10 +482,23 @@ class SystemMonitor(DashboardComponent):
             height=height,
             x_range=x_range,
             tools=tools,
+            toolbar_location="above",
             **kwargs,
         )
-        self.bandwidth.line(source=self.source, x="time", y="read_bytes", color="red")
-        self.bandwidth.line(source=self.source, x="time", y="write_bytes", color="blue")
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="read_bytes",
+            color="red",
+            legend_label="read",
+        )
+        self.bandwidth.line(
+            source=self.source,
+            x="time",
+            y="write_bytes",
+            color="blue",
+            legend_label="write",
+        )
         self.bandwidth.yaxis.axis_label = "Bytes / second"
 
         # self.cpu.yaxis[0].formatter = NumeralTickFormatter(format='0%')
@@ -499,6 +514,7 @@ class SystemMonitor(DashboardComponent):
                 height=height,
                 x_range=x_range,
                 tools=tools,
+                toolbar_location="above",
                 **kwargs,
             )
 
