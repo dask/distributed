@@ -83,3 +83,17 @@ def unpack_frames(b):
         start = end
 
     return prelude_size, frames
+
+
+def copy_frames(frames):
+    """Copy frames into new contiguous memory.
+
+    Returns a duplicate frames list of memoryviews referencing the new memory.
+    """
+    buffer = memoryview(b"".join(frames))
+    i = 0
+    new_frames = []
+    for frame in frames:
+        new_frames.append(buffer[i : i + len(frame)])
+        i += len(frame)
+    return new_frames

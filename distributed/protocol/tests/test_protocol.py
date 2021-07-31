@@ -3,6 +3,7 @@ import pytest
 from distributed.protocol import dumps, loads, maybe_compress, msgpack, to_serialize
 from distributed.protocol.compression import compressions
 from distributed.protocol.serialize import Serialize, Serialized, deserialize, serialize
+from distributed.protocol.utils import pack_frames, unpack_frames
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 
@@ -220,17 +221,32 @@ def test_maybe_compress_memoryviews():
         assert len(payload) < x.nbytes / 10
 
 
-def test_loads_multiple_memoryviews_error():
-    msg = [Serialize(b"abcd"), b"wxyz"]
-    frames = dumps(msg)
-    header = frames[0]
-    assert not isinstance(header, memoryview)
-    assert any(isinstance(f, memoryview) for f in frames)
+def test_loads_multiple_memoryviews():
+    """Test that zero-copy deserialization isn't attempted when the frames come from different
+    buffers _and_ an overall offset is passed into `loads` (because the buffer behind the header frame
+    has some extra bytes at the beginning).
 
-    prelude = b"foobar"
+    This case is highly contrived and should not occur in real-world use, but since we have logic to defend
+    against it, we want to test that it works.
+    """
+    msg = [Serialize(b"ab" * int(2 ** 26))]
+
+    # Pack/unpack the frames so they're all backed by the same bytestring buffer,
+    # which also happens to have a prelude (40 bytes currently).
+    real_prelude_len, frames = unpack_frames(pack_frames(dumps(msg)))
+    assert all(isinstance(f, memoryview) and f.obj is frames[0].obj for f in frames)
+
+    # Mess with the header frame, putting it in a different buffer with a different prelude length.
+    header = frames[0]
+    prelude = b"xxx"
+    assert len(prelude) != real_prelude_len
     new_header = memoryview(prelude + header)[len(prelude) :]
-    assert new_header.obj is not header
+    assert new_header.obj is not header.obj
     frames[0] = new_header
 
-    with pytest.raises(AssertionError, match="backed by multiple buffers"):
-        loads(frames, memoryview_offset=len(prelude))
+    # If we naively used this 3-byte prelude offset from the new header on all the memoryviews that actually
+    # needed at 40-byte offset, we'd deserialize incorrectly. Instead, `loads` detects this broken case and
+    # defensively copies the frames to a new buffer.
+    result = loads(frames, memoryview_offset=len(prelude))
+    correct = result == loads(dumps(msg))
+    assert correct  # Prevents slow pytest diffs if assert fails
