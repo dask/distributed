@@ -11,7 +11,7 @@ from .serialize import (
     msgpack_encode_default,
     serialize_and_split,
 )
-from .utils import copy_frames, msgpack_opts
+from .utils import msgpack_opts
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +115,10 @@ def loads(frames, deserialize=True, deserializers=None, memoryview_offset: int =
                             if not isinstance(f, memoryview) or f.obj is not obj:
                                 # Walking backwards from the start of `sub_frames`, reached a frame that doesn't
                                 # belong to the same memoryview
-                                if memoryview_offset != 0:
-                                    # If given an initial offset for `frames[0]`, but we're working with a different
-                                    # buffer, something is wrong. We don't know if there's an initial offset for this buffer too,
-                                    # so to be safe, copy all sub-frames to new memory to prevent faulty zero-copy deserialization.
-                                    sub_frames = copy_frames(sub_frames)
-                                    subframe_memoryview_offset = 0
+                                assert memoryview_offset == 0, (
+                                    f"Given an initial offset of {memoryview_offset} into the frames' underlying buffer "
+                                    "but the frames are backed by multiple buffers. This should not happen."
+                                )
                                 break
                             subframe_memoryview_offset += len(f)
 

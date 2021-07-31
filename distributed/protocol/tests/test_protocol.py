@@ -221,13 +221,13 @@ def test_maybe_compress_memoryviews():
         assert len(payload) < x.nbytes / 10
 
 
-def test_loads_multiple_memoryviews():
+def test_loads_multiple_memoryviews_error():
     """Test that zero-copy deserialization isn't attempted when the frames come from different
     buffers _and_ an overall offset is passed into `loads` (because the buffer behind the header frame
     has some extra bytes at the beginning).
 
-    This case is highly contrived and should not occur in real-world use, but since we have logic to defend
-    against it, we want to test that it works.
+    This case is highly contrived and should not occur in real-world use, but since we have an assert to catch
+    it, we want to test that it works.
     """
     msg = [Serialize(b"ab" * int(2 ** 26))]
 
@@ -247,6 +247,5 @@ def test_loads_multiple_memoryviews():
     # If we naively used this 3-byte prelude offset from the new header on all the memoryviews that actually
     # needed at 40-byte offset, we'd deserialize incorrectly. Instead, `loads` detects this broken case and
     # defensively copies the frames to a new buffer.
-    result = loads(frames, memoryview_offset=len(prelude))
-    correct = result == loads(dumps(msg))
-    assert correct  # Prevents slow pytest diffs if assert fails
+    with pytest.raises(AssertionError, match="backed by multiple buffers"):
+        loads(frames, memoryview_offset=len(prelude))
