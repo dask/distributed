@@ -5004,69 +5004,77 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
         dts: TaskState
-        assert ts._state == "released"
-        assert not ts._waiters
-        assert not ts._waiting_on
-        assert not ts._who_has
-        assert not ts._processing_on
-        assert not any([ts in dts._waiters for dts in ts._dependencies])
-        assert ts not in parent._unrunnable
+        assert ts._state == "released", ts._state
+        assert not ts._waiters, ts._waiters
+        assert not ts._waiting_on, ts._waiting_on
+        assert not ts._who_has, ts._who_has
+        assert not ts._processing_on, ts._processing_on
+        assert not any(ts in dts._waiters for dts in ts._dependencies), [
+            dts._waiters for dts in ts._dependencies
+        ]
+        assert ts not in parent._unrunnable, parent._unrunnable
 
     def validate_waiting(self, key):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
         dts: TaskState
-        assert ts._waiting_on
-        assert not ts._who_has
-        assert not ts._processing_on
-        assert ts not in parent._unrunnable
+        assert ts._waiting_on, ts._waiting_on
+        assert not ts._who_has, ts._who_has
+        assert not ts._processing_on, ts._processing_on
+        assert ts not in parent._unrunnable, parent._unrunnable
         for dts in ts._dependencies:
             # We are waiting on a dependency iff it's not stored
-            assert (not not dts._who_has) != (dts in ts._waiting_on)
-            assert ts in dts._waiters  # XXX even if dts._who_has?
+            assert (not not dts._who_has) != (dts in ts._waiting_on), (
+                dts._who_has,
+                ts._waiting_on,
+            )
+            assert ts in dts._waiters, dts._waiters  # XXX even if dts._who_has?
 
     def validate_processing(self, key):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
         dts: TaskState
-        assert not ts._waiting_on
+        assert not ts._waiting_on, ts._waiting_on
         ws: WorkerState = ts._processing_on
-        assert ws
-        assert ts in ws._processing
-        assert not ts._who_has
+        assert ws, ws
+        assert ts in ws._processing, ws._processing
+        assert not ts._who_has, ts._who_has
         for dts in ts._dependencies:
-            assert dts._who_has
-            assert ts in dts._waiters
+            assert dts._who_has, dts._who_has
+            assert ts in dts._waiters, dts._waiters
 
     def validate_memory(self, key):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
         dts: TaskState
-        assert ts._who_has
-        assert not ts._processing_on
-        assert not ts._waiting_on
-        assert ts not in parent._unrunnable
+        assert ts._who_has, ts._who_has
+        assert not ts._processing_on, ts._processing_on
+        assert not ts._waiting_on, ts._waiting_on
+        assert ts not in parent._unrunnable, parent._unrunnable
         for dts in ts._dependents:
-            assert (dts in ts._waiters) == (dts._state in ("waiting", "processing"))
-            assert ts not in dts._waiting_on
+            assert (dts in ts._waiters) == (dts._state in ("waiting", "processing")), (
+                ts._waiters,
+                dts._state,
+            )
+            assert ts not in dts._waiting_on, dts._waiting_on
 
     def validate_no_worker(self, key):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
         dts: TaskState
-        assert ts in parent._unrunnable
-        assert not ts._waiting_on
-        assert ts in parent._unrunnable
-        assert not ts._processing_on
-        assert not ts._who_has
+        assert ts in parent._unrunnable, parent._unrunnable
+        assert not ts._waiting_on, ts._waiting_on
+        assert ts in parent._unrunnable, parent._unrunnable
+        assert not ts._processing_on, ts._processing_on
+        assert not ts._who_has, ts._who_has
         for dts in ts._dependencies:
-            assert dts._who_has
+            assert dts._who_has, dts._who_has
 
     def validate_erred(self, key):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks[key]
-        assert ts._exception_blame
-        assert not ts._who_has
+        assert ts._exception_blame, ts._exception_blame
+        assert not ts._who_has, ts._who_has
 
     def validate_key(self, key, ts: TaskState = None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -5104,15 +5112,17 @@ class Scheduler(SchedulerState, ServerNode):
         for w, ws in parent._workers_dv.items():
             assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
-            assert ws._address == w
+            assert ws._address == w, f"{ws._address} != {w}"
             if not ws._processing:
-                assert not ws._occupancy
-                assert ws._address in parent._idle_dv
+                assert not ws._occupancy, ws._occupancy
+                assert (
+                    ws._address in parent._idle_dv
+                ), f"{ws._address} not in {parent._idle_dv}"
 
         ts: TaskState
         for k, ts in parent._tasks.items():
             assert isinstance(ts, TaskState), (type(ts), ts)
-            assert ts._key == k
+            assert ts._key == k, f"{ts._key} != {k}"
             self.validate_key(k, ts)
 
         c: str
@@ -5121,7 +5131,7 @@ class Scheduler(SchedulerState, ServerNode):
             # client=None is often used in tests...
             assert c is None or type(c) == str, (type(c), c)
             assert type(cs) == ClientState, (type(cs), cs)
-            assert cs._client_key == c
+            assert cs._client_key == c, f"{cs._client_key} == {c}"
 
         a = {w: ws._nbytes for w, ws in parent._workers_dv.items()}
         b = {
@@ -5132,7 +5142,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         actual_total_occupancy = 0
         for worker, ws in parent._workers_dv.items():
-            assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8
+            assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8, abs(
+                sum(ws._processing.values()) - ws._occupancy
+            )
             actual_total_occupancy += ws._occupancy
 
         assert abs(actual_total_occupancy - parent._total_occupancy) < 1e-8, (
