@@ -75,7 +75,7 @@ def dumps(
 
         frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
 
-        if len(frames[0]) > frame_split_size:
+        if frame_split_size and len(frames[0]) > frame_split_size:
             from distributed.protocol.utils import frame_split_size as split
 
             msg_frames = split(frames[0], n=frame_split_size)
