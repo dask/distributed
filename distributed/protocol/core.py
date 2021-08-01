@@ -74,6 +74,14 @@ def dumps(
                 return msgpack_encode_default(obj)
 
         frames[0] = msgpack.dumps(msg, default=_encode_default, use_bin_type=True)
+
+        if len(frames[0]) > frame_split_size:
+            from distributed.protocol.utils import frame_split_size as split
+
+            msg_frames = split(frames[0], n=frame_split_size)
+            header = msgpack.dumps({"large-header": True, "count": len(msg_frames)})
+            frames = [header] + msg_frames + frames[1:]
+
         return frames
 
     except Exception:
@@ -108,9 +116,15 @@ def loads(frames, deserialize=True, deserializers=None):
             else:
                 return msgpack_decode_default(obj)
 
-        return msgpack.loads(
+        result = msgpack.loads(
             frames[0], object_hook=_decode_default, use_list=False, **msgpack_opts
         )
+        if isinstance(result, dict) and "large-header" in result:
+            frame = b"".join(frames[1 : result["count"] + 1])
+            frames = [frame] + frames[result["count"] + 1 :]
+            return loads(frames, deserialize=deserialize, deserializers=deserializers)
+        else:
+            return result
 
     except Exception:
         logger.critical("Failed to deserialize", exc_info=True)

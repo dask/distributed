@@ -209,3 +209,14 @@ async def test_wss_roundtrip(c, s, a, b):
     future = await c.scatter(x)
     y = await future
     assert (x == y).all()
+
+
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ws://"})
+async def test_ws_roundtrip_large(c, s, a, b):
+    import numpy as np
+
+    x = np.random.random(25000000)
+
+    future = c.submit(lambda x: x, x)
+    y = await future
+    assert (x == y).all()
