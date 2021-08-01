@@ -666,7 +666,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             typ, exc, tb = clean_exception(**response)
             raise exc.with_traceback(tb)
         else:
-            raise Exception(response["text"])
+            raise Exception(response["exception_text"])
     return response
 
 
