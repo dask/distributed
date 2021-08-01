@@ -220,13 +220,13 @@ def test_compress_numpy():
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes
 
-    header = msgpack.loads(frames[1], raw=False, use_list=False, strict_map_key=False)
+    header = msgpack.loads(frames[0], raw=False, use_list=False, strict_map_key=False)
     try:
         import blosc  # noqa: F401
     except ImportError:
         pass
     else:
-        assert all(c == "blosc" for c in header["compression"])
+        assert any(c == "blosc" for c in header["compressions"])
 
 
 def test_compress_memoryview():
