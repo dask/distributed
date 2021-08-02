@@ -25,22 +25,6 @@ def dumps(
     out-of-band by `_encode_default()` and appended to the output frame list.
     """
     try:
-        if context and "compression" in context:
-            compress_opts = {"compression": context["compression"]}
-        else:
-            compress_opts = {}
-
-        def _inplace_compress_frames(header, frames):
-            compression = list(header.get("compression", [None] * len(frames)))
-
-            for i in range(len(frames)):
-                if compression[i] is None:
-                    compression[i], frames[i] = maybe_compress(
-                        frames[i], **compress_opts
-                    )
-
-            header["compression"] = tuple(compression)
-
         frames = [None]
 
         def _encode_default(obj):

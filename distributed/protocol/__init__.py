@@ -3,7 +3,7 @@ from distutils.version import LooseVersion
 from functools import partial
 
 from .compression import compressions, default_compression
-from .core import decompress, dumps, loads, maybe_compress, msgpack
+from .core import dumps, loads, maybe_compress, msgpack
 from .cuda import cuda_deserialize, cuda_serialize
 from .serialize import (
     Serialize,
