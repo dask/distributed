@@ -2456,7 +2456,7 @@ async def test_forget_dependents_after_release(c, s, a):
     assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}
 
 
-@gen_cluster(client=True, nthreads=[("", 1)] * 2)
+@gen_cluster(client=True)
 async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
     stealing_ext = s.extensions["stealing"]
     stealing_ext._pc.stop()
