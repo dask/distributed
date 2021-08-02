@@ -395,7 +395,7 @@ def test_temporary_credentials():
     sec_repr = repr(sec)
     fields = ["tls_ca_file"]
     fields.extend(
-        "tls_%s_%s" % (role, kind)
+        f"tls_{role}_{kind}"
         for role in ["client", "scheduler", "worker"]
         for kind in ["key", "cert"]
     )

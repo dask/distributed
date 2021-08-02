@@ -1,6 +1,143 @@
 Changelog
 =========
 
+2021.07.2
+---------
+
+Released on July 30, 2021
+
+- Fix a deadlock connected to task stealing and task deserialization (:pr:`5128`) `Florian Jetter`_
+- Include maximum shard size in second ``to_frames`` method (:pr:`5145`) `Matthew Rocklin`_
+- Minor dashboard style updates (:pr:`5143`) `Bryan Van de Ven`_
+- Cap maximum shard size at the size of an integer (:pr:`5141`) `Matthew Rocklin`_
+- Document automatic ``MALLOC_TRIM_THRESHOLD_`` environment variable (:pr:`5139`) `James Bourbeau`_
+- Mark ``ucx-py`` tests for GPU (:pr:`5133`) `Charles Blackmon-Luca`_
+- Update individual profile plot sizing (:pr:`5131`) `James Bourbeau`_
+- Handle ``NVMLError_Unknown`` in NVML diagnostics (:pr:`5121`) `Peter Andreas Entschev`_
+- Unit tests to use a random port for the dashboard (:pr:`5060`) `crusaderky`_
+- Ensure worker reconnect registers existing tasks properly (:pr:`5103`) `Florian Jetter`_
+- Halve CI runtime! (:pr:`5074`) `crusaderky`_
+- Add ``NannyPlugins`` (:pr:`5118`) `Matthew Rocklin`_
+- Add ``WorkerNetworkBandwidth`` chart to dashboard (:pr:`5104`) `Naty Clementi`_
+- Set nanny environment variables in config (:pr:`5098`) `Matthew Rocklin`_
+- Read smaller frames to workaround OpenSSL bug (:pr:`5115`) `jakirkham`_
+- Move UCX/RMM config variables to Distributed namespace  (:pr:`4916`) `Charles Blackmon-Luca`_
+- Allow ws(s) messages greater than 10Mb (:pr:`5110`) `Marcos Moyano`_
+- Short-circuit root-ish check for many deps (:pr:`5113`) `Gabe Joseph`_
+
+
+2021.07.1
+---------
+
+Released on July 23, 2021
+
+- Remove experimental feature warning from actors docs (:pr:`5108`) `James Bourbeau`_
+- Keep dependents in worker dependency if TS is still known (:pr:`5034`) `Florian Jetter`_
+- Add ``Scheduler.set_restrictions`` (:pr:`5101`) `Matthew Rocklin`_
+- Make ``Actor`` futures awaitable and work with ``as_completed`` (:pr:`5092`) `Martin Durant`_
+- Simplify ``test_secede_balances`` (:pr:`5071`) `Florian Jetter`_
+- ``Computation`` class (:pr:`5001`) `Florian Jetter`_
+- Some light dashboard cleanup (:pr:`5102`) `Bryan Van de Ven`_
+- Don't package tests (:pr:`5054`) `James Bourbeau`_
+- Add pytest marker for GPU tests (:pr:`5023`) `Charles Blackmon-Luca`_
+- Actor: don't hold key references on workers (:pr:`4937`) `Gabe Joseph`_
+- Collapse nav to hamburger sooner (:pr:`5094`) `Julia Signell`_
+- Verify that actors survive pickling (:pr:`5086`) `Matthew Rocklin`_
+- Reenable UCX-Py tests that used to segfault (:pr:`5076`) `Peter Andreas Entschev`_
+- Better support ``ProcessPoolExecutors`` (:pr:`5063`) `Matthew Rocklin`_
+- Simplify ``test_worker_heartbeat_after_cancel`` (:pr:`5067`) `Florian Jetter`_
+- Avoid property validation in Bokeh (:pr:`5065`) `Matthew Rocklin`_
+- Reduce default websocket frame size and make configurable (:pr:`5070`) `Ian Rose`_
+- Disable pytest-timeout ``SIGALARM`` on MacOS (:pr:`5057`) `crusaderky`_
+- ``rebalance()`` resilience to computations (:pr:`4968`) `crusaderky`_
+- Improve CI stability (:pr:`5022`) `crusaderky`_
+- Ensure heartbeats after cancelation do not raise ``KeyError`` s (:pr:`5053`) `Florian Jetter`_
+- Add more useful exception message on TLS cert mismatch (:pr:`5040`) `Jacob Tomlinson`_
+- Add bokeh ``mode`` parameter to performance reports (:pr:`5025`) `James Bourbeau`_
+
+
+2021.07.0
+---------
+
+Released on July 9, 2021
+
+- Fix Nbytes jitter - less expensive (:pr:`5043`) `Naty Clementi`_
+- Use native GH actions cancel feature (:pr:`5037`) `Florian Jetter`_
+- Don't require workers to report to scheduler if scheduler shuts down (:pr:`5032`) `Florian Jetter`_
+- Add pandas to the list of checked packages for ``client.get_versions()`` (:pr:`5029`) `Ian Rose`_
+- Move worker preload before scheduler address is set (:pr:`5024`) `Matthew Rocklin`_
+- Fix flaky ``test_oversubscribing_leases`` (:pr:`5030`) `Florian Jetter`_
+- Update scheduling policy docs for #4967 (:pr:`5018`) `Gabe Joseph`_
+- Add echo handler to ``Server`` class (:pr:`5020`) `Matthew Rocklin`_
+- Also include pngs when bundling package (:pr:`5016`) `Ian Rose`_
+- Remove duplicated dashboard panes (:pr:`5017`) `Ian Rose`_
+- Fix worker memory dashboard flickering (:pr:`4997`) `Naty Clementi`_
+- Tabs on bottom left corner on dashboard (:pr:`5006`) `Naty Clementi`_
+- Rename nbytes widgets (:pr:`4878`) `crusaderky`_
+- Co-assign root-ish tasks (:pr:`4967`) `Gabe Joseph`_
+- ``OSError`` tweaks (:pr:`5003`) `crusaderky`_
+- Update imports to ``cudf.testing._utils`` (:pr:`5005`) `Peter Andreas Entschev`_
+- Ensure shuffle split default durations uses proper prefix (:pr:`4991`) `Florian Jetter`_
+- Follow up ``pyupgrade`` formatting (:pr:`4993`) `Florian Jetter`_
+- Rename plot dropdown (:pr:`4992`) `James Bourbeau`_
+- Pyupgrade (:pr:`4741`) `Florian Jetter`_
+- Misc Sphinx tweaks (:pr:`4988`) `crusaderky`_
+- No longer hold dependencies of erred tasks in memory #4918 `Florian Jetter`_
+- Add maximum shard size to config (:pr:`4986`) `Matthew Rocklin`_
+- Ensure shuffle split operations are blacklisted from work stealing (:pr:`4964`) `Florian Jetter`_
+- Add dropdown menu to access individual plots (:pr:`4984`) `Jacob Tomlinson`_
+- Edited the path to ``scheduler.py`` (:pr:`4983`) `Freyam Mehta`_
+- Task Group Graph Visualization (:pr:`4886`) `Naty Clementi`_
+- Remove more internal references to deprecated utilities (:pr:`4971`) `James Bourbeau`_
+- Restructure nbytes hover (:pr:`4952`) `Naty Clementi`_
+- Except more errors in ``pynvml.nvmlInit()`` (:pr:`4970`) `gerrymanoim`_
+- Add occupancy as individual plot (:pr:`4963`) `Naty Clementi`_
+- Deprecate utilities which have moved to dask (:pr:`4966`) `James Bourbeau`_
+- Ensure connectionpool does not leave comms if closed mid connect (:pr:`4951`) `Florian Jetter`_
+- Add support for registering scheduler plugins from `Client` (:pr:`4808`) `Doug Davis`_
+- Stealing dashboard fixes (:pr:`4948`) `Florian Jetter`_
+- Allow requirements verification to be ignored when loading backends from entrypoints (:pr:`4961`) `Florian Jetter`_
+- Add ``Log`` and ``Logs`` to API docs (:pr:`4946`) `James Bourbeau`_
+- Support fixtures and ``pytest.mark.parametrize`` with ``gen_cluster`` (:pr:`4958`) `Gabe Joseph`_
+
+
+2021.06.2
+---------
+
+Released on June 22, 2021
+
+- Revert refactor to ``utils.Log[s]`` and ``Cluster.get_logs`` (:pr:`4941`) `Charles Blackmon-Luca`_
+- Use deprecation utility from Dask (:pr:`4924`) `James Bourbeau`_
+- Add transition counter to ``Scheduler`` (:pr:`4934`) `Matthew Rocklin`_
+- Remove ``nbytes_in_memory`` (:pr:`4930`) `Matthew Rocklin`_
+
+
+2021.06.1
+---------
+
+Released on June 18, 2021
+
+- Fix deadlock in ``handle_missing_dep`` if additional replicas are available (:pr:`4929`) `Florian Jetter`_
+- Add configuration to enable/disable NVML diagnostics (:pr:`4893`) `Peter Andreas Entschev`_
+- Add scheduler log tab to performance reports (:pr:`4909`) `Charles Blackmon-Luca`_
+- Add HTML repr to ``scheduler_info`` and incorporate into client and cluster reprs (:pr:`4857`) `Jacob Tomlinson`_
+- Fix error state typo (:pr:`4898`) `James Bourbeau`_
+- Allow actor exceptions to propagate (:pr:`4232`) `Martin Durant`_
+- Remove importing ``apply`` from ``dask.compatibility`` (:pr:`4913`) `Elliott Sales de Andrade`_
+- Use more informative default name for ``WorkerPlugin`` s (:pr:`4908`) `James Bourbeau`_
+- Removed unused utility functions (:pr:`4911`) `James Bourbeau`_
+- Locally rerun successfully completed futures (:pr:`4813`) `ArtinSarraf`_
+- Forget erred tasks and fix deadlocks on worker (:pr:`4784`) `Florian Jetter`_
+- Handle ``HTTPClientError`` in websocket connector (:pr:`4900`) `Marcos Moyano`_
+- Update ``dask_cuda`` usage in ``SSHCluster`` docstring (:pr:`4894`) `James Bourbeau`_
+- Remove tests for ``process_time`` and ``thread_time`` (:pr:`4895`) `James Bourbeau`_
+- Flake8 config cleanup (:pr:`4888`) `Florian Jetter`_
+- Don't strip scheduler protocol when determining host (:pr:`4883`) `James Bourbeau`_
+- Add more documentation on memory management (:pr:`4874`) `crusaderky`_
+- Add ``range_query`` tests to NVML test suite (:pr:`4879`) `Charles Blackmon-Luca`_
+- No longer cancel result future in async process when using timeouts (:pr:`4882`) `Florian Jetter`_
+
+
 2021.06.0
 ---------
 
@@ -2406,3 +2543,8 @@ significantly without many new features.
 .. _`Naty Clementi`: https://github.com/ncclementi
 .. _`Nathan Danielsen`: https://github.com/ndanielsen
 .. _`Torsten Wörtwein`: https://github.com/twoertwein
+.. _`ArtinSarraf`: https://github.com/ArtinSarraf
+.. _`Gabe Joseph`: https://github.com/gjoseph92
+.. _`Freyam Mehta`: https://github.com/freyam
+.. _`gerrymanoim`: https://github.com/gerrymanoim
+.. _`Bryan Van de Ven`: https://github.com/bryevdv

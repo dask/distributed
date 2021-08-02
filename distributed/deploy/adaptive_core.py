@@ -6,8 +6,9 @@ from typing import Iterable
 import tlz as toolz
 from tornado.ioloop import IOLoop, PeriodicCallback
 
+from dask.utils import parse_timedelta
+
 from ..metrics import time
-from ..utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class AdaptiveCore:
             not_yet_arrived = requested - observed
             to_close = set()
             if not_yet_arrived:
-                to_close.update((toolz.take(len(plan) - target, not_yet_arrived)))
+                to_close.update(toolz.take(len(plan) - target, not_yet_arrived))
 
             if target < len(plan) - len(to_close):
                 L = await self.workers_to_close(target=target)
