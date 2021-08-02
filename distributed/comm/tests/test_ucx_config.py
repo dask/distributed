@@ -5,7 +5,6 @@ import pytest
 pytestmark = pytest.mark.gpu
 
 import dask
-from dask.utils import format_bytes
 
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
@@ -97,12 +96,13 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 
-                # configured with 1G pool
-                rmm_usage = c.run_on_scheduler(rmm.get_info)
-                assert size == format_bytes(rmm_usage.free)
+                # Check for RMM pool resource type
+                rmm_resource = c.run_on_scheduler(
+                    rmm.mr.get_current_device_resource_type
+                )
+                assert rmm_resource == rmm.mr.PoolMemoryResource
 
-                # configured with 1G pool
                 worker_addr = list(c.scheduler_info()["workers"])[0]
-                worker_rmm_usage = c.run(rmm.get_info)
-                rmm_usage = worker_rmm_usage[worker_addr]
-                assert size == format_bytes(rmm_usage.free)
+                worker_rmm_usage = c.run(rmm.mr.get_current_device_resource_type)
+                rmm_resource = worker_rmm_usage[worker_addr]
+                assert rmm_resource == rmm.mr.PoolMemoryResource
