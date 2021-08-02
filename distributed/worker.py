@@ -2038,7 +2038,7 @@ class Worker(ServerNode):
                 }
             )
 
-            self.io_loop.add_callback(self.ensure_computing)
+            self.ensure_computing()
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2464,7 +2464,7 @@ class Worker(ServerNode):
                 if self.validate:
                     self.validate_state()
 
-                await self.ensure_computing()
+                self.ensure_computing()
 
                 if not busy:
                     self.repetitively_busy = 0
@@ -2822,7 +2822,7 @@ class Worker(ServerNode):
             self.log.append((ts.key, "deserialize-error"))
             raise
 
-    async def ensure_computing(self):
+    def ensure_computing(self):
         if self.paused:
             return
         try:
@@ -2979,7 +2979,7 @@ class Worker(ServerNode):
             ts.traceback = emsg["traceback"]
             self.transition(ts, "error")
         finally:
-            await self.ensure_computing()
+            self.ensure_computing()
             self.ensure_communicating()
 
     def _prepare_args_for_execution(self, ts, args, kwargs):
@@ -3050,7 +3050,7 @@ class Worker(ServerNode):
                     else "None",
                 )
                 self.paused = False
-                await self.ensure_computing()
+                self.ensure_computing()
 
         await check_pause(memory)
         # Dump data to disk if above 70%
