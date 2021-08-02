@@ -6923,3 +6923,13 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         assert results[n.worker_address] == 123
 
     assert files == set(os.listdir())  # no change
+
+
+@gen_cluster(client=True)
+async def test_async_task(c, s, a, b):
+    async def f(x):
+        return x + 1
+
+    future = c.submit(f, 10)
+    result = await future
+    assert result == 11
