@@ -676,6 +676,9 @@ async def test_clean_nbytes(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
 async def test_gather_many_small(c, s, a, *workers):
+    """If the dependencies of a given task are very small, do not limit the
+    number of concurrent outgoing connections
+    """
     a.total_out_connections = 2
     futures = await c._scatter(list(range(100)))
 
