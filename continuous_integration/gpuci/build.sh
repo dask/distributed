@@ -49,4 +49,4 @@ conda config --show-sources
 conda list --show-channel-urls
 
 gpuci_logger "Python py.test for dask"
-py.test $WORKSPACE -v -m gpu --junitxml="$WORKSPACE/junit-distributed.xml"
+py.test $WORKSPACE -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
