@@ -49,4 +49,4 @@ conda config --show-sources
 conda list --show-channel-urls
 
 gpuci_logger "Python py.test for dask"
-py.test $WORKSPACE -n 4 -v -m gpu --junitxml="$WORKSPACE/junit-distributed.xml" --cov-config="$WORKSPACE/.coveragerc" --cov=distributed --cov-report=xml:"$WORKSPACE/distributed-coverage.xml" --cov-report term
+py.test $WORKSPACE -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
