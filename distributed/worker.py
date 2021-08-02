@@ -2443,38 +2443,56 @@ class Worker(ServerNode):
                 assert set(to_gather_keys).issubset(
                     set(self.in_flight_workers.get(worker))
                 )
+
                 for d in self.in_flight_workers.pop(worker):
-
                     ts = self.tasks.get(d)
-
-                    if not busy and d in data:
-                        self.transition(ts, "memory", value=data[d])
-                    elif ts is None or ts.state == "executing":
-                        self.log.append(("already-executing", d))
-                        self.release_key(d, reason="already executing at gather")
-                    elif ts.state == "flight" and not ts.dependents:
-                        self.log.append(("flight no-dependents", d))
-                        self.release_key(
-                            d, reason="In-flight task no longer has dependents."
+                    try:
+                        if not busy and d in data:
+                            self.transition(ts, "memory", value=data[d])
+                        elif ts is None or ts.state == "executing":
+                            self.log.append(("already-executing", d))
+                            self.release_key(d, reason="already executing at gather")
+                        elif ts.state == "flight" and not ts.dependents:
+                            self.log.append(("flight no-dependents", d))
+                            self.release_key(
+                                d, reason="In-flight task no longer has dependents."
+                            )
+                        elif (
+                            not busy
+                            and d not in data
+                            and ts.dependents
+                            and ts.state != "memory"
+                        ):
+                            ts.who_has.discard(worker)
+                            self.has_what[worker].discard(ts.key)
+                            self.log.append(("missing-dep", d))
+                            self.batched_stream.send(
+                                {
+                                    "op": "missing-data",
+                                    "errant_worker": worker,
+                                    "key": d,
+                                }
+                            )
+                            self.transition(ts, "fetch")
+                        elif ts.state not in ("ready", "memory"):
+                            self.transition(ts, "fetch")
+                        else:
+                            logger.debug(
+                                "Unexpected task state encountered for %r after gather_dep",
+                                ts,
+                            )
+                    except Exception as exc:
+                        emsg = error_message(exc)
+                        assert ts is not None, ts
+                        self.log.append(
+                            (ts.key, "except-gather-dep-result", emsg, time())
                         )
-                    elif (
-                        not busy
-                        and d not in data
-                        and ts.dependents
-                        and ts.state != "memory"
-                    ):
-                        ts.who_has.discard(worker)
-                        self.has_what[worker].discard(ts.key)
-                        self.log.append(("missing-dep", d))
-                        self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
-                        )
-                        self.transition(ts, "fetch")
-                    elif ts.state not in ("ready", "memory"):
-                        self.transition(ts, "fetch")
-                    else:
+                        # FIXME: We currently cannot release this task and its
+                        # dependent safely
                         logger.debug(
-                            "Unexpected task state encountered for %s after gather_dep"
+                            "Exception occured while handling `gather_dep` response for %r",
+                            ts,
+                            exc_info=True,
                         )
 
                 if self.validate:
