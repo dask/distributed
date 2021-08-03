@@ -235,7 +235,10 @@ class Worker(ServerNode):
         The maximum number of concurrent outgoing requests for data
     * **total_in_connections**: ``int``
         The maximum number of concurrent incoming requests for data
-    * **total_comm_nbytes**: ``int``
+    * **comm_threshold_bytes**: ``int``
+        As long as the total number of bytes in flight is below this threshold
+        we will not limit the number of outgoing connections for a single tasks
+        dependency fetch.
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
@@ -426,7 +429,7 @@ class Worker(ServerNode):
         self.total_in_connections = dask.config.get(
             "distributed.worker.connections.incoming"
         )
-        self.total_comm_nbytes = 10e6
+        self.comm_threshold_bytes = 10e6
         self.comm_nbytes = 0
         self._missing_dep_flight = set()
 
@@ -635,6 +638,10 @@ class Worker(ServerNode):
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
+        if nvml.device_get_count() > 0:
+            self.executors["gpu"] = ThreadPoolExecutor(
+                1, thread_name_prefix="Dask-GPU-Threads"
+            )
 
         # Find the default executor
         if executor == "offload":
@@ -2144,7 +2151,7 @@ class Worker(ServerNode):
 
                 while dependencies_fetch and (
                     len(self.in_flight_workers) < self.total_out_connections
-                    or self.comm_nbytes < self.total_comm_nbytes
+                    or self.comm_nbytes < self.comm_threshold_bytes
                 ):
                     to_gather_ts = dependencies_fetch.pop()
 
@@ -2287,6 +2294,15 @@ class Worker(ServerNode):
             total_bytes += ts.get_nbytes()
 
         return deps, total_bytes
+
+    @property
+    def total_comm_bytes(self):
+        warnings.warn(
+            "The attribute `Worker.total_comm_bytes` has been renamed to `comm_threshold_bytes`. "
+            "Future versions will only support the new name.",
+            DeprecationWarning,
+        )
+        return self.comm_threshold_bytes
 
     async def gather_dep(
         self,
