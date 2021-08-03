@@ -29,6 +29,7 @@ from distributed.utils import (
     get_traceback,
     is_kernel,
     is_valid_xml,
+    iscoroutinefunction,
     nbytes,
     offload,
     open_port,
@@ -41,7 +42,15 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import captured_logger, div, gen_test, has_ipv6, inc, throws
+from distributed.utils_test import (
+    _UnhashableCallable,
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    throws,
+)
 
 
 def test_All(loop):
@@ -584,3 +593,8 @@ def test_parse_timedelta_deprecated():
     with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
         from distributed.utils import parse_timedelta
     assert parse_timedelta is dask.utils.parse_timedelta
+
+
+def test_iscoroutinefunction_unhashable_input():
+    # Ensure iscoroutinefunction can handle unhashable callables
+    assert not iscoroutinefunction(_UnhashableCallable())

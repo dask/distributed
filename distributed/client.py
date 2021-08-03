@@ -1556,6 +1556,9 @@ class Client:
         Parameters
         ----------
         func : callable
+            Callable to be scheduled as ``func(*args **kwargs)``. If ``func`` is a coroutine,
+            it will be run on the main event loop of a worker. Otherwise ``func`` will be run
+            in a worker's task executor pool (see ``Worker.executors`` for more information.)
         *args
         **kwargs
         pure : bool (defaults to True)
@@ -1674,6 +1677,9 @@ class Client:
         Parameters
         ----------
         func : callable
+            Callable to be scheduled for execution. If ``func`` is a coroutine,
+            it will be run on the main event loop of a worker. Otherwise ``func`` will be run
+            in a worker's task executor pool (see ``Worker.executors`` for more information.)
         iterables : Iterables
             List-like objects to map over.  They should have the same length.
         key : str, list

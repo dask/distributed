@@ -13,6 +13,7 @@ from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils import get_ip
 from distributed.utils_test import (
+    _UnhashableCallable,
     cluster,
     gen_cluster,
     gen_test,
@@ -269,3 +270,10 @@ async def test_tls_scheduler(security, cleanup):
         security=security, host="localhost", dashboard_address=":0"
     ) as s:
         assert s.address.startswith("tls")
+
+
+def test__UnhashableCallable():
+    func = _UnhashableCallable()
+    assert func(1) == 2
+    with pytest.raises(TypeError, match="unhashable"):
+        hash(func)

@@ -2910,7 +2910,14 @@ class Worker(ServerNode):
             try:
                 e = self.executors[executor]
                 ts.start_time = time()
-                if "ThreadPoolExecutor" in str(type(e)):
+                if iscoroutinefunction(function):
+                    result = await apply_function_async(
+                        function,
+                        args2,
+                        kwargs2,
+                        self.scheduler_delay,
+                    )
+                elif "ThreadPoolExecutor" in str(type(e)):
                     result = await self.loop.run_in_executor(
                         e,
                         apply_function,
@@ -3865,6 +3872,42 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
+    except Exception as e:
+        msg = error_message(e)
+        msg["op"] = "task-erred"
+        msg["actual-exception"] = e
+    else:
+        msg = {
+            "op": "task-finished",
+            "status": "OK",
+            "result": result,
+            "nbytes": sizeof(result),
+            "type": type(result) if result is not None else None,
+        }
+    finally:
+        end = time()
+    msg["start"] = start + time_delay
+    msg["stop"] = end + time_delay
+    msg["thread"] = ident
+    return msg
+
+
+async def apply_function_async(
+    function,
+    args,
+    kwargs,
+    time_delay,
+):
+    """Run a function, collect information
+
+    Returns
+    -------
+    msg: dictionary with status, result/error, timings, etc..
+    """
+    ident = threading.get_ident()
+    start = time()
+    try:
+        result = await function(*args, **kwargs)
     except Exception as e:
         msg = error_message(e)
         msg["op"] = "task-erred"
