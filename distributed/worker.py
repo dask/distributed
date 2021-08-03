@@ -2291,6 +2291,15 @@ class Worker(ServerNode):
 
         return deps, total_bytes
 
+    @property
+    def total_comm_bytes(self):
+        warnings.warn(
+            "The attribute `Worker.total_comm_bytes` has been renamed to `comm_threshold_bytes`. "
+            "Future versions will only support the new name.",
+            DeprecationWarning,
+        )
+        return self.comm_threshold_bytes
+
     async def gather_dep(
         self,
         worker: str,
