@@ -1324,7 +1324,7 @@ class Worker(ServerNode):
             await self.rpc.close()
 
             self.status = Status.closed
-            await ServerNode.close(self)
+            await super().close()
 
             setproctitle("dask-worker [closed]")
         return "OK"

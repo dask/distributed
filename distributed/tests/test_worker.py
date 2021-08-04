@@ -106,7 +106,7 @@ async def test_worker_bad_args(c, s, a, b):
 
         def __init__(self, *args, **kwargs):
             self.reset()
-            logging.Handler.__init__(self, *args, **kwargs)
+            super().__init__(*args, **kwargs)
 
         def emit(self, record):
             self.messages[record.levelname.lower()].append(record.getMessage())

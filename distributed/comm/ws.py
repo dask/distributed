@@ -166,7 +166,7 @@ class WS(Comm):
 
     def __init__(self, sock, deserialize=True, allow_offload=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self.sock = sock
         self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
