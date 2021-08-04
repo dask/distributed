@@ -378,12 +378,19 @@ On Linux:
     conda install jemalloc
     LD_PRELOAD=$CONDA_PREFIX/lib/libjemalloc.so dask-worker <...>
 
-On MacOS:
+On macOS:
 
 .. code-block:: bash
 
     conda install jemalloc
     DYLD_INSERT_LIBRARIES=$CONDA_PREFIX/lib/libjemalloc.dylib dask-worker <...>
+
+Alternatively on macOS, install globally with `homebrew`_:
+
+.. code-block:: bash
+
+    brew install jemalloc
+    DYLD_INSERT_LIBRARIES=$(brew --prefix jemalloc)/lib/libjemalloc.dylib dask-worker <...>
 
 `jemalloc`_ offers a wealth of configuration settings; please refer to its
 documentation.
@@ -432,3 +439,4 @@ API Documentation
 .. _malloc_trim: https://man7.org/linux/man-pages/man3/malloc_trim.3.html
 .. _brk: https://www.man7.org/linux/man-pages/man2/brk.2.html
 .. _jemalloc: http://jemalloc.net
+.. _homebrew: https://brew.sh/
