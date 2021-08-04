@@ -145,9 +145,11 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
+    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
@@ -248,6 +250,7 @@ class TCP(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=self.max_shard_size,
         )
         frames_nbytes = [nbytes(f) for f in frames]
         frames_nbytes_total = sum(frames_nbytes)
@@ -334,6 +337,9 @@ class TLS(TCP):
     """
     A TLS-specific version of TCP.
     """
+
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)

@@ -6,6 +6,7 @@ import sys
 import threading
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from numbers import Number
 from operator import add
 from time import sleep
@@ -19,6 +20,7 @@ import dask
 from dask import delayed
 from dask.system import CPU_COUNT
 
+import distributed
 from distributed import (
     Client,
     Nanny,
@@ -32,6 +34,7 @@ from distributed.comm.registry import backends
 from distributed.comm.tcp import TCPBackend
 from distributed.compatibility import LINUX, WINDOWS
 from distributed.core import CommClosedError, Status, rpc
+from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
@@ -103,7 +106,7 @@ async def test_worker_bad_args(c, s, a, b):
 
         def __init__(self, *args, **kwargs):
             self.reset()
-            logging.Handler.__init__(self, *args, **kwargs)
+            super().__init__(*args, **kwargs)
 
         def emit(self, record):
             self.messages[record.levelname.lower()].append(record.getMessage())
@@ -675,6 +678,9 @@ async def test_clean_nbytes(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 20)
 async def test_gather_many_small(c, s, a, *workers):
+    """If the dependencies of a given task are very small, do not limit the
+    number of concurrent outgoing connections
+    """
     a.total_out_connections = 2
     futures = await c._scatter(list(range(100)))
 
@@ -1978,16 +1984,16 @@ async def test_multiple_executors(c, s):
     async with Worker(
         s.address,
         nthreads=2,
-        executor={"GPU": ThreadPoolExecutor(1, thread_name_prefix="Dask-GPU-Threads")},
+        executor={"foo": ThreadPoolExecutor(1, thread_name_prefix="Dask-Foo-Threads")},
     ):
         futures = []
         with dask.annotate(executor="default"):
             futures.append(c.submit(get_thread_name, pure=False))
-        with dask.annotate(executor="GPU"):
+        with dask.annotate(executor="foo"):
             futures.append(c.submit(get_thread_name, pure=False))
         default_result, gpu_result = await c.gather(futures)
         assert "Dask-Default-Threads" in default_result
-        assert "Dask-GPU-Threads" in gpu_result
+        assert "Dask-Foo-Threads" in gpu_result
 
 
 @gen_cluster(client=True)
@@ -2005,17 +2011,64 @@ async def test_process_executor(c, s, a, b):
         assert (await future) != os.getpid()
 
 
+def kill_process():
+    import os
+    import signal
+
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
 @gen_cluster(client=True)
 async def test_process_executor_kills_process(c, s, a, b):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
         b.executors["processes"] = e
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(kill_process)
+
+        with pytest.raises(
+            BrokenProcessPool,
+            match="A child process terminated abruptly, the process pool is not usable anymore",
+        ):
+            await future
 
         with dask.annotate(executor="processes", retries=1):
-            future = c.submit(sys.exit, 1)
+            future = c.submit(inc, 1)
 
-        exc = await future.exception()
-        assert "SystemExit(1)" in repr(exc)
+        # FIXME: The processpool is now unusable and the worker is effectively
+        # dead
+        with pytest.raises(
+            BrokenProcessPool,
+            match="A child process terminated abruptly, the process pool is not usable anymore",
+        ):
+            assert await future == 2
+
+
+def raise_exc():
+    raise RuntimeError("foo")
+
+
+@gen_cluster(client=True)
+async def test_process_executor_raise_exception(c, s, a, b):
+    with ProcessPoolExecutor() as e:
+        a.executors["processes"] = e
+        b.executors["processes"] = e
+        with dask.annotate(executor="processes", retries=1):
+            future = c.submit(raise_exc)
+
+        with pytest.raises(RuntimeError, match="foo"):
+            await future
+
+
+@pytest.mark.gpu
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_gpu_executor(c, s, w):
+    if nvml.device_get_count() > 0:
+        e = w.executors["gpu"]
+        assert isinstance(e, distributed.threadpoolexecutor.ThreadPoolExecutor)
+        assert e._max_workers == 1
+    else:
+        assert "gpu" not in w.executors
 
 
 def assert_task_states_on_worker(expected, worker):
@@ -2417,3 +2470,63 @@ async def test_forget_dependents_after_release(c, s, a):
     while fut2.key in a.tasks:
         await asyncio.sleep(0.001)
     assert fut2.key not in {d.key for d in a.tasks[fut.key].dependents}
+
+
+@gen_cluster(client=True)
+async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
+    stealing_ext = s.extensions["stealing"]
+    stealing_ext._pc.stop()
+    from distributed.utils import ThreadPoolExecutor
+
+    class CountingThreadPool(ThreadPoolExecutor):
+        counter = 0
+
+        def submit(self, *args, **kwargs):
+            CountingThreadPool.counter += 1
+            return super().submit(*args, **kwargs)
+
+    # Ensure we're always offloading
+    monkeypatch.setattr("distributed.worker.OFFLOAD_THRESHOLD", 1)
+    threadpool = CountingThreadPool(
+        max_workers=1, thread_name_prefix="Counting-Offload-Threadpool"
+    )
+    try:
+        monkeypatch.setattr("distributed.utils._offload_executor", threadpool)
+
+        class SlowDeserializeCallable:
+            def __init__(self, delay=0.1):
+                self.delay = delay
+
+            def __getstate__(self):
+                return self.delay
+
+            def __setstate__(self, state):
+                delay = state
+                import time
+
+                time.sleep(delay)
+                return SlowDeserializeCallable(delay)
+
+            def __call__(self, *args, **kwargs):
+                return 41
+
+        slow_deserialized_func = SlowDeserializeCallable()
+        fut = c.submit(
+            slow_deserialized_func, 1, workers=[a.address], allow_other_workers=True
+        )
+
+        while CountingThreadPool.counter == 0:
+            await asyncio.sleep(0)
+
+        ts = s.tasks[fut.key]
+        a.steal_request(fut.key)
+        stealing_ext.scheduler.send_task_to_worker(b.address, ts)
+
+        fut2 = c.submit(inc, fut, workers=[a.address])
+        fut3 = c.submit(inc, fut2, workers=[a.address])
+
+        assert await fut2 == 42
+        await fut3
+
+    finally:
+        threadpool.shutdown()

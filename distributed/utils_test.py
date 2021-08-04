@@ -332,6 +332,13 @@ def slowidentity(*args, **kwargs):
         return args
 
 
+class _UnhashableCallable:
+    __hash__ = None
+
+    def __call__(self, x):
+        return x + 1
+
+
 def run_for(duration, timer=time):
     """
     Burn CPU for *duration* seconds.

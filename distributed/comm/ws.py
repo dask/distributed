@@ -166,7 +166,7 @@ class WS(Comm):
 
     def __init__(self, sock, deserialize=True, allow_offload=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self.sock = sock
         self._peer_addr = f"{self.prefix}{self.sock.parsed.netloc}"
         self._local_addr = f"{self.prefix}{self.sock.parsed.netloc}"
@@ -216,6 +216,7 @@ class WS(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
         n = struct.pack("Q", len(frames))
         try:

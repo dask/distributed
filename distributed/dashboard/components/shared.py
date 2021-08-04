@@ -435,6 +435,7 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
             **kwargs,
         )
@@ -457,6 +458,7 @@ class SystemMonitor(DashboardComponent):
             x_axis_type="datetime",
             height=height,
             tools=tools,
+            toolbar_location="above",
             x_range=x_range,
             **kwargs,
         )
@@ -480,6 +482,7 @@ class SystemMonitor(DashboardComponent):
             height=height,
             x_range=x_range,
             tools=tools,
+            toolbar_location="above",
             **kwargs,
         )
         self.bandwidth.line(
@@ -511,6 +514,7 @@ class SystemMonitor(DashboardComponent):
                 height=height,
                 x_range=x_range,
                 tools=tools,
+                toolbar_location="above",
                 **kwargs,
             )
 
