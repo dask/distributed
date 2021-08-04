@@ -1,9 +1,9 @@
 import pytest
 
+from distributed.protocol import deserialize, serialize
+
 np = pytest.importorskip("numpy")
 sparse = pytest.importorskip("sparse")
-
-from distributed.protocol import deserialize, serialize
 
 
 def test_serialize_deserialize_sparse():

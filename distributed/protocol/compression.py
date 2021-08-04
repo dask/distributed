@@ -12,6 +12,8 @@ from tlz import identity
 
 import dask
 
+from ..utils import ensure_bytes
+
 try:
     import blosc
 
@@ -21,7 +23,6 @@ try:
 except ImportError:
     blosc = False
 
-from ..utils import ensure_bytes
 
 compressions = {None: {"compress": identity, "decompress": identity}}
 

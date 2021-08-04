@@ -40,6 +40,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
+from jinja2 import Environment, FileSystemLoader
 from tlz import curry, pipe
 from tlz.curried import concat, groupby, map
 from tornado import escape
@@ -47,11 +48,6 @@ from tornado import escape
 import dask
 from dask import config
 from dask.utils import format_bytes, format_time, key_split, parse_timedelta
-
-try:
-    import numpy as np
-except ImportError:
-    np = False
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
@@ -69,6 +65,12 @@ from distributed.diagnostics.task_stream import colors as ts_color_lookup
 from distributed.metrics import time
 from distributed.utils import Log, log_errors
 
+try:
+    import numpy as np
+except ImportError:
+    np = False
+
+
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
@@ -76,7 +78,6 @@ else:
 
 logger = logging.getLogger(__name__)
 
-from jinja2 import Environment, FileSystemLoader
 
 env = Environment(
     loader=FileSystemLoader(

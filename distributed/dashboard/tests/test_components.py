@@ -1,9 +1,6 @@
 import asyncio
 
 import pytest
-
-pytest.importorskip("bokeh")
-
 from bokeh.models import ColumnDataSource, Model
 
 from distributed.dashboard.components.shared import (
@@ -12,6 +9,8 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
 )
 from distributed.utils_test import gen_cluster, slowinc
+
+pytest.importorskip("bokeh")
 
 
 @pytest.mark.parametrize("Component", [Processing])

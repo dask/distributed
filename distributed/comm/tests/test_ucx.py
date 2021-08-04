@@ -2,16 +2,17 @@ import asyncio
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-
-ucp = pytest.importorskip("ucp")
-
 from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.protocol import to_serialize
 from distributed.utils_test import gen_cluster, gen_test, inc
+
+pytestmark = pytest.mark.gpu
+
+ucp = pytest.importorskip("ucp")
+
 
 try:
     HOST = ucp.get_address()

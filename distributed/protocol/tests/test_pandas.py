@@ -1,8 +1,5 @@
 import pytest
 
-pd = pytest.importorskip("pandas")
-np = pytest.importorskip("numpy")
-
 from dask.dataframe.utils import assert_eq
 
 from distributed.protocol import (
@@ -14,6 +11,10 @@ from distributed.protocol import (
     to_serialize,
 )
 from distributed.utils import ensure_bytes
+
+pd = pytest.importorskip("pandas")
+np = pytest.importorskip("numpy")
+
 
 dfs = [
     pd.DataFrame({}),

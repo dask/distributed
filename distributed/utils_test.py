@@ -25,19 +25,14 @@ from contextlib import contextmanager, nullcontext, suppress
 from glob import glob
 from time import sleep
 
-from distributed.scheduler import Scheduler
-
-try:
-    import ssl
-except ImportError:
-    ssl = None
-
 import pytest
 from tlz import assoc, memoize, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
+
+from distributed.scheduler import Scheduler
 
 from . import system
 from .client import Client, _global_clients, default_client
@@ -65,6 +60,12 @@ from .utils import (
     thread_state,
 )
 from .worker import Worker
+
+try:
+    import ssl
+except ImportError:
+    ssl = None
+
 
 try:
     import dask.array  # register config

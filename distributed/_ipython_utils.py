@@ -6,13 +6,7 @@ after which we can import them instead of having our own definitions.
 
 import atexit
 import os
-
-try:
-    import queue
-except ImportError:
-    # Python 2
-    import Queue as queue
-
+import queue
 import sys
 from subprocess import Popen
 from threading import Event, Thread

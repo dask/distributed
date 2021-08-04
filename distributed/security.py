@@ -2,12 +2,13 @@ import datetime
 import os
 import tempfile
 
+import dask
+
 try:
     import ssl
 except ImportError:
     ssl = None
 
-import dask
 
 __all__ = ("Security",)
 

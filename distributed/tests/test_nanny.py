@@ -9,9 +9,6 @@ from time import sleep
 
 import psutil
 import pytest
-
-pytestmark = pytest.mark.gpu
-
 from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
@@ -25,6 +22,9 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
+
+pytestmark = pytest.mark.gpu
+
 
 pytestmark = pytest.mark.ci1
 

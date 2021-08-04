@@ -1,14 +1,15 @@
-import pytest
-
-pytest.importorskip("asyncssh")
-
 import sys
+
+import pytest
 
 import dask
 
 from distributed import Client
 from distributed.compatibility import MACOS, WINDOWS
 from distributed.deploy.ssh import SSHCluster
+
+pytest.importorskip("asyncssh")
+
 
 pytestmark = [
     pytest.mark.xfail(MACOS, reason="very high flakiness; see distributed/issues/4543"),

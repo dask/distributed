@@ -4,16 +4,16 @@ import socket
 import sys
 import time
 import traceback
+from threading import Thread
+
+from tlz import merge
+from tornado import gen
 
 try:
     from queue import Queue
 except ImportError:  # Python 2.7 fix
     from Queue import Queue
 
-from threading import Thread
-
-from tlz import merge
-from tornado import gen
 
 logger = logging.getLogger(__name__)
 

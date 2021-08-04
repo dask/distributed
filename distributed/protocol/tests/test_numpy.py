@@ -2,8 +2,6 @@ from zlib import crc32
 
 import pytest
 
-np = pytest.importorskip("numpy")
-
 from distributed.protocol import (
     decompress,
     deserialize,
@@ -20,6 +18,8 @@ from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_bytes, nbytes, tmpfile
 from distributed.utils_test import gen_cluster
+
+np = pytest.importorskip("numpy")
 
 
 def test_serialize():

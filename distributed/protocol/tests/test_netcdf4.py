@@ -1,10 +1,13 @@
 import pytest
 
-netCDF4 = pytest.importorskip("netCDF4")
-np = pytest.importorskip("numpy")
+import dask.array as da
 
 from distributed.protocol import deserialize, serialize
 from distributed.utils import tmpfile
+from distributed.utils_test import gen_cluster
+
+netCDF4 = pytest.importorskip("netCDF4")
+np = pytest.importorskip("numpy")
 
 
 def create_test_dataset(fn):
@@ -72,11 +75,6 @@ def test_serialize_deserialize_group():
                 assert y.dimensions == ("x",)
                 assert x.dtype == y.dtype
                 assert (x[:] == y[:]).all()
-
-
-import dask.array as da
-
-from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)

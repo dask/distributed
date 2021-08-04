@@ -8,15 +8,8 @@ import sys
 import weakref
 from ssl import SSLCertVerificationError, SSLError
 
-from tornado import gen
-
-try:
-    import ssl
-except ImportError:
-    ssl = None
-
 from tlz import sliding_window
-from tornado import netutil
+from tornado import gen, netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
@@ -32,6 +25,12 @@ from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
 from .registry import Backend, backends
 from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
+
+try:
+    import ssl
+except ImportError:
+    ssl = None
+
 
 logger = logging.getLogger(__name__)
 

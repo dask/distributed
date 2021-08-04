@@ -1,10 +1,10 @@
 import pytest
 
-pytestmark = pytest.mark.gpu
-
 from dask.dataframe.utils import assert_eq
 
 from distributed.protocol import deserialize, serialize
+
+pytestmark = pytest.mark.gpu
 
 
 @pytest.mark.parametrize("collection", [tuple, dict])

@@ -1,9 +1,9 @@
 import pytest
 
+from distributed.protocol import deserialize, dumps, loads, serialize, to_serialize
+
 keras = pytest.importorskip("keras")
 np = pytest.importorskip("numpy")
-
-from distributed.protocol import deserialize, dumps, loads, serialize, to_serialize
 
 
 def test_serialize_deserialize_model():

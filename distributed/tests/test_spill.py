@@ -1,10 +1,10 @@
 import pytest
 
-pytest.importorskip("zict")
-
 from dask.sizeof import sizeof
 
 from distributed.spill import SpillBuffer
+
+pytest.importorskip("zict")
 
 
 def test_spillbuffer(tmpdir):

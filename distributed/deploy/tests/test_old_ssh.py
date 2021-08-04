@@ -2,11 +2,11 @@ from time import sleep
 
 import pytest
 
-pytest.importorskip("paramiko")
-
 from distributed import Client
 from distributed.deploy.old_ssh import SSHCluster
 from distributed.metrics import time
+
+pytest.importorskip("paramiko")
 
 
 @pytest.mark.avoid_ci

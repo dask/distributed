@@ -3,10 +3,13 @@ import traceback
 
 import pytest
 
-h5py = pytest.importorskip("h5py")
+import dask.array as da
 
 from distributed.protocol import deserialize, serialize
 from distributed.utils import tmpfile
+from distributed.utils_test import gen_cluster
+
+h5py = pytest.importorskip("h5py")
 
 
 def silence_h5py_issue775(func):
@@ -79,11 +82,6 @@ def test_raise_error_on_serialize_write_permissions():
                 deserialize(*serialize(x))
             with pytest.raises(TypeError):
                 deserialize(*serialize(f))
-
-
-import dask.array as da
-
-from distributed.utils_test import gen_cluster
 
 
 @silence_h5py_issue775

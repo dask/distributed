@@ -24,6 +24,13 @@
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
+import dask_sphinx_theme
+from docutils.parsers.rst import directives
+from sphinx.ext.autosummary import Autosummary, get_documenter
+from sphinx.util.inspect import safe_getattr
+
+import distributed
+
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.todo",
@@ -63,7 +70,6 @@ author = "Anaconda, Inc."
 # built documents.
 #
 # The short X.Y version.
-import distributed
 
 version = distributed.__version__
 # The full version, including alpha/beta/rc tags.
@@ -116,7 +122,6 @@ todo_include_todos = True
 
 # -- Options for HTML output ----------------------------------------------
 
-import dask_sphinx_theme
 
 html_theme = "dask_sphinx_theme"
 html_theme_path = [dask_sphinx_theme.get_html_theme_path()]
@@ -426,15 +431,9 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
-from docutils.parsers.rst import directives
-
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693
 # See https://stackoverflow.com/questions/20569011/python-sphinx-autosummary-automated-listing-of-member-functions
-from sphinx.ext.autosummary import Autosummary, get_documenter
-from sphinx.util.inspect import safe_getattr
-
-
 class AutoAutoSummary(Autosummary):
     """Create a summary for methods and attributes (autosummary).
 

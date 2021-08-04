@@ -1,6 +1,9 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 import pytest
 
+# Make all fixtures available
+from distributed.utils_test import *  # noqa
+
 # Uncomment to enable more logging and checks
 # (https://docs.python.org/3/library/asyncio-dev.html)
 # Note this makes things slower and might consume much memory.
@@ -15,9 +18,6 @@ else:
         faulthandler.enable()
     except Exception:
         pass
-
-# Make all fixtures available
-from distributed.utils_test import *  # noqa
 
 
 def pytest_addoption(parser):

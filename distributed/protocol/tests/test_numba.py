@@ -2,9 +2,10 @@ import pickle
 
 import pytest
 
+from distributed.protocol import deserialize, serialize
+
 pytestmark = pytest.mark.gpu
 
-from distributed.protocol import deserialize, serialize
 
 cuda = pytest.importorskip("numba.cuda")
 np = pytest.importorskip("numpy")

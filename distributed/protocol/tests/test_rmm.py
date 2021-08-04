@@ -1,8 +1,9 @@
 import pytest
 
+from distributed.protocol import deserialize, serialize
+
 pytestmark = pytest.mark.gpu
 
-from distributed.protocol import deserialize, serialize
 
 numpy = pytest.importorskip("numpy")
 cuda = pytest.importorskip("numba.cuda")

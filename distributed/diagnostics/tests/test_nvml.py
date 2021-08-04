@@ -2,14 +2,14 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-
-pynvml = pytest.importorskip("pynvml")
-
 import dask
 
 from distributed.diagnostics import nvml
 from distributed.utils_test import gen_cluster
+
+pytestmark = pytest.mark.gpu
+
+pynvml = pytest.importorskip("pynvml")
 
 
 def test_one_time():

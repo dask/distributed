@@ -25,6 +25,8 @@ from numbers import Number
 from queue import Queue as pyQueue
 
 from tlz import first, groupby, keymap, merge, partition_all, valmap
+from tornado import gen
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
@@ -40,13 +42,6 @@ from dask.utils import (
     parse_timedelta,
     stringify,
 )
-
-try:
-    from dask.delayed import single_key
-except ImportError:
-    single_key = first
-from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import versions as version_module
 from .batched import BatchedSend
@@ -97,6 +92,12 @@ from .utils_comm import (
     unpack_remotedata,
 )
 from .worker import get_client, get_worker, secede
+
+try:
+    from dask.delayed import single_key
+except ImportError:
+    single_key = first
+
 
 logger = logging.getLogger(__name__)
 

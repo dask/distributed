@@ -6,12 +6,8 @@ import msgpack
 import pytest
 from tlz import identity
 
-try:
-    import numpy as np
-except ImportError:
-    np = None
-
 import dask
+from dask import delayed
 
 from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
@@ -33,7 +29,12 @@ from distributed.protocol import (
 )
 from distributed.protocol.serialize import check_dask_serializable
 from distributed.utils import nbytes
-from distributed.utils_test import gen_test, inc
+from distributed.utils_test import gen_cluster, gen_test, inc
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 
 class MyObj:
@@ -160,11 +161,6 @@ def test_serialize_iterate_collection():
     # Check serialize/deserialize directly
     assert deserialize(*serialize(task1, iterate_collection=True)) == expect
     assert deserialize(*serialize(task2, iterate_collection=True)) == expect
-
-
-from dask import delayed
-
-from distributed.utils_test import gen_cluster
 
 
 @gen_cluster(client=True)

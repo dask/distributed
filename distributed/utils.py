@@ -29,12 +29,6 @@ from typing import Dict, List
 
 import click
 import tblib.pickling_support
-
-try:
-    import resource
-except ImportError:
-    resource = None
-
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -43,13 +37,20 @@ import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
 
+from .compatibility import PYPY, WINDOWS
+from .metrics import time
+
+try:
+    import resource
+except ImportError:
+    resource = None
+
+
 try:
     from tornado.ioloop import PollIOLoop
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
-from .metrics import time
 
 try:
     from dask.context import thread_state

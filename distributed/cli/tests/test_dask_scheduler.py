@@ -1,14 +1,11 @@
-import psutil
-import pytest
-
-pytest.importorskip("requests")
-
 import os
 import shutil
 import sys
 import tempfile
 from time import sleep
 
+import psutil
+import pytest
 import requests
 from click.testing import CliRunner
 
@@ -23,6 +20,8 @@ from distributed.utils_test import (
     assert_can_connect_locally_4,
     popen,
 )
+
+pytest.importorskip("requests")
 
 
 def test_defaults(loop):

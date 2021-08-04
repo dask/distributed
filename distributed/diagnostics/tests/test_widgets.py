@@ -1,9 +1,22 @@
+import re
+from operator import add
+
 import pytest
+from ipykernel.comm import Comm
+from ipywidgets import Widget
+from tlz import valmap
+
+from distributed.client import wait
+from distributed.diagnostics.progressbar import (
+    MultiProgressWidget,
+    ProgressWidget,
+    progress,
+)
+from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
+from distributed.worker import dumps_task
 
 pytest.importorskip("ipywidgets")
 
-from ipykernel.comm import Comm
-from ipywidgets import Widget
 
 #################
 # Utility stuff #
@@ -70,20 +83,6 @@ def record_display(*args):
 #####################
 # Distributed stuff #
 #####################
-
-import re
-from operator import add
-
-from tlz import valmap
-
-from distributed.client import wait
-from distributed.diagnostics.progressbar import (
-    MultiProgressWidget,
-    ProgressWidget,
-    progress,
-)
-from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
-from distributed.worker import dumps_task
 
 
 @gen_cluster(client=True)

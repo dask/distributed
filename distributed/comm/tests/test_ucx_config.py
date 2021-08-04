@@ -2,14 +2,15 @@ from time import sleep
 
 import pytest
 
-pytestmark = pytest.mark.gpu
-
 import dask
 
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
 from distributed.utils import get_ip
 from distributed.utils_test import popen
+
+pytestmark = pytest.mark.gpu
+
 
 try:
     HOST = get_ip()

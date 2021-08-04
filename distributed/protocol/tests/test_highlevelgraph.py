@@ -1,6 +1,7 @@
 import ast
 
 import pytest
+from numpy.testing import assert_array_equal
 
 import dask
 import dask.array as da
@@ -11,8 +12,6 @@ from distributed.utils_test import gen_cluster
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
-
-from numpy.testing import assert_array_equal
 
 
 @gen_cluster(client=True)

@@ -7,12 +7,13 @@ from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.server.server import BokehTornado
 
+import dask
+
 try:
     from bokeh.server.util import create_hosts_allowlist
 except ImportError:
     from bokeh.server.util import create_hosts_whitelist as create_hosts_allowlist
 
-import dask
 
 if LooseVersion(bokeh.__version__) < LooseVersion("1.0.0"):
     warnings.warn(

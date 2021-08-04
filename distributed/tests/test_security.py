@@ -1,10 +1,5 @@
 from contextlib import contextmanager
 
-try:
-    import ssl
-except ImportError:
-    ssl = None
-
 import pytest
 
 import dask
@@ -12,6 +7,12 @@ import dask
 from distributed.comm import connect, listen
 from distributed.security import Security
 from distributed.utils_test import get_cert
+
+try:
+    import ssl
+except ImportError:
+    ssl = None
+
 
 ca_file = get_cert("tls-ca-cert.pem")
 

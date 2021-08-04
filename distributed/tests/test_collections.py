@@ -2,15 +2,16 @@ from distutils.version import LooseVersion
 
 import pytest
 
-np = pytest.importorskip("numpy")
-pd = pytest.importorskip("pandas")
-
 import dask
 import dask.bag as db
 import dask.dataframe as dd
 
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
+
+np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
+
 
 PANDAS_VERSION = LooseVersion(pd.__version__)
 PANDAS_GT_100 = PANDAS_VERSION >= LooseVersion("1.0.0")
