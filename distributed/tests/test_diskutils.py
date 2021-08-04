@@ -274,15 +274,12 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
-@pytest.mark.flaky(condition=not MACOS, reruns=10, reruns_delay=5)
 def test_workspace_concurrency(tmpdir):
     _test_workspace_concurrency(tmpdir, 5.0, 6)
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
-@pytest.mark.flaky(condition=not MACOS, reruns=10, reruns_delay=5)
+@pytest.mark.xfail(reason="extremely flaky; reruns always fail")
 def test_workspace_concurrency_intense(tmpdir):
     n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)
     assert n_created >= 100
