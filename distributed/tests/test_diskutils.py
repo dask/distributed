@@ -12,7 +12,6 @@ import pytest
 
 import dask
 
-from distributed.compatibility import MACOS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
