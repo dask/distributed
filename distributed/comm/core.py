@@ -53,11 +53,11 @@ class Comm(ABC):
     # XXX add set_close_callback()?
 
     @abstractmethod
-    def read(self, deserializers=None):
+    async def read(self, deserializers=None):
         """
         Read and return a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
@@ -67,11 +67,11 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, serializers=None, on_error=None):
+    async def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
@@ -82,12 +82,12 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def close(self):
+    async def close(self):
         """
         Close the communication cleanly.  This will attempt to flush
         outgoing buffers before actually closing the underlying transport.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
 
     @abstractmethod
@@ -241,10 +241,10 @@ class Listener(ABC):
 
 class Connector(ABC):
     @abstractmethod
-    def connect(self, address, deserialize=True):
+    async def connect(self, address, deserialize=True):
         """
         Connect to the given address and return a Comm object.
-        This function is a coroutine.   It may raise EnvironmentError
+        This function returns a coroutine. It may raise EnvironmentError
         if the other endpoint is unreachable or unavailable.  It
         may raise ValueError if the address is malformed.
         """
