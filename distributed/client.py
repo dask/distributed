@@ -378,7 +378,7 @@ class Future(WrappedKey):
             c = Client.current(allow_global=False)
         except ValueError:
             c = get_client(address)
-        Future.__init__(self, key, c)
+        self.__init__(key, c)
         c._send_to_scheduler(
             {
                 "op": "update-graph",

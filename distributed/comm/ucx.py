@@ -167,7 +167,7 @@ class UCX(Comm):
     """
 
     def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
-        Comm.__init__(self)
+        super().__init__()
         self._ep = ep
         if local_addr:
             assert local_addr.startswith("ucx")
