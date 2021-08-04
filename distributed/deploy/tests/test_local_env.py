@@ -13,6 +13,7 @@ from distributed.deploy.local_env import LocalEnvCluster
 async def test_basic():
     async with LocalEnvCluster(
         sys.executable,
+        asynchronous=True,
         scheduler_options={"port": 0, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
@@ -27,6 +28,7 @@ async def test_basic():
 async def test_job_submission():
     async with LocalEnvCluster(
         sys.executable,
+        asynchronous=True,
         scheduler_options={"port": 0, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
@@ -41,6 +43,7 @@ async def test_multiple_workers():
     async with LocalEnvCluster(
             sys.executable,
             n_workers=n_workers,
+            asynchronous=True,
             scheduler_options={"port": 0, "idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
     ) as cluster:
@@ -52,6 +55,7 @@ async def test_bad_executable():
     with pytest.raises(Exception):
         async with LocalEnvCluster(
                 "/foo/bar/baz/python",
+                asynchronous=True,
                 scheduler_options={"port": 0, "idle_timeout": "5s"},
                 worker_options={"death_timeout": "5s"},
         ) as cluster:
@@ -69,6 +73,7 @@ async def test_set_env():
     with dask.config.set(foo=value):
         async with LocalEnvCluster(
             sys.executable,
+            asynchronous=True,
             scheduler_options={"port": 0, "idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
         ) as cluster:
