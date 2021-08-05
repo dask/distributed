@@ -12,7 +12,6 @@ from concurrent.futures import (
 import pytest
 from tlz import take
 
-from distributed.compatibility import MACOS
 from distributed.utils import CancelledError
 from distributed.utils_test import inc, slowadd, slowdec, slowinc, throws, varying
 
@@ -127,7 +126,6 @@ def test_cancellation_as_completed(client):
         assert n_cancelled == 2
 
 
-@pytest.mark.flaky(condition=MACOS, reruns=10, reruns_delay=5)
 def test_map(client):
     with client.get_executor() as e:
         N = 10
@@ -156,6 +154,7 @@ def test_map(client):
         assert number_of_processing_tasks(client) > 0
         # Garbage collect the iterator => remaining tasks are cancelled
         del it
+        time.sleep(0.05)
         assert number_of_processing_tasks(client) == 0
 
 
