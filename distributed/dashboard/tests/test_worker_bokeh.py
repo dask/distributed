@@ -4,6 +4,10 @@ from operator import add, sub
 from time import sleep
 
 import pytest
+
+# isort: off
+pytest.importorskip("bokeh")
+# isort: on
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient
 
@@ -19,8 +23,6 @@ from distributed.dashboard.components.worker import (
 )
 from distributed.metrics import time
 from distributed.utils_test import dec, gen_cluster, inc
-
-pytest.importorskip("bokeh")
 
 
 @gen_cluster(

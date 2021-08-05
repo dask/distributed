@@ -6,6 +6,11 @@ import sys
 from time import sleep
 
 import pytest
+
+# isort: off
+pytest.importorskip("bokeh")
+# isort: on
+
 from bokeh.server.server import BokehTornado
 from tlz import first
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
@@ -43,9 +48,6 @@ from distributed.dashboard.scheduler import applications
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
-
-pytest.importorskip("bokeh")
-
 
 scheduler.PROFILING = False
 

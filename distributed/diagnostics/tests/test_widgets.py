@@ -2,6 +2,10 @@ import re
 from operator import add
 
 import pytest
+
+# isort: off
+pytest.importorskip("ipywidgets")
+# isort: on
 from ipykernel.comm import Comm
 from ipywidgets import Widget
 from tlz import valmap
@@ -14,9 +18,6 @@ from distributed.diagnostics.progressbar import (
 )
 from distributed.utils_test import dec, gen_cluster, gen_tls_cluster, inc, throws
 from distributed.worker import dumps_task
-
-pytest.importorskip("ipywidgets")
-
 
 #################
 # Utility stuff #

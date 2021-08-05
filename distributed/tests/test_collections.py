@@ -4,10 +4,12 @@ import pytest
 
 import dask
 import dask.bag as db
-import dask.dataframe as dd
 
 from distributed.client import wait
 from distributed.utils_test import gen_cluster
+
+dd = pytest.importorskip("dask.dataframe")
+
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")

@@ -4,7 +4,6 @@ from multiprocessing import cpu_count
 from time import sleep
 
 import pytest
-import requests
 from click.testing import CliRunner
 
 import distributed.cli.dask_worker
@@ -15,7 +14,7 @@ from distributed.metrics import time
 from distributed.utils import parse_ports, sync, tmpfile
 from distributed.utils_test import gen_cluster, popen, terminate_process, wait_for_port
 
-pytest.importorskip("requests")
+requests = pytest.importorskip("requests")
 
 
 def test_nanny_worker_ports(loop):

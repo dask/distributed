@@ -6,7 +6,6 @@ from time import sleep
 
 import psutil
 import pytest
-import requests
 from click.testing import CliRunner
 
 import distributed
@@ -21,7 +20,7 @@ from distributed.utils_test import (
     popen,
 )
 
-pytest.importorskip("requests")
+requests = pytest.importorskip("requests")
 
 
 def test_defaults(loop):

@@ -23,10 +23,10 @@ from distributed.protocol.pickle import dumps
 from distributed.utils import TimeoutError, parse_ports, tmpfile
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
-pytestmark = pytest.mark.gpu
-
-
-pytestmark = pytest.mark.ci1
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.ci1,
+]
 
 
 @pytest.mark.slow
