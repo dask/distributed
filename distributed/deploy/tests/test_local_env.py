@@ -1,6 +1,6 @@
-import pytest
-
 import sys
+
+import pytest
 
 import dask
 
@@ -32,7 +32,7 @@ async def test_job_submission():
         scheduler_options={"port": 20001, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
-        async with Client(cluster) as client:
+        async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)
             assert result == 11
 
@@ -41,11 +41,11 @@ async def test_job_submission():
 async def test_multiple_workers():
     n_workers = 2
     async with LocalEnvCluster(
-            sys.executable,
-            n_workers=n_workers,
-            asynchronous=True,
-            scheduler_options={"port": 20002, "idle_timeout": "5s"},
-            worker_options={"death_timeout": "5s"},
+        sys.executable,
+        n_workers=n_workers,
+        asynchronous=True,
+        scheduler_options={"port": 20002, "idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == n_workers
 
@@ -54,10 +54,10 @@ async def test_multiple_workers():
 async def test_bad_executable():
     with pytest.raises(Exception):
         async with LocalEnvCluster(
-                "/foo/bar/baz/python",
-                asynchronous=True,
-                scheduler_options={"port": 20003, "idle_timeout": "5s"},
-                worker_options={"death_timeout": "5s"},
+            "/foo/bar/baz/python",
+            asynchronous=True,
+            scheduler_options={"port": 20003, "idle_timeout": "5s"},
+            worker_options={"death_timeout": "5s"},
         ) as cluster:
             assert cluster
         cluster.close()
@@ -77,6 +77,6 @@ async def test_set_env():
             scheduler_options={"port": 20004, "idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
         ) as cluster:
-            async with Client(cluster) as client:
+            async with Client(cluster, asynchronous=True) as client:
                 result = await client.submit(f)
                 assert result == value
