@@ -14,7 +14,7 @@ async def test_basic():
     async with LocalEnvCluster(
         sys.executable,
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"port": 20000, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == 1
@@ -29,7 +29,7 @@ async def test_job_submission():
     async with LocalEnvCluster(
         sys.executable,
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"port": 20001, "idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
         async with Client(cluster) as client:
@@ -44,7 +44,7 @@ async def test_multiple_workers():
             sys.executable,
             n_workers=n_workers,
             asynchronous=True,
-            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            scheduler_options={"port": 20002, "idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == n_workers
@@ -56,7 +56,7 @@ async def test_bad_executable():
         async with LocalEnvCluster(
                 "/foo/bar/baz/python",
                 asynchronous=True,
-                scheduler_options={"port": 0, "idle_timeout": "5s"},
+                scheduler_options={"port": 20003, "idle_timeout": "5s"},
                 worker_options={"death_timeout": "5s"},
         ) as cluster:
             assert cluster
@@ -74,7 +74,7 @@ async def test_set_env():
         async with LocalEnvCluster(
             sys.executable,
             asynchronous=True,
-            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            scheduler_options={"port": 20004, "idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
         ) as cluster:
             async with Client(cluster) as client:
