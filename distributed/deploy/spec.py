@@ -99,6 +99,44 @@ class ProcessInterface:
     def __repr__(self):
         return f"<{type(self).__name__}: status={self.status}>"
 
+    def _repr_html_(self):
+        self.address = getattr(self, "address", None)
+        self.external_address = None
+        self.lock = asyncio.Lock()
+        self.status = Status.created
+        self._event_finished = asyncio.Event()
+
+        attr = {
+            "address": self.address,
+            "external_address": self.external_address,
+            "lock": self.lock,
+            "status": self.status,
+            "_event_finished": self._event_finished,
+        }
+
+        rows = ""
+
+        for key, val in attr.items():
+            rows += f"""
+            <tr>
+                <th style="text-align: left; width: 150px;">{key}</th>
+                <td style="text-align: left;">{val}</td>
+            </tr>
+            """
+
+        html = f"""
+        <div style="margin-left: auto;">
+            <h3 style="margin-bottom: 0px;">Process Interface</h3>
+            <p>
+                <table style="width: 100%;">
+                {rows}
+                </table>
+            </p>
+        </div>
+        """
+
+        return html
+
     async def __aenter__(self):
         await self
         return self
