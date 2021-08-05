@@ -1,10 +1,11 @@
 import pytest
 
-import dask.array as da
-
 from distributed.protocol import deserialize, serialize
 from distributed.utils import tmpfile
 from distributed.utils_test import gen_cluster
+
+da = pytest.importorskip("dask.array")
+
 
 netCDF4 = pytest.importorskip("netCDF4")
 np = pytest.importorskip("numpy")

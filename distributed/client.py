@@ -31,6 +31,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.base import collections_to_dsk, normalize_token, tokenize
 from dask.core import flatten
+from dask.delayed import single_key
 from dask.highlevelgraph import HighLevelGraph
 from dask.optimization import SubgraphCallable
 from dask.utils import (
@@ -92,12 +93,6 @@ from .utils_comm import (
     unpack_remotedata,
 )
 from .worker import get_client, get_worker, secede
-
-try:
-    from dask.delayed import single_key
-except ImportError:
-    single_key = first
-
 
 logger = logging.getLogger(__name__)
 

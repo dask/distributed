@@ -1,7 +1,6 @@
 import ast
 
 import pytest
-from numpy.testing import assert_array_equal
 
 import dask
 import dask.array as da
@@ -146,7 +145,7 @@ async def test_array_annotations(c, s, a, b):
     with dask.config.set(optimization__fuse__active=False):
         result = await c.compute(B)
 
-    assert_array_equal(result, 2)
+    np.testing.assert_array_equal(result, 2)
 
     # There are annotation matches per array chunk (i.e. task)
     assert plugin.qux_matches == A.npartitions

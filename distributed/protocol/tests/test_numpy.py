@@ -19,7 +19,9 @@ from distributed.system import MEMORY_LIMIT
 from distributed.utils import ensure_bytes, nbytes, tmpfile
 from distributed.utils_test import gen_cluster
 
+# isort:off
 np = pytest.importorskip("numpy")
+# isort:on
 
 
 def test_serialize():

@@ -4,8 +4,6 @@ from dask.sizeof import sizeof
 
 from distributed.spill import SpillBuffer
 
-pytest.importorskip("zict")
-
 
 def test_spillbuffer(tmpdir):
     buf = SpillBuffer(str(tmpdir), target=300)
