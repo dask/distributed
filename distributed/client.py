@@ -82,6 +82,7 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
+    json_load_robust,
     key_split,
     log_errors,
     no_default,
@@ -1058,16 +1059,8 @@ class Client:
                 )
             address = self.cluster.scheduler_address
         elif self.scheduler_file is not None:
-            while not os.path.exists(self.scheduler_file):
-                await asyncio.sleep(0.01)
-            for i in range(10):
-                try:
-                    with open(self.scheduler_file) as f:
-                        cfg = json.load(f)
-                    address = cfg["address"]
-                    break
-                except (ValueError, KeyError):  # JSON file not yet flushed
-                    await asyncio.sleep(0.01)
+            cfg = json_load_robust(self.scheduler_file)
+            address = cfg["address"]
         elif self._start_arg is None:
             from .deploy import LocalCluster
 
@@ -3565,7 +3558,7 @@ class Client:
         if self.scheduler_file:
             raise ValueError("Scheduler file already set")
         else:
-            self.scheduler_file = scheduler_file
+            self.scheduler_file = os.path.expanduser(scheduler_file)
 
         with open(self.scheduler_file, "w") as f:
             json.dump(self.scheduler_info(), f, indent=2)

@@ -972,6 +972,7 @@ def nbytes(frame, _bytes_like=(bytes, bytearray)):
 
 def json_load_robust(fn, load=json.load):
     """Reads a JSON file from disk that may be being written as we read"""
+    fn = os.path.expanduser(fn)
     while not os.path.exists(fn):
         sleep(0.01)
     for i in range(10):
