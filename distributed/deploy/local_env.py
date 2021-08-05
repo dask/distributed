@@ -45,21 +45,24 @@ class Process(ProcessInterface):
         -------
             Dask config to inherit, if any.
         """
+        keyname = "DASK_INTERNAL_INHERIT_CONFIG"
         proc = await asyncio.create_subprocess_shell("uname", **self.connect_options)
         await proc.communicate()
         if proc.returncode == 0:
-            set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                dask.config.serialize(dask.config.global_config)
-            )
+            # set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
+            #     dask.config.serialize(dask.config.global_config)
+            # )
+            set_env = {keyname: f"{dask.config.serialize(dask.config.global_config)}"}
         else:
             proc = await asyncio.create_subprocess_shell(
                 "cmd /c ver", **self.connect_options
             )
             await proc.communicate()
             if proc.returncode == 0:
-                set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    dask.config.serialize(dask.config.global_config)
-                )
+                # set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
+                #     dask.config.serialize(dask.config.global_config)
+                # )
+                set_env = {keyname: f"{dask.config.serialize(dask.config.global_config)}"}
             else:
                 name = self.__class__.__name__
                 emsg = f"{name} failed to set DASK_INTERNAL_INHERIT_CONFIG variable"
@@ -125,25 +128,48 @@ class Worker(Process):
     async def start(self):
         set_env = await self._set_env_helper()
 
-        cmd = " ".join(
-            [
-                set_env,
-                self.python_executable,
-                "-m",
-                self.worker_module,
-                self.scheduler,
-                "--name",
-                str(self.name),
-            ]
-            + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
-        )
-        self.proc = await asyncio.create_subprocess_shell(
-            cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
+        cmds = [
+            "-m",
+            self.worker_module,
+            self.scheduler,
+            "--name",
+            str(self.name),
+        ] + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
+
+        self.proc = await asyncio.create_subprocess_exec(
+            self.python_executable,
+            *cmds,
+            stderr=asyncio.subprocess.PIPE,
+            env=set_env,
+            **self.connect_options
         )
 
         search_string = "worker at"
         await self._get_address(search_string)
         await super().start()
+
+    # async def _start(self):
+    #     set_env = await self._set_env_helper()
+    #
+    #     cmd = " ".join(
+    #         [
+    #             set_env,
+    #             self.python_executable,
+    #             "-m",
+    #             self.worker_module,
+    #             self.scheduler,
+    #             "--name",
+    #             str(self.name),
+    #         ]
+    #         + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
+    #     )
+    #     self.proc = await asyncio.create_subprocess_shell(
+    #         cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
+    #     )
+    #
+    #     search_string = "worker at"
+    #     await self._get_address(search_string)
+    #     await super().start()
 
 
 class Scheduler(Process):
@@ -172,17 +198,36 @@ class Scheduler(Process):
 
         set_env = await self._set_env_helper()
 
-        cmd = " ".join(
-            [set_env, self.python_executable, "-m", "distributed.cli.dask_scheduler"]
-            + cli_keywords(self.kwargs, cls=_Scheduler)
-        )
-        self.proc = await asyncio.create_subprocess_shell(
-            cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
+        cmds = ["-m", "distributed.cli.dask_scheduler"] + cli_keywords(self.kwargs, cls=_Scheduler)
+
+        self.proc = await asyncio.create_subprocess_exec(
+            self.python_executable,
+            *cmds,
+            stderr=asyncio.subprocess.PIPE,
+            env=set_env,
+            **self.connect_options
         )
 
         search_string = "Scheduler at"
         await self._get_address(search_string)
         await super().start()
+
+    # async def _start(self):
+    #     logger.debug("Created Scheduler")
+    #
+    #     set_env = await self._set_env_helper()
+    #
+    #     cmd = " ".join(
+    #         [set_env, self.python_executable, "-m", "distributed.cli.dask_scheduler"]
+    #         + cli_keywords(self.kwargs, cls=_Scheduler)
+    #     )
+    #     self.proc = await asyncio.create_subprocess_shell(
+    #         cmd, stderr=asyncio.subprocess.PIPE, **self.connect_options
+    #     )
+    #
+    #     search_string = "Scheduler at"
+    #     await self._get_address(search_string)
+    #     await super().start()
 
 
 def LocalEnvCluster(
