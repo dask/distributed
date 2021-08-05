@@ -2738,6 +2738,13 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
+                warnings.warn(
+                    "Attempting to add a worker plugin with the same name as an already registered "
+                    f"plugin ({name}). Currently this results in no change and the previously registered "
+                    "plugin is not overwritten. This behavior is deprecated and in a future release "
+                    f"the previously registered {name} worker plugin will be overwritten.",
+                    category=FutureWarning,
+                )
                 return {"status": "repeat"}
             else:
                 self.plugins[name] = plugin
