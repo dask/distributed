@@ -166,6 +166,42 @@ class Security:
                     items.append((k, repr(val)))
         return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
 
+    def _repr_html_(self):
+        import html
+
+        keys = sorted(self.__slots__)
+        keys.remove("extra_conn_args")
+
+        attr = {}
+
+        for k in keys:
+            val = getattr(self, k)
+            if val is not None:
+                attr[k] = "<br />".join(repr(val).split("\\n"))
+
+        rows = ""
+
+        for key, val in attr.items():
+            rows += f"""
+            <tr>
+                <th style="text-align: left; width: 150px;">{key}</th>
+                <td style="text-align: left;">{val}</td>
+            </tr>
+            """
+
+        html = f"""
+        <div style="margin-left: auto;">
+            <h3 style="margin-bottom: 0px;">Distributed Security</h3>
+            <p>
+                <table style="width: 100%;">
+                {rows}
+                </table>
+            </p>
+        </div>
+        """
+
+        return html
+
     def get_tls_config_for_role(self, role):
         """
         Return the TLS configuration for the given role, as a flat dict.
