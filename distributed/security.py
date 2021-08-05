@@ -167,8 +167,6 @@ class Security:
         return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
 
     def _repr_html_(self):
-        import html
-
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
 
