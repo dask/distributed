@@ -194,3 +194,23 @@ dask.config.set(scheduler_address="{s.address}")
 """
     async with Nanny(preload_nanny=text) as w:
         assert w.scheduler.address == s.address
+
+
+@gen_cluster(nthreads=[])
+async def test_web_preload_worker(s):
+    class MyHandler(web.RequestHandler):
+        def get(self):
+            self.write(
+                f"""
+import dask
+dask.config.set(scheduler_address="{s.address}")
+""".strip()
+            )
+
+    app = web.Application([(r"/preload", MyHandler)])
+    server = app.listen(12345)
+    try:
+        async with Nanny(preload_nanny=["http://localhost:12345/preload"]) as w:
+            assert w.scheduler.address == s.address
+    finally:
+        server.stop()
