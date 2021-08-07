@@ -7,6 +7,7 @@ import threading
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from contextlib import suppress
 from numbers import Number
 from operator import add
 from time import sleep
@@ -41,6 +42,7 @@ from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
+    _LockedCommPool,
     captured_logger,
     dec,
     div,
@@ -2530,3 +2532,96 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
 
     finally:
         threadpool.shutdown()
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_exception_one_task(c, s, a, b):
+    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
+
+
+    See also https://github.com/dask/distributed/issues/5152
+    See also test_gather_dep_exception_one_task_2
+    """
+    fut = c.submit(inc, 1, workers=[a.address], key="f1")
+    fut2 = c.submit(inc, 2, workers=[a.address], key="f2")
+    fut3 = c.submit(inc, 3, workers=[a.address], key="f3")
+
+    import asyncio
+
+    event = asyncio.Event()
+    write_queue = asyncio.Queue()
+    event.clear()
+    b.rpc = _LockedCommPool(b.rpc, write_event=event, write_queue=write_queue)
+    b.rpc.remove(a.address)
+
+    def sink(a, b, *args):
+        return a + b
+
+    res1 = c.submit(sink, fut, fut2, fut3, workers=[b.address])
+    res2 = c.submit(sink, fut, fut2, workers=[b.address])
+
+    # Wait until we're sure the worker is attempting to fetch the data
+    while True:
+        peer_addr, msg = await write_queue.get()
+        if peer_addr == a.address and msg["op"] == "get_data":
+            break
+
+    # Provoke an "impossible transision exception"
+    # By choosing a state which doesn't exist we're not running into validation
+    # errors and the state machine should raise if we want to transition from
+    # fetch to memory
+
+    b.validate = False
+    b.tasks[fut3.key].state = "fetch"
+    event.set()
+
+    with captured_logger("distributed.worker", level=logging.DEBUG) as worker_logs:
+
+        # FIXME: We currently have no reliable, safe way to release the task and
+        # its dependent without race conditions
+
+        # Unfortunately res1 is deadlocking. IRL this is not always a problem
+        # since a commonly reported transition is Fetch->Memory, i.e. the task
+        # exists already in memory for whatever reason but a gather_dep was
+        # still runnign, e.g. the task was rescheduled on that worker and it was
+        # computed faster than fetched.
+
+        with suppress(TimeoutError):
+            await asyncio.wait_for(res1, 0.1)
+
+        assert await res2 == 5
+
+        del res1, res2, fut, fut2
+        fut3.release()
+
+        while a.tasks and b.tasks:
+            await asyncio.sleep(0.1)
+
+    expected_msg = (
+        "Exception occured while handling `gather_dep` response for <Task 'f3' fetch>"
+    )
+    assert expected_msg in worker_logs.getvalue()
+    assert any("except-gather-dep-result" in msg for msg in b.story(fut3.key))
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_exception_one_task_2(c, s, a, b):
+    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
+
+    The below triggers an fetch->memory transition
+
+    See also https://github.com/dask/distributed/issues/5152
+    See also test_gather_dep_exception_one_task
+    """
+    # This test does not trigger the condition reliably but is a very easy case
+    # which should function correctly regardles
+
+    fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+    fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
+
+    while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
+        await asyncio.sleep(0)
+
+    s.handle_missing_data(key="f1", errant_worker=a.address)
+
+    await fut2

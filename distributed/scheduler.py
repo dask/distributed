@@ -1969,6 +1969,7 @@ class SchedulerState:
             ("processing", "erred"): self.transition_processing_erred,
             ("no-worker", "released"): self.transition_no_worker_released,
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
+            ("no-worker", "memory"): self.transition_no_worker_memory,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
             ("erred", "released"): self.transition_erred_released,
@@ -2440,6 +2441,42 @@ class SchedulerState:
                 else:
                     self._unrunnable.add(ts)
                     ts.state = "no-worker"
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_no_worker_memory(
+        self, key, nbytes=None, type=None, typename: str = None, worker=None
+    ):
+        try:
+            ws: WorkerState = self._workers_dv[worker]
+            ts: TaskState = self._tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            if self._validate:
+                assert not ts._processing_on
+                assert not ts._waiting_on
+                assert ts._state == "no-worker"
+
+            self._unrunnable.remove(ts)
+
+            if nbytes is not None:
+                ts.set_nbytes(nbytes)
+
+            self.check_idle_saturated(ws)
+
+            _add_to_memory(
+                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
+            ts.state = "memory"
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -5022,7 +5059,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts not in parent._unrunnable
         for dts in ts._dependencies:
             # We are waiting on a dependency iff it's not stored
-            assert (not not dts._who_has) != (dts in ts._waiting_on)
+            assert bool(dts._who_has) != (dts in ts._waiting_on)
             assert ts in dts._waiters  # XXX even if dts._who_has?
 
     def validate_processing(self, key):
