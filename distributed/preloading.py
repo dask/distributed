@@ -4,12 +4,12 @@ import logging
 import os
 import shutil
 import sys
-import urllib3
 from importlib import import_module
 from types import ModuleType
 from typing import List
 
 import click
+import urllib3
 
 from dask.utils import tmpfile
 
