@@ -100,39 +100,35 @@ class ProcessInterface:
         return f"<{type(self).__name__}: status={self.status}>"
 
     def _repr_html_(self):
-        self.address = getattr(self, "address", None)
-        self.external_address = None
-        self.lock = asyncio.Lock()
-        self.status = Status.created
-        self._event_finished = asyncio.Event()
-
-        attr = {
-            "address": self.address,
-            "external_address": self.external_address,
-            "lock": self.lock,
-            "status": self.status,
-            "_event_finished": self._event_finished,
-        }
-
-        rows = ""
-
-        for key, val in attr.items():
-            rows += f"""
-            <tr>
-                <th style="text-align: left; width: 150px;">{key}</th>
-                <td style="text-align: left;">{val}</td>
-            </tr>
-            """
+        if self.status == Status.created:
+            status = "Created"
+            bg_color = "#c7f9cc"
+            border_color = "#78c6a3"
+        elif self.status == Status.running:
+            status = "Running"
+            bg_color = "#caf0f8"
+            border_color = "#48cae4"
+        elif self.status == Status.closed:
+            status = "Closed"
+            bg_color = "#ffbfad"
+            border_color = "#ff6132"
 
         html = f"""
-        <div style="margin-left: auto;">
-            <h3 style="margin-bottom: 0px;">Process Interface</h3>
-            <p>
-                <table style="width: 100%;">
-                {rows}
-                </table>
-            </p>
-        </div>
+            <div>
+              <div
+                style="
+                  width: 24px;
+                  height: 24px;
+                  background-color: {bg_color};
+                  border: 3px solid {border_color};
+                  border-radius: 5px;
+                  position: absolute;"
+              ></div>
+              <div style="margin-left: 48px">
+                <h3 style="margin-bottom: 0px">Process Interface</h3>
+                <p style="color: #9D9D9D; margin-bottom: 0px">Status: {status}</p>
+              </div>
+            </div>
         """
 
         return html
