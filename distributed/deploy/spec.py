@@ -102,12 +102,12 @@ class ProcessInterface:
     def _repr_html_(self):
         if self.status == Status.created:
             status = "Created"
-            bg_color = "#c7f9cc"
-            border_color = "#78c6a3"
-        elif self.status == Status.running:
-            status = "Running"
             bg_color = "#caf0f8"
             border_color = "#48cae4"
+        elif self.status == Status.running:
+            status = "Running"
+            bg_color = "#c7f9cc"
+            border_color = "#78c6a3"
         elif self.status == Status.closed:
             status = "Closed"
             bg_color = "#ffbfad"
