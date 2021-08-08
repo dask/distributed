@@ -172,8 +172,8 @@ def dask_setup(dask_server):
     p = multiprocessing.Process(target=create_application)
     p.start()
     yield
-    p.terminate()
-    p.join()
+    p.kill()
+    p.join(timeout=5)
 
 
 @pytest.mark.asyncio
@@ -226,8 +226,8 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
     p = multiprocessing.Process(target=create_application)
     p.start()
     yield
-    p.terminate()
-    p.join()
+    p.kill()
+    p.join(timeout=5)
 
 
 @pytest.mark.asyncio
