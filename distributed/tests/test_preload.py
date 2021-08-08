@@ -173,6 +173,7 @@ def dask_setup(dask_server):
     p.start()
     yield
     p.terminate()
+    p.join()
 
 
 @pytest.mark.asyncio
@@ -226,6 +227,7 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
     p.start()
     yield
     p.terminate()
+    p.join()
 
 
 @pytest.mark.asyncio
