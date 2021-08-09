@@ -87,7 +87,7 @@ async def test_adaptive_scale_down_override():
     class TestAdaptive(Adaptive):
         def __init__(self, *args, **kwargs):
             self.min_size = kwargs.pop("min_size", 0)
-            Adaptive.__init__(self, *args, **kwargs)
+            super().__init__(*args, **kwargs)
 
         async def workers_to_close(self, **kwargs):
             num_workers = len(self.cluster.workers)
