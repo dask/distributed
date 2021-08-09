@@ -164,14 +164,12 @@ def dask_setup(dask_server):
 """.strip()
             )
 
-    def create_application(ctx):
+    def create_application():
         app = web.Application([(r"/preload", MyHandler)])
         server = app.listen(12345, address="127.0.0.1")
         tornado.ioloop.IOLoop.instance().start()
 
-    ctx = multiprocessing.get_context("spawn")
-    queue = ctx.Queue()
-    p = multiprocessing.Process(target=create_application, args=(queue,))
+    p = multiprocessing.Process(target=create_application)
     p.start()
     yield
     p.kill()
@@ -220,14 +218,12 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 """.strip()
             )
 
-    def create_application(ctx):
+    def create_application():
         application = web.Application([(r"/preload", MyHandler)])
         server = application.listen(12346, address="127.0.0.1")
         tornado.ioloop.IOLoop.instance().start()
 
-    ctx = multiprocessing.get_context("spawn")
-    queue = ctx.Queue()
-    p = multiprocessing.Process(target=create_application, args=(queue,))
+    p = multiprocessing.Process(target=create_application)
     p.start()
     yield
     p.kill()
