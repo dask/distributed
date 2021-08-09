@@ -352,7 +352,7 @@ class SpecCluster(Cluster):
                 cls, opts = d["cls"], d.get("options", {})
                 if "name" not in opts:
                     opts = opts.copy()
-                    opts["name"] = name
+                    opts["name"] = str(name)
                 if isinstance(cls, str):
                     cls = import_term(cls)
                 worker = cls(self.scheduler.address, **opts)
