@@ -845,11 +845,12 @@ class SystemTimeseries(DashboardComponent):
             update(self.source, self.get_data())
 
             x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
+            tools = "reset, xpan, xwheel_zoom"
 
             self.bandwidth = figure(
                 title="Workers Network Bandwidth",
                 x_axis_type="datetime",
-                tools="",
+                tools=tools,
                 x_range=x_range,
                 id="bk-worker-network-bandwidth-ts",
                 name="worker_network_bandwidth-timeseries",
@@ -880,7 +881,7 @@ class SystemTimeseries(DashboardComponent):
             self.cpu = figure(
                 title="Workers CPU",
                 x_axis_type="datetime",
-                tools="",
+                tools=tools,
                 x_range=x_range,
                 id="bk-worker-cpu-ts",
                 name="worker_cpu-timeseries",
@@ -900,7 +901,7 @@ class SystemTimeseries(DashboardComponent):
             self.memory = figure(
                 title="Workers Memory",
                 x_axis_type="datetime",
-                tools="",
+                tools=tools,
                 x_range=x_range,
                 id="bk-worker-memory-ts",
                 name="worker_memory-timeseries",
@@ -921,7 +922,7 @@ class SystemTimeseries(DashboardComponent):
             self.disk = figure(
                 title="Workers Disk",
                 x_axis_type="datetime",
-                tools="",
+                tools=tools,
                 x_range=x_range,
                 id="bk-worker-disk-ts",
                 name="worker_disk-timeseries",
