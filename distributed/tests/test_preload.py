@@ -1,4 +1,3 @@
-from logging import logMultiprocessing
 import multiprocessing
 import os
 import shutil
