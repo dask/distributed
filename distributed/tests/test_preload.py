@@ -153,23 +153,25 @@ backends["foo"] = TCPBackend()
         del backends["foo"]
 
 
-@pytest.fixture
-def scheduler_preload():
-    class MyHandler(web.RequestHandler):
-        def get(self):
-            self.write(
-                """
+class MyHandler(web.RequestHandler):
+    def get(self):
+        self.write(
+            """
 def dask_setup(dask_server):
     dask_server.foo = 1
 """.strip()
-            )
+        )
 
-    def create_application():
-        app = web.Application([(r"/preload", MyHandler)])
-        server = app.listen(12345, address="127.0.0.1")
-        tornado.ioloop.IOLoop.instance().start()
 
-    p = multiprocessing.Process(target=create_application)
+def create_preload_application():
+    app = web.Application([(r"/preload", MyHandler)])
+    server = app.listen(12345, address="127.0.0.1")
+    tornado.ioloop.IOLoop.instance().start()
+
+
+@pytest.fixture
+def scheduler_preload():
+    p = multiprocessing.Process(target=create_preload_application)
     p.start()
     yield
     p.kill()
@@ -207,23 +209,25 @@ dask.config.set(scheduler_address="{s.address}")
         assert w.scheduler.address == s.address
 
 
-@pytest.fixture
-def worker_preload():
-    class MyHandler(web.RequestHandler):
-        def get(self):
-            self.write(
-                """
+class WorkerPreloadHandler(web.RequestHandler):
+    def get(self):
+        self.write(
+            """
 import dask
 dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 """.strip()
-            )
+        )
 
-    def create_application():
-        application = web.Application([(r"/preload", MyHandler)])
-        server = application.listen(12346, address="127.0.0.1")
-        tornado.ioloop.IOLoop.instance().start()
 
-    p = multiprocessing.Process(target=create_application)
+def create_worker_preload_application():
+    application = web.Application([(r"/preload", WorkerPreloadHandler)])
+    server = application.listen(12346, address="127.0.0.1")
+    tornado.ioloop.IOLoop.instance().start()
+
+
+@pytest.fixture
+def worker_preload():
+    p = multiprocessing.Process(target=create_worker_preload_application)
     p.start()
     yield
     p.kill()
