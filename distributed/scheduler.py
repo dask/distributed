@@ -2181,7 +2181,7 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    @ccall
+    @cfunc
     def _transition(self, key, finish: str, args: tuple = None, kwargs: dict = None):
         """Transition a key from its current state to the finish state
 
@@ -2370,6 +2370,7 @@ class SchedulerState:
             for key in keys:
                 self.validate_key(key)
 
+    @ccall
     def transition_released_waiting(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -2425,6 +2426,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_no_worker_waiting(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -3226,6 +3228,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_released_forgotten(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -4391,6 +4394,7 @@ class Scheduler(ServerNode):
                             t: tuple = parent._transition(
                                 key,
                                 "memory",
+                                args=None,
                                 kwargs=dict(
                                     worker=address,
                                     nbytes=nbytes[key],
@@ -4826,6 +4830,7 @@ class Scheduler(ServerNode):
             r: tuple = parent._transition(
                 key,
                 "memory",
+                args=None,
                 kwargs=dict(
                     worker=worker,
                     nbytes=kwargs.get("nbytes"),
@@ -4879,6 +4884,7 @@ class Scheduler(ServerNode):
                 r = parent._transition(
                     key,
                     "erred",
+                    args=None,
                     kwargs=dict(
                         cause=key,
                         exception=exception,
