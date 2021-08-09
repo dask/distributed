@@ -816,15 +816,15 @@ class WorkerNetworkBandwidth(DashboardComponent):
 class SystemTimeseries(DashboardComponent):
     """Timeseries for worker network bandwidth, cpu, memory and disk.
 
-    bandwidth: plots the sum of read_bytes and write_bytes for the workers
+    bandwidth: plots the average of read_bytes and write_bytes for the workers
     as a function of time.
-    cpu: plots the sum of cpu for the workers as a function of time.
-    memory: plots the sum of memory for the workers as a function of time.
-    disk: plots the sum of read_bytes_disk and write_bytes_disk for the workers
+    cpu: plots the average of cpu for the workers as a function of time.
+    memory: plots the average of memory for the workers as a function of time.
+    disk: plots the average of read_bytes_disk and write_bytes_disk for the workers
     as a function of time.
 
-    The metrics plotted comme from the aggregation of
-    from ws.metrics["val"] for ws in scheduler.workers.values()
+    The metrics plotted come from the aggregation of
+    from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
     """
 
     def __init__(self, scheduler, **kwargs):
@@ -972,12 +972,12 @@ class SystemTimeseries(DashboardComponent):
         result = {
             # use `or` to avoid ZeroDivision when no workers
             "time": [time / (len(workers) or 1) * 1000],
-            "read_bytes": [read_bytes],
-            "write_bytes": [write_bytes],
-            "cpu": [cpu],
-            "memory": [memory],
-            "read_bytes_disk": [read_bytes_disk],
-            "write_bytes_disk": [write_bytes_disk],
+            "read_bytes": [read_bytes / (len(workers) or 1)],
+            "write_bytes": [write_bytes / (len(workers) or 1)],
+            "cpu": [cpu / (len(workers) or 1)],
+            "memory": [memory / (len(workers) or 1)],
+            "read_bytes_disk": [read_bytes_disk / (len(workers) or 1)],
+            "write_bytes_disk": [write_bytes_disk / (len(workers) or 1)],
         }
         return result
 
@@ -989,10 +989,10 @@ class SystemTimeseries(DashboardComponent):
             if self.scheduler.workers:
                 y_end_cpu = sum(
                     ws.nthreads or 1 for ws in self.scheduler.workers.values()
-                )
+                ) / len(self.scheduler.workers.values())
                 y_end_mem = sum(
                     ws.memory_limit for ws in self.scheduler.workers.values()
-                )
+                ) / len(self.scheduler.workers.values())
             else:
                 y_end_cpu = 1
                 y_end_mem = 100_000_000
