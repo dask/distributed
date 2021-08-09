@@ -1,3 +1,4 @@
+from logging import logMultiprocessing
 import multiprocessing
 import os
 import shutil
@@ -164,12 +165,14 @@ def dask_setup(dask_server):
 """.strip()
             )
 
-    def create_application():
+    def create_application(ctx):
         app = web.Application([(r"/preload", MyHandler)])
         server = app.listen(12345)
         tornado.ioloop.IOLoop.instance().start()
 
-    p = multiprocessing.Process(target=create_application)
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    p = multiprocessing.Process(target=create_application, args=(queue,))
     p.start()
     yield
     p.kill()
@@ -180,7 +183,7 @@ def dask_setup(dask_server):
 async def test_web_preload(cleanup, scheduler_preload):
     with captured_logger("distributed.preloading") as log:
         async with Scheduler(
-            dashboard_address=":0",
+            host="localhost",
             preload=["http://localhost:12345/preload"],
         ) as s:
             assert s.foo == 1
@@ -218,12 +221,14 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 """.strip()
             )
 
-    def create_application():
+    def create_application(ctx):
         application = web.Application([(r"/preload", MyHandler)])
         server = application.listen(12345)
         tornado.ioloop.IOLoop.instance().start()
 
-    p = multiprocessing.Process(target=create_application)
+    ctx = multiprocessing.get_context("spawn")
+    queue = ctx.Queue()
+    p = multiprocessing.Process(target=create_application, args=(queue,))
     p.start()
     yield
     p.kill()
