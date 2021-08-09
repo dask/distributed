@@ -114,21 +114,33 @@ class ProcessInterface:
             border_color = "#ff6132"
 
         html = f"""
-            <div>
-              <div
+          <div>
+            <div
                 style="
-                  width: 24px;
-                  height: 24px;
-                  background-color: {bg_color};
-                  border: 3px solid {border_color};
-                  border-radius: 5px;
-                  position: absolute;"
-              ></div>
-              <div style="margin-left: 48px">
+                width: 24px;
+                height: 24px;
+                background-color: {bg_color};
+                border: 3px solid {border_color};
+                border-radius: 5px;
+                position: absolute;"
+            ></div>
+            <div style="margin-left: 48px">
                 <h3 style="margin-bottom: 0px">Process Interface</h3>
-                <p style="color: #9D9D9D; margin-bottom: 0px">Status: {status}</p>
-              </div>
+                <p style="color: #9d9d9d; margin-bottom: 0px">Status: {status}</p>
             </div>
+            <p>
+            <table style="width: 100%">
+                <tr>
+                <th style="text-align: left; width: 150px">Address</th>
+                <td style="text-align: left">{self.address}</td>
+                </tr>
+                <tr>
+                <th style="text-align: left; width: 150px">External Address</th>
+                <td style="text-align: left">{self.external_address}</td>
+                </tr>
+            </table> </p>
+            </div>
+          </div>
         """
 
         return html
