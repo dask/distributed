@@ -2640,9 +2640,11 @@ class SchedulerState:
             raise
 
     @ccall
-    def transition_waiting_memory(
-        self, key, nbytes=None, type=None, typename: str = None, worker=None
-    ):
+    def transition_waiting_memory(self, key, _, kwargs):
+        nbytes = kwargs.get("nbytes")
+        type = kwargs.get("type")
+        typename: str = kwargs.get("typename")
+        worker = kwargs.get("worker")
         try:
             ws: WorkerState = self._workers_dv[worker]
             ts: TaskState = self._tasks[key]
@@ -3062,10 +3064,13 @@ class SchedulerState:
             raise
 
     @ccall
-    def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None
-    ):
+    def transition_processing_erred(self, key, _, kwargs):
+        cause = kwargs.get("cause")
+        exception = kwargs.get("exception")
+        traceback = kwargs.get("traceback")
+        worker = kwargs.get("worker")
         ws: WorkerState
+        print(key, cause, exception, worker)
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3448,12 +3453,76 @@ class SchedulerState:
         else:
             return (start_time, ws._nbytes)
 
-    @ccall
+    ###################
+    # Task Validation #
+    ###################
+    # TODO: could all be @ccall, but called rarely
+
+    def validate_released(self, key):
+        ts: TaskState = self._tasks[key]
+        dts: TaskState
+        assert ts._state == "released"
+        assert not ts._waiters
+        assert not ts._waiting_on
+        assert not ts._who_has
+        assert not ts._processing_on
+        assert not any([ts in dts._waiters for dts in ts._dependencies])
+        assert ts not in self._unrunnable
+
+    def validate_waiting(self, key):
+        ts: TaskState = self._tasks[key]
+        dts: TaskState
+        assert ts._waiting_on
+        assert not ts._who_has
+        assert not ts._processing_on
+        assert ts not in self._unrunnable
+        for dts in ts._dependencies:
+            # We are waiting on a dependency iff it's not stored
+            assert (not not dts._who_has) != (dts in ts._waiting_on)
+            assert ts in dts._waiters  # XXX even if dts._who_has?
+
+    def validate_processing(self, key):
+        ts: TaskState = self._tasks[key]
+        dts: TaskState
+        assert not ts._waiting_on
+        ws: WorkerState = ts._processing_on
+        assert ws
+        assert ts in ws._processing
+        assert not ts._who_has
+        for dts in ts._dependencies:
+            assert dts._who_has
+            assert ts in dts._waiters
+
+    def validate_memory(self, key):
+        ts: TaskState = self._tasks[key]
+        dts: TaskState
+        assert ts._who_has
+        assert not ts._processing_on
+        assert not ts._waiting_on
+        assert ts not in self._unrunnable
+        for dts in ts._dependents:
+            assert (dts in ts._waiters) == (dts._state in ("waiting", "processing"))
+            assert ts not in dts._waiting_on
+
+    def validate_no_worker(self, key):
+        ts: TaskState = self._tasks[key]
+        dts: TaskState
+        assert ts in self._unrunnable
+        assert not ts._waiting_on
+        assert not ts._processing_on
+        assert not ts._who_has
+        for dts in ts._dependencies:
+            assert dts._who_has
+
+    def validate_erred(self, key):
+        ts: TaskState = self._tasks[key]
+        assert ts._exception_blame
+        assert not ts._who_has
+
     def validate_key(self, key, ts: TaskState = None):
-        parent: SchedulerState = self
         try:
             if ts is None:
-                ts = parent._tasks.get(key)
+                ts = self._tasks.get(key)
             if ts is None:
                 logger.debug("Key lost: %s", key)
             else:
@@ -3473,6 +3542,52 @@ class SchedulerState:
 
                 pdb.set_trace()
             raise
+
+    def validate_state(self, allow_overlap=False):
+        validate_state(self._tasks, self._workers, self._clients)
+
+        # if not (set(parent._workers_dv) == set(self.stream_comms)):
+        #    raise ValueError("Workers not the same in all collections")
+
+        ws: WorkerState
+        for w, ws in self._workers_dv.items():
+            assert isinstance(w, str), (type(w), w)
+            assert isinstance(ws, WorkerState), (type(ws), ws)
+            assert ws._address == w
+            if not ws._processing:
+                assert not ws._occupancy
+                assert ws._address in self._idle_dv
+
+        ts: TaskState
+        for k, ts in self._tasks.items():
+            assert isinstance(ts, TaskState), (type(ts), ts)
+            assert ts._key == k
+            self.validate_key(k, ts)
+
+        c: str
+        cs: ClientState
+        for c, cs in self._clients.items():
+            # client=None is often used in tests...
+            assert c is None or type(c) == str, (type(c), c)
+            assert type(cs) == ClientState, (type(cs), cs)
+            assert cs._client_key == c
+
+        a = {w: ws._nbytes for w, ws in self._workers_dv.items()}
+        b = {
+            w: sum(ts.get_nbytes() for ts in ws._has_what)
+            for w, ws in self._workers_dv.items()
+        }
+        assert a == b, (a, b)
+
+        actual_total_occupancy = 0
+        for worker, ws in self._workers_dv.items():
+            assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8
+            actual_total_occupancy += ws._occupancy
+
+        assert abs(actual_total_occupancy - self._total_occupancy) < 1e-8, (
+            actual_total_occupancy,
+            self._total_occupancy,
+        )
 
 
 class Scheduler(ServerNode):
@@ -4434,7 +4549,7 @@ class Scheduler(ServerNode):
                             recommendations = {}
 
             for ts in list(parent._unrunnable):
-                valid: set = self.valid_workers(ts)
+                valid: set = self.state.valid_workers(ts)
                 if valid is None or ws in valid:
                     recommendations[ts._key] = "waiting"
 
@@ -5183,127 +5298,8 @@ class Scheduler(ServerNode):
         cs: ClientState = parent._clients[client]
         cs._last_seen = time()
 
-    ###################
-    # Task Validation #
-    ###################
-
-    def validate_released(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        dts: TaskState
-        assert ts._state == "released"
-        assert not ts._waiters
-        assert not ts._waiting_on
-        assert not ts._who_has
-        assert not ts._processing_on
-        assert not any([ts in dts._waiters for dts in ts._dependencies])
-        assert ts not in parent._unrunnable
-
-    def validate_waiting(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        dts: TaskState
-        assert ts._waiting_on
-        assert not ts._who_has
-        assert not ts._processing_on
-        assert ts not in parent._unrunnable
-        for dts in ts._dependencies:
-            # We are waiting on a dependency iff it's not stored
-            assert (not not dts._who_has) != (dts in ts._waiting_on)
-            assert ts in dts._waiters  # XXX even if dts._who_has?
-
-    def validate_processing(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        dts: TaskState
-        assert not ts._waiting_on
-        ws: WorkerState = ts._processing_on
-        assert ws
-        assert ts in ws._processing
-        assert not ts._who_has
-        for dts in ts._dependencies:
-            assert dts._who_has
-            assert ts in dts._waiters
-
-    def validate_memory(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        dts: TaskState
-        assert ts._who_has
-        assert not ts._processing_on
-        assert not ts._waiting_on
-        assert ts not in parent._unrunnable
-        for dts in ts._dependents:
-            assert (dts in ts._waiters) == (dts._state in ("waiting", "processing"))
-            assert ts not in dts._waiting_on
-
-    def validate_no_worker(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        dts: TaskState
-        assert ts in parent._unrunnable
-        assert not ts._waiting_on
-        assert ts in parent._unrunnable
-        assert not ts._processing_on
-        assert not ts._who_has
-        for dts in ts._dependencies:
-            assert dts._who_has
-
-    def validate_erred(self, key):
-        parent: SchedulerState = self.state
-        ts: TaskState = parent._tasks[key]
-        assert ts._exception_blame
-        assert not ts._who_has
-
-    def validate_key(self, key, ts: TaskState = None):
-        self.state.validate_key(key, ts)
-
-    def validate_state(self, allow_overlap=False):
-        parent: SchedulerState = self.state
-        validate_state(parent._tasks, parent._workers, parent._clients)
-
-        if not (set(parent._workers_dv) == set(self.stream_comms)):
-            raise ValueError("Workers not the same in all collections")
-
-        ws: WorkerState
-        for w, ws in parent._workers_dv.items():
-            assert isinstance(w, str), (type(w), w)
-            assert isinstance(ws, WorkerState), (type(ws), ws)
-            assert ws._address == w
-            if not ws._processing:
-                assert not ws._occupancy
-                assert ws._address in parent._idle_dv
-
-        ts: TaskState
-        for k, ts in parent._tasks.items():
-            assert isinstance(ts, TaskState), (type(ts), ts)
-            assert ts._key == k
-            self.validate_key(k, ts)
-
-        c: str
-        cs: ClientState
-        for c, cs in parent._clients.items():
-            # client=None is often used in tests...
-            assert c is None or type(c) == str, (type(c), c)
-            assert type(cs) == ClientState, (type(cs), cs)
-            assert cs._client_key == c
-
-        a = {w: ws._nbytes for w, ws in parent._workers_dv.items()}
-        b = {
-            w: sum(ts.get_nbytes() for ts in ws._has_what)
-            for w, ws in parent._workers_dv.items()
-        }
-        assert a == b, (a, b)
-
-        actual_total_occupancy = 0
-        for worker, ws in parent._workers_dv.items():
-            assert abs(sum(ws._processing.values()) - ws._occupancy) < 1e-8
-            actual_total_occupancy += ws._occupancy
-
-        assert abs(actual_total_occupancy - parent._total_occupancy) < 1e-8, (
-            actual_total_occupancy,
-            parent._total_occupancy,
-        )
+    def validate_state(self):
+        self.state.validate_state()
 
     ###################
     # Manage Messages #
@@ -6032,7 +6028,7 @@ class Scheduler(ServerNode):
             All other workers will be ignored. The mean cluster occupancy will be
             calculated only using the whitelisted workers.
         """
-        parent: SchedulerState = self
+        parent: SchedulerState = self.state
 
         with log_errors():
             if workers is not None:
@@ -6063,7 +6059,7 @@ class Scheduler(ServerNode):
                 return await self._rebalance_move_data(msgs)
 
     def _rebalance_find_msgs(
-        self: SchedulerState,
+        self,
         keys: "Optional[Set[Hashable]]",
         workers: "Iterable[WorkerState]",
     ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
@@ -6093,7 +6089,7 @@ class Scheduler(ServerNode):
         - recipient worker
         - task to be transferred
         """
-        parent: SchedulerState = self
+        parent: SchedulerState = self.state
         ts: TaskState
         ws: WorkerState
 
@@ -7961,6 +7957,7 @@ def decide_worker(
     return ws
 
 
+@ccall
 def validate_task_state(ts: TaskState):
     """
     Validate the given TaskState.
@@ -8062,6 +8059,7 @@ def validate_task_state(ts: TaskState):
             assert ts in ts._processing_on.actors
 
 
+@ccall
 def validate_worker_state(ws: WorkerState):
     ts: TaskState
     for ts in ws._has_what:
@@ -8076,6 +8074,7 @@ def validate_worker_state(ws: WorkerState):
         assert ts._state in ("memory", "processing")
 
 
+@ccall
 def validate_state(tasks, workers, clients):
     """
     Validate a current runtime state
