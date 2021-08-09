@@ -3361,7 +3361,7 @@ class SchedulerState:
         if ts._host_restrictions:
             # Resolve the alias here rather than early, for the worker
             # may not be connected when host_restrictions is populated
-            hr: list = [self.coerce_hostname(h) for h in ts._host_restrictions]
+            hr: list = [self.state.coerce_hostname(h) for h in ts._host_restrictions]
             # XXX need HostState?
             sl: list = []
             for h in hr:
@@ -3447,6 +3447,32 @@ class SchedulerState:
             return (len(ws._actors), start_time, ws._nbytes)
         else:
             return (start_time, ws._nbytes)
+
+    @ccall
+    def validate_key(self, key, ts: TaskState = None):
+        parent: SchedulerState = self
+        try:
+            if ts is None:
+                ts = parent._tasks.get(key)
+            if ts is None:
+                logger.debug("Key lost: %s", key)
+            else:
+                ts.validate()
+                try:
+                    func = getattr(self, "validate_" + ts._state.replace("-", "_"))
+                except AttributeError:
+                    logger.error(
+                        "self.validate_%s not found", ts._state.replace("-", "_")
+                    )
+                else:
+                    func(key)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
 
 
 class Scheduler(ServerNode):
@@ -5230,29 +5256,7 @@ class Scheduler(ServerNode):
         assert not ts._who_has
 
     def validate_key(self, key, ts: TaskState = None):
-        parent: SchedulerState = self.state
-        try:
-            if ts is None:
-                ts = parent._tasks.get(key)
-            if ts is None:
-                logger.debug("Key lost: %s", key)
-            else:
-                ts.validate()
-                try:
-                    func = getattr(self, "validate_" + ts._state.replace("-", "_"))
-                except AttributeError:
-                    logger.error(
-                        "self.validate_%s not found", ts._state.replace("-", "_")
-                    )
-                else:
-                    func(key)
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-
-                pdb.set_trace()
-            raise
+        self.state.validate_key(key, ts)
 
     def validate_state(self, allow_overlap=False):
         parent: SchedulerState = self.state
