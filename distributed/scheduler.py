@@ -2181,11 +2181,11 @@ class SchedulerState:
     # State Transitions #
     #####################
 
-    #  cannot be @ccall with args/kwargs
-    def _transition(self, key, finish: str, *args, **kwargs):
+    @ccall
+    def _transition(self, key, finish: str, args: tuple = None, kwargs: dict = None):
         """Transition a key from its current state to the finish state
 
-        Examples
+        Examples.stimulus_task_finished
         --------
         >>> self._transition('x', 'waiting')
         {'x': 'processing'}
@@ -2209,6 +2209,8 @@ class SchedulerState:
         new_msgs: list
         dependents: set
         dependencies: set
+        args: tuple = args or ()
+        kwargs: dict = kwargs or {}
         try:
             recommendations = {}
             worker_msgs = {}
@@ -2228,7 +2230,10 @@ class SchedulerState:
             start_finish = (start, finish)
             func = self._transitions_table.get(start_finish)
             if func is not None:
-                a: tuple = func(key, *args, **kwargs)
+                if finish in ["forgotten", "waiting", "released", "processing"]:
+                    a: tuple = func(key)
+                else:
+                    a: tuple = func(key, args, kwargs)
                 self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
@@ -2325,6 +2330,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def _transitions(self, recommendations: dict, client_msgs: dict, worker_msgs: dict):
         """Process transitions until none are left
 
@@ -2583,6 +2589,7 @@ class SchedulerState:
         ws._processing[ts] = total_duration
         return total_duration
 
+    @ccall
     def transition_waiting_processing(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -2630,8 +2637,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_waiting_memory(
-        self, key, nbytes=None, type=None, typename: str = None, worker=None, **kwargs
+        self, key, nbytes=None, type=None, typename: str = None, worker=None
     ):
         try:
             ws: WorkerState = self._workers_dv[worker]
@@ -2670,16 +2678,18 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_processing_memory(
         self,
         key,
-        nbytes=None,
-        type=None,
-        typename: str = None,
-        worker=None,
-        startstops=None,
-        **kwargs,
+        _,
+        kwargs,
     ):
+        nbytes = kwargs.get("nbytes")
+        type = kwargs.get("type")
+        typename: str = kwargs.get("typename")
+        worker = kwargs.get("worker")
+        startstops = kwargs.get("startstops")
         ws: WorkerState
         wws: WorkerState
         recommendations: dict = {}
@@ -2797,6 +2807,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_memory_released(self, key, safe: bint = False):
         ws: WorkerState
         try:
@@ -2871,6 +2882,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_released_erred(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -2916,6 +2928,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_erred_released(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -2960,6 +2973,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_waiting_released(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -2997,6 +3011,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_processing_released(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -3044,8 +3059,9 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
+        self, key, cause=None, exception=None, traceback=None, worker=None
     ):
         ws: WorkerState
         try:
@@ -3123,6 +3139,7 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    @ccall
     def transition_no_worker_released(self, key):
         try:
             ts: TaskState = self._tasks[key]
@@ -3166,6 +3183,7 @@ class SchedulerState:
         ts._exception_blame = ts._exception = ts._traceback = None
         self._task_metadata.pop(key, None)
 
+    @ccall
     def transition_memory_forgotten(self, key):
         ws: WorkerState
         try:
@@ -4373,9 +4391,11 @@ class Scheduler(ServerNode):
                             t: tuple = parent._transition(
                                 key,
                                 "memory",
-                                worker=address,
-                                nbytes=nbytes[key],
-                                typename=types[key],
+                                kwargs=dict(
+                                    worker=address,
+                                    nbytes=nbytes[key],
+                                    typename=types[key],
+                                ),
                             )
                             recommendations, client_msgs, worker_msgs = t
                             parent._transitions(
@@ -4803,7 +4823,17 @@ class Scheduler(ServerNode):
         ts._metadata.update(kwargs["metadata"])
 
         if ts._state != "released":
-            r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
+            r: tuple = parent._transition(
+                key,
+                "memory",
+                kwargs=dict(
+                    worker=worker,
+                    nbytes=kwargs.get("nbytes"),
+                    type=kwargs.get("type"),
+                    typename=kwargs.get("typename"),
+                    startstops=kwargs.get("startstops"),
+                ),
+            )
             recommendations, client_msgs, worker_msgs = r
 
             if ts._state == "memory":
@@ -4849,11 +4879,13 @@ class Scheduler(ServerNode):
                 r = parent._transition(
                     key,
                     "erred",
-                    cause=key,
-                    exception=exception,
-                    traceback=traceback,
-                    worker=worker,
-                    **kwargs,
+                    kwargs=dict(
+                        cause=key,
+                        exception=exception,
+                        traceback=traceback,
+                        worker=worker,
+                        **kwargs,
+                    ),
                 )
             recommendations, client_msgs, worker_msgs = r
 
@@ -7056,7 +7088,7 @@ class Scheduler(ServerNode):
         recommendations: dict
         worker_msgs: dict
         client_msgs: dict
-        a: tuple = parent._transition(key, finish, *args, **kwargs)
+        a: tuple = parent._transition(key, finish, args=args, kwargs=kwargs)
         recommendations, client_msgs, worker_msgs = a
         self.send_all(client_msgs, worker_msgs)
         return recommendations
