@@ -198,7 +198,8 @@ async def test_registering_with_name_arg(c, s, w):
     assert list(responses.values()) == [{"status": "OK"}]
 
     async with Worker(s.address, loop=s.loop):
-        responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
+        with pytest.warns(FutureWarning, match="worker plugin will be overwritten"):
+            responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
         assert list(responses.values()) == [{"status": "repeat"}] * 2
 
 

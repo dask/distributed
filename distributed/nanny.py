@@ -586,7 +586,7 @@ class Nanny(ServerNode):
         self.status = Status.closed
         if comm:
             await comm.write("OK")
-        await ServerNode.close(self)
+        await super().close()
 
 
 class WorkerProcess:
