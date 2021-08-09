@@ -166,7 +166,7 @@ def dask_setup(dask_server):
 
     def create_application(ctx):
         app = web.Application([(r"/preload", MyHandler)])
-        server = app.listen(12345)
+        server = app.listen(12345, address="127.0.0.1")
         tornado.ioloop.IOLoop.instance().start()
 
     ctx = multiprocessing.get_context("spawn")
@@ -183,7 +183,7 @@ async def test_web_preload(cleanup, scheduler_preload):
     with captured_logger("distributed.preloading") as log:
         async with Scheduler(
             host="localhost",
-            preload=["http://localhost:12345/preload"],
+            preload=["http://127.0.0.1:12345/preload"],
         ) as s:
             assert s.foo == 1
     assert "12345/preload" in log.getvalue()
@@ -222,7 +222,7 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 
     def create_application(ctx):
         application = web.Application([(r"/preload", MyHandler)])
-        server = application.listen(12345)
+        server = application.listen(12346, address="127.0.0.1")
         tornado.ioloop.IOLoop.instance().start()
 
     ctx = multiprocessing.get_context("spawn")
@@ -237,5 +237,5 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 @pytest.mark.asyncio
 async def test_web_preload_worker(cleanup, worker_preload):
     async with Scheduler(port=8786, host="localhost") as s:
-        async with Nanny(preload_nanny=["http://localhost:12345/preload"]) as nanny:
+        async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:
             assert nanny.scheduler_addr == s.address
