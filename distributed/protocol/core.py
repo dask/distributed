@@ -16,7 +16,9 @@ from .utils import msgpack_opts
 logger = logging.getLogger(__name__)
 
 
-def dumps(msg, serializers=None, on_error="message", context=None) -> list:
+def dumps(
+    msg, serializers=None, on_error="message", context=None, frame_split_size=None
+) -> list:
     """Transform Python message to bytestream suitable for communication
 
     Developer Notes
@@ -53,7 +55,11 @@ def dumps(msg, serializers=None, on_error="message", context=None) -> list:
                     sub_header, sub_frames = obj.header, obj.frames
                 else:
                     sub_header, sub_frames = serialize_and_split(
-                        obj, serializers=serializers, on_error=on_error, context=context
+                        obj,
+                        serializers=serializers,
+                        on_error=on_error,
+                        context=context,
+                        size=frame_split_size,
                     )
                     _inplace_compress_frames(sub_header, sub_frames)
                 sub_header["num-sub-frames"] = len(sub_frames)

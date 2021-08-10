@@ -8,6 +8,7 @@ import uuid
 import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
 from multiprocessing.queues import Empty
 from time import sleep as sync_sleep
 
@@ -22,15 +23,18 @@ from dask.utils import parse_timedelta
 from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
-from .core import CommClosedError, RPCClosed, Status, coerce_to_address
+from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
+from .diagnostics.plugin import _get_worker_plugin_name
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
+from .protocol import pickle
 from .security import Security
 from .utils import (
     TimeoutError,
     get_ip,
     json_load_robust,
+    log_errors,
     mp_context,
     parse_ports,
     silence_logging,
@@ -110,14 +114,14 @@ class Nanny(ServerNode):
 
         if local_directory is None:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
             self._original_local_dir = local_directory
             local_directory = os.path.join(local_directory, "dask-worker-space")
         else:
             self._original_local_dir = local_directory
 
         self.local_directory = local_directory
+        if not os.path.exists(self.local_directory):
+            os.makedirs(self.local_directory, exist_ok=True)
 
         self.preload = preload
         if self.preload is None:
@@ -162,7 +166,13 @@ class Nanny(ServerNode):
         self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = env or {}
+        self.env = dask.config.get("distributed.nanny.environ")
+        for k in self.env:
+            if k in os.environ:
+                self.env[k] = os.environ[k]
+        if env:
+            self.env.update(env)
+        self.env = {k: str(v) for k, v in self.env.items()}
         self.config = config or dask.config.config
         worker_kwargs.update(
             {
@@ -199,7 +209,11 @@ class Nanny(ServerNode):
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
         }
+
+        self.plugins = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
@@ -294,6 +308,10 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.start()
 
+        msg = await self.scheduler.register_nanny()
+        for name, plugin in msg["nanny-plugins"].items():
+            await self.plugin_add(plugin=plugin, name=name)
+
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
         if response == Status.running:
@@ -384,7 +402,48 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def restart(self, comm=None, timeout=2, executor_wait=True):
+    async def plugin_add(self, comm=None, plugin=None, name=None):
+        with log_errors(pdb=False):
+            if isinstance(plugin, bytes):
+                plugin = pickle.loads(plugin)
+
+            if name is None:
+                name = _get_worker_plugin_name(plugin)
+
+            assert name
+
+            self.plugins[name] = plugin
+
+            logger.info("Starting Nanny plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+            if getattr(plugin, "restart", False):
+                await self.restart()
+
+            return {"status": "OK"}
+
+    async def plugin_remove(self, comm=None, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Nanny plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
+
+    async def restart(self, comm=None, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -393,7 +452,9 @@ class Nanny(ServerNode):
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out, returning before finished")
+            logger.error(
+                f"Restart timed out after {timeout}s; returning before finished"
+            )
             return "timed out"
         else:
             return "OK"
@@ -506,6 +567,14 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+
+        await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+
         self.stop()
         try:
             if self.process is not None:
@@ -517,7 +586,7 @@ class Nanny(ServerNode):
         self.status = Status.closed
         if comm:
             await comm.write("OK")
-        await ServerNode.close(self)
+        await super().close()
 
 
 class WorkerProcess:

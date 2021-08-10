@@ -32,7 +32,7 @@ class SlowWorker:
         self.status = "closed"
 
 
-scheduler = {"cls": Scheduler, "options": {"port": 0}}
+scheduler = {"cls": Scheduler, "options": {"dashboard_address": ":0"}}
 
 
 @pytest.mark.asyncio

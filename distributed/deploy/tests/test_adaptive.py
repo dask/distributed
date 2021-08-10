@@ -7,7 +7,16 @@ import pytest
 
 import dask
 
-from distributed import Adaptive, Client, LocalCluster, SpecCluster, Worker, wait
+from distributed import (
+    Adaptive,
+    Client,
+    LocalCluster,
+    Scheduler,
+    SpecCluster,
+    Worker,
+    wait,
+)
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.utils_test import (
     async_wait_for,
@@ -279,9 +288,8 @@ async def test_adapt_stop_del():
 def test_adaptive_local_cluster(loop):
     with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         loop=loop,
     ) as cluster:
         alc = cluster.adapt(interval="100 ms")
@@ -304,14 +312,13 @@ def test_adaptive_local_cluster(loop):
             assert not c.nthreads()
 
 
-@pytest.mark.asyncio
-async def test_adaptive_local_cluster_multi_workers(cleanup):
+@gen_test()
+async def test_adaptive_local_cluster_multi_workers():
     async with LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
 
@@ -320,19 +327,14 @@ async def test_adaptive_local_cluster_multi_workers(cleanup):
         async with Client(cluster, asynchronous=True) as c:
             futures = c.map(slowinc, range(100), delay=0.01)
 
-            start = time()
             while not cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
-                assert time() < start + 15, adapt.log
 
             await c.gather(futures)
             del futures
 
-            start = time()
-            # while cluster.workers:
             while cluster.scheduler.workers:
                 await asyncio.sleep(0.01)
-                assert time() < start + 15, adapt.log
 
             # no workers for a while
             for i in range(10):
@@ -344,12 +346,12 @@ async def test_adaptive_local_cluster_multi_workers(cleanup):
 
 
 @pytest.mark.xfail(reason="changed API")
-@pytest.mark.asyncio
-async def test_adaptive_scale_down_override(cleanup):
+@gen_test()
+async def test_adaptive_scale_down_override():
     class TestAdaptive(Adaptive):
         def __init__(self, *args, **kwargs):
             self.min_size = kwargs.pop("min_size", 0)
-            Adaptive.__init__(self, *args, **kwargs)
+            super().__init__(*args, **kwargs)
 
         async def workers_to_close(self, **kwargs):
             num_workers = len(self.cluster.workers)
@@ -363,7 +365,9 @@ async def test_adaptive_scale_down_override(cleanup):
         def scale_up(self, n, **kwargs):
             assert False
 
-    async with TestCluster(n_workers=10, processes=False, asynchronous=True) as cluster:
+    async with TestCluster(
+        n_workers=10, processes=False, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         ta = cluster.adapt(
             min_size=2, interval=0.1, scale_factor=2, Adaptive=TestAdaptive
         )
@@ -378,10 +382,9 @@ async def test_adaptive_scale_down_override(cleanup):
 async def test_min_max():
     cluster = await LocalCluster(
         n_workers=0,
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
         threads_per_worker=1,
     )
@@ -435,9 +438,8 @@ async def test_avoid_churn(cleanup):
         n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             adapt = cluster.adapt(interval="20 ms", wait_count=5)
@@ -460,9 +462,8 @@ async def test_adapt_quickly():
         n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
     )
     client = await Client(cluster, asynchronous=True)
     adapt = cluster.adapt(interval="20 ms", wait_count=5, maximum=10)
@@ -506,16 +507,15 @@ async def test_adapt_quickly():
         await cluster.close()
 
 
-@gen_test(timeout=None)
+@gen_test()
 async def test_adapt_down():
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with LocalCluster(
-        0,
+        n_workers=0,
         asynchronous=True,
         processes=False,
-        scheduler_port=0,
         silence_logs=False,
-        dashboard_address=None,
+        dashboard_address=":0",
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             cluster.adapt(interval="20ms", maximum=5)
@@ -538,11 +538,10 @@ async def test_no_more_workers_than_tasks():
         {"distributed.scheduler.default-task-durations": {"slowinc": 1000}}
     ):
         async with LocalCluster(
-            0,
-            scheduler_port=0,
+            n_workers=0,
             silence_logs=False,
             processes=False,
-            dashboard_address=None,
+            dashboard_address=":0",
             asynchronous=True,
         ) as cluster:
             adapt = cluster.adapt(minimum=0, maximum=4, interval="10 ms")
@@ -555,7 +554,7 @@ def test_basic_no_loop(loop):
     with clean(threads=False):
         try:
             with LocalCluster(
-                0, scheduler_port=0, silence_logs=False, dashboard_address=None
+                n_workers=0, silence_logs=False, dashboard_address=":0"
             ) as cluster:
                 with Client(cluster) as client:
                     cluster.adapt()
@@ -566,38 +565,35 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
-@pytest.mark.asyncio
+@pytest.mark.flaky(condition=not WINDOWS, reruns=10, reruns_delay=5)
+@pytest.mark.xfail(condition=WINDOWS, reason="extremely flaky")
+@gen_test()
 async def test_target_duration():
-    """Ensure that redefining adapt with a lower maximum removes workers"""
     with dask.config.set(
         {"distributed.scheduler.default-task-durations": {"slowinc": 1}}
     ):
         async with LocalCluster(
-            0,
+            n_workers=0,
             asynchronous=True,
             processes=False,
-            scheduler_port=0,
             silence_logs=False,
-            dashboard_address=None,
+            dashboard_address=":0",
         ) as cluster:
             adapt = cluster.adapt(interval="20ms", minimum=2, target_duration="5s")
             async with Client(cluster, asynchronous=True) as client:
-                while len(cluster.scheduler.workers) < 2:
-                    await asyncio.sleep(0.01)
-
+                await client.wait_for_workers(2)
                 futures = client.map(slowinc, range(100), delay=0.3)
+                await wait(futures)
 
-                while len(adapt.log) < 2:
-                    await asyncio.sleep(0.01)
-
-                assert adapt.log[0][1] == {"status": "up", "n": 2}
-                assert adapt.log[1][1] == {"status": "up", "n": 20}
+            assert adapt.log[0][1] == {"status": "up", "n": 2}
+            assert adapt.log[1][1] == {"status": "up", "n": 20}
 
 
 @pytest.mark.asyncio
 async def test_worker_keys(cleanup):
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
+        scheduler={"cls": Scheduler, "options": {"dashboard_address": ":0"}},
         workers={
             "a-1": {"cls": Worker},
             "a-2": {"cls": Worker},
@@ -625,13 +621,12 @@ async def test_worker_keys(cleanup):
 @pytest.mark.asyncio
 async def test_adapt_cores_memory(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         threads_per_worker=2,
         memory_limit="3 GB",
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
         adapt = cluster.adapt(minimum_cores=3, maximum_cores=9)
@@ -666,13 +661,12 @@ def test_adaptive_config():
 @pytest.mark.asyncio
 async def test_update_adaptive(cleanup):
     async with LocalCluster(
-        0,
+        n_workers=0,
         threads_per_worker=2,
         memory_limit="3 GB",
-        scheduler_port=0,
         silence_logs=False,
         processes=False,
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
     ) as cluster:
         first = cluster.adapt(maxmimum=1)
@@ -686,7 +680,11 @@ async def test_update_adaptive(cleanup):
 async def test_adaptive_no_memory_limit(cleanup):
     """Make sure that adapt() does not keep creating workers when no memory limit is set."""
     async with LocalCluster(
-        n_workers=0, threads_per_worker=1, memory_limit=0, asynchronous=True
+        n_workers=0,
+        threads_per_worker=1,
+        memory_limit=0,
+        asynchronous=True,
+        dashboard_address=":0",
     ) as cluster:
         cluster.adapt(minimum=1, maximum=10, interval="1 ms")
         async with Client(cluster, asynchronous=True) as client:
@@ -718,7 +716,9 @@ async def test_scale_needs_to_be_awaited(cleanup):
 
             return self.sync(_)
 
-    async with RequiresAwaitCluster(n_workers=0, asynchronous=True) as cluster:
+    async with RequiresAwaitCluster(
+        n_workers=0, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             futures = client.map(slowinc, range(5), delay=0.05)
             assert len(cluster.workers) == 0
@@ -736,7 +736,9 @@ async def test_adaptive_stopped():
     We should ensure that the adapt PC is actually stopped once the cluster
     stops.
     """
-    async with LocalCluster(n_workers=0, asynchronous=True) as cluster:
+    async with LocalCluster(
+        n_workers=0, asynchronous=True, dashboard_address=":0"
+    ) as cluster:
         instance = cluster.adapt(interval="10ms")
         assert instance.periodic_callback is not None
 

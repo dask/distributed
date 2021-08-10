@@ -38,16 +38,13 @@ async def test_construct_after_call(c, s, a, b):
 @gen_cluster(client=True)
 async def test_states(c, s, a, b):
     gl = GraphLayout(s)
-    futures = c.map(inc, range(5))
-    total = c.submit(sum, futures)
-    del futures
+    await c.submit(sum, c.map(inc, range(5)))
 
-    await total
-
-    updates = {state for idx, state in gl.state_updates}
-    assert "memory" in updates
-    assert "processing" in updates
-    assert "released" in updates
+    while True:
+        updates = {state for _, state in gl.state_updates}
+        if updates == {"waiting", "processing", "memory", "released"}:
+            break
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)

@@ -7,8 +7,10 @@ import inspect
 import json
 import logging
 import os
+import re
 import sys
 import threading
+import traceback
 import uuid
 import warnings
 import weakref
@@ -57,7 +59,12 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import UploadFile, WorkerPlugin, _get_worker_plugin_name
+from .diagnostics.plugin import (
+    NannyPlugin,
+    UploadFile,
+    WorkerPlugin,
+    _get_worker_plugin_name,
+)
 from .metrics import time
 from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
@@ -371,7 +378,7 @@ class Future(WrappedKey):
             c = Client.current(allow_global=False)
         except ValueError:
             c = get_client(address)
-        Future.__init__(self, key, c)
+        self.__init__(key, c)
         c._send_to_scheduler(
             {
                 "op": "update-graph",
@@ -1467,10 +1474,10 @@ class Client:
                 pc.stop()
 
         if self.asynchronous:
-            future = self._close()
+            coro = self._close()
             if timeout:
-                future = asyncio.wait_for(future, timeout)
-            return future
+                coro = asyncio.wait_for(coro, timeout)
+            return coro
 
         if self._start_arg is None:
             with suppress(AttributeError):
@@ -1549,6 +1556,10 @@ class Client:
         Parameters
         ----------
         func : callable
+            Callable to be scheduled as ``func(*args **kwargs)``. If ``func`` returns a
+            coroutine, it will be run on the main event loop of a worker. Otherwise
+            ``func`` will be run in a worker's task executor pool (see
+            ``Worker.executors`` for more information.)
         *args
         **kwargs
         pure : bool (defaults to True)
@@ -1667,6 +1678,10 @@ class Client:
         Parameters
         ----------
         func : callable
+            Callable to be scheduled for execution. If ``func`` returns a coroutine, it
+            will be run on the main event loop of a worker. Otherwise ``func`` will be
+            run in a worker's task executor pool (see ``Worker.executors`` for more
+            information.)
         iterables : Iterables
             List-like objects to map over.  They should have the same length.
         key : str, list
@@ -2566,6 +2581,41 @@ class Client:
         """
         return self.run(function, *args, **kwargs)
 
+    @staticmethod
+    def _get_computation_code() -> str:
+        """Walk up the stack to the user code and extract the code surrounding
+        the compute/submit/persist call. All modules encountered which are
+        blacklisted by the option
+        `distributed.diagnostics.computations.ignore-modules` will be ignored.
+        This can be used to blacklist commonly used libraries which wrap
+        dask/distributed compute calls.
+        """
+
+        ignore_modules = dask.config.get(
+            "distributed.diagnostics.computations.ignore-modules"
+        )
+        if not isinstance(ignore_modules, list):
+            raise TypeError(
+                f"Ignored modules must be a list. Instead got ({type(ignore_modules)}, {ignore_modules})"
+            )
+
+        if ignore_modules:
+            pattern = "|".join([f"(?:{mod})" for mod in ignore_modules])
+            pattern = re.compile(pattern)
+        else:
+            pattern = None
+
+        for fr, _ in traceback.walk_stack(None):
+            if pattern is None or (
+                not pattern.match(fr.f_globals["__name__"])
+                and fr.f_code.co_name not in ("<listcomp>", "<dictcomp>")
+            ):
+                try:
+                    return inspect.getsource(fr)
+                except OSError:
+                    break
+        return "<Code not available>"
+
     def _graph_to_futures(
         self,
         dsk,
@@ -2612,6 +2662,7 @@ class Client:
 
             # Create futures before sending graph (helps avoid contention)
             futures = {key: Future(key, self, inform=False) for key in keyset}
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph-hlg",
@@ -2621,6 +2672,7 @@ class Client:
                     "submitting_task": getattr(thread_state, "key", None),
                     "fifo_timeout": fifo_timeout,
                     "actors": actors,
+                    "code": self._get_computation_code(),
                 }
             )
             return futures
@@ -3095,11 +3147,9 @@ class Client:
         else:
             keys = None
         result = await self.scheduler.rebalance(keys=keys, workers=workers)
-        if result["status"] == "missing-data":
-            raise KeyError(
-                f"During rebalance {len(result['keys'])} keys were found to be missing"
-            )
-        assert result["status"] == "OK"
+        if result["status"] == "partial-fail":
+            raise KeyError(f"Could not rebalance keys: {result['keys']}")
+        assert result["status"] == "OK", result
 
     def rebalance(self, futures=None, workers=None, **kwargs):
         """Rebalance data within network
@@ -4052,10 +4102,13 @@ class Client:
         """
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
-    async def _register_worker_plugin(self, plugin=None, name=None):
-        responses = await self.scheduler.register_worker_plugin(
-            plugin=dumps(plugin, protocol=4), name=name
-        )
+    async def _register_worker_plugin(self, plugin=None, name=None, nanny=None):
+        if nanny or nanny is None and isinstance(plugin, NannyPlugin):
+            method = self.scheduler.register_nanny_plugin
+        else:
+            method = self.scheduler.register_worker_plugin
+
+        responses = await method(plugin=dumps(plugin, protocol=4), name=name)
         for response in responses.values():
             if response["status"] == "error":
                 exc = response["exception"]
@@ -4063,7 +4116,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def register_worker_plugin(self, plugin=None, name=None, **kwargs):
+    def register_worker_plugin(self, plugin=None, name=None, nanny=None, **kwargs):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -4087,12 +4140,14 @@ class Client:
 
         Parameters
         ----------
-        plugin : WorkerPlugin
-            The plugin object to pass to the workers
+        plugin : WorkerPlugin or NannyPlugin
+            The plugin object to register.
         name : str, optional
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
             If plugin has no name attribute a random name is used.
+        nanny : bool, optional
+            Whether to register the plugin with workers or nannies.
         **kwargs : optional
             If you pass a class as the plugin, instead of a class instance, then the
             class will be instantiated with any extra keyword arguments.
@@ -4137,10 +4192,15 @@ class Client:
 
         assert name
 
-        return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+        return self.sync(
+            self._register_worker_plugin, plugin=plugin, name=name, nanny=nanny
+        )
 
-    async def _unregister_worker_plugin(self, name):
-        responses = await self.scheduler.unregister_worker_plugin(name=name)
+    async def _unregister_worker_plugin(self, name, nanny=None):
+        if nanny:
+            responses = await self.scheduler.unregister_nanny_plugin(name=name)
+        else:
+            responses = await self.scheduler.unregister_worker_plugin(name=name)
 
         for response in responses.values():
             if response["status"] == "error":
@@ -4149,7 +4209,7 @@ class Client:
                 raise exc.with_traceback(tb)
         return responses
 
-    def unregister_worker_plugin(self, name):
+    def unregister_worker_plugin(self, name, nanny=None):
         """Unregisters a lifecycle worker plugin
 
         This unregisters an existing worker plugin. As part of the unregistration process
@@ -4183,7 +4243,7 @@ class Client:
         --------
         register_worker_plugin
         """
-        return self.sync(self._unregister_worker_plugin, name=name)
+        return self.sync(self._unregister_worker_plugin, name=name, nanny=nanny)
 
 
 class _WorkerSetupPlugin(WorkerPlugin):
@@ -4405,9 +4465,11 @@ class as_completed:
         """Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
+        from .actor import ActorFuture
+
         with self.lock:
             for f in futures:
-                if not isinstance(f, Future):
+                if not isinstance(f, (Future, ActorFuture)):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
                 self.loop.add_callback(self._track_future, f)
@@ -4747,13 +4809,15 @@ class performance_report:
 
     Parameters
     ----------
-    filename: str (optional)
+    filename: str, optional
         The filename to save the performance report locally
 
-    stacklevel: int (optional)
+    stacklevel: int, optional
         The code execution frame utilized for populating the Calling Code section
         of the report. Defaults to `1` which is the frame calling ``performance_report``
 
+    mode: str, optional
+        Mode parameter to pass to :func:`bokeh.io.output.output_file`. Defaults to ``None``.
 
     Examples
     --------
@@ -4764,10 +4828,11 @@ class performance_report:
     $ open myfile.html
     """
 
-    def __init__(self, filename="dask-report.html", stacklevel=1):
+    def __init__(self, filename="dask-report.html", stacklevel=1, mode=None):
         self.filename = filename
         # stacklevel 0 or less - shows dask internals which likely isn't helpful
         self._stacklevel = stacklevel if stacklevel > 0 else 1
+        self.mode = mode
 
     async def __aenter__(self):
         self.start = time()
@@ -4784,7 +4849,7 @@ class performance_report:
             except Exception:
                 code = ""
         data = await get_client().scheduler.performance_report(
-            start=self.start, last_count=self.last_count, code=code
+            start=self.start, last_count=self.last_count, code=code, mode=self.mode
         )
         with open(self.filename, "w") as f:
             f.write(data)
