@@ -4651,6 +4651,15 @@ class Scheduler(ServerNode):
         }
         return msg
 
+    def get_task_duration(self, ts: TaskState, default: double = -1) -> double:
+        return self.state.get_task_duration(ts, default)
+
+    def get_comm_cost(self, *args, **kwargs):
+        return self.state.get_comm_cost(*args, **kwargs)
+
+    def check_idle_saturated(self, *args, **kwargs):
+        return self.state.check_idle_saturated(*args, **kwargs)
+
     def update_graph_hlg(
         self,
         client=None,
