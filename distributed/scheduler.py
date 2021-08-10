@@ -50,7 +50,14 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import CommClosedError, Status, clean_exception, rpc, send_recv
+from .core import (
+    CommClosedError,
+    Status,
+    clean_exception,
+    error_message,
+    rpc,
+    send_recv,
+)
 from .diagnostics.plugin import SchedulerPlugin
 from .event import EventExtension
 from .http import get_handlers
@@ -3747,6 +3754,7 @@ class Scheduler(SchedulerState, ServerNode):
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
+            "server-exception": self.handle_server_exception,
         }
 
         client_handlers = {
@@ -3876,6 +3884,24 @@ class Scheduler(SchedulerState, ServerNode):
             f'<font color="gray">tasks: </font>{len(parent._tasks)}'
         )
         return text
+
+    def trigger_exception(self, msg, typ=Exception):
+        msg = error_message(typ(msg))
+        msg.pop("status")
+        msg["worker"] = self.address
+        self.handle_server_exception(**msg)
+
+    def handle_server_exception(
+        self,
+        comm=None,
+        worker=None,
+        **msg,
+    ):
+        msg["server"] = worker
+        self.log_event("server-error", msg)
+        logger.debug("Exception from %s: %s", worker, msg["text"])
+        msg["op"] = "error"
+        self.report(msg)
 
     def identity(self, comm=None):
         """Basic information about ourselves and our cluster"""

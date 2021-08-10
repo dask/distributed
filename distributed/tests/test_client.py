@@ -6934,3 +6934,82 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+# utils_test.py
+
+
+def raise_exceptions(client, server=None):
+    if client.error_log:
+        event = None
+        if server:
+            event = client.error_log[server][-1]
+        else:
+            most_recent_timestamp = None
+            for server, exceptions in client.error_log.items():
+                if (
+                    not most_recent_timestamp
+                    or exceptions[-1]["time"] > most_recent_timestamp
+                ):
+                    event = exceptions[-1]
+
+        assert event
+        exc = event["exception"]
+        tb = event["traceback"]
+        raise exc.with_traceback(tb)
+
+
+@gen_cluster(nthreads=[("", 1)])
+async def test_forward_unhandled_exceptions_from_worker(s, a):
+    triggered_handler = False
+
+    def my_exception_handler(ctx):
+        nonlocal triggered_handler
+        triggered_handler = True
+        assert isinstance(ctx["exception"], OSError)
+
+    async with Client(
+        s.address,
+        asynchronous=True,
+        # TODO: Config option or kwarg?
+        # Downside of config option is that we need to rely on exception
+        # class names or need to eval a string which can be a security risk?
+        # Pro side would be that this is a kind of config a lot of users
+        # only want to change rarely and kwargs are inconvenient
+        exception_filter=[
+            (RuntimeError, "log"),
+            (CommClosedError, "ignore"),
+            (OSError, my_exception_handler),
+            (Exception, "log"),
+        ],
+    ) as c:
+        start = time()
+        # TODO: Forward exception and trigger_exception to be replaced with
+        # proper exception handling on the servers
+        a.forward_exception(msg="TestException", typ=RuntimeError)
+        a.forward_exception(msg="IgnoredException", typ=CommClosedError)
+        a.forward_exception(msg="HandlerCalled", typ=OSError)
+
+        with captured_logger("distributed.client", level=logging.ERROR) as client_logs:
+            await asyncio.sleep(0.1)
+        logs = client_logs.getvalue()
+        assert "TestException" in logs
+        assert "IgnoredException" not in logs
+
+        assert len(c.error_log[a.address]) == 1
+        assert isinstance(c.error_log[a.address][0]["exception"], RuntimeError)
+        time_ = c.error_log[a.address][0]["time"]
+        assert isinstance(time_, float)
+        assert time() > time_ > start
+
+        assert triggered_handler
+
+        s.trigger_exception("scheduler", KeyError)
+        with captured_logger("distributed.client", level=logging.ERROR) as client_logs:
+            await asyncio.sleep(0.1)
+
+        with pytest.raises(KeyError, match="scheduler"):
+            raise_exceptions(c)
+
+        with pytest.raises(RuntimeError, match="TestException"):
+            raise_exceptions(c, a.address)

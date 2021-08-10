@@ -1226,6 +1226,13 @@ class Worker(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
+    def forward_exception(self, msg=None, typ=Exception):
+        msg = error_message(typ(msg))
+        msg.pop("status")
+        msg["op"] = "server-exception"
+        msg["time"] = time()
+        self.batched_stream.send(msg)
+
     async def close(
         self, report=True, timeout=30, nanny=True, executor_wait=True, safe=False
     ):

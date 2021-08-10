@@ -618,6 +618,7 @@ class Client:
         extensions=DEFAULT_EXTENSIONS,
         direct_to_workers=None,
         connection_limit=512,
+        exception_filter=None,
         **kwargs,
     ):
         if timeout == no_default:
@@ -716,6 +717,10 @@ class Client:
         scheduler_info_interval = parse_timedelta(
             dask.config.get("distributed.client.scheduler-info-interval", default="ms")
         )
+        from collections import deque
+
+        self.error_log = defaultdict(partial(deque, maxlen=1000))
+        self.exception_filter = [] or exception_filter
 
         self._periodic_callbacks = dict()
         self._periodic_callbacks["scheduler-info"] = PeriodicCallback(
@@ -1362,9 +1367,43 @@ class Client:
         with suppress(AttributeError):
             self._restart_event.set()
 
-    def _handle_error(self, exception=None):
-        logger.warning("Scheduler exception:")
-        logger.exception(exception)
+    def _handle_error(
+        self, exception=None, traceback=None, server=None, time=None, **kwargs
+    ):
+        ex_type, exc, tb = clean_exception(exception, traceback)
+        assert self.exception_filter
+        for typ, action in self.exception_filter:
+            if issubclass(ex_type, typ):
+                assert action
+                if callable(action):
+                    action(
+                        {
+                            "exception": exception,
+                            "traceback": traceback,
+                            "server": server,
+                            "time": time,
+                        }
+                    )
+                    break
+                else:
+                    # TODO: Do parsing during init
+                    assert action in ["ignore", "log", "raise"]
+                    if action == "ignore":
+                        break
+                    exc_info = (typ, exception, traceback)
+                    logger.error("Exception on: %s", server, exc_info=exc_info)
+                    self.error_log[server].append(
+                        {
+                            "exception": exception,
+                            "traceback": traceback,
+                            "time": time,
+                        }
+                    )
+                    if action == "log":
+                        break
+                    assert action == "raise"
+                    raise exc.with_traceback(tb)
+                    break
 
     async def _close(self, fast=False):
         """Send close signal and wait until scheduler completes"""
