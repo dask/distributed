@@ -13,7 +13,10 @@ from tornado import web
 import dask
 
 from distributed import Client, Nanny, Scheduler, Worker
+from distributed.compatibility import MACOS
 from distributed.utils_test import captured_logger, cluster, gen_cluster, gen_test
+
+PY_VERSION = sys.version_info[:2]
 
 PRELOAD_TEXT = """
 _worker_info = {}
@@ -198,6 +201,9 @@ def scheduler_preload():
     p.join(timeout=5)
 
 
+@pytest.mark.skipif(
+    MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
+)
 @pytest.mark.asyncio
 async def test_web_preload(cleanup, scheduler_preload):
     with captured_logger("distributed.preloading") as log:
@@ -272,6 +278,9 @@ def worker_preload():
     p.join(timeout=5)
 
 
+@pytest.mark.skipif(
+    MACOS and PY_VERSION == (3, 7), reason="HTTP Server doesn't come up"
+)
 @pytest.mark.asyncio
 async def test_web_preload_worker(cleanup, worker_preload):
     async with Scheduler(port=8786, host="localhost") as s:
