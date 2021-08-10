@@ -3119,7 +3119,7 @@ class SchedulerState:
         exception = kwargs.get("exception")
         exception_text: str = kwargs.get("exception_text")
         traceback = kwargs.get("traceback")
-        traceback_text: str = kwargs.get("traceback_test")
+        traceback_text: str = kwargs.get("traceback_text")
         worker = kwargs.get("worker")
         ws: WorkerState
         try:
