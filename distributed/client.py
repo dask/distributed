@@ -2,7 +2,6 @@ import asyncio
 import atexit
 import copy
 import errno
-import html
 import inspect
 import json
 import logging
@@ -82,7 +81,6 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
-    key_split,
     log_errors,
     no_default,
     sync,
@@ -360,6 +358,13 @@ class Future(WrappedKey):
     def type(self):
         return self._state.type
 
+    @property
+    def _typ(self):
+        try:
+            return self.type.__module__.split(".")[0] + "." + self.type.__name__
+        except AttributeError:
+            return str(self.type)
+
     def release(self, _in_destructor=False):
         # NOTE: this method can be called from different threads
         # (see e.g. Client.get() or Future.__del__())
@@ -402,39 +407,16 @@ class Future(WrappedKey):
 
     def __repr__(self):
         if self.type:
-            try:
-                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
-            except AttributeError:
-                typ = str(self.type)
-            return f"<Future: {self.status}, type: {typ}, key: {self.key}>"
+            return f"<Future: {self.status}, type: {self._typ}, key: {self.key}>"
         else:
             return f"<Future: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
-        text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
-        text += (
-            '<font style="color: var(--jp-ui-font-color2, gray)">status: </font>'
-            '<font style="color: %(color)s">%(status)s</font>, '
-        ) % {
-            "status": self.status,
-            "color": "var(--jp-error-color0, red)"
-            if self.status == "error"
-            else "var(--jp-ui-font-color0, black)",
-        }
-        if self.type:
-            try:
-                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
-            except AttributeError:
-                typ = str(self.type)
-            text += (
-                '<font style="color: var(--jp-ui-font-color2, gray)">type: </font>%s, '
-                % typ
-            )
-        text += (
-            '<font style="color: var(--jp-ui-font-color2, gray)">key: </font>%s'
-            % html.escape(str(self.key))
+        return get_template("future.html.j2").render(
+            key=str(self.key),
+            type=self._typ,
+            status=self.status,
         )
-        return text
 
     def __await__(self):
         return self.result().__await__()

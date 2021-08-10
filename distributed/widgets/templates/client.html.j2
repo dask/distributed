@@ -5,25 +5,18 @@
         <p style="color: #9D9D9D; margin-bottom: 0px;">{{ id }}</p>
         <table style="width: 100%; text-align: left;">
 
-
+        <tr>
         {% if not cluster and not scheduler_file %}
-            <tr>
-                <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
-                <td style="text-align: left;"></td>
-            </tr>
-
+            <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
+            <td style="text-align: left;"></td>
         {% elif cluster %}
-            <tr>
-                <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
-                <td style="text-align: left;"><strong>Cluster type:</strong> {{ cluster | type }}</td>
-            </tr>
+            <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
+            <td style="text-align: left;"><strong>Cluster type:</strong> {{ cluster | type }}</td>
         {% elif scheduler_file %}
-            <tr>
-                <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
-                <td style="text-align: left;"><strong>Scheduler file:</strong> {{ scheduler_file }}</td>
-            </tr>
+            <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
+            <td style="text-align: left;"><strong>Scheduler file:</strong> {{ scheduler_file }}</td>
         {% endif %}
-
+        </tr>
 
         {% if dashboard_link %}
             <tr>
@@ -33,6 +26,7 @@
                 <td style="text-align: left;"></td>
             </tr>
         {% endif %}
+
         </table>
 
         {% if scheduler is none %}
