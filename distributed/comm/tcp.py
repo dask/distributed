@@ -518,7 +518,14 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         if self.bound_address is None:
             self.bound_address = get_tcp_server_address(self.tcp_server)
         # IPv6 getsockname() can return more a 4-len tuple
-        return self.bound_address[:2]
+
+        host, port = self.bound_address[:2]
+        # Rewrite to connectable address
+        if host == "::":
+            host = "::1"
+        if host == "0.0.0.0":
+            host = "127.0.0.1"
+        return host, port
 
     @property
     def listen_address(self):

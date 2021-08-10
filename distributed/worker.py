@@ -29,7 +29,7 @@ from dask.utils import apply, format_bytes, funcname, parse_bytes, parse_timedel
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import connect, get_address_host
-from .comm.addressing import address_from_user_args
+from .comm.addressing import address_from_user_args, parse_address
 from .comm.utils import OFFLOAD_THRESHOLD
 from .core import (
     CommClosedError,
@@ -553,6 +553,11 @@ class Worker(ServerNode):
 
         self._start_port = port
         self._start_host = host
+        if host:
+            # Helpful error message if IPv6 specified incorrectly
+            _, host_address = parse_address(host)
+            assert host_address.count(":") <= 1 or host_address.startswith("["), \
+                    "Host address with IPv6 must be bracketed like '[::1]'"
         self._interface = interface
         self._protocol = protocol
 

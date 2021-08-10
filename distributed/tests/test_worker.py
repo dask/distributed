@@ -1049,6 +1049,26 @@ async def test_service_hosts_match_worker(s):
         sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
+    # See what happens with e.g. `dask-worker --listen-address tcp://:8811`
+    async with Worker(s.address, host="") as w:
+        sock = first(w.http_server._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        # Address must be a connectable address. 0.0.0.0 is not!
+        address_all = w.address.rsplit(':', 1)[0]
+        assert address_all in ("tcp://[::1]", "tcp://127.0.0.1")
+
+    # Check various malformed IPv6 addresses
+    # Since these hostnames get passed to distributed.comm.address_from_user_args,
+    # bracketing is mandatory for IPv6.
+    with pytest.raises(AssertionError) as exc:
+        async with Worker(s.address, host="::") as w:
+            pass
+    assert 'bracketed' in str(exc)
+    with pytest.raises(AssertionError) as exc:
+        async with Worker(s.address, host="tcp://::1") as w:
+            pass
+    assert 'bracketed' in str(exc)
+
 
 @gen_cluster(nthreads=[])
 async def test_start_services(s):
@@ -1464,12 +1484,12 @@ async def test_local_directory_make_new_directory(s):
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
     w = await Worker(s.address, host="127.0.0.2")
-    assert "127.0.0.2" in w.address
+    assert "127.0.0.1" in w.address
     await w.close()
 
     n = await Nanny(s.address, host="127.0.0.3")
-    assert "127.0.0.3" in n.address
-    assert "127.0.0.3" in n.worker_address
+    assert "127.0.0.1" in n.address
+    assert "127.0.0.1" in n.worker_address
     await n.close()
 
 

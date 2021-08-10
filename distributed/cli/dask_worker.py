@@ -339,6 +339,9 @@ def main(
     try:
         if listen_address:
             (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            if ":" in host:
+                # IPv6 -- bracket to pass as user args
+                host = f"[{host}]"
 
         if contact_address:
             # we only need this to verify it is getting parsed
