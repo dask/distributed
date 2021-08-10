@@ -2229,7 +2229,7 @@ class SchedulerState:
                 self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                assert not args and not kwargs
+                assert not args and not kwargs, (args, kwargs)
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
