@@ -5,7 +5,6 @@ import tempfile
 import threading
 
 import pytest
-import tornado
 from tornado import web
 
 import dask
@@ -219,7 +218,6 @@ dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
     async def run_webserver():
         application = web.Application([(r"/preload", WorkerPreloadHandler)])
         server = application.listen(12346, address="127.0.0.1")
-        tornado.ioloop.IOLoop.current().start()
         event.set()
 
     loop_in_thread.add_callback(run_webserver)
