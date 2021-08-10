@@ -1,8 +1,8 @@
-import multiprocessing
 import os
 import shutil
 import sys
 import tempfile
+import threading
 
 import pytest
 import tornado
@@ -153,23 +153,26 @@ backends["foo"] = TCPBackend()
         del backends["foo"]
 
 
-class MyHandler(web.RequestHandler):
-    def get(self):
-        self.write(
-            """
+@pytest.mark.asyncio
+async def test_web_preload(cleanup, loop_in_thread):
+    class MyHandler(web.RequestHandler):
+        def get(self):
+            self.write(
+                """
 def dask_setup(dask_server):
     dask_server.foo = 1
 """.strip()
-        )
+            )
 
+    event = threading.Event()
 
-@pytest.mark.asyncio
-async def test_web_preload(cleanup, loop_in_thread):
     async def run_webserver():
         app = web.Application([(r"/preload", MyHandler)])
         server = app.listen(12345, address="127.0.0.1")
+        event.set()
 
     loop_in_thread.add_callback(run_webserver)
+    event.wait()
 
     with captured_logger("distributed.preloading") as log:
         async with Scheduler(
@@ -200,39 +203,27 @@ dask.config.set(scheduler_address="{s.address}")
         assert w.scheduler.address == s.address
 
 
-class WorkerPreloadHandler(web.RequestHandler):
-    def get(self):
-        self.write(
-            """
+@pytest.mark.asyncio
+async def test_web_preload_worker(cleanup, loop_in_thread):
+    class WorkerPreloadHandler(web.RequestHandler):
+        def get(self):
+            self.write(
+                """
 import dask
 dask.config.set(scheduler_address="tcp://127.0.0.1:8786")
 """.strip()
-        )
+            )
 
+    event = threading.Event()
 
-def create_worker_preload_application():
-    application = web.Application([(r"/preload", WorkerPreloadHandler)])
-    server = application.listen(12346, address="127.0.0.1")
-    tornado.ioloop.IOLoop.instance().start()
-
-
-@pytest.fixture
-def worker_preload():
-    p = multiprocessing.Process(target=create_worker_preload_application)
-    p.start()
-    yield
-    p.kill()
-    p.join(timeout=5)
-
-
-@pytest.mark.asyncio
-async def test_web_preload_worker(cleanup, loop_in_thread):
     async def run_webserver():
         application = web.Application([(r"/preload", WorkerPreloadHandler)])
         server = application.listen(12346, address="127.0.0.1")
         tornado.ioloop.IOLoop.current().start()
+        event.set()
 
     loop_in_thread.add_callback(run_webserver)
+    event.wait()
 
     async with Scheduler(port=8786, host="localhost") as s:
         async with Nanny(preload_nanny=["http://127.0.0.1:12346/preload"]) as nanny:
