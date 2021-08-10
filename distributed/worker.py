@@ -56,7 +56,6 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
-    get_ip,
     has_arg,
     import_file,
     iscoroutinefunction,

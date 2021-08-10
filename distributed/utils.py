@@ -681,7 +681,7 @@ def ensure_ip(hostname):
     '123.123.123.123'
     """
     if not hostname:
-        hostname = 'localhost'
+        hostname = "localhost"
 
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
