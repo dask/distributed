@@ -3,9 +3,11 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 import pytest
 import tornado
+import urllib3
 from tornado import web
 
 import dask
@@ -173,6 +175,24 @@ def create_preload_application():
 def scheduler_preload():
     p = multiprocessing.Process(target=create_preload_application)
     p.start()
+    start = time.time()
+    while not p.is_alive():
+        if time.time() > start + 5:
+            raise AssertionError("Process didn't come up")
+        time.sleep(0.5)
+    # Make sure we can query the server
+    client = urllib3.PoolManager()
+    start = time.time()
+    while True:
+        try:
+            response = client.request("GET", "http://127.0.0.1:12345/preload")
+            if response.status == 200:
+                break
+        except urllib3.exceptions.HTTPError:
+            if time.time() > start + 5:
+                raise AssertionError("Webserver didn't come up")
+            time.sleep(0.5)
+
     yield
     p.kill()
     p.join(timeout=5)
@@ -229,6 +249,24 @@ def create_worker_preload_application():
 def worker_preload():
     p = multiprocessing.Process(target=create_worker_preload_application)
     p.start()
+    start = time.time()
+    while not p.is_alive():
+        if time.time() > start + 5:
+            raise AssertionError("Process didn't come up")
+        time.sleep(0.5)
+    # Make sure we can query the server
+    client = urllib3.PoolManager()
+    start = time.time()
+    while True:
+        try:
+            response = client.request("GET", "http://127.0.0.1:12346/preload")
+            if response.status == 200:
+                break
+        except urllib3.exceptions.HTTPError:
+            if time.time() > start + 5:
+                raise AssertionError("Webserver didn't come up")
+            time.sleep(0.5)
+
     yield
     p.kill()
     p.join(timeout=5)
