@@ -2014,7 +2014,7 @@ def kill_process():
     import signal
 
     if WINDOWS:
-        # There's no SIGKILL on Windows. However, SIGTERM *seems* to be instantaneous.
+        # There's no SIGKILL on Windows
         sig = signal.SIGTERM
     else:
         # With SIGTERM there may be several seconds worth of delay before the worker
@@ -2023,6 +2023,7 @@ def kill_process():
         sig = signal.SIGKILL
 
     os.kill(os.getpid(), sig)
+    sleep(60)  # Cope with non-instantaneous termination
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
