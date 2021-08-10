@@ -2017,9 +2017,16 @@ def kill_process():
     import os
     import signal
 
-    # With SIGTERM there may be several seconds worth of delay before the
-    # worker actually shuts down - particularly on slow CI
-    os.kill(os.getpid(), signal.SIGKILL)
+    if WINDOWS:
+        # There's no SIGKILL on Windows. However, SIGTERM *seems* to be instantaneous.
+        sig = signal.SIGTERM
+    else:
+        # With SIGTERM there may be several seconds worth of delay before the worker
+        # actually shuts down - particularly on slow CI. Use SIGKILL for instant
+        # termination.
+        sig = signal.SIGKILL
+
+    os.kill(os.getpid(), sig)
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
