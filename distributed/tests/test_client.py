@@ -6927,6 +6927,22 @@ async def test_upload_directory(c, s, a, b, tmp_path):
 
 
 @gen_cluster(client=True)
+async def test_exception_text(c, s, a, b):
+    def bad(x):
+        raise Exception(x)
+
+    future = c.submit(bad, 123)
+    await wait(future)
+
+    ts = s.tasks[future.key]
+
+    assert isinstance(ts.exception_text, str)
+    assert "123" in ts.exception_text
+    assert "Exception(x)" in ts.traceback_text
+    assert "bad" in ts.traceback_text
+
+
+@gen_cluster(client=True)
 async def test_async_task(c, s, a, b):
     async def f(x):
         return x + 1
