@@ -188,9 +188,9 @@ def scheduler_preload():
             response = client.request("GET", "http://127.0.0.1:12345/preload")
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError:
-            if time.time() > start + 5:
-                raise AssertionError("Webserver didn't come up")
+        except urllib3.exceptions.HTTPError as e:
+            if time.time() > start + 10:
+                raise AssertionError("Webserver didn't come up", e)
             time.sleep(0.5)
 
     yield
@@ -262,9 +262,9 @@ def worker_preload():
             response = client.request("GET", "http://127.0.0.1:12346/preload")
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError:
-            if time.time() > start + 5:
-                raise AssertionError("Webserver didn't come up")
+        except urllib3.exceptions.HTTPError as e:
+            if time.time() > start + 10:
+                raise AssertionError("Webserver didn't come up", e)
             time.sleep(0.5)
 
     yield
