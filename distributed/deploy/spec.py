@@ -528,7 +528,7 @@ class SpecCluster(Cluster):
 
     @property
     def _supports_scaling(self):
-        return not not self.new_spec
+        return bool(self.new_spec)
 
     async def scale_down(self, workers):
         # We may have groups, if so, map worker addresses to job names

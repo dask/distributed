@@ -236,8 +236,8 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_ping_pong_numba(cleanup):
+@gen_test()
+async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
     import numba.cuda
@@ -258,9 +258,9 @@ async def test_ping_pong_numba(cleanup):
 @pytest.mark.asyncio
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
-        protocol="ucx:://",
+        protocol="ucx",
         host=HOST,
-        dashboard_address=None,
+        dashboard_address=":0",
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
@@ -276,20 +276,20 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_stress(cleanup):
+@gen_test(timeout=240)
+async def test_stress():
     da = pytest.importorskip("dask.array")
 
     chunksize = "10 MB"
 
     async with LocalCluster(
         protocol="ucx",
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
         processes=False,
         host=HOST,
     ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
+        async with Client(cluster, asynchronous=True):
             rs = da.random.RandomState()
             x = rs.random((10000, 10000), chunks=(-1, chunksize))
             x = x.persist()
