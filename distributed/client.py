@@ -359,7 +359,7 @@ class Future(WrappedKey):
         return self._state.type
 
     @property
-    def _typ(self):
+    def _type(self):
         try:
             return self.type.__module__.split(".")[0] + "." + self.type.__name__
         except AttributeError:
@@ -407,14 +407,14 @@ class Future(WrappedKey):
 
     def __repr__(self):
         if self.type:
-            return f"<Future: {self.status}, type: {self._typ}, key: {self.key}>"
+            return f"<Future: {self.status}, type: {self._type}, key: {self.key}>"
         else:
             return f"<Future: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
         return get_template("future.html.j2").render(
             key=str(self.key),
-            type=self._typ,
+            type=self._type,
             status=self.status,
         )
 
