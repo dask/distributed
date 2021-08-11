@@ -1098,9 +1098,6 @@ class TaskGroup:
             + ">"
         )
 
-    def _repr_html_(self):
-        return repr(self)[1:-1]
-
     def __len__(self):
         return sum(self._states.values())
 
