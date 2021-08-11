@@ -1,6 +1,5 @@
 import asyncio
 import heapq
-import html
 import inspect
 import itertools
 import json
@@ -3822,13 +3821,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _repr_html_(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        text = (
-            f"<b>Scheduler: </b>{html.escape(self.address)} "
-            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
-            f'<font color="gray">cores: </font>{parent._total_nthreads} '
-            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        return get_template("scheduler.html.j2").render(
+            address=self.address,
+            workers=parent._workers_dv,
+            threads=parent._total_nthreads,
+            tasks=parent._tasks,
         )
-        return text
 
     def identity(self, comm=None):
         """Basic information about ourselves and our cluster"""
