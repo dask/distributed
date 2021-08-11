@@ -21,6 +21,9 @@
                     <strong>Total memory:</strong> {{ workers.values() | map(attribute='memory_limit') | sum | format_bytes }}
                 </td>
             </tr>
+            {% if cluster_status %}
+            {{ cluster_status }}
+            {% endif %}
         </table>
 
         <details>

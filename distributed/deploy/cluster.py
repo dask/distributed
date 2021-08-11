@@ -376,6 +376,7 @@ class Cluster:
             workers=self.scheduler_info["workers"],
             dashboard_link=self.dashboard_link,
             scheduler_info_repr=scheduler_info_repr,
+            cluster_status=cluster_status,
         )
 
     def _ipython_display_(self, **kwargs):
