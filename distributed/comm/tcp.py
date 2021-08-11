@@ -523,7 +523,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         # Rewrite to connectable address
         if host == "::":
             host = "::1"
-        if host == "0.0.0.0":
+        elif host == "0.0.0.0":
             host = "127.0.0.1"
         return host, port
 

@@ -85,6 +85,7 @@ def parse_host_port(address, default_port=None):
         # Generic notation: 'addr:port' or 'addr'.
         host, sep, port = address.rpartition(":")
         if not sep:
+            host = port
             port = _default()
         elif ":" in host:
             _fail()

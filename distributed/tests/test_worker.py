@@ -1484,12 +1484,12 @@ async def test_local_directory_make_new_directory(s):
 @gen_cluster(nthreads=[], client=True)
 async def test_host_address(c, s):
     w = await Worker(s.address, host="127.0.0.2")
-    assert "127.0.0.1" in w.address
+    assert "127.0.0.2" in w.address
     await w.close()
 
     n = await Nanny(s.address, host="127.0.0.3")
-    assert "127.0.0.1" in n.address
-    assert "127.0.0.1" in n.worker_address
+    assert "127.0.0.3" in n.address
+    assert "127.0.0.3" in n.worker_address
     await n.close()
 
 
