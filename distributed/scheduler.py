@@ -1,6 +1,5 @@
 import asyncio
 import heapq
-import html
 import inspect
 import itertools
 import json
@@ -82,6 +81,7 @@ from .utils import (
 from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
 from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from .variable import VariableExtension
+from .widgets import get_template
 
 try:
     from cython import compiled
@@ -733,13 +733,12 @@ class WorkerState:
         )
 
     def _repr_html_(self):
-        text = (
-            f"<b>WorkerState: </b> {html.escape(self._address)} "
-            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        return get_template("worker_state.html.j2").render(
+            address=self.address,
+            name=self.name,
+            has_what=self._has_what,
+            processing=self.processing,
         )
-        return text
 
     @ccall
     @exceptval(check=False)
@@ -825,53 +824,14 @@ class Computation:
         )
 
     def _repr_html_(self):
-        text = f"""<b>Computation</b> {self._id}
-
-        <table>
-            <tr>
-                <td style="text-align: left;"><strong>Duration: </strong>{self.stop - self.start:.3f}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Start: </strong>{self.start}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Groups: </strong>{len(self.groups)}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Tasks: </strong>
-                {", ".join(
-                    "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-                )}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-        </table>
-
-        <details>
-        <summary style="margin-bottom": 20px><h4 style="display:inline">Code</h4></summary>
-        """
-
-        for ix, code in enumerate(self.code):
-            text += f"<h5>Code segment {ix + 1} / {len(self.code)}</h5>"
-            text += f"<code>{code}</code>"
-
-        text += """
-        </details>
-        <details>
-        <summary style="margin-bottom": 20px><h4 style="display:inline">Task Groups</h4></summary>
-        <ul>
-        """
-        for gr in self.groups:
-            text += f"""
-            <li> {gr._repr_html_()} </li>
-            """
-        text += """
-        </ul>
-        </details>
-        """
-        return text
+        return get_template("computation.html.j2").render(
+            id=self._id,
+            start=self.start,
+            stop=self.stop,
+            groups=self.groups,
+            states=self.states,
+            code=self.code,
+        )
 
 
 @final
@@ -1136,9 +1096,6 @@ class TaskGroup:
             )
             + ">"
         )
-
-    def _repr_html_(self):
-        return repr(self)[1:-1]
 
     def __len__(self):
         return sum(self._states.values())
@@ -1695,16 +1652,11 @@ class TaskState:
         return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
-        color = (
-            "var(--jp-error-color0, red)"
-            if self._state == "erred"
-            else "var(--jp-ui-font-color0, black)"
+        return get_template("task_state.html.j2").render(
+            state=self._state,
+            nbytes=self._nbytes,
+            key=self._key,
         )
-        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
-        if self._state == "memory":
-            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
-        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
-        return text
 
     @ccall
     def validate(self):
@@ -3892,13 +3844,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _repr_html_(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        text = (
-            f"<b>Scheduler: </b>{html.escape(self.address)} "
-            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
-            f'<font color="gray">cores: </font>{parent._total_nthreads} '
-            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        return get_template("scheduler.html.j2").render(
+            address=self.address,
+            workers=parent._workers_dv,
+            threads=parent._total_nthreads,
+            tasks=parent._tasks,
         )
-        return text
 
     def identity(self, comm=None):
         """Basic information about ourselves and our cluster"""

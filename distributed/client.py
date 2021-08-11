@@ -2,7 +2,6 @@ import asyncio
 import atexit
 import copy
 import errno
-import html
 import inspect
 import json
 import logging
@@ -82,11 +81,11 @@ from .utils import (
     TimeoutError,
     format_dashboard_link,
     has_keyword,
-    key_split,
     log_errors,
     no_default,
     sync,
     thread_state,
+    typename,
 )
 from .utils_comm import (
     WrappedKey,
@@ -96,6 +95,7 @@ from .utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
+from .widgets import get_template
 from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
@@ -401,39 +401,18 @@ class Future(WrappedKey):
 
     def __repr__(self):
         if self.type:
-            try:
-                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
-            except AttributeError:
-                typ = str(self.type)
-            return f"<Future: {self.status}, type: {typ}, key: {self.key}>"
+            return (
+                f"<Future: {self.status}, type: {typename(self.type)}, key: {self.key}>"
+            )
         else:
             return f"<Future: {self.status}, key: {self.key}>"
 
     def _repr_html_(self):
-        text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
-        text += (
-            '<font style="color: var(--jp-ui-font-color2, gray)">status: </font>'
-            '<font style="color: %(color)s">%(status)s</font>, '
-        ) % {
-            "status": self.status,
-            "color": "var(--jp-error-color0, red)"
-            if self.status == "error"
-            else "var(--jp-ui-font-color0, black)",
-        }
-        if self.type:
-            try:
-                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
-            except AttributeError:
-                typ = str(self.type)
-            text += (
-                '<font style="color: var(--jp-ui-font-color2, gray)">type: </font>%s, '
-                % typ
-            )
-        text += (
-            '<font style="color: var(--jp-ui-font-color2, gray)">key: </font>%s'
-            % html.escape(str(self.key))
+        return get_template("future.html.j2").render(
+            key=str(self.key),
+            type=typename(self.type),
+            status=self.status,
         )
-        return text
 
     def __await__(self):
         return self.result().__await__()
@@ -921,78 +900,14 @@ class Client:
     def _repr_html_(self):
         scheduler, info = self._get_scheduler_info()
 
-        if scheduler is None:
-            child_repr = """<p>No scheduler connected.</p>"""
-        elif self.cluster:
-            child_repr = f"""
-                <details>
-                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Cluster Info</h3></summary>
-                {self.cluster._repr_html_()}
-                </details>
-                """
-        else:
-            child_repr = f"""
-                <details>
-                <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
-                {info._repr_html_()}
-                </details>
-                """
-
-        client_status = ""
-
-        if not self.cluster and not self.scheduler_file:
-            client_status += """
-                <tr>
-                    <td style="text-align: left;"><strong>Connection method:</strong> Direct</td>
-                    <td style="text-align: left;"></td>
-                </tr>
-                """
-
-        if self.cluster:
-            client_status += f"""
-                <tr>
-                    <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
-                    <td style="text-align: left;"><strong>Cluster type:</strong> {type(self.cluster).__name__}</td>
-                </tr>
-                """
-        elif self.scheduler_file:
-            client_status += f"""
-                <tr>
-                    <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
-                    <td style="text-align: left;"><strong>Scheduler file:</strong> {self.scheduler_file}</td>
-                </tr>
-                """
-
-        if self.dashboard_link:
-            client_status += f"""
-                <tr>
-                    <td style="text-align: left;">
-                        <strong>Dashboard: </strong>
-                        <a href="{self.dashboard_link}">{self.dashboard_link}</a>
-                    </td>
-                    <td style="text-align: left;"></td>
-                </tr>
-                """
-
-        return f"""
-            <div>
-                <div style="
-                    width: 24px;
-                    height: 24px;
-                    background-color: #e1e1e1;
-                    border: 3px solid #9D9D9D;
-                    border-radius: 5px;
-                    position: absolute;"> </div>
-                <div style="margin-left: 48px;">
-                    <h3 style="margin-bottom: 0px;">Client</h3>
-                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.id}</p>
-                    <table style="width: 100%; text-align: left;">
-                    {client_status}
-                    </table>
-                    {child_repr}
-                </div>
-            </div>
-        """
+        return get_template("client.html.j2").render(
+            id=self.id,
+            scheduler=scheduler,
+            info=info,
+            cluster=self.cluster,
+            scheduler_file=self.scheduler_file,
+            dashboard_link=self.dashboard_link,
+        )
 
     def start(self, **kwargs):
         """Start scheduler running in separate thread"""

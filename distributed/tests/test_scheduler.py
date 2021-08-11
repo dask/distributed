@@ -3132,7 +3132,6 @@ async def test_computations(c, s, a, b):
     assert "sub" not in str(s.computations[0].groups)
 
     assert isinstance(repr(s.computations[1]), str)
-    assert "x + 1" in s.computations[1]._repr_html_()
 
     assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
 
