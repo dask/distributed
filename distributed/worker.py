@@ -56,6 +56,7 @@ from .utils import (
     LRU,
     TimeoutError,
     _maybe_complex,
+    get_ip,
     has_arg,
     import_file,
     iscoroutinefunction,
@@ -287,6 +288,10 @@ class Worker(ServerNode):
     * **in_flight_workers**: ``{worker: {task}}``
         The workers from which we are currently gathering data and the
         dependencies we expect from those connections
+    * **busy_workers**: ``{worker}``
+        The workers from which we have tried to gather data and received
+        a busy response. These will be removed from the list as they are
+        needed.
     * **comm_bytes**: ``int``
         The total number of bytes in flight
     * **threads**: ``{key: int}``
@@ -422,6 +427,7 @@ class Worker(ServerNode):
 
         self.in_flight_tasks = 0
         self.in_flight_workers = dict()
+        self.busy_workers = set()
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
@@ -556,8 +562,9 @@ class Worker(ServerNode):
         if host:
             # Helpful error message if IPv6 specified incorrectly
             _, host_address = parse_address(host)
-            assert host_address.count(":") <= 1 or host_address.startswith("["), \
-                    "Host address with IPv6 must be bracketed like '[::1]'"
+            assert host_address.count(":") <= 1 or host_address.startswith(
+                "["
+            ), "Host address with IPv6 must be bracketed like '[::1]'"
         self._interface = interface
         self._protocol = protocol
 
@@ -1143,10 +1150,14 @@ class Worker(ServerNode):
                 protocol=self._protocol,
                 security=self.security,
             )
-            try:
-                await self.listen(
-                    start_address, **self.security.get_listen_args("worker")
+            kwargs = self.security.get_listen_args("worker")
+            if self._protocol in ("tcp", "tls"):
+                kwargs = kwargs.copy()
+                kwargs["default_host"] = get_ip(
+                    get_address_host(self.scheduler.address)
                 )
+            try:
+                await self.listen(start_address, **kwargs)
             except OSError as e:
                 if len(ports) > 1 and e.errno == errno.EADDRINUSE:
                     continue
@@ -2163,9 +2174,15 @@ class Worker(ServerNode):
                         in_flight = True
                         continue
                     host = get_address_host(self.address)
-                    local = [w for w in workers if get_address_host(w) == host]
+                    workers_not_busy = [
+                        w for w in workers if w not in self.busy_workers
+                    ]
+                    local = [w for w in workers_not_busy if get_address_host(w) == host]
                     if local:
                         worker = random.choice(local)
+                    elif not workers_not_busy:
+                        self.busy_workers.difference_update(workers)
+                        worker = random.choice(list(workers))
                     else:
                         worker = random.choice(list(workers))
                     to_gather, total_nbytes = self.select_keys_for_gather(
@@ -2360,6 +2377,7 @@ class Worker(ServerNode):
 
                 if response["status"] == "busy":
                     self.log.append(("busy-gather", worker, to_gather_keys))
+                    self.busy_workers.add(worker)
                     for key in to_gather_keys:
                         ts = self.tasks.get(key)
                         if ts and ts.state == "flight":

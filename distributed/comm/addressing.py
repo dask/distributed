@@ -60,7 +60,9 @@ def parse_host_port(address, default_port=None):
         return address
 
     def _fail():
-        raise ValueError(f"invalid address {address!r}; maybe: ipv6 needs brackets like [::1]")
+        raise ValueError(
+            f"invalid address {address!r}; maybe: ipv6 needs brackets like [::1]"
+        )
 
     def _default():
         if default_port is None:

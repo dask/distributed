@@ -1054,7 +1054,7 @@ async def test_service_hosts_match_worker(s):
         sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
         # Address must be a connectable address. 0.0.0.0 is not!
-        address_all = w.address.rsplit(':', 1)[0]
+        address_all = w.address.rsplit(":", 1)[0]
         assert address_all in ("tcp://[::1]", "tcp://127.0.0.1")
 
     # Check various malformed IPv6 addresses
@@ -1063,11 +1063,11 @@ async def test_service_hosts_match_worker(s):
     with pytest.raises(AssertionError) as exc:
         async with Worker(s.address, host="::") as w:
             pass
-    assert 'bracketed' in str(exc)
+    assert "bracketed" in str(exc)
     with pytest.raises(AssertionError) as exc:
         async with Worker(s.address, host="tcp://::1") as w:
             pass
-    assert 'bracketed' in str(exc)
+    assert "bracketed" in str(exc)
 
 
 @gen_cluster(nthreads=[])
@@ -1335,6 +1335,51 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
 
     y = c.submit(inc, x, workers=[w2.address])
+    await wait(y)
+
+    assert any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
+    assert not any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
+
+
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
+)
+async def test_prefer_gather_from_local_address_unless_busy(c, s, w1, w2, w3):
+    x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
+
+    # Set up w1 to be busy
+    w1.outgoing_current_count = 10000000
+
+    y = c.submit(inc, x, workers=[w2.address])
+    await wait(y)
+
+    assert not any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
+    assert any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
+
+
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
+)
+async def test_prefer_gather_from_local_address_unless_busy_allows_reset(
+    c, s, w1, w2, w3
+):
+    x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
+
+    # Set up both to be busy, ensuring multiple loops run
+    w1.outgoing_current_count = 10000000
+    w3.outgoing_current_count = 10000000
+
+    y = c.submit(inc, x, workers=[w2.address])
+    with pytest.raises(TimeoutError):
+        await wait(y, timeout=1.0)
+
+    assert w1.address in w2.busy_workers
+    assert w3.address in w2.busy_workers
+
+    # Un-block, ensure they use the one that was unblocked
+    w1.outgoing_current_count = 0
     await wait(y)
 
     assert any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
