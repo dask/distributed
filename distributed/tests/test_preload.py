@@ -4,10 +4,11 @@ import shutil
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 import tornado
-import urllib3
 from tornado import web
 
 import dask
@@ -184,14 +185,14 @@ def scheduler_preload():
             raise AssertionError("Process didn't come up")
         time.sleep(0.5)
     # Make sure we can query the server
-    client = urllib3.PoolManager()
     start = time.time()
+    request = urllib.request.Request("http://127.0.0.1:12345/preload", method="GET")
     while True:
         try:
-            response = client.request("GET", "http://127.0.0.1:12345/preload")
+            response = urllib.request.urlopen(request)
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError as e:
+        except urllib.error.URLError as e:
             if time.time() > start + 10:
                 raise AssertionError("Webserver didn't come up", e)
             time.sleep(0.5)
@@ -261,14 +262,14 @@ def worker_preload():
             raise AssertionError("Process didn't come up")
         time.sleep(0.5)
     # Make sure we can query the server
-    client = urllib3.PoolManager()
+    request = urllib.request.Request("http://127.0.0.1:12346/preload", method="GET")
     start = time.time()
     while True:
         try:
-            response = client.request("GET", "http://127.0.0.1:12346/preload")
+            response = urllib.request.urlopen(request)
             if response.status == 200:
                 break
-        except urllib3.exceptions.HTTPError as e:
+        except urllib.error.URLError as e:
             if time.time() > start + 10:
                 raise AssertionError("Webserver didn't come up", e)
             time.sleep(0.5)

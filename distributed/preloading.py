@@ -4,12 +4,12 @@ import logging
 import os
 import shutil
 import sys
+import urllib.request
 from importlib import import_module
 from types import ModuleType
 from typing import List
 
 import click
-import urllib3
 
 from dask.utils import tmpfile
 
@@ -123,10 +123,9 @@ def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
 
-    client = urllib3.PoolManager()
-
-    response = client.request("GET", url)
-    source = response.data.decode()
+    request = urllib.request.Request(url, method="GET")
+    response = urllib.request.urlopen(request)
+    source = response.read().decode()
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
