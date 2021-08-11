@@ -84,7 +84,9 @@ env = Environment(
     )
 )
 
-BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
+BOKEH_THEME = Theme(
+    filename=os.path.join(os.path.dirname(__file__), "..", "theme.yaml")
+)
 TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]}
 XLABEL_ORIENTATION = -math.pi / 9  # slanted downwards 20 degrees
 

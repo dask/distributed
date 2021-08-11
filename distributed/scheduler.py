@@ -1409,7 +1409,9 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str
     _exception: object
+    _exception_text: str
     _traceback: object
+    _traceback_text: str
     _exception_blame: object
     _erred_on: set
     _suspicious: Py_ssize_t
@@ -1461,7 +1463,9 @@ class TaskState:
         # Which clients want us
         "_who_wants",
         "_exception",
+        "_exception_text",
         "_traceback",
+        "_traceback_text",
         "_erred_on",
         "_exception_blame",
         "_suspicious",
@@ -1480,6 +1484,7 @@ class TaskState:
         self._run_spec = run_spec
         self._state = None
         self._exception = self._traceback = self._exception_blame = None
+        self._exception_text = self._traceback_text = ""
         self._suspicious = self._retries = 0
         self._nbytes = -1
         self._priority = None
@@ -1598,8 +1603,16 @@ class TaskState:
         return self._exception
 
     @property
+    def exception_text(self):
+        return self._exception_text
+
+    @property
     def traceback(self):
         return self._traceback
+
+    @property
+    def traceback_text(self):
+        return self._traceback_text
 
     @property
     def exception_blame(self):
@@ -2216,7 +2229,7 @@ class SchedulerState:
                 self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                assert not args and not kwargs
+                assert not args and not kwargs, (args, kwargs)
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
@@ -3066,7 +3079,15 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
+        self,
+        key: str,
+        cause: str = None,
+        exception=None,
+        traceback=None,
+        exception_text: str = None,
+        traceback_text: str = None,
+        worker: str = None,
+        **kwargs,
     ):
         ws: WorkerState
         try:
@@ -3092,8 +3113,10 @@ class SchedulerState:
             ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
+                ts._exception_text = exception_text
             if traceback is not None:
                 ts._traceback = traceback
+                ts._traceback_text = traceback_text
             if cause is not None:
                 failing_ts = self._tasks[cause]
                 ts._exception_blame = failing_ts
