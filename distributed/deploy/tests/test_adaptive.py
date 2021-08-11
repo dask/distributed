@@ -16,7 +16,7 @@ from distributed import (
     Worker,
     wait,
 )
-from distributed.compatibility import WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils_test import async_wait_for, clean, gen_test, slowinc
 
@@ -301,8 +301,8 @@ def test_basic_no_loop(loop):
             loop.add_callback(loop.stop)
 
 
-@pytest.mark.flaky(condition=not WINDOWS, reruns=10, reruns_delay=5)
-@pytest.mark.xfail(condition=WINDOWS, reason="extremely flaky")
+@pytest.mark.flaky(condition=LINUX, reruns=10, reruns_delay=5)
+@pytest.mark.xfail(condition=MACOS or WINDOWS, reason="extremely flaky")
 @gen_test()
 async def test_target_duration():
     with dask.config.set(
