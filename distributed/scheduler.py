@@ -1640,16 +1640,11 @@ class TaskState:
         return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
-        color = (
-            "var(--jp-error-color0, red)"
-            if self._state == "erred"
-            else "var(--jp-ui-font-color0, black)"
+        return get_template("task_state.html.j2").render(
+            state=self._state,
+            nbytes=self._nbytes,
+            key=self._key,
         )
-        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
-        if self._state == "memory":
-            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
-        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
-        return text
 
     @ccall
     def validate(self):
