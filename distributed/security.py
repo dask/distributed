@@ -181,7 +181,7 @@ class Security:
                 if isinstance(val, str) and "\n" in val:
                     location[k] = "Temporary (In-memory)"
                 else:
-                    location[k] = f"Local ({val})"
+                    location[k] = f"Local ({os.path.abspath(val)})"
 
         rows = ""
 
