@@ -59,7 +59,7 @@ async def test_specification():
             assert result == 11
 
         for name in cluster.workers:
-            assert cluster.workers[name].name == str(name)
+            assert cluster.workers[name].name == name
 
 
 def test_spec_sync(loop):
