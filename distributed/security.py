@@ -169,17 +169,23 @@ class Security:
     def _repr_html_(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
+        keys.remove("require_encryption")
 
-        attr = {}
+        encryption = "Required" if self.require_encryption else "Optional"
+
+        location = {}
 
         for k in keys:
             val = getattr(self, k)
             if val is not None:
-                attr[k] = "<br />".join(repr(val).split("\\n"))
+                if isinstance(val, str) and "\n" in val:
+                    location[k] = "Temporary (In-memory)"
+                else:
+                    location[k] = f"Local ({val})"
 
         rows = ""
 
-        for key, val in attr.items():
+        for key, val in location.items():
             rows += f"""
             <tr>
                 <th style="text-align: left; width: 150px;">{key}</th>
@@ -192,6 +198,10 @@ class Security:
             <h3 style="margin-bottom: 0px;">Distributed Security</h3>
             <p>
                 <table style="width: 100%;">
+                <tr>
+                    <th style="text-align: left; width: 150px;">Encryption</th>
+                    <td style="text-align: left;">{encryption}</td>
+                </tr>
                 {rows}
                 </table>
             </p>
