@@ -1341,51 +1341,6 @@ async def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     assert not any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
 
 
-@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
-)
-async def test_prefer_gather_from_local_address_unless_busy(c, s, w1, w2, w3):
-    x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
-
-    # Set up w1 to be busy
-    w1.outgoing_current_count = 10000000
-
-    y = c.submit(inc, x, workers=[w2.address])
-    await wait(y)
-
-    assert not any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
-    assert any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
-
-
-@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster(
-    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 1), ("127.0.0.2", 1)], client=True
-)
-async def test_prefer_gather_from_local_address_unless_busy_allows_reset(
-    c, s, w1, w2, w3
-):
-    x = await c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
-
-    # Set up both to be busy, ensuring multiple loops run
-    w1.outgoing_current_count = 10000000
-    w3.outgoing_current_count = 10000000
-
-    y = c.submit(inc, x, workers=[w2.address])
-    with pytest.raises(TimeoutError):
-        await wait(y, timeout=1.0)
-
-    assert w1.address in w2.busy_workers
-    assert w3.address in w2.busy_workers
-
-    # Un-block, ensure they use the one that was unblocked
-    w1.outgoing_current_count = 0
-    await wait(y)
-
-    assert any(d["who"] == w2.address for d in w1.outgoing_transfer_log)
-    assert not any(d["who"] == w2.address for d in w3.outgoing_transfer_log)
-
-
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 20,
