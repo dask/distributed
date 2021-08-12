@@ -105,6 +105,8 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     # There's no direct API to get the address of a memoryview,
     # so we use a trick through ctypes and the buffer protocol:
     # https://mattgwwalker.wordpress.com/2020/10/15/address-of-a-buffer-in-python/
+    one_byte_carr = ctypes.c_byte * 1
+    # ^ length and type don't matter, just use it to get the address of the first byte
 
     if not mvs:
         return memoryview(bytearray(0))
@@ -113,35 +115,39 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
 
     first = mvs[0]
     obj = first.obj
-    itemsize = first.itemsize
     format = first.format
-    strides = first.strides
-    assert all(
-        mv.contiguous
-        and mv.obj is obj
-        and mv.strides == strides
-        and mv.ndim == 1
-        and mv.format == format
-        for mv in mvs[1:]
-    )
 
-    one_byte_carr = ctypes.c_byte * 1
-    # ^ length and type don't matter, just use it to get the address of the first byte
     first_start_addr = 0
-    n = 0
-    for mv in mvs:
+    nbytes = 0
+    for i, mv in enumerate(mvs):
+        if mv.nbytes == 0:
+            continue
+
+        assert mv.obj is obj, f"{i}: memoryview has different buffer: {mv.obj} vs {obj}"
+        assert mv.contiguous, f"{i}: memoryview non-contiguous"
+        assert mv.ndim == 1, f"{i}: memoryview has {mv.ndim} dimensions, not 1"
+        assert mv.format == format, f"{i}: inconsistent format: {mv.format} vs {format}"
+
         start_addr = ctypes.addressof(one_byte_carr.from_buffer(mv))
         if first_start_addr == 0:
             first_start_addr = start_addr
         else:
-            assert start_addr == first_start_addr + n * itemsize
-        n += len(mv)  # works because `mv` is 1D
+            expected_addr = first_start_addr + nbytes
+            assert start_addr == expected_addr, (
+                f"memoryview {i} does not start where the previous ends. "
+                f"Expected {expected_addr:x}, starts {start_addr - expected_addr} byte(s) away."
+            )
+        nbytes += mv.nbytes
 
-    base_mv = memoryview(obj).cast(format)
-    assert base_mv.itemsize == itemsize
-    assert base_mv.strides == strides
+    if nbytes == 0:
+        # all memoryviews were zero-length
+        assert len(first) == 0
+        return first
+
+    assert first_start_addr != 0, "Underlying buffer is null pointer?!"
+
+    base_mv = memoryview(obj).cast("B")
     base_start_addr = ctypes.addressof(one_byte_carr.from_buffer(base_mv))
-    start_index, remainder = divmod(first_start_addr - base_start_addr, itemsize)
-    assert remainder == 0
+    start_index = first_start_addr - base_start_addr
 
-    return base_mv[start_index : start_index + n]
+    return base_mv[start_index : start_index + nbytes].cast(format)
