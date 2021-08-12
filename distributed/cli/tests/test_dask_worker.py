@@ -6,8 +6,8 @@ from click.testing import CliRunner
 pytest.importorskip("requests")
 
 import os
-from multiprocessing import cpu_count
 import socket
+from multiprocessing import cpu_count
 from time import sleep
 
 import requests
