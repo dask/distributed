@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import importlib
 import traceback
 from array import array
 from enum import Enum
 from functools import partial
+from typing import Sequence
 
 import msgpack
 
@@ -465,13 +468,82 @@ def merge_and_deserialize(header, frames, deserializers=None):
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
-        for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
-            if n == 1:
-                merged_frames.append(frames[offset])
-            else:
-                merged_frames.append(bytearray().join(frames[offset : offset + n]))
+        merged_frames = [
+            merge_subframes(frames[offset : offset + n])
+            for n, offset in zip(
+                header["split-num-sub-frames"], header["split-offsets"]
+            )
+        ]
 
     return deserialize(header, merged_frames, deserializers=deserializers)
+
+
+def merge_subframes(
+    subframes: list[memoryview | bytearray | bytes],
+) -> memoryview | bytearray | bytes:
+    """Merge a list of frames into one buffer.
+    If all frames are memoryviews backed by the same underlying buffer,
+    this is zero-copy.
+    Otherwise, all frames are copied into a new contiguous bytearray.
+    See Also
+    --------
+    merge_and_deserialize
+    """
+    if len(subframes) == 1:
+        return subframes[0]
+
+    if subframes:
+        first = subframes[0]
+        if isinstance(first, memoryview) and first.contiguous:
+            try:
+                return merge_memoryviews(subframes)
+            except AssertionError:
+                pass
+
+    return bytearray().join(subframes)
+
+
+def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
+    import numpy as np  # TODO handle import error?
+
+    if not mvs:
+        return memoryview(bytearray(0))
+    if len(mvs) == 1:
+        return mvs[0]
+
+    first = mvs[0]
+    obj = first.obj
+    itemsize = first.itemsize
+    format = first.format
+    strides = first.strides
+    assert all(
+        mv.contiguous
+        and mv.obj is obj
+        and mv.strides == strides
+        and mv.ndim == 1
+        and mv.format == format
+        for mv in mvs[1:]
+    )
+
+    first_start_addr = 0
+    n = 0
+    for mv in mvs:
+        arr = np.asarray(mv)
+        start_addr = arr.__array_interface__["data"][0]
+        if first_start_addr == 0:
+            first_start_addr = start_addr
+        else:
+            assert start_addr == first_start_addr + n * itemsize
+        n += arr.size
+
+    base_mv = memoryview(obj).cast(format)
+    assert base_mv.itemsize == itemsize
+    assert base_mv.strides == strides
+    base_start_addr = np.asarray(base_mv).__array_interface__["data"][0]
+    start_offset, remainder = divmod(first_start_addr - base_start_addr, itemsize)
+    assert remainder == 0
+
+    return base_mv[start_offset : start_offset + n]
 
 
 class Serialize:
