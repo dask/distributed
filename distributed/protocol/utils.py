@@ -1,3 +1,4 @@
+import ctypes
 import struct
 from typing import Sequence
 
@@ -84,76 +85,63 @@ def unpack_frames(b):
     return frames
 
 
-try:
-    import numpy as np
-except ImportError:
+def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
+    """
+    Zero-copy "concatenate" a sequence of contiguous memoryviews.
 
-    import warnings
+    Returns a new memoryview which slices into the underlying buffer
+    to extract out the portion equivalent to all of ``mvs`` being concatenated.
 
-    warnings.warn(
-        "Some data transfer may be less memory-efficient because NumPy is not installed."
+    All the memoryviews must:
+    * Share the same underlying buffer (``.obj``)
+    * When merged, cover a continuous portion of that buffer with no gaps
+    * Have the same strides
+    * Be 1-dimensional
+    * Have the same format
+    * Be contiguous
+    """
+    # NOTE: this method relies on pointer arithmetic to figure out
+    # where each memoryview starts within the underlying buffer.
+    # There's no direct API to get the address of a memoryview,
+    # so we use a trick through ctypes and the buffer protocol:
+    # https://mattgwwalker.wordpress.com/2020/10/15/address-of-a-buffer-in-python/
+
+    if not mvs:
+        return memoryview(bytearray(0))
+    if len(mvs) == 1:
+        return mvs[0]
+
+    first = mvs[0]
+    obj = first.obj
+    itemsize = first.itemsize
+    format = first.format
+    strides = first.strides
+    assert all(
+        mv.contiguous
+        and mv.obj is obj
+        and mv.strides == strides
+        and mv.ndim == 1
+        and mv.format == format
+        for mv in mvs[1:]
     )
 
-    def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
-        """Concatenate a sequence of memoryviews via copy"""
-        return memoryview(bytearray().join(mvs))
+    one_byte_carr = ctypes.c_byte * 1
+    # ^ length and type don't matter, just use it to get the address of the first byte
+    first_start_addr = 0
+    n = 0
+    for mv in mvs:
+        start_addr = ctypes.addressof(one_byte_carr.from_buffer(mv))
+        if first_start_addr == 0:
+            first_start_addr = start_addr
+        else:
+            assert start_addr == first_start_addr + n * itemsize
+        n += len(mv)  # works because `mv` is 1D
 
+    base_mv = memoryview(obj).cast(format)
+    assert base_mv.itemsize == itemsize
+    assert base_mv.strides == strides
+    base_start_addr = ctypes.addressof(one_byte_carr.from_buffer(base_mv))
+    start_index, remainder = divmod(first_start_addr - base_start_addr, itemsize)
+    assert remainder == 0
 
-else:
-
-    def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
-        """
-        Zero-copy "concatenate" a sequence of contiguous memoryviews.
-
-        Returns a new memoryview which slices into the underlying buffer
-        to extract out the portion equivalent to all of ``mvs`` being concatenated.
-
-        All the memoryviews must:
-        * Share the same underlying buffer (``.obj``)
-        * When merged, cover a continuous portion of that buffer with no gaps
-        * Have the same strides
-        * Be 1-dimensional
-        * Have the same format
-        * Be contiguous
-
-        Note: This requires NumPy to get the underlying pointers of the memoryview
-        objects via the buffer interface, since there is no API exposed to do so.
-        """
-        if not mvs:
-            return memoryview(bytearray(0))
-        if len(mvs) == 1:
-            return mvs[0]
-
-        first = mvs[0]
-        obj = first.obj
-        itemsize = first.itemsize
-        format = first.format
-        strides = first.strides
-        assert all(
-            mv.contiguous
-            and mv.obj is obj
-            and mv.strides == strides
-            and mv.ndim == 1
-            and mv.format == format
-            for mv in mvs[1:]
-        )
-
-        first_start_addr = 0
-        n = 0
-        for mv in mvs:
-            arr = np.asarray(mv)
-            start_addr = arr.__array_interface__["data"][0]
-            if first_start_addr == 0:
-                first_start_addr = start_addr
-            else:
-                assert start_addr == first_start_addr + n * itemsize
-            n += arr.size
-
-        base_mv = memoryview(obj).cast(format)
-        assert base_mv.itemsize == itemsize
-        assert base_mv.strides == strides
-        base_start_addr = np.asarray(base_mv).__array_interface__["data"][0]
-        start_index, remainder = divmod(first_start_addr - base_start_addr, itemsize)
-        assert remainder == 0
-
-        return base_mv[start_index : start_index + n]
+    return base_mv[start_index : start_index + n]
