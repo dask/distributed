@@ -195,7 +195,7 @@ class Security:
 
         html = f"""
         <div style="margin-left: auto;">
-            <h3 style="margin-bottom: 0px;">Distributed Security</h3>
+            <h3 style="margin-bottom: 0px;"><b>Security</b></h3>
             <p>
                 <table style="width: 100%;">
                 <tr>
