@@ -5,7 +5,6 @@ import traceback
 from array import array
 from enum import Enum
 from functools import partial
-from typing import Sequence
 
 import msgpack
 
@@ -15,7 +14,13 @@ from dask.base import normalize_token
 from ..utils import ensure_bytes, has_keyword, typename
 from . import pickle
 from .compression import decompress, maybe_compress
-from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
+from .utils import (
+    frame_split_size,
+    merge_memoryviews,
+    msgpack_opts,
+    pack_frames_prelude,
+    unpack_frames,
+)
 
 lazy_registrations = {}
 
@@ -501,49 +506,6 @@ def merge_subframes(
                 pass
 
     return bytearray().join(subframes)
-
-
-def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
-    import numpy as np  # TODO handle import error?
-
-    if not mvs:
-        return memoryview(bytearray(0))
-    if len(mvs) == 1:
-        return mvs[0]
-
-    first = mvs[0]
-    obj = first.obj
-    itemsize = first.itemsize
-    format = first.format
-    strides = first.strides
-    assert all(
-        mv.contiguous
-        and mv.obj is obj
-        and mv.strides == strides
-        and mv.ndim == 1
-        and mv.format == format
-        for mv in mvs[1:]
-    )
-
-    first_start_addr = 0
-    n = 0
-    for mv in mvs:
-        arr = np.asarray(mv)
-        start_addr = arr.__array_interface__["data"][0]
-        if first_start_addr == 0:
-            first_start_addr = start_addr
-        else:
-            assert start_addr == first_start_addr + n * itemsize
-        n += arr.size
-
-    base_mv = memoryview(obj).cast(format)
-    assert base_mv.itemsize == itemsize
-    assert base_mv.strides == strides
-    base_start_addr = np.asarray(base_mv).__array_interface__["data"][0]
-    start_offset, remainder = divmod(first_start_addr - base_start_addr, itemsize)
-    assert remainder == 0
-
-    return base_mv[start_offset : start_offset + n]
 
 
 class Serialize:
