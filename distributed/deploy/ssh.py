@@ -45,6 +45,9 @@ class Process(ProcessInterface):
     def __repr__(self):
         return f"<SSH {type(self).__name__}: status={self.status}>"
 
+    def _repr_html_(self):
+        return super()._repr_html_()
+
 
 class Worker(Process):
     """A Remote Dask Worker controled by SSH

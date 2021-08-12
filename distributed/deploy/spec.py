@@ -125,7 +125,7 @@ class ProcessInterface:
                 position: absolute;"
             ></div>
             <div style="margin-left: 48px">
-                <h3 style="margin-bottom: 0px">Process Interface</h3>
+                <h3 style="margin-bottom: 0px">{self.__class__.__name__}</h3>
                 <p style="color: #9d9d9d; margin-bottom: 0px">Status: {status}</p>
             </div>
             <p>
