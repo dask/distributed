@@ -99,6 +99,8 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     * Be 1-dimensional
     * Have the same format
     * Be contiguous
+
+    Raises ValueError if these conditions are not met.
     """
     # NOTE: this method relies on pointer arithmetic to figure out
     # where each memoryview starts within the underlying buffer.
@@ -123,20 +125,25 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
         if mv.nbytes == 0:
             continue
 
-        assert mv.obj is obj, f"{i}: memoryview has different buffer: {mv.obj} vs {obj}"
-        assert mv.contiguous, f"{i}: memoryview non-contiguous"
-        assert mv.ndim == 1, f"{i}: memoryview has {mv.ndim} dimensions, not 1"
-        assert mv.format == format, f"{i}: inconsistent format: {mv.format} vs {format}"
+        if mv.obj is not obj:
+            raise ValueError(f"{i}: memoryview has different buffer: {mv.obj} vs {obj}")
+        if not mv.contiguous:
+            raise ValueError(f"{i}: memoryview non-contiguous")
+        if mv.ndim != 1:
+            raise ValueError(f"{i}: memoryview has {mv.ndim} dimensions, not 1")
+        if mv.format != format:
+            raise ValueError(f"{i}: inconsistent format: {mv.format} vs {format}")
 
         start_addr = ctypes.addressof(one_byte_carr.from_buffer(mv))
         if first_start_addr == 0:
             first_start_addr = start_addr
         else:
             expected_addr = first_start_addr + nbytes
-            assert start_addr == expected_addr, (
-                f"memoryview {i} does not start where the previous ends. "
-                f"Expected {expected_addr:x}, starts {start_addr - expected_addr} byte(s) away."
-            )
+            if start_addr != expected_addr:
+                raise ValueError(
+                    f"memoryview {i} does not start where the previous ends. "
+                    f"Expected {expected_addr:x}, starts {start_addr - expected_addr} byte(s) away."
+                )
         nbytes += mv.nbytes
 
     if nbytes == 0:

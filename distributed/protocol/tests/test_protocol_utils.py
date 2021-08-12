@@ -66,31 +66,29 @@ class TestMergeMemroyviews:
         base_mv = memoryview(base)
 
         parts = [base_mv[s] for s in slices]
-        with pytest.raises(
-            AssertionError, match="does not start where the previous ends"
-        ):
+        with pytest.raises(ValueError, match="does not start where the previous ends"):
             merge_memoryviews(parts)
 
     def test_catch_different_buffer(self):
         base = bytearray(range(8))
         base_mv = memoryview(base)
-        with pytest.raises(AssertionError, match="different buffer"):
+        with pytest.raises(ValueError, match="different buffer"):
             merge_memoryviews([base_mv, memoryview(base.copy())])
 
     def test_catch_different_non_contiguous(self):
         base = bytearray(range(8))
         base_mv = memoryview(base)[::-1]
-        with pytest.raises(AssertionError, match="non-contiguous"):
+        with pytest.raises(ValueError, match="non-contiguous"):
             merge_memoryviews([base_mv[:3], base_mv[3:]])
 
     def test_catch_multidimensional(self):
         base = bytearray(range(6))
         base_mv = memoryview(base).cast("B", [3, 2])
-        with pytest.raises(AssertionError, match="has 2 dimensions, not 1"):
+        with pytest.raises(ValueError, match="has 2 dimensions, not 1"):
             merge_memoryviews([base_mv[:1], base_mv[1:]])
 
     def test_catch_different_formats(self):
         base = bytearray(range(8))
         base_mv = memoryview(base)
-        with pytest.raises(AssertionError, match="inconsistent format: I vs B"):
+        with pytest.raises(ValueError, match="inconsistent format: I vs B"):
             merge_memoryviews([base_mv[:4], base_mv[4:].cast("I")])

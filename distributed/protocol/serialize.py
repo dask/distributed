@@ -502,7 +502,7 @@ def merge_subframes(
         if isinstance(first, memoryview) and first.contiguous:
             try:
                 return merge_memoryviews(subframes)
-            except AssertionError:
+            except ValueError:
                 pass
 
     return bytearray().join(subframes)
