@@ -70,7 +70,10 @@ applications = {
     "/individual-bandwidth-types": individual_doc(BandwidthTypes, 500),
     "/individual-bandwidth-workers": individual_doc(BandwidthWorkers, 500),
     "/individual-workers-network-bandwidth": individual_doc(
-        WorkerNetworkBandwidth, 500
+        WorkerNetworkBandwidth, 500, fig_attr="bandwidth"
+    ),
+    "/individual-workers-disk": individual_doc(
+        WorkerNetworkBandwidth, 500, fig_attr="disk"
     ),
     "/individual-workers-network-bandwidth-timeseries": individual_doc(
         SystemTimeseries, 500, fig_attr="bandwidth"

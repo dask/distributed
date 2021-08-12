@@ -737,9 +737,12 @@ class WorkerNetworkBandwidth(DashboardComponent):
                     "y_write": [],
                     "x_read": [],
                     "x_write": [],
+                    "x_read_disk": [],
+                    "x_write_disk": [],
                 }
             )
-            self.root = figure(
+
+            self.bandwidth = figure(
                 title="Worker Network Bandwidth",
                 tools="",
                 id="bk-worker-net-bandwidth",
@@ -748,7 +751,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             )
 
             # read_bytes
-            self.root.hbar(
+            self.bandwidth.hbar(
                 y="y_read",
                 right="x_read",
                 line_color=None,
@@ -760,7 +763,7 @@ class WorkerNetworkBandwidth(DashboardComponent):
             )
 
             # write_bytes
-            self.root.hbar(
+            self.bandwidth.hbar(
                 y="y_write",
                 right="x_write",
                 line_color=None,
@@ -771,14 +774,55 @@ class WorkerNetworkBandwidth(DashboardComponent):
                 source=self.source,
             )
 
-            self.root.axis[0].ticker = BasicTicker(**TICKS_1024)
-            self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
-            self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
-            self.root.xaxis.minor_tick_line_alpha = 0
-            self.root.x_range = Range1d(start=0)
-            self.root.yaxis.visible = False
-            self.root.ygrid.visible = False
-            self.root.toolbar_location = None
+            self.bandwidth.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.bandwidth.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.bandwidth.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.bandwidth.xaxis.minor_tick_line_alpha = 0
+            self.bandwidth.x_range = Range1d(start=0)
+            self.bandwidth.yaxis.visible = False
+            self.bandwidth.ygrid.visible = False
+            self.bandwidth.toolbar_location = None
+
+            self.disk = figure(
+                title="Workers Disk",
+                tools="",
+                id="bk-workers-disk",
+                name="worker_disk",
+                **kwargs,
+            )
+
+            # read_bytes_disk
+            self.disk.hbar(
+                y="y_read",
+                right="x_read_disk",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="red",
+                legend_label="read",
+                source=self.source,
+            )
+
+            # write_bytes_disk
+            self.disk.hbar(
+                y="y_write",
+                right="x_write_disk",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="blue",
+                legend_label="write",
+                source=self.source,
+            )
+
+            self.disk.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.disk.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.disk.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.disk.xaxis.minor_tick_line_alpha = 0
+            self.disk.x_range = Range1d(start=0)
+            self.disk.yaxis.visible = False
+            self.disk.ygrid.visible = False
+            self.disk.toolbar_location = None
 
     @without_property_validation
     def update(self):
@@ -791,16 +835,27 @@ class WorkerNetworkBandwidth(DashboardComponent):
 
             x_read = []
             x_write = []
+            x_read_disk = []
+            x_write_disk = []
 
             for ws in workers:
                 x_read.append(ws.metrics["read_bytes"])
                 x_write.append(ws.metrics["write_bytes"])
+                x_read_disk.append(ws.metrics["read_bytes_disk"])
+                x_write_disk.append(ws.metrics["write_bytes_disk"])
 
-            self.root.x_range.end = max(
+            self.bandwidth.x_range.end = max(
                 max(x_read),
                 max(x_write),
                 100_000_000,
-                0.95 * self.root.x_range.end,
+                0.95 * self.bandwidth.x_range.end,
+            )
+
+            self.disk.x_range.end = max(
+                max(x_read_disk),
+                max(x_write_disk),
+                100_000_000,
+                0.95 * self.disk.x_range.end,
             )
 
             result = {
@@ -808,6 +863,8 @@ class WorkerNetworkBandwidth(DashboardComponent):
                 "y_write": y_write,
                 "x_read": x_read,
                 "x_write": x_write,
+                "x_read_disk": x_read_disk,
+                "x_write_disk": x_write_disk,
             }
 
             update(self.source, result)

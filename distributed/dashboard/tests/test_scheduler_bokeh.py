@@ -507,6 +507,8 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     for idx, ws in enumerate(s.workers.values()):
         assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
         assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
+        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
 
 
 @gen_cluster(client=True)
