@@ -367,28 +367,19 @@ class SpecCluster(Cluster):
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
-            scheduler_name = self.scheduler_info["workers"][msg]["name"]
-            cluster_name = scheduler_name
-
-            if isinstance(cluster_name, str):
-                if "-" in cluster_name:
-                    cluster_name = int(cluster_name.split("-")[0])
-                else:
-                    cluster_name = int(cluster_name)
+            name = self.scheduler_info["workers"][msg]["name"]
 
             def f():
                 if (
-                    cluster_name in self.workers
+                    name in self.workers
                     and msg not in self.scheduler_info["workers"]
                     and not any(
-                        d["name"] == scheduler_name
+                        d["name"] == name
                         for d in self.scheduler_info["workers"].values()
                     )
                 ):
-                    self._futures.add(
-                        asyncio.ensure_future(self.workers[cluster_name].close())
-                    )
-                    del self.workers[cluster_name]
+                    self._futures.add(asyncio.ensure_future(self.workers[name].close()))
+                    del self.workers[name]
 
             delay = parse_timedelta(
                 dask.config.get("distributed.deploy.lost-worker-timeout")
