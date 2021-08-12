@@ -38,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from . import preloading, profile
 from . import versions as version_module
@@ -81,7 +82,6 @@ from .utils import (
 from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
 from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from .variable import VariableExtension
-from .widgets import get_template
 
 try:
     from cython import compiled

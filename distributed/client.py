@@ -39,6 +39,7 @@ from dask.utils import (
     parse_timedelta,
     stringify,
 )
+from dask.widgets import get_template
 
 try:
     from dask.delayed import single_key
@@ -95,7 +96,6 @@ from .utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from .widgets import get_template
 from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)

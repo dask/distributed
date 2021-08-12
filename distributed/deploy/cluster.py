@@ -10,11 +10,11 @@ from tornado.ioloop import PeriodicCallback
 
 import dask.config
 from dask.utils import _deprecated, format_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from ..core import Status
 from ..objects import SchedulerInfo
 from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
-from ..widgets import get_template
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)

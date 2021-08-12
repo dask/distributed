@@ -36,7 +36,7 @@
 <summary style="margin-bottom": 20px><h4 style="display:inline">Task Groups</h4></summary>
 <ul>
 {% for gr in groups %}
-    <li> {{ gr._repr_html_() }} </li>
+    <li> {{ gr.__repr__() | html_escape }} </li>
 {% endfor %}
 </ul>
 </details>
