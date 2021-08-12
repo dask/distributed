@@ -309,9 +309,7 @@ def test_contact_listen_address(loop, nanny, listen_address):
 
 @pytest.mark.skipif(not socket.has_ipv6, reason="Needs IPv6 support to test")
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-@pytest.mark.parametrize(
-    "listen_address", ["tcp://:39838", "tcp://[::1]:39838"]
-)
+@pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
 def test_listen_address_ipv6(loop, nanny, listen_address):
     with popen(["dask-scheduler", "--no-dashboard"]):
         with popen(
@@ -335,9 +333,11 @@ def test_listen_address_ipv6(loop, nanny, listen_address):
                     sleep(0.1)
                 info = client.scheduler_info()
                 assert expected_name in info["workers"]
-                assert client.submit(lambda x: x+1, 10).result() == 11
+                assert client.submit(lambda x: x + 1, 10).result() == 11
+
                 def func(dask_worker):
                     return dask_worker.listener.listen_address
+
                 assert client.run(func) == {expected_name: expected_listen}
 
 
