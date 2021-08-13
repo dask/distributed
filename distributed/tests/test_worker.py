@@ -2454,6 +2454,73 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
+@gen_cluster(client=True)
+async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
+    """
+    Ensure that a reconnecting worker does not break the scheduler regardless of
+    what state the keys of the worker are in when it connects back
+
+    See also test_worker_reconnects_mid_compute which uses a smaller chain of
+    tasks and does not release f1 in between
+    """
+
+    with captured_logger("distributed.scheduler") as s_logs:
+        # Let's put one task in memory to ensure the reconnect has tasks in
+        # different states
+        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
+        f2 = c.submit(sum, f1, workers=[a.address], allow_other_workers=True)
+        a_address = a.address
+
+        a.periodic_callbacks["heartbeat"].stop()
+        await a.heartbeat()
+        a.heartbeat_active = True
+
+        from distributed import Lock
+
+        def fast_on_a(lock):
+            w = get_worker()
+            import time
+
+            if w.address != a_address:
+                lock.acquire()
+            else:
+                time.sleep(1)
+
+        lock = Lock()
+        # We want to be sure that A is the only one computing this result
+        async with lock:
+
+            f3 = c.submit(
+                fast_on_a, lock, workers=[a.address], allow_other_workers=True
+            )
+
+            while f3.key not in a.tasks:
+                await asyncio.sleep(0.01)
+
+            await s.stream_comms[a.address].close()
+            f1.release()
+            assert len(s.workers) == 1
+            while s.tasks[f1.key].state != "released":
+                await asyncio.sleep(0)
+            a.heartbeat_active = False
+            await a.heartbeat()
+            assert len(s.workers) == 2
+            # Since B is locked, this is ensured to originate from A
+            await f3
+
+    assert "Unexpected worker completed task" in s_logs.getvalue()
+
+    while not len(s.tasks[f2.key].who_has) == 2:
+        await asyncio.sleep(0.001)
+
+    for ts in s.tasks.values():
+        assert isinstance(ts.type, type)
+
+    del f1, f2, f3
+    while any(w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_forget_dependents_after_release(c, s, a):
 
