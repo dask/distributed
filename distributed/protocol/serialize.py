@@ -469,43 +469,29 @@ def merge_and_deserialize(header, frames, deserializers=None):
     deserialize
     serialize_and_split
     """
-    merged_frames = []
     if "split-num-sub-frames" not in header:
         merged_frames = frames
     else:
-        merged_frames = [
-            merge_subframes(frames[offset : offset + n])
-            for n, offset in zip(
-                header["split-num-sub-frames"], header["split-offsets"]
-            )
-        ]
+        merged_frames = []
+        for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
+            if n == 0:
+                merged = bytearray(0)
+            elif n == 1:
+                merged = frames[offset]
+            else:
+                subframes = frames[offset : offset + n]
+                first = subframes[0]
+                if isinstance(first, memoryview) and first.contiguous:
+                    try:
+                        merged = merge_memoryviews(subframes)
+                    except ValueError:
+                        merged = bytearray().join(subframes)
+                else:
+                    merged = bytearray().join(subframes)
+
+            merged_frames.append(merged)
 
     return deserialize(header, merged_frames, deserializers=deserializers)
-
-
-def merge_subframes(
-    subframes: list[memoryview | bytearray | bytes],
-) -> memoryview | bytearray | bytes:
-    """Merge a list of frames into one buffer.
-    If all frames are memoryviews backed by the same underlying buffer,
-    this is zero-copy.
-    Otherwise, all frames are copied into a new contiguous bytearray.
-    See Also
-    --------
-    merge_and_deserialize
-    """
-    if len(subframes) == 1:
-        return subframes[0]
-
-    if subframes:
-        first = subframes[0]
-        if isinstance(first, memoryview) and first.contiguous:
-            try:
-                return merge_memoryviews(subframes)
-            except ValueError:
-                pass
-
-    return bytearray().join(subframes)
 
 
 class Serialize:
