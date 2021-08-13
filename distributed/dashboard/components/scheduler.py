@@ -919,16 +919,17 @@ class SystemTimeseries(DashboardComponent):
                 x="time",
                 y="read_bytes",
                 color="red",
-                legend_label="read (sum)",
+                legend_label="read (mean)",
             )
             self.bandwidth.line(
                 source=self.source,
                 x="time",
                 y="write_bytes",
                 color="blue",
-                legend_label="write (sum)",
+                legend_label="write (mean)",
             )
 
+            self.bandwidth.legend.location = "top_left"
             self.bandwidth.yaxis.axis_label = "bytes / second"
             self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.bandwidth.y_range.start = 0
@@ -991,16 +992,17 @@ class SystemTimeseries(DashboardComponent):
                 x="time",
                 y="read_bytes_disk",
                 color="red",
-                legend_label="read (sum)",
+                legend_label="read (mean)",
             )
             self.disk.line(
                 source=self.source,
                 x="time",
                 y="write_bytes_disk",
                 color="blue",
-                legend_label="write (sum)",
+                legend_label="write (mean)",
             )
 
+            self.disk.legend.location = "top_left"
             self.disk.yaxis.axis_label = "bytes / second"
             self.disk.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
             self.disk.y_range.start = 0
