@@ -169,10 +169,11 @@ class Security:
                 else:
                     location[k] = val
 
-        return "Security\n" + ", ".join(
-            f"{key}={value}" for key, value in location.items()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in location.items())
+            + ")"
         )
-        # return location
 
     def _repr_html_(self):
         keys = sorted(self.__slots__)
