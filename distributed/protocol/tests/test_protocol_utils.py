@@ -54,6 +54,9 @@ class TestMergeMemroyviews:
         assert result == equiv
 
     def test_readonly_buffer(self):
+        pytest.importorskip(
+            "numpy", reason="Read-only buffer zero-copy merging requires NumPy"
+        )
         base = bytes(range(10))
         base_mv = memoryview(base)
 
