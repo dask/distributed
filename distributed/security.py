@@ -156,15 +156,23 @@ class Security:
     def __repr__(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
-        items = []
+
+        location = {}
+
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
+                    location[k] = "Temporary (In-memory)"
+                elif isinstance(val, str):
+                    location[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
+                    location[k] = val
+
+        return "Security\n" + ", ".join(
+            f"{key}={value}" for key, value in location.items()
+        )
+        # return location
 
     def _repr_html_(self):
         keys = sorted(self.__slots__)
