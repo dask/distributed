@@ -169,6 +169,7 @@ def test_interface(loop):
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
 
 
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
