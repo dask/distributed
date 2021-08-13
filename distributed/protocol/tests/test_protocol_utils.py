@@ -53,6 +53,15 @@ class TestMergeMemroyviews:
         assert len(result) == len(equiv)
         assert result == equiv
 
+    def test_readonly_buffer(self):
+        base = bytes(range(10))
+        base_mv = memoryview(base)
+
+        result = merge_memoryviews([base_mv[:4], base_mv[4:]])
+        assert result.obj is base
+        assert len(result) == len(base)
+        assert result == base
+
     @pytest.mark.parametrize(
         "slices",
         [

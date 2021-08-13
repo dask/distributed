@@ -102,14 +102,6 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
 
     Raises ValueError if these conditions are not met.
     """
-    # NOTE: this method relies on pointer arithmetic to figure out
-    # where each memoryview starts within the underlying buffer.
-    # There's no direct API to get the address of a memoryview,
-    # so we use a trick through ctypes and the buffer protocol:
-    # https://mattgwwalker.wordpress.com/2020/10/15/address-of-a-buffer-in-python/
-    one_byte_carr = ctypes.c_byte * 1
-    # ^ length and type don't matter, just use it to get the address of the first byte
-
     if not mvs:
         return memoryview(bytearray(0))
     if len(mvs) == 1:
@@ -134,7 +126,7 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
         if mv.format != format:
             raise ValueError(f"{i}: inconsistent format: {mv.format} vs {format}")
 
-        start_addr = ctypes.addressof(one_byte_carr.from_buffer(mv))
+        start_addr = address_of_memoryview(mv)
         if first_start_addr == 0:
             first_start_addr = start_addr
         else:
@@ -154,7 +146,45 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
     assert first_start_addr != 0, "Underlying buffer is null pointer?!"
 
     base_mv = memoryview(obj).cast("B")
-    base_start_addr = ctypes.addressof(one_byte_carr.from_buffer(base_mv))
+    base_start_addr = address_of_memoryview(base_mv)
     start_index = first_start_addr - base_start_addr
 
     return base_mv[start_index : start_index + nbytes].cast(format)
+
+
+def address_of_memoryview(mv: memoryview) -> int:
+    """
+    Get the pointer to the first byte of a memoryview's data.
+
+    If the memoryview is read-only, NumPy must be installed.
+    """
+    # NOTE: this method relies on pointer arithmetic to figure out
+    # where each memoryview starts within the underlying buffer.
+    # There's no direct API to get the address of a memoryview,
+    # so we use a trick through ctypes and the buffer protocol:
+    # https://mattgwwalker.wordpress.com/2020/10/15/address-of-a-buffer-in-python/
+    one_byte_carr = ctypes.c_byte * 1
+    # ^ length and type don't matter, just use it to get the address of the first byte
+
+    try:
+        carr = one_byte_carr.from_buffer(mv)
+    except TypeError:
+        # `mv` is read-only. `from_buffer` requires the buffer to be writeable.
+        # See https://bugs.python.org/issue11427 for discussion.
+        # This typically comes from `deserialize_bytes`, where `mv.obj` is an
+        # immutable bytestring.
+        pass
+    else:
+        return ctypes.addressof(carr)
+
+    try:
+        import numpy as np
+    except ImportError:
+        raise ValueError(
+            f"Cannot get address of read-only memoryview {mv} since NumPy is not installed."
+        ) from None
+
+    # NumPy doesn't mind read-only buffers. We could just use this method
+    # for all cases, but it's nice to use the pure-Python method for the common
+    # case of writeable buffers (created by TCP comms, for example).
+    return np.asarray(mv).__array_interface__["data"][0]
