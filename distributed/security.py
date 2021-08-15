@@ -153,44 +153,38 @@ class Security:
             out = dask.config.get(config_name)
         setattr(self, field, out)
 
-    def __repr__(self):
+    def attr_to_dict(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
 
-        items = {}
+        attr = {}
 
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items[k] = "Temporary (In-memory)"
+                    attr[k] = "Temporary (In-memory)"
                 elif isinstance(val, str):
-                    items[k] = f"Local ({os.path.abspath(val)})"
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items[k] = val
+                    attr[k] = val
 
-        return items
+        return attr
+
+    def __repr__(self):
+        attr = self.attr_to_dict()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ")"
+        )
 
     def _repr_html_(self):
-        keys = sorted(self.__slots__)
-        keys.remove("extra_conn_args")
-        keys.remove("require_encryption")
-
-        encryption = "Required" if self.require_encryption else "Optional"
-
-        items = {}
-
-        for k in keys:
-            val = getattr(self, k)
-            if val is not None:
-                if isinstance(val, str) and "\n" in val:
-                    items[k] = "Temporary (In-memory)"
-                else:
-                    items[k] = f"Local ({os.path.abspath(val)})"
+        attr = self.attr_to_dict()
 
         rows = ""
 
-        for key, val in items.items():
+        for key, val in attr.items():
             rows += f"""
             <tr>
                 <th style="text-align: left; width: 150px;">{key}</th>
@@ -203,10 +197,6 @@ class Security:
             <h3 style="margin-bottom: 0px;"><b>Security</b></h3>
             <p>
                 <table style="width: 100%;">
-                <tr>
-                    <th style="text-align: left; width: 150px;">Encryption</th>
-                    <td style="text-align: left;">{encryption}</td>
-                </tr>
                 {rows}
                 </table>
             </p>
