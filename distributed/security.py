@@ -157,23 +157,19 @@ class Security:
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
 
-        location = {}
+        items = {}
 
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    location[k] = "Temporary (In-memory)"
+                    items[k] = "Temporary (In-memory)"
                 elif isinstance(val, str):
-                    location[k] = f"Local ({os.path.abspath(val)})"
+                    items[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    location[k] = val
+                    items[k] = val
 
-        return (
-            "Security("
-            + ", ".join(f"{key}={value}" for key, value in location.items())
-            + ")"
-        )
+        return items
 
     def _repr_html_(self):
         keys = sorted(self.__slots__)
@@ -182,19 +178,19 @@ class Security:
 
         encryption = "Required" if self.require_encryption else "Optional"
 
-        location = {}
+        items = {}
 
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    location[k] = "Temporary (In-memory)"
+                    items[k] = "Temporary (In-memory)"
                 else:
-                    location[k] = f"Local ({os.path.abspath(val)})"
+                    items[k] = f"Local ({os.path.abspath(val)})"
 
         rows = ""
 
-        for key, val in location.items():
+        for key, val in items.items():
             rows += f"""
             <tr>
                 <th style="text-align: left; width: 150px;">{key}</th>
