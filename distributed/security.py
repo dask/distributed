@@ -70,7 +70,7 @@ class Security:
         if require_encryption is None:
             require_encryption = dask.config.get("distributed.comm.require-encryption")
         if require_encryption is None:
-            require_encryption = not not kwargs
+            require_encryption = bool(kwargs)
         self.require_encryption = require_encryption
         self._set_field(kwargs, "tls_ciphers", "distributed.comm.tls.ciphers")
         self._set_field(kwargs, "tls_ca_file", "distributed.comm.tls.ca-file")

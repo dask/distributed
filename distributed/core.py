@@ -666,7 +666,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             typ, exc, tb = clean_exception(**response)
             raise exc.with_traceback(tb)
         else:
-            raise Exception(response["text"])
+            raise Exception(response["exception_text"])
     return response
 
 
@@ -1179,7 +1179,13 @@ def error_message(e, status="error"):
     else:
         tb_result = protocol.to_serialize(tb)
 
-    return {"status": status, "exception": e4, "traceback": tb_result, "text": str(e2)}
+    return {
+        "status": status,
+        "exception": e4,
+        "traceback": tb_result,
+        "exception_text": repr(e2),
+        "traceback_text": "".join(traceback.format_tb(tb)),
+    }
 
 
 def clean_exception(exception, traceback, **kwargs):

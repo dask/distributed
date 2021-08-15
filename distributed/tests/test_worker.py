@@ -7,6 +7,7 @@ import threading
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from contextlib import suppress
 from numbers import Number
 from operator import add
 from time import sleep
@@ -41,6 +42,7 @@ from distributed.scheduler import Scheduler
 from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
+    _LockedCommPool,
     captured_logger,
     dec,
     div,
@@ -340,18 +342,14 @@ def test_error_message():
     max_error_len = 100
     with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
         msg = error_message(RuntimeError("-" * max_error_len))
-        assert len(msg["text"]) <= max_error_len
-        assert len(msg["text"]) < max_error_len * 2
+        assert len(msg["exception_text"]) <= max_error_len + 30
+        assert len(msg["exception_text"]) < max_error_len * 2
         msg = error_message(RuntimeError("-" * max_error_len * 20))
-        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
-        assert len(cut_text) == max_error_len
 
     max_error_len = 1000000
     with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
         msg = error_message(RuntimeError("-" * max_error_len * 2))
-        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
-        assert len(cut_text) == max_error_len
-        assert len(msg["text"]) > 10100  # default + 100
+        assert len(msg["exception_text"]) > 10100  # default + 100
 
 
 @gen_cluster(client=True)
@@ -2015,33 +2013,36 @@ def kill_process():
     import os
     import signal
 
-    os.kill(os.getpid(), signal.SIGTERM)
+    if WINDOWS:
+        # There's no SIGKILL on Windows
+        sig = signal.SIGTERM
+    else:
+        # With SIGTERM there may be several seconds worth of delay before the worker
+        # actually shuts down - particularly on slow CI. Use SIGKILL for instant
+        # termination.
+        sig = signal.SIGKILL
+
+    os.kill(os.getpid(), sig)
+    sleep(60)  # Cope with non-instantaneous termination
 
 
-@gen_cluster(client=True)
-async def test_process_executor_kills_process(c, s, a, b):
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_process_executor_kills_process(c, s, a):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
-        b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(kill_process)
 
-        with pytest.raises(
-            BrokenProcessPool,
-            match="A child process terminated abruptly, the process pool is not usable anymore",
-        ):
+        msg = "A child process terminated abruptly, the process pool is not usable anymore"
+        with pytest.raises(BrokenProcessPool, match=msg):
             await future
 
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(inc, 1)
 
-        # FIXME: The processpool is now unusable and the worker is effectively
-        # dead
-        with pytest.raises(
-            BrokenProcessPool,
-            match="A child process terminated abruptly, the process pool is not usable anymore",
-        ):
-            assert await future == 2
+        # The process pool is now unusable and the worker is effectively dead
+        with pytest.raises(BrokenProcessPool, match=msg):
+            await future
 
 
 def raise_exc():
@@ -2390,11 +2391,11 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
-    """
-    This test ensure that if a worker disconnects while computing a result, the scheduler will still accept the result.
+    """Ensure that, if a worker disconnects while computing a result, the scheduler will
+    still accept the result.
 
     There is also an edge case tested which ensures that the reconnect is
-    successful if a task is currently executing, see
+    successful if a task is currently executing; see
     https://github.com/dask/distributed/issues/5078
 
     See also distributed.tests.test_scheduler.py::test_gather_allow_worker_reconnect
@@ -2530,3 +2531,96 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
 
     finally:
         threadpool.shutdown()
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_exception_one_task(c, s, a, b):
+    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
+
+
+    See also https://github.com/dask/distributed/issues/5152
+    See also test_gather_dep_exception_one_task_2
+    """
+    fut = c.submit(inc, 1, workers=[a.address], key="f1")
+    fut2 = c.submit(inc, 2, workers=[a.address], key="f2")
+    fut3 = c.submit(inc, 3, workers=[a.address], key="f3")
+
+    import asyncio
+
+    event = asyncio.Event()
+    write_queue = asyncio.Queue()
+    event.clear()
+    b.rpc = _LockedCommPool(b.rpc, write_event=event, write_queue=write_queue)
+    b.rpc.remove(a.address)
+
+    def sink(a, b, *args):
+        return a + b
+
+    res1 = c.submit(sink, fut, fut2, fut3, workers=[b.address])
+    res2 = c.submit(sink, fut, fut2, workers=[b.address])
+
+    # Wait until we're sure the worker is attempting to fetch the data
+    while True:
+        peer_addr, msg = await write_queue.get()
+        if peer_addr == a.address and msg["op"] == "get_data":
+            break
+
+    # Provoke an "impossible transision exception"
+    # By choosing a state which doesn't exist we're not running into validation
+    # errors and the state machine should raise if we want to transition from
+    # fetch to memory
+
+    b.validate = False
+    b.tasks[fut3.key].state = "fetch"
+    event.set()
+
+    with captured_logger("distributed.worker", level=logging.DEBUG) as worker_logs:
+
+        # FIXME: We currently have no reliable, safe way to release the task and
+        # its dependent without race conditions
+
+        # Unfortunately res1 is deadlocking. IRL this is not always a problem
+        # since a commonly reported transition is Fetch->Memory, i.e. the task
+        # exists already in memory for whatever reason but a gather_dep was
+        # still runnign, e.g. the task was rescheduled on that worker and it was
+        # computed faster than fetched.
+
+        with suppress(TimeoutError):
+            await asyncio.wait_for(res1, 0.1)
+
+        assert await res2 == 5
+
+        del res1, res2, fut, fut2
+        fut3.release()
+
+        while a.tasks and b.tasks:
+            await asyncio.sleep(0.1)
+
+    expected_msg = (
+        "Exception occured while handling `gather_dep` response for <Task 'f3' fetch>"
+    )
+    assert expected_msg in worker_logs.getvalue()
+    assert any("except-gather-dep-result" in msg for msg in b.story(fut3.key))
+
+
+@gen_cluster(client=True)
+async def test_gather_dep_exception_one_task_2(c, s, a, b):
+    """Ensure an exception in a single task does not tear down an entire batch of gather_dep
+
+    The below triggers an fetch->memory transition
+
+    See also https://github.com/dask/distributed/issues/5152
+    See also test_gather_dep_exception_one_task
+    """
+    # This test does not trigger the condition reliably but is a very easy case
+    # which should function correctly regardles
+
+    fut1 = c.submit(inc, 1, workers=[a.address], key="f1")
+    fut2 = c.submit(inc, fut1, workers=[b.address], key="f2")
+
+    while fut1.key not in b.tasks or b.tasks[fut1.key].state == "flight":
+        await asyncio.sleep(0)
+
+    s.handle_missing_data(key="f1", errant_worker=a.address)
+
+    await fut2

@@ -14,6 +14,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
+  - jinja2
   - joblib
   - jupyter_client
   - msgpack-python

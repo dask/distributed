@@ -155,16 +155,13 @@ class Comm(ABC):
         return out
 
     def __repr__(self):
-        clsname = self.__class__.__name__
-        if self.closed():
-            return f"<closed {clsname}>"
-        else:
-            return "<{} {} local={} remote={}>".format(
-                clsname,
-                self.name or "",
-                self.local_address,
-                self.peer_address,
-            )
+        return "<{}{} {} local={} remote={}>".format(
+            self.__class__.__name__,
+            " (closed)" if self.closed() else "",
+            self.name or "",
+            self.local_address,
+            self.peer_address,
+        )
 
 
 class Listener(ABC):
