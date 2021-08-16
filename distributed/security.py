@@ -153,7 +153,7 @@ class Security:
             out = dask.config.get(config_name)
         setattr(self, field, out)
 
-    def attr_to_dict(self):
+    def _attr_to_dict(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
 
