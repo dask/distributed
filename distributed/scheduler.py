@@ -19,7 +19,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
+from typing import List, Optional
 
 import psutil
 import sortedcontainers
@@ -3710,6 +3710,7 @@ class Scheduler(SchedulerState, ServerNode):
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
+            "annotate-task": self.annotate_task,
         }
 
         client_handlers = {
@@ -5509,6 +5510,41 @@ class Scheduler(SchedulerState, ServerNode):
                 w.send(*msgs)
             except (CommClosedError, AttributeError):
                 self.loop.add_callback(self.remove_worker, address=worker)
+
+    def annotate_task(
+        self,
+        worker=None,
+        key: str = None,
+        annotations: Mapping = None,
+        resource_restrictions: Mapping = None,
+        annotate_dependents=True,
+    ):
+        """Update the annotations and restrictions of a task"""
+
+        parent: SchedulerState = cast(SchedulerState, self)
+        if worker not in parent._workers_dv:
+            return
+        validate_key(key)
+        ts: TaskState = parent.tasks[key]
+
+        # Find tasks to annotate
+        tasks: List[TaskState] = [ts]
+        if annotate_dependents:
+            tasks.extend(ts._dependents)
+
+        if annotations:
+            for dts in tasks:
+                if dts._annotations:
+                    dts._annotations.update(annotations)
+                else:
+                    dts._annotations = annotations
+
+        if resource_restrictions:
+            for dts in tasks:
+                if dts._resource_restrictions:
+                    dts._resource_restrictions.update(resource_restrictions)
+                else:
+                    dts._resource_restrictions = resource_restrictions
 
     ############################
     # Less common interactions #
