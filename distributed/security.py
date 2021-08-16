@@ -172,7 +172,7 @@ class Security:
         return attr
 
     def __repr__(self):
-        attr = self.attr_to_dict()
+        attr = self._attr_to_dict()
         return (
             "Security("
             + ", ".join(f"{key}={value}" for key, value in attr.items())
@@ -180,7 +180,7 @@ class Security:
         )
 
     def _repr_html_(self):
-        attr = self.attr_to_dict()
+        attr = self._attr_to_dict()
 
         rows = ""
 
