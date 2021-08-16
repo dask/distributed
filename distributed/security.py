@@ -176,7 +176,7 @@ class Security:
         return (
             "Security("
             + ",\n    ".join(f"{key}={value}" for key, value in attr.items())
-            + ")"
+            + "\n)"
         )
 
     def _repr_html_(self):
