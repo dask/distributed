@@ -844,19 +844,23 @@ class WorkerNetworkBandwidth(DashboardComponent):
                 x_read_disk.append(ws.metrics["read_bytes_disk"])
                 x_write_disk.append(ws.metrics["write_bytes_disk"])
 
-            self.bandwidth.x_range.end = max(
-                max(x_read),
-                max(x_write),
-                100_000_000,
-                0.95 * self.bandwidth.x_range.end,
-            )
+            if self.scheduler.workers:
+                self.bandwidth.x_range.end = max(
+                    max(x_read),
+                    max(x_write),
+                    100_000_000,
+                    0.95 * self.bandwidth.x_range.end,
+                )
 
-            self.disk.x_range.end = max(
-                max(x_read_disk),
-                max(x_write_disk),
-                100_000_000,
-                0.95 * self.disk.x_range.end,
-            )
+                self.disk.x_range.end = max(
+                    max(x_read_disk),
+                    max(x_write_disk),
+                    100_000_000,
+                    0.95 * self.disk.x_range.end,
+                )
+            else:
+                self.bandwidth.x_range.end = 100_000_000
+                self.disk.x_range.end = 100_000_000
 
             result = {
                 "y_read": y_read,
