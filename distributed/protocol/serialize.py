@@ -474,20 +474,11 @@ def merge_and_deserialize(header, frames, deserializers=None):
     else:
         merged_frames = []
         for n, offset in zip(header["split-num-sub-frames"], header["split-offsets"]):
-            if n == 0:
-                merged = bytearray(0)
-            elif n == 1:
-                merged = frames[offset]
-            else:
-                subframes = frames[offset : offset + n]
-                first = subframes[0]
-                if isinstance(first, memoryview) and first.contiguous:
-                    try:
-                        merged = merge_memoryviews(subframes)
-                    except ValueError:
-                        merged = bytearray().join(subframes)
-                else:
-                    merged = bytearray().join(subframes)
+            subframes = frames[offset : offset + n]
+            try:
+                merged = merge_memoryviews(subframes)
+            except (ValueError, TypeError):
+                merged = bytearray().join(subframes)
 
             merged_frames.append(merged)
 

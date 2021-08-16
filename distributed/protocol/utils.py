@@ -108,12 +108,17 @@ def merge_memoryviews(mvs: Sequence[memoryview]) -> memoryview:
         return mvs[0]
 
     first = mvs[0]
+    if not isinstance(first, memoryview):
+        raise TypeError(f"Expected memoryview; got {type(first)}")
     obj = first.obj
     format = first.format
 
     first_start_addr = 0
     nbytes = 0
     for i, mv in enumerate(mvs):
+        if not isinstance(mv, memoryview):
+            raise TypeError(f"{i}: expected memoryview; got {type(mv)}")
+
         if mv.nbytes == 0:
             continue
 
