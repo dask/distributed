@@ -710,6 +710,7 @@ class Client:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
             )
+        self.event_handlers = {}
 
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
@@ -719,6 +720,7 @@ class Client:
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
+            "event": self._handle_event,
         }
 
         self._state_handlers = {
@@ -3574,6 +3576,61 @@ class Client:
             provided, then logs for all topics will be returned.
         """
         return self.sync(self.scheduler.events, topic=topic)
+
+    async def _handle_event(self, topic, event):
+        if topic not in self.event_handlers:
+            self.unsubscribe_topic(topic)
+            return
+        handler = self.event_handlers[topic]
+        ret = handler(event)
+        if inspect.isawaitable(ret):
+            await ret
+
+    def subscribe_topic(self, topic, handler):
+        """Subscribe to a topic and execute a handler for every received event
+
+        Parameters
+        ----------
+        topic: str
+            The topic name
+        handler: callable or coroutinefunction
+            A handler called for every received event. The handler must accept a
+            single argument `event` which is a tuple `(timestamp, msg)` where
+            timestamp refers to the clock on the scheduler.
+
+        Example
+        -------
+
+        >>> import logging
+        >>> logger = logging.getLogger("myLogger")  # Log config not shown
+        >>> client.subscribe_topic("topic-name", lambda: logger.info)
+
+        See Also
+        --------
+        dask.distributed.Client.unsubscribe_topic
+        dask.distributed.Client.get_events
+        dask.distributed.Client.log_event
+        """
+        if topic in self.event_handlers:
+            logger.info("Handler for %s already set. Overwriting.", topic)
+        self.event_handlers[topic] = handler
+        msg = {"op": "subscribe-topic", "topic": topic, "client": self.id}
+        self._send_to_scheduler(msg)
+
+    def unsubscribe_topic(self, topic):
+        """Unsubscribe from a topic and remove event handler
+
+        See Also
+        --------
+        dask.distributed.Client.subscribe_topic
+        dask.distributed.Client.get_events
+        dask.distributed.Client.log_event
+        """
+        if topic in self.event_handlers:
+            msg = {"op": "unsubscribe-topic", "topic": topic, "client": self.id}
+            self._send_to_scheduler(msg)
+        else:
+            raise ValueError(f"No event handler known for topic {topic}.")
 
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """Retire certain workers on the scheduler

@@ -6950,3 +6950,78 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_subscribe_topic(c, s, a):
+
+    log = []
+
+    def user_event_handler(event):
+        log.append(event)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+
+    await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {"important": "event"})
+
+    await asyncio.sleep(0.01)
+
+    assert len(log) == 1
+    time_, msg = log[0]
+    assert isinstance(time_, float)
+    assert msg == {"important": "event"}
+
+    c.unsubscribe_topic("test-topic")
+
+    await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {"forget": "me"})
+    await asyncio.sleep(0.01)
+    assert len(log) == 1
+
+    async def async_user_event_handler(event):
+        log.append(event)
+        await asyncio.sleep(0)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+    await asyncio.sleep(0.01)
+    a.log_event("test-topic", {"async": "event"})
+    await asyncio.sleep(0.01)
+    assert len(log) == 2
+    time_, msg = log[1]
+    assert isinstance(time_, float)
+    assert msg == {"async": "event"}
+
+    # Even though the middle event was not subscribed to, the scheduler still
+    # knows about all and we can retrieve them
+    all_events = await c.get_events(topic="test-topic")
+    assert len(all_events) == 3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_all_servers_use_same_channel(c, s, a):
+    """Ensure that logs from all server types (scheduler, worker, nanny)
+    and the clients themselves arrive"""
+
+    log = []
+
+    def user_event_handler(event):
+        log.append(event)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+    async with Nanny(s.address) as n:
+        a.log_event("test-topic", "worker")
+        n.log_event("test-topic", "nanny")
+        s.log_event("test-topic", "scheduler")
+        await c.log_event("test-topic", "client")
+
+    await asyncio.sleep(0.1)
+    assert len(log) == 4 == len(set(log))
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_events_unsubscribe_raises_if_unknown(c, s):
+    with pytest.raises(ValueError, match="No event handler known for topic unknown"):
+        c.unsubscribe_topic("unknown")
