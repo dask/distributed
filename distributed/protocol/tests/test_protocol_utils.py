@@ -65,6 +65,13 @@ class TestMergeMemroyviews:
         assert len(result) == len(base)
         assert result == base
 
+    def test_catch_non_memoryview(self):
+        with pytest.raises(TypeError, match="Expected memoryview"):
+            merge_memoryviews([b"1234", memoryview(b"4567")])
+
+        with pytest.raises(TypeError, match="expected memoryview"):
+            merge_memoryviews([memoryview(b"123"), b"1234"])
+
     @pytest.mark.parametrize(
         "slices",
         [
