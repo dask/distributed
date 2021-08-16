@@ -4253,9 +4253,6 @@ class Scheduler(SchedulerState, ServerNode):
             if nbytes:
                 assert isinstance(nbytes, dict)
                 already_released_keys = list()
-                if self.validate:
-                    for t in types:
-                        assert isinstance(t, type)
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
                     if ts is not None and ts.state != "released":

@@ -2468,7 +2468,7 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
         # Let's put one task in memory to ensure the reconnect has tasks in
         # different states
         f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
-        f2 = c.submit(sum, f1, workers=[a.address], allow_other_workers=True)
+        f2 = c.submit(inc, f1, workers=[a.address], allow_other_workers=True)
         a_address = a.address
 
         a.periodic_callbacks["heartbeat"].stop()
@@ -2512,9 +2512,6 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
 
     while not len(s.tasks[f2.key].who_has) == 2:
         await asyncio.sleep(0.001)
-
-    for ts in s.tasks.values():
-        assert isinstance(ts.type, type)
 
     del f1, f2, f3
     while any(w.tasks for w in [a, b]):
