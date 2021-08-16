@@ -6507,6 +6507,28 @@ async def test_log_event_warn(c, s, a, b):
         await c.submit(foo)
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print(c, s, a, b, capsys):
+    def foo():
+        from dask.distributed import print
+
+        print("Hello!")
+
+    await c.submit(foo)
+
+    out, err = capsys.readouterr()
+    assert "Hello!" in out
+
+
+def test_print_simple(capsys):
+    from dask.distributed import print
+
+    print("Hello!")
+
+    out, err = capsys.readouterr()
+    assert "Hello!" in out
+
+
 @gen_cluster(client=True)
 async def test_annotations_task_state(c, s, a, b):
     da = pytest.importorskip("dask.array")

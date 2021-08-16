@@ -43,7 +43,7 @@ from .semaphore import Semaphore
 from .threadpoolexecutor import rejoin
 from .utils import CancelledError, TimeoutError, sync
 from .variable import Variable
-from .worker import Reschedule, Worker, get_client, get_worker, secede
+from .worker import Reschedule, Worker, get_client, get_worker, print, secede
 from .worker_client import local_client, worker_client
 
 versions = get_versions()
