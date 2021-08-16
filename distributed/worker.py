@@ -168,7 +168,7 @@ class TaskState:
         self.who_has = set()
         self.coming_from = None
         self.waiting_for_data = set()
-        self.resource_restrictions = None
+        self.resource_restrictions = {}
         self.exception = None
         self.traceback = None
         self.type = None
@@ -178,7 +178,7 @@ class TaskState:
         self.stop_time = None
         self.metadata = {}
         self.nbytes = None
-        self.annotations = None
+        self.annotations = {}
         self.scheduler_holds_ref = False
 
     def __repr__(self):
@@ -409,7 +409,7 @@ class Worker(ServerNode):
         lifetime_restart=None,
         **kwargs,
     ):
-        self.tasks = dict()
+        self.tasks: Dict[str, TaskState] = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -1629,7 +1629,7 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
-            ts.annotations = annotations
+            ts.annotations = annotations or {}
 
             who_has = who_has or {}
 
@@ -1902,7 +1902,7 @@ class Worker(ServerNode):
 
             self.has_what[self.address].discard(ts.key)
 
-            if ts.resource_restrictions is not None:
+            if ts.resource_restrictions:
                 self.constrained.append(ts.key)
                 return "constrained"
             else:
@@ -1983,9 +1983,8 @@ class Worker(ServerNode):
                 assert ts.key not in self.ready
 
             out = None
-            if ts.resource_restrictions is not None:
-                for resource, quantity in ts.resource_restrictions.items():
-                    self.available_resources[resource] += quantity
+            for resource, quantity in ts.resource_restrictions.items():
+                self.available_resources[resource] += quantity
 
             if ts.state == "executing":
                 self.executing_count -= 1
@@ -2191,7 +2190,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def send_task_state_to_scheduler(self, ts):
+    def send_task_state_to_scheduler(self, ts: TaskState):
         if ts.key in self.data or self.actors.get(ts.key):
             typ = ts.type
             if ts.nbytes is None or typ is None:
@@ -2792,12 +2791,9 @@ class Worker(ServerNode):
 
     def meets_resource_constraints(self, key):
         ts = self.tasks[key]
-        if not ts.resource_restrictions:
-            return True
         for resource, needed in ts.resource_restrictions.items():
             if self.available_resources[resource] < needed:
                 return False
-
         return True
 
     async def _maybe_deserialize_task(self, ts):
@@ -2884,10 +2880,7 @@ class Worker(ServerNode):
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is not None and "executor" in ts.annotations:
-                executor = ts.annotations["executor"]
-            else:
-                executor = "default"
+            executor = ts.annotations.get("executor", "default")
             assert executor in self.executors
             assert key == ts.key
             self.active_keys.add(ts.key)
