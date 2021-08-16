@@ -145,9 +145,6 @@ class Worker(Process):
     def __repr__(self):
         return f"<SSH {type(self).__name__}: status={self.status}>"
 
-    def _repr_html_(self):
-        return super()._repr_html_()
-
 
 class Scheduler(Process):
     """A Remote Dask Scheduler controlled by SSH
@@ -226,9 +223,6 @@ class Scheduler(Process):
 
     def __repr__(self):
         return f"<SSH {type(self).__name__}: status={self.status}>"
-
-    def _repr_html_(self):
-        return super()._repr_html_()
 
 
 old_cluster_kwargs = {
