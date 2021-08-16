@@ -3132,7 +3132,6 @@ async def test_computations(c, s, a, b):
     assert "sub" not in str(s.computations[0].groups)
 
     assert isinstance(repr(s.computations[1]), str)
-    assert "x + 1" in s.computations[1]._repr_html_()
 
     assert s.computations[1].stop == max(tg.stop for tg in s.task_groups.values())
 
@@ -3183,3 +3182,24 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
 
     while any(w.tasks for w in workers):
         await asyncio.gather(*[w.heartbeat() for w in workers])
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_worker_reconnect_task_memory_with_resources(c, s, a):
+    async with Worker(s.address, resources={"A": 1}) as b:
+        b.periodic_callbacks["heartbeat"].stop()
+
+        futs = c.map(inc, range(10), resources={"A": 1})
+        res = c.submit(sum, futs)
+
+        while not b.executing_count and not b.data:
+            await asyncio.sleep(0.001)
+
+        await s.remove_worker(address=b.address, close=False)
+        while not res.done():
+            await b.heartbeat()
+
+        await res
+        assert ("no-worker", "memory") in {
+            (start, finish) for (_, start, finish, _, _) in s.transition_log
+        }

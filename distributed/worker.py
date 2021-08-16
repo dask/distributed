@@ -170,7 +170,9 @@ class TaskState:
         self.waiting_for_data = set()
         self.resource_restrictions = {}
         self.exception = None
+        self.exception_text = ""
         self.traceback = None
+        self.traceback_text = ""
         self.type = None
         self.suspicious_count = 0
         self.startstops = list()
@@ -235,7 +237,10 @@ class Worker(ServerNode):
         The maximum number of concurrent outgoing requests for data
     * **total_in_connections**: ``int``
         The maximum number of concurrent incoming requests for data
-    * **total_comm_nbytes**: ``int``
+    * **comm_threshold_bytes**: ``int``
+        As long as the total number of bytes in flight is below this threshold
+        we will not limit the number of outgoing connections for a single tasks
+        dependency fetch.
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
@@ -431,7 +436,7 @@ class Worker(ServerNode):
         self.total_in_connections = dask.config.get(
             "distributed.worker.connections.incoming"
         )
-        self.total_comm_nbytes = 10e6
+        self.comm_threshold_bytes = 10e6
         self.comm_nbytes = 0
         self._missing_dep_flight = set()
 
@@ -640,6 +645,10 @@ class Worker(ServerNode):
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
+        if nvml.device_get_count() > 0:
+            self.executors["gpu"] = ThreadPoolExecutor(
+                1, thread_name_prefix="Dask-GPU-Threads"
+            )
 
         # Find the default executor
         if executor == "offload":
@@ -1326,7 +1335,7 @@ class Worker(ServerNode):
             await self.rpc.close()
 
             self.status = Status.closed
-            await ServerNode.close(self)
+            await super().close()
 
             setproctitle("dask-worker [closed]")
         return "OK"
@@ -1613,7 +1622,9 @@ class Worker(ServerNode):
                     return
                 if ts.state == "error":
                     ts.exception = None
+                    ts.exception_text = ""
                     ts.traceback = None
+                    ts.traceback_text = ""
                 else:
                     # This is a scheduler re-assignment
                     # Either `fetch` -> `waiting` or `flight` -> `waiting`
@@ -1975,6 +1986,8 @@ class Worker(ServerNode):
         if self.validate:
             assert ts.exception is not None
             assert ts.traceback is not None
+            assert ts.exception_text
+            assert ts.traceback_text
         self.send_task_state_to_scheduler(ts)
 
     def transition_ready_memory(self, ts, value=no_value):
@@ -2014,7 +2027,9 @@ class Worker(ServerNode):
                     logger.info("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
                     ts.exception = msg["exception"]
+                    ts.exception_text = msg["exception_text"]
                     ts.traceback = msg["traceback"]
+                    ts.traceback_text = msg["traceback_text"]
                     ts.state = "error"
                     out = "error"
                     for d in ts.dependents:
@@ -2053,7 +2068,7 @@ class Worker(ServerNode):
                 }
             )
 
-            self.io_loop.add_callback(self.ensure_computing)
+            self.ensure_computing()
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -2159,7 +2174,7 @@ class Worker(ServerNode):
 
                 while dependencies_fetch and (
                     len(self.in_flight_workers) < self.total_out_connections
-                    or self.comm_nbytes < self.total_comm_nbytes
+                    or self.comm_nbytes < self.comm_threshold_bytes
                 ):
                     to_gather_ts = dependencies_fetch.pop()
 
@@ -2241,6 +2256,8 @@ class Worker(ServerNode):
                 "thread": self.threads.get(ts.key),
                 "exception": ts.exception,
                 "traceback": ts.traceback,
+                "exception_text": ts.exception_text,
+                "traceback_text": ts.traceback_text,
             }
         else:
             logger.error("Key not ready to send to worker, %s: %s", ts.key, ts.state)
@@ -2329,6 +2346,15 @@ class Worker(ServerNode):
             total_bytes += ts.get_nbytes()
 
         return deps, total_bytes
+
+    @property
+    def total_comm_bytes(self):
+        warnings.warn(
+            "The attribute `Worker.total_comm_bytes` has been renamed to `comm_threshold_bytes`. "
+            "Future versions will only support the new name.",
+            DeprecationWarning,
+        )
+        return self.comm_threshold_bytes
 
     async def gather_dep(
         self,
@@ -2469,44 +2495,62 @@ class Worker(ServerNode):
                 assert set(to_gather_keys).issubset(
                     set(self.in_flight_workers.get(worker))
                 )
+
                 for d in self.in_flight_workers.pop(worker):
-
                     ts = self.tasks.get(d)
-
-                    if not busy and d in data:
-                        self.transition(ts, "memory", value=data[d])
-                    elif ts is None or ts.state == "executing":
-                        self.log.append(("already-executing", d))
-                        self.release_key(d, reason="already executing at gather")
-                    elif ts.state == "flight" and not ts.dependents:
-                        self.log.append(("flight no-dependents", d))
-                        self.release_key(
-                            d, reason="In-flight task no longer has dependents."
+                    try:
+                        if not busy and d in data:
+                            self.transition(ts, "memory", value=data[d])
+                        elif ts is None or ts.state == "executing":
+                            self.log.append(("already-executing", d))
+                            self.release_key(d, reason="already executing at gather")
+                        elif ts.state == "flight" and not ts.dependents:
+                            self.log.append(("flight no-dependents", d))
+                            self.release_key(
+                                d, reason="In-flight task no longer has dependents."
+                            )
+                        elif (
+                            not busy
+                            and d not in data
+                            and ts.dependents
+                            and ts.state != "memory"
+                        ):
+                            ts.who_has.discard(worker)
+                            self.has_what[worker].discard(ts.key)
+                            self.log.append(("missing-dep", d))
+                            self.batched_stream.send(
+                                {
+                                    "op": "missing-data",
+                                    "errant_worker": worker,
+                                    "key": d,
+                                }
+                            )
+                            self.transition(ts, "fetch")
+                        elif ts.state not in ("ready", "memory"):
+                            self.transition(ts, "fetch")
+                        else:
+                            logger.debug(
+                                "Unexpected task state encountered for %r after gather_dep",
+                                ts,
+                            )
+                    except Exception as exc:
+                        emsg = error_message(exc)
+                        assert ts is not None, ts
+                        self.log.append(
+                            (ts.key, "except-gather-dep-result", emsg, time())
                         )
-                    elif (
-                        not busy
-                        and d not in data
-                        and ts.dependents
-                        and ts.state != "memory"
-                    ):
-                        ts.who_has.discard(worker)
-                        self.has_what[worker].discard(ts.key)
-                        self.log.append(("missing-dep", d))
-                        self.batched_stream.send(
-                            {"op": "missing-data", "errant_worker": worker, "key": d}
-                        )
-                        self.transition(ts, "fetch")
-                    elif ts.state not in ("ready", "memory"):
-                        self.transition(ts, "fetch")
-                    else:
+                        # FIXME: We currently cannot release this task and its
+                        # dependent safely
                         logger.debug(
-                            "Unexpected task state encountered for %s after gather_dep"
+                            "Exception occured while handling `gather_dep` response for %r",
+                            ts,
+                            exc_info=True,
                         )
 
                 if self.validate:
                     self.validate_state()
 
-                await self.ensure_computing()
+                self.ensure_computing()
 
                 if not busy:
                     self.repetitively_busy = 0
@@ -2527,6 +2571,8 @@ class Worker(ServerNode):
             msg = error_message(exc)
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
+            ts.exception_text = msg["exception_text"]
+            ts.traceback_text = msg["traceback_text"]
             self.transition(ts, "error")
         self.release_key(dep.key, reason="bad dep")
 
@@ -2764,6 +2810,13 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
+                warnings.warn(
+                    "Attempting to add a worker plugin with the same name as an already registered "
+                    f"plugin ({name}). Currently this results in no change and the previously registered "
+                    "plugin is not overwritten. This behavior is deprecated and in a future release "
+                    f"the previously registered {name} worker plugin will be overwritten.",
+                    category=FutureWarning,
+                )
                 return {"status": "repeat"}
             else:
                 self.plugins[name] = plugin
@@ -2861,7 +2914,7 @@ class Worker(ServerNode):
             self.log.append((ts.key, "deserialize-error"))
             raise
 
-    async def ensure_computing(self):
+    def ensure_computing(self):
         if self.paused:
             return
         try:
@@ -2930,7 +2983,14 @@ class Worker(ServerNode):
             try:
                 e = self.executors[executor]
                 ts.start_time = time()
-                if "ThreadPoolExecutor" in str(type(e)):
+                if iscoroutinefunction(function):
+                    result = await apply_function_async(
+                        function,
+                        args2,
+                        kwargs2,
+                        self.scheduler_delay,
+                    )
+                elif "ThreadPoolExecutor" in str(type(e)):
                     result = await self.loop.run_in_executor(
                         e,
                         apply_function,
@@ -2987,6 +3047,8 @@ class Worker(ServerNode):
             else:
                 ts.exception = result["exception"]
                 ts.traceback = result["traceback"]
+                ts.exception_text = result["exception_text"]
+                ts.traceback_text = result["traceback_text"]
                 logger.warning(
                     "Compute Failed\n"
                     "Function:  %s\n"
@@ -3013,9 +3075,11 @@ class Worker(ServerNode):
             emsg = error_message(exc)
             ts.exception = emsg["exception"]
             ts.traceback = emsg["traceback"]
+            ts.exception_text = emsg["exception_text"]
+            ts.traceback_text = emsg["traceback_text"]
             self.transition(ts, "error")
         finally:
-            await self.ensure_computing()
+            self.ensure_computing()
             self.ensure_communicating()
 
     def _prepare_args_for_execution(self, ts, args, kwargs):
@@ -3086,7 +3150,7 @@ class Worker(ServerNode):
                     else "None",
                 )
                 self.paused = False
-                await self.ensure_computing()
+                self.ensure_computing()
 
         await check_pause(memory)
         # Dump data to disk if above 70%
@@ -3885,6 +3949,42 @@ def apply_function_simple(
     start = time()
     try:
         result = function(*args, **kwargs)
+    except Exception as e:
+        msg = error_message(e)
+        msg["op"] = "task-erred"
+        msg["actual-exception"] = e
+    else:
+        msg = {
+            "op": "task-finished",
+            "status": "OK",
+            "result": result,
+            "nbytes": sizeof(result),
+            "type": type(result) if result is not None else None,
+        }
+    finally:
+        end = time()
+    msg["start"] = start + time_delay
+    msg["stop"] = end + time_delay
+    msg["thread"] = ident
+    return msg
+
+
+async def apply_function_async(
+    function,
+    args,
+    kwargs,
+    time_delay,
+):
+    """Run a function, collect information
+
+    Returns
+    -------
+    msg: dictionary with status, result/error, timings, etc..
+    """
+    ident = threading.get_ident()
+    start = time()
+    try:
+        result = await function(*args, **kwargs)
     except Exception as e:
         msg = error_message(e)
         msg["op"] = "task-erred"

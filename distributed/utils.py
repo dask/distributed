@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import html
 import importlib
 import inspect
 import json
@@ -1126,9 +1125,21 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-@functools.lru_cache(None)
-def iscoroutinefunction(f):
+def _iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+
+
+@functools.lru_cache(None)
+def _iscoroutinefunction_cached(f):
+    return _iscoroutinefunction(f)
+
+
+def iscoroutinefunction(f):
+    # Attempt to use lru_cache version and fall back to non-cached version if needed
+    try:
+        return _iscoroutinefunction_cached(f)
+    except TypeError:  # unhashable type
+        return _iscoroutinefunction(f)
 
 
 @contextmanager
@@ -1230,43 +1241,19 @@ is_coroutine_function = iscoroutinefunction
 class Log(str):
     """A container for newline-delimited string of log entries"""
 
-    level_styles = {
-        "WARNING": "font-weight: bold; color: orange;",
-        "CRITICAL": "font-weight: bold; color: orangered;",
-        "ERROR": "font-weight: bold; color: crimson;",
-    }
-
     def _repr_html_(self):
-        logs_html = []
-        for message in self.split("\n"):
-            style = "font-family: monospace; margin: 0;"
-            for level in self.level_styles:
-                if level in message:
-                    style += self.level_styles[level]
-                    break
+        from .widgets import get_template  # Avoiding circular import
 
-            logs_html.append(
-                '<p style="{style}">{message}</p>'.format(
-                    style=html.escape(style),
-                    message=html.escape(message),
-                )
-            )
-
-        return "\n".join(logs_html)
+        return get_template("log.html.j2").render(log=self)
 
 
 class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        summaries = [
-            "<details>\n"
-            "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
-        ]
-        return "\n".join(summaries)
+        from .widgets import get_template  # Avoiding circular import
+
+        return get_template("logs.html.j2").render(logs=self)
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
