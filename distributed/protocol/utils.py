@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import ctypes
 import struct
-from typing import Sequence
+from collections.abc import Sequence
 
 import dask
 
