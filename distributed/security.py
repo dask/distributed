@@ -175,7 +175,7 @@ class Security:
         attr = self.attr_to_dict()
         return (
             "Security("
-            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ",\n    ".join(f"{key}={value}" for key, value in attr.items())
             + ")"
         )
 
