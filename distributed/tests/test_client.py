@@ -6501,7 +6501,7 @@ async def test_log_event(c, s, a, b):
 @gen_cluster(client=True)
 async def test_log_event_warn(c, s, a, b):
     def foo():
-        get_worker().log_event("warn", "Hello!")
+        get_worker().log_event(["foo", "warn"], "Hello!")
 
     with pytest.warns(Warning, match="Hello!"):
         await c.submit(foo)
@@ -6509,9 +6509,9 @@ async def test_log_event_warn(c, s, a, b):
 
 @gen_cluster(client=True, Worker=Nanny)
 async def test_print(c, s, a, b, capsys):
-    def foo():
-        from dask.distributed import print
+    from dask.distributed import print
 
+    def foo():
         print("Hello!", 123, sep=":")
 
     await c.submit(foo)

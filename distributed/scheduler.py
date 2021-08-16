@@ -7411,12 +7411,11 @@ class Scheduler(SchedulerState, ServerNode):
         return results
 
     def log_event(self, name, msg, **kwargs):
-        event = (time(), msg)
         if isinstance(name, list):
             for n in name:
-                self.events[n].append(event)
-                self.event_counts[n] += 1
+                self.log_event(n, msg, **kwargs)
         else:
+            event = (time(), msg)
             self.events[name].append(event)
             self.event_counts[name] += 1
             if name == "print":
