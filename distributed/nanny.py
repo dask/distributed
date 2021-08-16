@@ -29,6 +29,7 @@ from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .protocol import pickle
+from .pubsub import Pub
 from .security import Security
 from .utils import (
     TimeoutError,
@@ -607,14 +608,16 @@ class Nanny(ServerNode):
             await comm.write("OK")
         await super().close()
 
-    async def _log_event(self, topic, msg):
-        await self.scheduler.log_event(
-            topic=topic,
-            msg=msg,
-        )
-
     def log_event(self, topic, msg):
-        self.loop.add_callback(self._log_event, topic, msg)
+        if not hasattr(self, "event_publishers"):
+            self.event_publishers = {}
+        pub = self.event_publishers.get(topic)
+        if pub is None:
+            self.event_publishers[topic] = pub = Pub(
+                topic,
+                log_queue=True,
+            )
+        pub.put(msg)
 
 
 class WorkerProcess:

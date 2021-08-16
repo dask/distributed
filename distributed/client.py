@@ -69,7 +69,7 @@ from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
-from .pubsub import PubSubClientExtension
+from .pubsub import PubSubClientExtension, Sub
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
@@ -711,6 +711,7 @@ class Client:
                 scheduler="dask.distributed", shuffle="tasks"
             )
         self.event_handlers = {}
+        self.event_subscriptions = {}
 
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
@@ -720,7 +721,7 @@ class Client:
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
-            "event": self._handle_event,
+            # "event": self._handle_event,
         }
 
         self._state_handlers = {
@@ -1293,6 +1294,9 @@ class Client:
         with suppress(AttributeError):
             for pc in self._periodic_callbacks.values():
                 pc.stop()
+
+        for topic in set(self.event_subscriptions):
+            self.unsubscribe_topic(topic)
 
         with log_errors():
             _del_global_client(self)
@@ -3564,7 +3568,17 @@ class Client:
         >>> from time import time
         >>> client.log_event("current-time", time())
         """
-        return self.sync(self.scheduler.log_event, topic=topic, msg=msg)
+        from .pubsub import Pub
+
+        if not hasattr(self, "event_publishers"):
+            self.event_publishers = {}
+        pub = self.event_publishers.get(topic)
+        if pub is None:
+            self.event_publishers[topic] = pub = Pub(
+                topic,
+                log_queue=True,
+            )
+        pub.put(msg)
 
     def get_events(self, topic: str = None):
         """Retrieve structured topic logs
@@ -3577,14 +3591,12 @@ class Client:
         """
         return self.sync(self.scheduler.events, topic=topic)
 
-    async def _handle_event(self, topic, event):
-        if topic not in self.event_handlers:
-            self.unsubscribe_topic(topic)
-            return
-        handler = self.event_handlers[topic]
-        ret = handler(event)
-        if inspect.isawaitable(ret):
-            await ret
+    async def _handle_events(self, sub, handler):
+        while self.status == "running":
+            event = await sub.get()
+            ret = handler(event)
+            if inspect.isawaitable(ret):
+                await ret
 
     def subscribe_topic(self, topic, handler):
         """Subscribe to a topic and execute a handler for every received event
@@ -3611,11 +3623,18 @@ class Client:
         dask.distributed.Client.get_events
         dask.distributed.Client.log_event
         """
+        if topic not in self.event_subscriptions:
+            sub = self.event_subscriptions[topic] = Sub(topic, client=self)
+        else:
+            sub = self.event_subscriptions[topic]
+
         if topic in self.event_handlers:
-            logger.info("Handler for %s already set. Overwriting.", topic)
-        self.event_handlers[topic] = handler
-        msg = {"op": "subscribe-topic", "topic": topic, "client": self.id}
-        self._send_to_scheduler(msg)
+            fut = self.event_handlers[topic]
+            fut.cancel()
+
+        self.event_handlers[topic] = fut = asyncio.ensure_future(
+            self._handle_events(sub=sub, handler=handler)
+        )
 
     def unsubscribe_topic(self, topic):
         """Unsubscribe from a topic and remove event handler
@@ -3627,8 +3646,10 @@ class Client:
         dask.distributed.Client.log_event
         """
         if topic in self.event_handlers:
-            msg = {"op": "unsubscribe-topic", "topic": topic, "client": self.id}
-            self._send_to_scheduler(msg)
+            fut = self.event_handlers.pop(topic)
+            fut.cancel()
+            sub = self.event_subscriptions.pop(topic)
+            sub.stop()
         else:
             raise ValueError(f"No event handler known for topic {topic}.")
 

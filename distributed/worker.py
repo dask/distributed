@@ -47,7 +47,7 @@ from .metrics import time
 from .node import ServerNode
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize
-from .pubsub import PubSubWorkerExtension
+from .pubsub import Pub, PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -721,7 +721,7 @@ class Worker(ServerNode):
             connection_args=self.connection_args,
             **kwargs,
         )
-
+        self.event_publishers = dict()
         self.scheduler = self.rpc(scheduler_addr)
         self.execution_state = {
             "scheduler": self.scheduler.address,
@@ -811,13 +811,13 @@ class Worker(ServerNode):
         return self._deque_handler.deque
 
     def log_event(self, topic, msg):
-        self.batched_stream.send(
-            {
-                "op": "log-event",
-                "topic": topic,
-                "msg": msg,
-            }
-        )
+        pub = self.event_publishers.get(topic)
+        if pub is None:
+            self.event_publishers[topic] = pub = Pub(
+                topic,
+                log_queue=True,
+            )
+        pub.put(msg)
 
     @property
     def worker_address(self):

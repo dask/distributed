@@ -8,7 +8,7 @@ from dask.utils import parse_timedelta
 
 from .core import CommClosedError
 from .metrics import time
-from .protocol.serialize import to_serialize
+from .protocol.serialize import Serialized, deserialize  # , to_serialize
 from .utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
@@ -36,13 +36,21 @@ class PubSubSchedulerExtension:
 
         self.scheduler.extensions["pubsub"] = self
 
-    def add_publisher(self, comm=None, name=None, worker=None):
+    def add_publisher(self, comm=None, name=None, worker=None, log_queue=False):
         logger.debug("Add publisher: %s %s", name, worker)
         self.publishers[name].add(worker)
+
+        if log_queue:
+            self.scheduler.events[name]  # init defaultdict
+            assert name in self.scheduler.events
+
         return {
             "subscribers": {addr: {} for addr in self.subscribers[name]},
-            "publish-scheduler": name in self.client_subscribers
-            and len(self.client_subscribers[name]) > 0,
+            "publish-scheduler": (
+                name in self.client_subscribers
+                and len(self.client_subscribers[name]) > 0
+            )
+            or name in self.scheduler.events,
         }
 
     def add_subscriber(self, comm=None, name=None, worker=None, client=None):
@@ -75,7 +83,7 @@ class PubSubSchedulerExtension:
     def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
         if worker:
             logger.debug("Remove worker subscriber: %s %s", name, worker)
-            self.subscribers[name].remove(worker)
+            self.subscribers[name].discard(worker)
             for pub in self.publishers[name]:
                 self.scheduler.worker_send(
                     pub,
@@ -83,7 +91,7 @@ class PubSubSchedulerExtension:
                 )
         elif client:
             logger.debug("Remove client subscriber: %s %s", name, client)
-            self.client_subscribers[name].remove(client)
+            self.client_subscribers[name].discard(client)
             if not self.client_subscribers[name]:
                 del self.client_subscribers[name]
                 for pub in self.publishers[name]:
@@ -109,6 +117,14 @@ class PubSubSchedulerExtension:
                 )
             except (KeyError, CommClosedError):
                 self.remove_subscriber(name=name, client=c)
+
+        if name in self.scheduler.events:
+            # FIXME: Am I allowed to do this? Feels evil
+            if isinstance(msg, Serialized):
+                msg = deserialize(msg.header, msg.frames)
+            event = (time(), msg)
+            self.scheduler.events[name].append(event)
+            self.scheduler.event_counts[name] += 1
 
         if client:
             for sub in self.subscribers[name]:
@@ -143,7 +159,7 @@ class PubSubWorkerExtension:
 
     def remove_subscriber(self, name=None, address=None):
         for pub in self.publishers[name]:
-            del pub.subscribers[address]
+            pub.subscribers.pop(address, None)
 
     def publish_scheduler(self, name=None, publish=None):
         self.publish_to_scheduler[name] = publish
@@ -247,6 +263,8 @@ class Pub:
     client: Client (optional)
         Client used for communication with the scheduler. Defaults to
         the value of ``get_client()``. If given, ``worker`` must be ``None``.
+    log_queue: bool
+        If True, log the events in an event queue on the scheduler.
 
     Examples
     --------
@@ -283,7 +301,7 @@ class Pub:
     Sub
     """
 
-    def __init__(self, name, worker=None, client=None):
+    def __init__(self, name, worker=None, client=None, log_queue=False):
         if worker is None and client is None:
             from distributed import get_client, get_worker
 
@@ -304,6 +322,7 @@ class Pub:
             self.loop = self.client.loop
 
         self.name = name
+        self.log_queue = log_queue
         self._started = False
         self._buffer = []
 
@@ -317,7 +336,7 @@ class Pub:
     async def _start(self):
         if self.worker:
             result = await self.scheduler.pubsub_add_publisher(
-                name=self.name, worker=self.worker.address
+                name=self.name, worker=self.worker.address, log_queue=self.log_queue
             )
             pubsub = self.worker.extensions["pubsub"]
             self.subscribers.update(result["subscribers"])
@@ -334,7 +353,8 @@ class Pub:
             self._buffer.append(msg)
             return
 
-        data = {"op": "pubsub-msg", "name": self.name, "msg": to_serialize(msg)}
+        # FIXME If I use to_serialize here, this breaks msgs of type dict!
+        data = {"op": "pubsub-msg", "name": self.name, "msg": msg}
 
         if self.worker:
             for sub in self.subscribers:
@@ -388,12 +408,7 @@ class Sub:
         self.loop.add_callback(pubsub.subscribers[name].add, self)
 
         msg = {"op": "pubsub-add-subscriber", "name": self.name}
-        if self.worker:
-            self.loop.add_callback(self.worker.batched_stream.send, msg)
-        elif self.client:
-            self.loop.add_callback(self.client.scheduler_comm.send, msg)
-        else:
-            raise Exception()
+        self._send_message(msg)
 
         weakref.finalize(self, pubsub.trigger_cleanup)
 
@@ -460,6 +475,18 @@ class Sub:
         self.buffer.append(msg)
         async with self.condition:
             self.condition.notify()
+
+    def _send_message(self, msg):
+        if self.worker:
+            self.loop.add_callback(self.worker.batched_stream.send, msg)
+        elif self.client:
+            self.loop.add_callback(self.client.scheduler_comm.send, msg)
+        else:
+            raise Exception()
+
+    def stop(self):
+        msg = {"op": "pubsub-remove-subscriber", "name": self.name}
+        self._send_message(msg)
 
     def __repr__(self):
         return f"<Sub: {self.name}>"
