@@ -99,7 +99,7 @@ class ProcessInterface:
     def __repr__(self):
         return f"<{type(self).__name__}: status={self.status}>"
 
-    def _repr_html_(self):
+    def _repr_html_(self, heading=None):
         if self.status == Status.created:
             status = "Created"
             bg_color = "#caf0f8"
@@ -113,6 +113,8 @@ class ProcessInterface:
             bg_color = "#ffbfad"
             border_color = "#ff6132"
 
+        heading = heading or self.__class__.__name__
+
         html = f"""
           <div>
             <div
@@ -125,7 +127,7 @@ class ProcessInterface:
                 position: absolute;"
             ></div>
             <div style="margin-left: 48px">
-                <h3 style="margin-bottom: 0px">{self.__class__.__name__}</h3>
+                <h3 style="margin-bottom: 0px">{heading}</h3>
                 <p style="color: #9d9d9d; margin-bottom: 0px">Status: {status}</p>
             </div>
             <p>

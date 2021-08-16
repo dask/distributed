@@ -45,8 +45,8 @@ class Process(ProcessInterface):
     def __repr__(self):
         return f"<SSH {type(self).__name__}: status={self.status}>"
 
-    def _repr_html_(self):
-        return super()._repr_html_()
+    def _repr_html_(self, heading=None):
+        return super()._repr_html_(heading=heading)
 
 
 class Worker(Process):
@@ -146,7 +146,8 @@ class Worker(Process):
         return f"<SSH {type(self).__name__}: status={self.status}>"
 
     def _repr_html_(self):
-        return super()._repr_html_()
+        heading = "SSH Worker"
+        return super()._repr_html_(heading=heading)
 
 
 class Scheduler(Process):
@@ -228,7 +229,8 @@ class Scheduler(Process):
         return f"<SSH {type(self).__name__}: status={self.status}>"
 
     def _repr_html_(self):
-        return super()._repr_html_()
+        heading = "SSH Scheduler"
+        return super()._repr_html_(heading=heading)
 
 
 old_cluster_kwargs = {
