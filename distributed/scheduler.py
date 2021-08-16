@@ -7531,7 +7531,7 @@ class Scheduler(SchedulerState, ServerNode):
     def unsubscribe_topic(self, topic, client):
         self.event_subscriber[topic].discard(client)
 
-    def get_events(self, comm, topic):
+    def get_events(self, comm=None, topic=None):
         if topic is not None:
             return tuple(self.events[topic])
         else:
