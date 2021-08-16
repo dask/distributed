@@ -2188,8 +2188,7 @@ class Client:
         keys = list({stringify(f.key) for f in futures_of(futures)})
         response = await self.scheduler.retry(keys=keys, client=self.id)
         for key in response:
-            st = self.futures[key]
-            st.retry()
+            self._handle_retried_key(key=key)
 
     def retry(self, futures, asynchronous=None):
         """
