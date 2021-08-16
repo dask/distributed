@@ -43,7 +43,7 @@ class Process(ProcessInterface):
         await super().close()
 
     def __repr__(self):
-        return f"<SSH {type(self).__name__}: status={self.status}>"
+        return f"<{dask.utils.typename(type(self))}: status={self.status}>"
 
     def _repr_html_(self):
         return super()._repr_html_()
@@ -142,9 +142,6 @@ class Worker(Process):
         logger.debug("%s", line)
         await super().start()
 
-    def __repr__(self):
-        return f"<SSH {type(self).__name__}: status={self.status}>"
-
 
 class Scheduler(Process):
     """A Remote Dask Scheduler controlled by SSH
@@ -220,9 +217,6 @@ class Scheduler(Process):
                 break
         logger.debug("%s", line)
         await super().start()
-
-    def __repr__(self):
-        return f"<SSH {type(self).__name__}: status={self.status}>"
 
 
 old_cluster_kwargs = {
