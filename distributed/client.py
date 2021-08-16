@@ -719,6 +719,8 @@ class Client:
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
+            "print": self._handle_print,
+            "warn": self._handle_warn,
         }
 
         self._state_handlers = {
@@ -1280,6 +1282,12 @@ class Client:
     def _handle_error(self, exception=None):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
+
+    def _handle_warn(self, warning=None):
+        warnings.warn(warning)
+
+    def _handle_print(self, message=None):
+        print(message)
 
     async def _close(self, fast=False):
         """Send close signal and wait until scheduler completes"""

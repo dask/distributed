@@ -7419,6 +7419,12 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self.events[name].append(event)
             self.event_counts[name] += 1
+            if name == "print":
+                for comm in self.client_comms.values():
+                    comm.send({"op": "print", "message": msg})
+            if name == "warn":
+                for comm in self.client_comms.values():
+                    comm.send({"op": "warn", "warning": msg})
 
     def get_events(self, comm=None, topic=None):
         if topic is not None:

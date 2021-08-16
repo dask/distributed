@@ -6499,6 +6499,15 @@ async def test_log_event(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_log_event_warn(c, s, a, b):
+    def foo():
+        get_worker().log_event("warn", "Hello!")
+
+    with pytest.warns(Warning, match="Hello!"):
+        await c.submit(foo)
+
+
+@gen_cluster(client=True)
 async def test_annotations_task_state(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
