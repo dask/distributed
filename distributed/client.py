@@ -1283,11 +1283,11 @@ class Client:
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    def _handle_warn(self, warning=None):
+    def _handle_warn(self, warning=None, **kwargs):
         warnings.warn(warning)
 
-    def _handle_print(self, message=None):
-        print(message)
+    def _handle_print(self, message=None, **kwargs):
+        print(*message, **kwargs)
 
     async def _close(self, fast=False):
         """Send close signal and wait until scheduler completes"""

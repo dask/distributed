@@ -811,12 +811,13 @@ class Worker(ServerNode):
     def logs(self):
         return self._deque_handler.deque
 
-    def log_event(self, topic, msg):
+    def log_event(self, topic, msg, **kwargs):
         self.batched_stream.send(
             {
                 "op": "log-event",
                 "topic": topic,
                 "msg": msg,
+                **kwargs,
             }
         )
 
@@ -4123,7 +4124,7 @@ else:
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
 
 
-def print(value):
+def print(*args, **kwargs):
     """Dask print function
 
     This prints both wherever this function is run, and also in the user's
@@ -4134,6 +4135,6 @@ def print(value):
     except ValueError:
         pass
     else:
-        worker.log_event("print", value)
+        worker.log_event("print", args, **kwargs)
 
-    builtins.print(value)
+    builtins.print(*args, **kwargs)

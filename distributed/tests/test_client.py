@@ -6512,21 +6512,21 @@ async def test_print(c, s, a, b, capsys):
     def foo():
         from dask.distributed import print
 
-        print("Hello!")
+        print("Hello!", 123, sep=":")
 
     await c.submit(foo)
 
     out, err = capsys.readouterr()
-    assert "Hello!" in out
+    assert "Hello!:123" in out
 
 
 def test_print_simple(capsys):
     from dask.distributed import print
 
-    print("Hello!")
+    print("Hello!", 123, sep=":")
 
     out, err = capsys.readouterr()
-    assert "Hello!" in out
+    assert "Hello!:123" in out
 
 
 @gen_cluster(client=True)

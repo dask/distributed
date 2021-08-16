@@ -6749,8 +6749,8 @@ class Scheduler(SchedulerState, ServerNode):
                 if teardown:
                     teardown(self, state)
 
-    def log_worker_event(self, worker=None, topic=None, msg=None):
-        self.log_event(topic, msg)
+    def log_worker_event(self, worker=None, topic=None, msg=None, **kwargs):
+        self.log_event(topic, msg, **kwargs)
 
     def subscribe_worker_status(self, comm=None):
         WorkerStatusPlugin(self, comm)
@@ -7410,7 +7410,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return results
 
-    def log_event(self, name, msg):
+    def log_event(self, name, msg, **kwargs):
         event = (time(), msg)
         if isinstance(name, list):
             for n in name:
@@ -7421,10 +7421,10 @@ class Scheduler(SchedulerState, ServerNode):
             self.event_counts[name] += 1
             if name == "print":
                 for comm in self.client_comms.values():
-                    comm.send({"op": "print", "message": msg})
+                    comm.send({"op": "print", "message": msg, **kwargs})
             if name == "warn":
                 for comm in self.client_comms.values():
-                    comm.send({"op": "warn", "warning": msg})
+                    comm.send({"op": "warn", "warning": msg, **kwargs})
 
     def get_events(self, comm=None, topic=None):
         if topic is not None:
