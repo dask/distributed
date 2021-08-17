@@ -43,8 +43,7 @@ class Process(ProcessInterface):
         await super().close()
 
     def __repr__(self):
-        status = str(self.status).split(".")[1]
-        return f"<{dask.utils.typename(type(self))}: status={status}>"
+        return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
 
     def _repr_html_(self):
         return super()._repr_html_()
