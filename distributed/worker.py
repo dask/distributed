@@ -2495,7 +2495,7 @@ class Worker(ServerNode):
             if not deps:
                 return
 
-            for dep in deps:
+            for dep in list(deps):
                 if dep.suspicious_count > 5:
                     deps.remove(dep)
                     self.bad_dep(dep)
