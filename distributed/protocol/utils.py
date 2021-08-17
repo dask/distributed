@@ -189,7 +189,7 @@ def address_of_memoryview(mv: memoryview) -> int:
     except ImportError:
         raise ValueError(
             f"Cannot get address of read-only memoryview {mv} since NumPy is not installed."
-        ) from None
+        )
 
     # NumPy doesn't mind read-only buffers. We could just use this method
     # for all cases, but it's nice to use the pure-Python method for the common
