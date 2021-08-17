@@ -97,7 +97,7 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return f"<{type(self).__name__}: status={self.status.name}>"
+        return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
 
     def _repr_html_(self):
         if self.status == Status.created:
