@@ -7048,3 +7048,34 @@ async def test_events_all_servers_use_same_channel(c, s, a):
 async def test_events_unsubscribe_raises_if_unknown(c, s):
     with pytest.raises(ValueError, match="No event handler known for topic unknown"):
         c.unsubscribe_topic("unknown")
+
+
+@gen_cluster(client=True)
+async def test_log_event_warn(c, s, a, b):
+    def foo():
+        get_worker().log_event(["foo", "warn"], "Hello!")
+
+    with pytest.warns(Warning, match="Hello!"):
+        await c.submit(foo)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print(c, s, a, b, capsys):
+    from dask.distributed import print
+
+    def foo():
+        print("Hello!", 123, sep=":")
+
+    await c.submit(foo)
+
+    out, err = capsys.readouterr()
+    assert "Hello!:123" in out
+
+
+def test_print_simple(capsys):
+    from dask.distributed import print
+
+    print("Hello!", 123, sep=":")
+
+    out, err = capsys.readouterr()
+    assert "Hello!:123" in out

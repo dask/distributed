@@ -493,6 +493,19 @@ class AllExit(Exception):
     """Custom exception class to exit All(...) early."""
 
 
+def _handle_print(event):
+    _, msg = event
+    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
+        print(*msg["args"], **msg["kwargs"])
+    else:
+        print(msg)
+
+
+def _handle_warn(event):
+    _, msg = event
+    warnings.warn(msg)
+
+
 class Client:
     """Connect to and submit computation to a Dask cluster
 
@@ -575,6 +588,8 @@ class Client:
     """
 
     _instances = weakref.WeakSet()
+
+    default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     def __init__(
         self,
@@ -1016,6 +1031,9 @@ class Client:
 
         for pc in self._periodic_callbacks.values():
             pc.start()
+
+        for topic, handler in Client.default_event_handlers.items():
+            self.subscribe_topic(topic, handler)
 
         self._handle_scheduler_coroutine = asyncio.ensure_future(self._handle_report())
         self.coroutines.append(self._handle_scheduler_coroutine)
