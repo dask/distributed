@@ -11,6 +11,7 @@ from dask.system import CPU_COUNT
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
+from ..widgets import get_template
 from ..worker import Worker, parse_memory_limit
 from .spec import SpecCluster
 from .utils import nprocesses_nthreads
@@ -249,14 +250,11 @@ class LocalCluster(SpecCluster):
         )
 
     def _repr_html_(self, cluster_status=None):
-        if cluster_status is None:
-            cluster_status = ""
-        cluster_status += f"""
-            <tr>
-                <td style="text-align: left;"><strong>Status:</strong> {self.status.name}</td>
-                <td style="text-align: left;"><strong>Using processes:</strong> {self.processes}</td>
-            </tr>
-        """
+        cluster_status = get_template("local_cluster.html.j2").render(
+            status=self.status.name,
+            processes=self.processes,
+            cluster_status=cluster_status,
+        )
         return super()._repr_html_(cluster_status=cluster_status)
 
 

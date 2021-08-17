@@ -52,7 +52,21 @@ class Nanny(ServerNode):
     ``Client.restart`` method, or to restart the worker automatically if
     it gets to the terminate fractiom of its memory limit.
 
-    The parameters for the Nanny are mostly the same as those for the Worker.
+    The parameters for the Nanny are mostly the same as those for the Worker
+    with exceptions listed below.
+
+    Parameters
+    ----------
+    env: dict, optional
+        Environment variables set at time of Nanny initialization will be
+        ensured to be set in the Worker process as well. This argument allows to
+        overwrite or otherwise set environment variables for the Worker. It is
+        also possible to set environment variables using the option
+        `distributed.nanny.environ`. Precedence as follows
+
+            1. Nanny arguments
+            2. Existing environment variables
+            3. Dask configuration
 
     See Also
     --------
@@ -166,7 +180,12 @@ class Nanny(ServerNode):
         self.death_timeout = parse_timedelta(death_timeout)
 
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = dask.config.get("distributed.nanny.environ")
+        config_environ = dask.config.get("distributed.nanny.environ", {})
+        if not isinstance(config_environ, dict):
+            raise TypeError(
+                f"distributed.nanny.environ configuration must be of type dict. Instead got {type(config_environ)}"
+            )
+        self.env = config_environ.copy()
         for k in self.env:
             if k in os.environ:
                 self.env[k] = os.environ[k]
