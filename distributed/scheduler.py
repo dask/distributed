@@ -5315,7 +5315,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
-        ws: WorkerState = parent._workers_dv[worker]
+        ws: WorkerState = parent._workers_dv.get(worker)
         if ts._processing_on != ws:
             return
 
