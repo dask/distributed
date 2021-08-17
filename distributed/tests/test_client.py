@@ -6989,9 +6989,9 @@ async def test_events_subscribe_topic(c, s, a):
 
     a.log_event("test-topic", {"important": "event"})
 
-    await asyncio.sleep(0.01)
+    while len(log) != 1:
+        await asyncio.sleep(0.01)
 
-    assert len(log) == 1
     time_, msg = log[0]
     assert isinstance(time_, float)
     assert msg == {"important": "event"}
@@ -7011,8 +7011,10 @@ async def test_events_subscribe_topic(c, s, a):
     c.subscribe_topic("test-topic", user_event_handler)
     await asyncio.sleep(0.01)
     a.log_event("test-topic", {"async": "event"})
-    await asyncio.sleep(0.01)
-    assert len(log) == 2
+
+    while len(log) != 2:
+        await asyncio.sleep(0.01)
+
     time_, msg = log[1]
     assert isinstance(time_, float)
     assert msg == {"async": "event"}
