@@ -4672,7 +4672,7 @@ class Scheduler(SchedulerState, ServerNode):
         if ts is None:
             return recommendations, client_msgs, worker_msgs
 
-        if ts.state == "memory":
+        if ts._state == "memory":
             self.add_keys(worker=worker, keys=[key])
             return recommendations, client_msgs, worker_msgs
 
