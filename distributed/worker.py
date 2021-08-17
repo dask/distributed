@@ -557,9 +557,11 @@ class Worker(ServerNode):
         if host:
             # Helpful error message if IPv6 specified incorrectly
             _, host_address = parse_address(host)
-            assert host_address.count(":") <= 1 or host_address.startswith(
-                "["
-            ), "Host address with IPv6 must be bracketed like '[::1]'"
+            if host_address.count(":") > 1 and not host_address.startswith("["):
+                raise ValueError(
+                    "Host address with IPv6 must be bracketed like '[::1]'; "
+                    f"got {host_address}"
+                )
         self._interface = interface
         self._protocol = protocol
 

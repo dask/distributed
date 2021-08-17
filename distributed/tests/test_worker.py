@@ -1060,11 +1060,11 @@ async def test_service_hosts_match_worker(s):
     # Check various malformed IPv6 addresses
     # Since these hostnames get passed to distributed.comm.address_from_user_args,
     # bracketing is mandatory for IPv6.
-    with pytest.raises(AssertionError) as exc:
+    with pytest.raises(ValueError) as exc:
         async with Worker(s.address, host="::") as w:
             pass
     assert "bracketed" in str(exc)
-    with pytest.raises(AssertionError) as exc:
+    with pytest.raises(ValueError) as exc:
         async with Worker(s.address, host="tcp://::1") as w:
             pass
     assert "bracketed" in str(exc)
