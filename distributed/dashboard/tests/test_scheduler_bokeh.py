@@ -31,6 +31,7 @@ from distributed.dashboard.components.scheduler import (
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
@@ -506,6 +507,78 @@ async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
     for idx, ws in enumerate(s.workers.values()):
         assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
         assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
+        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+
+
+@gen_cluster(client=True)
+async def test_SystemTimeseries(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    systs = SystemTimeseries(s)
+    workers = s.workers.values()
+
+    assert all(len(v) == 1 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][0] == sum(
+        [ws.metrics["read_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][0] == sum(
+        [ws.metrics["write_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["cpu"][0] == sum(
+        [ws.metrics["cpu"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["memory"][0] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][0] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][0] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][0]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+    systs.update()
+
+    assert all(len(v) == 2 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][1] == sum(
+        [ws.metrics["read_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][1] == sum(
+        [ws.metrics["write_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["cpu"][1] == sum(
+        [ws.metrics["cpu"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["memory"][1] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][1] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][1] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][1]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
 
 
 @gen_cluster(client=True)
