@@ -97,7 +97,8 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return f"<{type(self).__name__}: status={self.status}>"
+        status = str(self.status).split(".")[1]
+        return f"<{type(self).__name__}: status={status}>"
 
     def _repr_html_(self):
         if self.status == Status.created:
