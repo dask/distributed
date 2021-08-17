@@ -7061,6 +7061,17 @@ async def test_log_event_warn(c, s, a, b):
         await c.submit(foo)
 
 
+@gen_cluster(client=True)
+async def test_log_event_warn_dask_warns(c, s, a, b):
+    from dask.distributed import warn
+
+    def foo():
+        warn("Hello!")
+
+    with pytest.warns(Warning, match="Hello!"):
+        await c.submit(foo)
+
+
 @gen_cluster(client=True, Worker=Nanny)
 async def test_print(c, s, a, b, capsys):
     from dask.distributed import print

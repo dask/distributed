@@ -503,7 +503,10 @@ def _handle_print(event):
 
 def _handle_warn(event):
     _, msg = event
-    warnings.warn(msg)
+    if isinstance(msg, dict) and "args" in msg and "kwargs" in msg:
+        warnings.warn(*msg["args"], **msg["kwargs"])
+    else:
+        warnings.warn(msg)
 
 
 class Client:
@@ -589,7 +592,7 @@ class Client:
 
     _instances = weakref.WeakSet()
 
-    default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
+    _default_event_handlers = {"print": _handle_print, "warn": _handle_warn}
 
     def __init__(
         self,
@@ -720,7 +723,7 @@ class Client:
             self._set_config = dask.config.set(
                 scheduler="dask.distributed", shuffle="tasks"
             )
-        self.event_handlers = {}
+        self._event_handlers = {}
 
         self._stream_handlers = {
             "key-in-memory": self._handle_key_in_memory,
@@ -1032,7 +1035,7 @@ class Client:
         for pc in self._periodic_callbacks.values():
             pc.start()
 
-        for topic, handler in Client.default_event_handlers.items():
+        for topic, handler in Client._default_event_handlers.items():
             self.subscribe_topic(topic, handler)
 
         self._handle_scheduler_coroutine = asyncio.ensure_future(self._handle_report())
@@ -3591,10 +3594,10 @@ class Client:
         return self.sync(self.scheduler.events, topic=topic)
 
     async def _handle_event(self, topic, event):
-        if topic not in self.event_handlers:
+        if topic not in self._event_handlers:
             self.unsubscribe_topic(topic)
             return
-        handler = self.event_handlers[topic]
+        handler = self._event_handlers[topic]
         ret = handler(event)
         if inspect.isawaitable(ret):
             await ret
@@ -3606,7 +3609,7 @@ class Client:
         ----------
         topic: str
             The topic name
-        handler: callable or coroutinefunction
+        handler: callable or coroutine function
             A handler called for every received event. The handler must accept a
             single argument `event` which is a tuple `(timestamp, msg)` where
             timestamp refers to the clock on the scheduler.
@@ -3624,9 +3627,9 @@ class Client:
         dask.distributed.Client.get_events
         dask.distributed.Client.log_event
         """
-        if topic in self.event_handlers:
+        if topic in self._event_handlers:
             logger.info("Handler for %s already set. Overwriting.", topic)
-        self.event_handlers[topic] = handler
+        self._event_handlers[topic] = handler
         msg = {"op": "subscribe-topic", "topic": topic, "client": self.id}
         self._send_to_scheduler(msg)
 
@@ -3639,7 +3642,7 @@ class Client:
         dask.distributed.Client.get_events
         dask.distributed.Client.log_event
         """
-        if topic in self.event_handlers:
+        if topic in self._event_handlers:
             msg = {"op": "unsubscribe-topic", "topic": topic, "client": self.id}
             self._send_to_scheduler(msg)
         else:
