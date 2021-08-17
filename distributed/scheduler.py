@@ -7411,7 +7411,7 @@ class Scheduler(SchedulerState, ServerNode):
         return results
 
     def log_event(self, name, msg, **kwargs):
-        if isinstance(name, list):
+        if isinstance(name, (list, tuple)):
             for n in name:
                 self.log_event(n, msg, **kwargs)
         else:
