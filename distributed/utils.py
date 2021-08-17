@@ -1160,6 +1160,8 @@ def typename(typ):
     >>> typename(Scheduler)
     'distributed.scheduler.Scheduler'
     """
+    if not isinstance(typ, type):
+        return typename(type(typ))
     try:
         return typ.__module__ + "." + typ.__name__
     except AttributeError:
