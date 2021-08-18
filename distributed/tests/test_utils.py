@@ -40,7 +40,6 @@ from distributed.utils import (
     sync,
     thread_state,
     truncate_exception,
-    typename,
     warn_on_duration,
 )
 from distributed.utils_test import (
@@ -599,12 +598,3 @@ def test_parse_timedelta_deprecated():
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
-
-
-class MyType:
-    pass
-
-
-def test_typename_on_instances():
-    instance = MyType()
-    assert typename(instance) == typename(MyType)

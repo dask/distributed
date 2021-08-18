@@ -520,7 +520,7 @@ def test_serialize_lists(serializers):
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
-    assert header["type"] == "builtins.memoryview"
+    assert header["type"] == "memoryview"
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out
