@@ -128,6 +128,11 @@ class ClientExecutor(cf.Executor):
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
 
+        if isinstance(fs, list):
+            # Below iterator relies on this being a generator to cancel
+            # remaining futures
+            fs = (val for val in fs)
+
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
         def result_iterator():
