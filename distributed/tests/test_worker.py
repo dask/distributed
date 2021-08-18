@@ -2443,7 +2443,7 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    while not len(s.tasks[f2.key].who_has) == 2:
+    while a.address not in {w.address for w in s.tasks[f2.key].who_has}:
         await asyncio.sleep(0.001)
 
     # Ensure that all keys have been properly registered and will also be
@@ -2510,7 +2510,7 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    while not len(s.tasks[f2.key].who_has) == 2:
+    while a.address not in {w.address for w in s.tasks[f2.key].who_has}:
         await asyncio.sleep(0.001)
 
     del f1, f2, f3
