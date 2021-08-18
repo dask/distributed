@@ -41,7 +41,6 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
-from dask.utils import typename
 from dask.widgets import get_template
 
 try:
@@ -1266,6 +1265,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1421,6 +1422,7 @@ _deprecations = {
     "funcname": "dask.utils.funcname",
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
 }
 
 
