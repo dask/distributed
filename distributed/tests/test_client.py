@@ -7004,6 +7004,9 @@ async def test_events_subscribe_topic(c, s, a):
 
     a.log_event("test-topic", {"forget": "me"})
 
+    while len(s.events["test-topic"]) == 1:
+        await asyncio.sleep(0.01)
+
     assert len(log) == 1
 
     async def async_user_event_handler(event):
