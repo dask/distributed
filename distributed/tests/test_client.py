@@ -7008,7 +7008,7 @@ async def test_events_subscribe_topic(c, s, a):
         log.append(event)
         await asyncio.sleep(0)
 
-    c.subscribe_topic("test-topic", user_event_handler)
+    c.subscribe_topic("test-topic", async_user_event_handler)
     await asyncio.sleep(0.01)
     a.log_event("test-topic", {"async": "event"})
 

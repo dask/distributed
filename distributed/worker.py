@@ -32,6 +32,7 @@ from dask.utils import (
     parse_bytes,
     parse_timedelta,
     typename,
+    stringify,
 )
 
 from . import comm, preloading, profile, system, utils
@@ -4142,7 +4143,9 @@ def print(*args, **kwargs):
     except ValueError:
         pass
     else:
-        worker.log_event("print", {"args": args, "kwargs": kwargs})
+        msg = {"args": args, "kwargs": kwargs}
+        # https://github.com/dask/distributed/pull/5217#discussion_r690797717
+        worker.log_event("print", stringify(msg, exclusive=[]))
 
     builtins.print(*args, **kwargs)
 
