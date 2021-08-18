@@ -744,7 +744,7 @@ class Worker(ServerNode):
             lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
         self.periodic_callbacks["keep-alive"] = pc
-
+        self._suspicious_count_limit = 10
         self._address = contact_address
 
         self.memory_monitor_interval = parse_timedelta(
@@ -2538,7 +2538,7 @@ class Worker(ServerNode):
         exc = ValueError(
             "Could not find dependent %s.  Check worker logs" % str(dep.key)
         )
-        for ts in dep.dependents:
+        for ts in list(dep.dependents):
             msg = error_message(exc)
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
@@ -2555,7 +2555,10 @@ class Worker(ServerNode):
                 return
 
             for dep in list(deps):
-                if dep.suspicious_count > 5:
+                if (
+                    self._suspicious_count_limit
+                    and dep.suspicious_count > self._suspicious_count_limit
+                ):
                     deps.remove(dep)
                     self.bad_dep(dep)
             if not deps:

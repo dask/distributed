@@ -4715,7 +4715,7 @@ class Scheduler(SchedulerState, ServerNode):
                     "reason": f"already-released-or-forgotten-{time()}",
                 }
             ]
-        elif ts.state == "memory":
+        elif ts._state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
             ts._metadata.update(kwargs["metadata"])
@@ -5345,8 +5345,8 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None:
             return
-        ws: WorkerState = parent._workers_dv[worker]
-        if ts._processing_on != ws:
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if ws is None or ts._processing_on != ws:
             return
 
         recommendations: dict
@@ -5380,7 +5380,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers_dv[worker]
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if not ws:
+            return
         tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
         removed_tasks: set = tasks.intersection(ws._has_what)
 
@@ -5599,6 +5601,9 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 w = stream_comms[worker]
                 w.send(*msgs)
+            except KeyError:
+                # worker already gone
+                pass
             except (CommClosedError, AttributeError):
                 self.loop.add_callback(self.remove_worker, address=worker)
 
