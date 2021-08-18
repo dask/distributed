@@ -4143,9 +4143,11 @@ def print(*args, **kwargs):
     except ValueError:
         pass
     else:
-        msg = {"args": args, "kwargs": kwargs}
-        # https://github.com/dask/distributed/pull/5217#discussion_r690797717
-        worker.log_event("print", stringify(msg, exclusive=[]))
+        msg = {
+            "args": tuple(stringify(arg) for arg in args),
+            "kwargs": {k: stringify(v) for k, v in kwargs.items()},
+        }
+        worker.log_event("print", msg)
 
     builtins.print(*args, **kwargs)
 

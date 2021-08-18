@@ -7095,6 +7095,19 @@ async def test_print(c, s, a, b, capsys):
     assert "Hello!:123" in out
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_non_msgpack_serializable(c, s, a, b, capsys):
+    from dask.distributed import print
+
+    def foo():
+        print(object())
+
+    await c.submit(foo)
+
+    out, err = capsys.readouterr()
+    assert "<object object at" in out
+
+
 def test_print_simple(capsys):
     from dask.distributed import print
 
