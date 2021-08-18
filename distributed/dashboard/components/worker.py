@@ -111,7 +111,8 @@ class CommunicatingStream(DashboardComponent):
                 "duration",
                 "who",
                 "y",
-                "hover",
+                "transfer",
+                "keys",
                 "alpha",
                 "bandwidth",
                 "total",
@@ -135,6 +136,7 @@ class CommunicatingStream(DashboardComponent):
 
             fig.rect(
                 source=self.incoming,
+                name="Incoming",
                 x="middle",
                 y="y",
                 width="duration",
@@ -144,6 +146,7 @@ class CommunicatingStream(DashboardComponent):
             )
             fig.rect(
                 source=self.outgoing,
+                name="Outgoing",
                 x="middle",
                 y="y",
                 width="duration",
@@ -152,7 +155,14 @@ class CommunicatingStream(DashboardComponent):
                 alpha="alpha",
             )
 
-            hover = HoverTool(point_policy="follow_mouse", tooltips="""@hover""")
+            hover = HoverTool(
+                point_policy="follow_mouse",
+                tooltips=[
+                    ("Transfer", "@transfer"),
+                    ("Keys", "@keys{safe}"),
+                    ("Direction", "$name"),
+                ],
+            )
             fig.add_tools(
                 hover,
                 ResetTool(),
@@ -187,7 +197,6 @@ class CommunicatingStream(DashboardComponent):
                 for msg in msgs:
                     if "compressed" in msg:
                         del msg["compressed"]
-                    del msg["keys"]
 
                     bandwidth = msg["total"] / (msg["duration"] or 0.5)
                     bw = max(min(bandwidth / 500e6, 1), 0.3)
@@ -198,10 +207,13 @@ class CommunicatingStream(DashboardComponent):
                         self.who[msg["who"]] = len(self.who)
                         msg["y"] = self.who[msg["who"]]
 
-                    msg["hover"] = "{} / {} = {}/s".format(
+                    msg["transfer"] = "{} / {} = {}/s".format(
                         format_bytes(msg["total"]),
                         format_time(msg["duration"]),
                         format_bytes(msg["total"] / msg["duration"]),
+                    )
+                    msg["keys"] = "<br>".join(
+                        f"{k}: {format_bytes(v)}" for k, v in msg["keys"].items()
                     )
 
                     for k in ["middle", "duration", "start", "stop"]:
