@@ -6985,7 +6985,8 @@ async def test_events_subscribe_topic(c, s, a):
 
     c.subscribe_topic("test-topic", user_event_handler)
 
-    await asyncio.sleep(0.01)
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
 
     a.log_event("test-topic", {"important": "event"})
 
@@ -6998,10 +6999,11 @@ async def test_events_subscribe_topic(c, s, a):
 
     c.unsubscribe_topic("test-topic")
 
-    await asyncio.sleep(0.01)
+    while s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
 
     a.log_event("test-topic", {"forget": "me"})
-    await asyncio.sleep(0.01)
+
     assert len(log) == 1
 
     async def async_user_event_handler(event):
@@ -7009,12 +7011,16 @@ async def test_events_subscribe_topic(c, s, a):
         await asyncio.sleep(0)
 
     c.subscribe_topic("test-topic", async_user_event_handler)
-    await asyncio.sleep(0.01)
-    a.log_event("test-topic", {"async": "event"})
 
-    while len(log) != 2:
+    while not s.event_subscriber["test-topic"]:
         await asyncio.sleep(0.01)
 
+    a.log_event("test-topic", {"async": "event"})
+
+    while len(log) == 1:
+        await asyncio.sleep(0.01)
+
+    assert len(log) == 2
     time_, msg = log[1]
     assert isinstance(time_, float)
     assert msg == {"async": "event"}
@@ -7036,14 +7042,18 @@ async def test_events_all_servers_use_same_channel(c, s, a):
         log.append(event)
 
     c.subscribe_topic("test-topic", user_event_handler)
+
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
     async with Nanny(s.address) as n:
         a.log_event("test-topic", "worker")
         n.log_event("test-topic", "nanny")
         s.log_event("test-topic", "scheduler")
         await c.log_event("test-topic", "client")
 
-    await asyncio.sleep(0.1)
-    assert len(log) == 4 == len(set(log))
+    while not len(log) == 4 == len(set(log)):
+        await asyncio.sleep(0.1)
 
 
 @gen_cluster(client=True, nthreads=[])
