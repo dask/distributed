@@ -2522,7 +2522,7 @@ class Client:
 
         for fr, _ in traceback.walk_stack(None):
             if pattern is None or (
-                not pattern.match(fr.f_globals["__name__"])
+                not pattern.match(fr.f_globals.get("__name__", ""))
                 and fr.f_code.co_name not in ("<listcomp>", "<dictcomp>")
             ):
                 try:
