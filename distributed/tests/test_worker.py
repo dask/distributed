@@ -2037,13 +2037,15 @@ async def test_annotator_choose_executor(c, s):
         },
         annotators=[set_executor_by_task_output],
     ):
-        res = c.submit(f, "exec1")
-        res = await c.submit(get_thread_name, res)
-        assert "Executor1" in res
-
-        res = c.submit(f, "exec2")
-        res = await c.submit(get_thread_name, res)
-        assert "Executor2" in res
+        dsk = {
+            "f1": (f, "exec1"),
+            "g1": (get_thread_name, "f1"),
+            "f2": (f, "exec2"),
+            "g2": (get_thread_name, "f2"),
+        }
+        res1, res2 = c.get(dsk, ["g1", "g2"], sync=False, asynchronous=True)
+        assert "Executor1" in await res1
+        assert "Executor2" in await res2
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -2077,12 +2079,13 @@ async def test_annotator_choose_gpu_executor(c, s):
 
     numpy = pytest.importorskip("numpy")
     cupy = pytest.importorskip("cupy")
+    dask_cuda = pytest.importorskip("dask_cuda.is_device_object")
 
     def get_thread_name(x):
         return threading.current_thread().name
 
     def set_gpu_executor(ts: TaskState, value: object) -> dict:
-        if isinstance(value, cupy.ndarray):
+        if dask_cuda.is_device_object(value):
             return {"annotations": {"executor": "gpu"}, "dependents": True}
 
     def f(ary_type):
@@ -2099,13 +2102,15 @@ async def test_annotator_choose_gpu_executor(c, s):
         },
         annotators=[set_gpu_executor],
     ):
-        res = c.submit(f, "numpy")
-        res = await c.submit(get_thread_name, res)
-        assert "Dask-Default-Threads" in res
-
-        res = c.submit(f, "cupy")
-        res = await c.submit(get_thread_name, res)
-        assert "GPU-Executor" in res
+        dsk = {
+            "f1": (f, "numpy"),
+            "g1": (get_thread_name, "f1"),
+            "f2": (f, "cupy"),
+            "g2": (get_thread_name, "f2"),
+        }
+        res1, res2 = c.get(dsk, ["g1", "g2"], sync=False, asynchronous=True)
+        assert "Dask-Default-Threads" in await res1
+        assert "GPU-Executor" in await res2
 
 
 def kill_process():
