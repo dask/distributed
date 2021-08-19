@@ -37,10 +37,13 @@ gpuci_logger "Activate conda env"
 . /opt/conda/etc/profile.d/conda.sh
 conda activate dask
 
+gpuci_logger "Install dask"
+python -m pip install git+https://github.com/dask/dask
+
 gpuci_logger "Install distributed"
 python setup.py install
 
-gpuci_logger "Check compiler versions"
+gpuci_logger "Check Python versions"
 python --version
 
 gpuci_logger "Check conda environment"
@@ -48,5 +51,5 @@ conda info
 conda config --show-sources
 conda list --show-channel-urls
 
-gpuci_logger "Python py.test for dask"
+gpuci_logger "Python py.test for distributed"
 py.test $WORKSPACE -v -m gpu --runslow --junitxml="$WORKSPACE/junit-distributed.xml"
