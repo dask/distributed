@@ -2,8 +2,9 @@
 These are mostly regular objects with more useful _repr_ and _repr_html_ methods."""
 from urllib.parse import urlparse
 
+from dask.widgets import get_environment, get_template
+
 from distributed.utils import format_dashboard_link
-from distributed.widgets import get_environment, get_template
 
 
 class HasWhat(dict):

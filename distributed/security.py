@@ -153,18 +153,57 @@ class Security:
             out = dask.config.get(config_name)
         setattr(self, field, out)
 
-    def __repr__(self):
+    def _attr_to_dict(self):
         keys = sorted(self.__slots__)
         keys.remove("extra_conn_args")
-        items = []
+
+        attr = {}
+
         for k in keys:
             val = getattr(self, k)
             if val is not None:
                 if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
+                    attr[k] = "Temporary (In-memory)"
+                elif isinstance(val, str):
+                    attr[k] = f"Local ({os.path.abspath(val)})"
                 else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join(f"{k}={v}" for k, v in items) + ")"
+                    attr[k] = val
+
+        return attr
+
+    def __repr__(self):
+        attr = self._attr_to_dict()
+        return (
+            "Security("
+            + ", ".join(f"{key}={value}" for key, value in attr.items())
+            + ")"
+        )
+
+    def _repr_html_(self):
+        attr = self._attr_to_dict()
+
+        rows = ""
+
+        for key, val in attr.items():
+            rows += f"""
+            <tr>
+                <th style="text-align: left; width: 150px;">{key}</th>
+                <td style="text-align: left;">{val}</td>
+            </tr>
+            """
+
+        html = f"""
+        <div style="margin-left: auto;">
+            <h3 style="margin-bottom: 0px;"><b>Security</b></h3>
+            <p>
+                <table style="width: 100%;">
+                {rows}
+                </table>
+            </p>
+        </div>
+        """
+
+        return html
 
     def get_tls_config_for_role(self, role):
         """

@@ -124,7 +124,9 @@ class Progress(SchedulerPlugin):
             self.scheduler.plugins.remove(self)
         if exception:
             self.status = "error"
-            self.extra.update({"exception": self.scheduler.exceptions[key], "key": key})
+            self.extra.update(
+                {"exception": self.scheduler.tasks[key].exception, "key": key}
+            )
         else:
             self.status = "finished"
         logger.debug("Remove Progress plugin")

@@ -18,7 +18,7 @@ from tlz import concat, first, frequencies, merge, valmap
 
 import dask
 from dask import delayed
-from dask.utils import apply, parse_timedelta, stringify
+from dask.utils import apply, parse_timedelta, stringify, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
@@ -27,7 +27,7 @@ from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.scheduler import MemoryState, Scheduler
-from distributed.utils import TimeoutError, tmpfile, typename
+from distributed.utils import TimeoutError, tmpfile
 from distributed.utils_test import (
     captured_logger,
     cluster,
