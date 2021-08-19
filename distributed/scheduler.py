@@ -5548,14 +5548,11 @@ class Scheduler(SchedulerState, ServerNode):
         # Find tasks to annotate
         tasks: List[TaskState] = [ts]
         if dependents:
-            tasks.extend(ts._dependents)
+            tasks.extend(ts.dependents)
 
         if annotations:
             for dts in tasks:
-                if dts._annotations:
-                    dts._annotations.update(annotations)
-                else:
-                    dts._annotations = annotations
+                dts.annotations.update(annotations)
 
     ############################
     # Less common interactions #
