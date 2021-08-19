@@ -7,11 +7,11 @@ import weakref
 import toolz
 
 from dask.system import CPU_COUNT
+from dask.widgets import get_template
 
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..security import Security
-from ..widgets import get_template
 from ..worker import Worker, parse_memory_limit
 from .spec import SpecCluster
 from .utils import nprocesses_nthreads

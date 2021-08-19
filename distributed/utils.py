@@ -41,6 +41,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
 try:
     from tornado.ioloop import PollIOLoop
@@ -1151,23 +1152,6 @@ def warn_on_duration(duration, msg):
         warnings.warn(msg, stacklevel=2)
 
 
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    if not isinstance(typ, type):
-        return typename(type(typ))
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
-
-
 def format_dashboard_link(host, port):
     template = dask.config.get("distributed.dashboard.link")
     if dask.config.get("distributed.scheduler.dashboard.tls.cert"):
@@ -1244,8 +1228,6 @@ class Log(str):
     """A container for newline-delimited string of log entries"""
 
     def _repr_html_(self):
-        from .widgets import get_template  # Avoiding circular import
-
         return get_template("log.html.j2").render(log=self)
 
 
@@ -1253,8 +1235,6 @@ class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        from .widgets import get_template  # Avoiding circular import
-
         return get_template("logs.html.j2").render(logs=self)
 
 
@@ -1285,6 +1265,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1440,6 +1422,7 @@ _deprecations = {
     "funcname": "dask.utils.funcname",
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
 }
 
 

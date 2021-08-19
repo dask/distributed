@@ -40,7 +40,6 @@ from distributed.utils import (
     sync,
     thread_state,
     truncate_exception,
-    typename,
     warn_on_duration,
 )
 from distributed.utils_test import (
@@ -596,15 +595,12 @@ def test_parse_timedelta_deprecated():
     assert parse_timedelta is dask.utils.parse_timedelta
 
 
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
-
-
-class MyType:
-    pass
-
-
-def test_typename_on_instances():
-    instance = MyType()
-    assert typename(instance) == typename(MyType)
