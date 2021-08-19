@@ -16,7 +16,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Callable, Dict, Hashable, Iterable, Optional
+from typing import Callable, Dict, Hashable, Iterable, Mapping, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -692,7 +692,7 @@ class Worker(ServerNode):
 
         self.low_level_profiler = low_level_profiler
 
-        self.annotators: Iterable[Callable[[TaskState, object], bool]] = (
+        self.annotators: Iterable[Callable[[TaskState, object], Mapping]] = (
             annotators or ()
         )
 
@@ -1512,7 +1512,7 @@ class Worker(ServerNode):
 
         if self.annotators:
             for key, value in data.items():
-                self.handle_annotators(self.tasks[key], value, report=report)
+                self.handle_annotators(self.tasks[key], value)
 
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
@@ -2042,7 +2042,7 @@ class Worker(ServerNode):
                         d.waiting_for_data.add(ts.key)
 
             if self.batched_stream and self.status == Status.running:
-                self.handle_annotators(ts, value, report=report)
+                self.handle_annotators(ts, value)
                 if report:
                     self.send_task_state_to_scheduler(ts)
             else:
@@ -2311,26 +2311,41 @@ class Worker(ServerNode):
         self,
         ts: TaskState,
         value: object = no_value,
-        report=True,
-        annotate_dependents=True,
     ):
         """Annotate task if applicable and report back to the scheduler"""
 
-        any_changes = False
-        try:
-            for func in self.annotators:
-                any_changes |= func(ts, value)
-        except Exception as e:
-            logger.exception(e)
-            return False
-        if any_changes and report:
+        # Separate annotation updates into two cases:
+        a1 = {}  # when the task's dependents should also be updated
+        a2 = {}  # when only the task itself should be updated
+        for func in self.annotators:
+            try:
+                res = func(ts, value)
+            except Exception as e:
+                logger.exception(e)
+            else:
+                if res:
+                    if res["dependents"]:
+                        a1.update(res["annotations"])
+                    else:
+                        a2.update(res["annotations"])
+        if a1:
+            ts.annotations.update(a1)
             self.batched_stream.send(
                 {
                     "op": "annotate-task",
                     "key": ts.key,
-                    "annotations": ts.annotations,
-                    "resource_restrictions": ts.resource_restrictions,
-                    "annotate_dependents": annotate_dependents,
+                    "annotations": a1,
+                    "dependents": True,
+                }
+            )
+        if a2:
+            ts.annotations.update(a2)
+            self.batched_stream.send(
+                {
+                    "op": "annotate-task",
+                    "key": ts.key,
+                    "annotations": a2,
+                    "dependents": False,
                 }
             )
 

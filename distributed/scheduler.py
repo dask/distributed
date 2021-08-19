@@ -5535,8 +5535,7 @@ class Scheduler(SchedulerState, ServerNode):
         worker=None,
         key: str = None,
         annotations: Mapping = None,
-        resource_restrictions: Mapping = None,
-        annotate_dependents=True,
+        dependents: bool = None,
     ):
         """Update the annotations and restrictions of a task"""
 
@@ -5548,7 +5547,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Find tasks to annotate
         tasks: List[TaskState] = [ts]
-        if annotate_dependents:
+        if dependents:
             tasks.extend(ts._dependents)
 
         if annotations:
@@ -5557,13 +5556,6 @@ class Scheduler(SchedulerState, ServerNode):
                     dts._annotations.update(annotations)
                 else:
                     dts._annotations = annotations
-
-        if resource_restrictions:
-            for dts in tasks:
-                if dts._resource_restrictions:
-                    dts._resource_restrictions.update(resource_restrictions)
-                else:
-                    dts._resource_restrictions = resource_restrictions
 
     ############################
     # Less common interactions #

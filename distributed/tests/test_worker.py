@@ -2022,9 +2022,8 @@ async def test_annotator_choose_executor(c, s):
     def get_thread_name(x):
         return threading.current_thread().name
 
-    def set_executor_by_task_output(ts: TaskState, value: object) -> bool:
-        ts.annotations["executor"] = value
-        return True
+    def set_executor_by_task_output(ts: TaskState, value: object) -> dict:
+        return {"annotations": {"executor": value}, "dependents": True}
 
     def f(x):
         return x
@@ -2051,7 +2050,7 @@ async def test_annotator_choose_executor(c, s):
 async def test_annotator_raise_exception(c, s):
     """Test that it is possible for a task to choose executor"""
 
-    def broken_annotator(ts: TaskState, value: object) -> bool:
+    def broken_annotator(ts: TaskState, value: object) -> dict:
         raise RuntimeError()
 
     def f(x):
@@ -2078,16 +2077,13 @@ async def test_annotator_choose_gpu_executor(c, s):
 
     numpy = pytest.importorskip("numpy")
     cupy = pytest.importorskip("cupy")
-    dask_cuda = pytest.importorskip("dask_cuda.is_device_object")
 
     def get_thread_name(x):
         return threading.current_thread().name
 
-    def set_gpu_executor(ts: TaskState, value: object) -> bool:
-        if dask_cuda.is_device_object(value):
-            ts.annotations["executor"] = "gpu"
-            return True
-        return False
+    def set_gpu_executor(ts: TaskState, value: object) -> dict:
+        if isinstance(value, cupy.ndarray):
+            return {"annotations": {"executor": "gpu"}, "dependents": True}
 
     def f(ary_type):
         if ary_type == "numpy":
