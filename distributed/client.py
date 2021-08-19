@@ -38,6 +38,7 @@ from dask.utils import (
     funcname,
     parse_timedelta,
     stringify,
+    typename,
 )
 from dask.widgets import get_template
 
@@ -86,7 +87,6 @@ from .utils import (
     no_default,
     sync,
     thread_state,
-    typename,
 )
 from .utils_comm import (
     WrappedKey,
