@@ -1,6 +1,40 @@
 Changelog
 =========
 
+2021.08.0
+---------
+
+Released on August 13, 2021
+
+- Include addresses in closed comm repr  (:pr:`5203`) `James Bourbeau`_
+- Test ``nanny.environ`` precedence (:pr:`5204`) `Florian Jetter`_
+- Migrating HTML reprs to jinja2 (:pr:`5188`) `Jacob Tomlinson`_
+- Fix ``test_process_executor_kills_process`` flakyness (:pr:`5183`) `crusaderky`_
+- Remove ``urllib3`` as a dependency downloading preloads (:pr:`5199`) `Marcos Moyano`_
+- Download preload urls in the ``Preload`` constructor  (:pr:`5194`) `Marcos Moyano`_
+- Avoid recursion error in ``profile.merge`` (:pr:`5195`) `Matthew Rocklin`_
+- Add text exceptions to the ``Scheduler`` (:pr:`5148`) `Matthew Rocklin`_
+- Use ``kwarg`` for ``Theme`` filename (:pr:`5190`) `Bryan Van de Ven`_
+- Add a ``.git-ignore-revs`` file (:pr:`5187`) `Florian Jetter`_
+- Replace ``not not`` with ``bool()`` (:pr:`5182`) `Jacob Tomlinson`_
+- Resolve deadlock cause by transition error after fetching dependency (:pr:`5157`) `Florian Jetter`_
+- Set z-index of data-table lower (:pr:`5175`) `Julia Signell`_
+- Add ``no-worker`` - ``memory`` transition to scheduler (:pr:`5174`) `Florian Jetter`_
+- Deprecate worker plugin overwrite policy (:pr:`5146`) `James Bourbeau`_
+- Fix flaky tests in CI (:pr:`5168`) `crusaderky`_
+- Instructions for jemalloc with brew on macOS (:pr:`4996`) `Gabe Joseph`_
+- Bump ``RAPIDS_VER`` to 21.10 (:pr:`5165`) `Charles Blackmon-Luca`_
+- Tweak verbiage around ``async`` functions (:pr:`5166`) `crusaderky`_
+- Use Python 3 ``super()`` calls (:pr:`5167`) `crusaderky`_
+- Support asynchronous tasks (:pr:`5151`) `Matthew Rocklin`_
+- Rename total comm bytes and provide doc string (:pr:`5155`) `Florian Jetter`_
+- Add GPU executor if GPU is present (:pr:`5123`) `Matthew Rocklin`_
+- Fix RMM and UCX tests (:pr:`5158`) `Peter Andreas Entschev`_
+- Remove excessive timeout of ``test_steal_during_task_deserialization`` (:pr:`5156`) `Florian Jetter`_
+- Add gpuCI build script (:pr:`5147`) `Charles Blackmon-Luca`_
+- Demote ``Worker.ensure_computing`` to function (:pr:`5153`) `Florian Jetter`_
+
+
 2021.07.2
 ---------
 

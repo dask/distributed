@@ -45,7 +45,9 @@ env = Environment(
     )
 )
 
-BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
+BOKEH_THEME = Theme(
+    filename=os.path.join(os.path.dirname(__file__), "..", "theme.yaml")
+)
 
 template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
 

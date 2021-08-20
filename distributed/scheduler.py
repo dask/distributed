@@ -1,6 +1,5 @@
 import asyncio
 import heapq
-import html
 import inspect
 import itertools
 import json
@@ -39,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from . import preloading, profile
 from . import versions as version_module
@@ -733,13 +733,12 @@ class WorkerState:
         )
 
     def _repr_html_(self):
-        text = (
-            f"<b>WorkerState: </b> {html.escape(self._address)} "
-            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        return get_template("worker_state.html.j2").render(
+            address=self.address,
+            name=self.name,
+            has_what=self._has_what,
+            processing=self.processing,
         )
-        return text
 
     @ccall
     @exceptval(check=False)
@@ -825,53 +824,14 @@ class Computation:
         )
 
     def _repr_html_(self):
-        text = f"""<b>Computation</b> {self._id}
-
-        <table>
-            <tr>
-                <td style="text-align: left;"><strong>Duration: </strong>{self.stop - self.start:.3f}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Start: </strong>{self.start}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Groups: </strong>{len(self.groups)}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-            <tr>
-                <td style="text-align: left;"><strong>Tasks: </strong>
-                {", ".join(
-                    "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
-                )}</td>
-                <td style="text-align: left;"></td>
-            </tr>
-        </table>
-
-        <details>
-        <summary style="margin-bottom": 20px><h4 style="display:inline">Code</h4></summary>
-        """
-
-        for ix, code in enumerate(self.code):
-            text += f"<h5>Code segment {ix + 1} / {len(self.code)}</h5>"
-            text += f"<code>{code}</code>"
-
-        text += """
-        </details>
-        <details>
-        <summary style="margin-bottom": 20px><h4 style="display:inline">Task Groups</h4></summary>
-        <ul>
-        """
-        for gr in self.groups:
-            text += f"""
-            <li> {gr._repr_html_()} </li>
-            """
-        text += """
-        </ul>
-        </details>
-        """
-        return text
+        return get_template("computation.html.j2").render(
+            id=self._id,
+            start=self.start,
+            stop=self.stop,
+            groups=self.groups,
+            states=self.states,
+            code=self.code,
+        )
 
 
 @final
@@ -1136,9 +1096,6 @@ class TaskGroup:
             )
             + ">"
         )
-
-    def _repr_html_(self):
-        return repr(self)[1:-1]
 
     def __len__(self):
         return sum(self._states.values())
@@ -1409,7 +1366,9 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str
     _exception: object
+    _exception_text: str
     _traceback: object
+    _traceback_text: str
     _exception_blame: object
     _erred_on: set
     _suspicious: Py_ssize_t
@@ -1461,7 +1420,9 @@ class TaskState:
         # Which clients want us
         "_who_wants",
         "_exception",
+        "_exception_text",
         "_traceback",
+        "_traceback_text",
         "_erred_on",
         "_exception_blame",
         "_suspicious",
@@ -1480,6 +1441,7 @@ class TaskState:
         self._run_spec = run_spec
         self._state = None
         self._exception = self._traceback = self._exception_blame = None
+        self._exception_text = self._traceback_text = ""
         self._suspicious = self._retries = 0
         self._nbytes = -1
         self._priority = None
@@ -1598,8 +1560,16 @@ class TaskState:
         return self._exception
 
     @property
+    def exception_text(self):
+        return self._exception_text
+
+    @property
     def traceback(self):
         return self._traceback
+
+    @property
+    def traceback_text(self):
+        return self._traceback_text
 
     @property
     def exception_blame(self):
@@ -1682,16 +1652,11 @@ class TaskState:
         return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
-        color = (
-            "var(--jp-error-color0, red)"
-            if self._state == "erred"
-            else "var(--jp-ui-font-color0, black)"
+        return get_template("task_state.html.j2").render(
+            state=self._state,
+            nbytes=self._nbytes,
+            key=self._key,
         )
-        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
-        if self._state == "memory":
-            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
-        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
-        return text
 
     @ccall
     def validate(self):
@@ -1969,6 +1934,7 @@ class SchedulerState:
             ("processing", "erred"): self.transition_processing_erred,
             ("no-worker", "released"): self.transition_no_worker_released,
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
+            ("no-worker", "memory"): self.transition_no_worker_memory,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
             ("erred", "released"): self.transition_erred_released,
@@ -2215,7 +2181,7 @@ class SchedulerState:
                 self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                assert not args and not kwargs
+                assert not args and not kwargs, (args, kwargs)
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
@@ -2440,6 +2406,42 @@ class SchedulerState:
                 else:
                     self._unrunnable.add(ts)
                     ts.state = "no-worker"
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
+    def transition_no_worker_memory(
+        self, key, nbytes=None, type=None, typename: str = None, worker=None
+    ):
+        try:
+            ws: WorkerState = self._workers_dv[worker]
+            ts: TaskState = self._tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            if self._validate:
+                assert not ts._processing_on
+                assert not ts._waiting_on
+                assert ts._state == "no-worker"
+
+            self._unrunnable.remove(ts)
+
+            if nbytes is not None:
+                ts.set_nbytes(nbytes)
+
+            self.check_idle_saturated(ws)
+
+            _add_to_memory(
+                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
+            ts.state = "memory"
 
             return recommendations, client_msgs, worker_msgs
         except Exception as e:
@@ -3029,7 +3031,15 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
+        self,
+        key: str,
+        cause: str = None,
+        exception=None,
+        traceback=None,
+        exception_text: str = None,
+        traceback_text: str = None,
+        worker: str = None,
+        **kwargs,
     ):
         ws: WorkerState
         try:
@@ -3055,8 +3065,10 @@ class SchedulerState:
             ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
+                ts._exception_text = exception_text
             if traceback is not None:
                 ts._traceback = traceback
+                ts._traceback_text = traceback_text
             if cause is not None:
                 failing_ts = self._tasks[cause]
                 ts._exception_blame = failing_ts
@@ -3832,13 +3844,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _repr_html_(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        text = (
-            f"<b>Scheduler: </b>{html.escape(self.address)} "
-            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
-            f'<font color="gray">cores: </font>{parent._total_nthreads} '
-            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        return get_template("scheduler.html.j2").render(
+            address=self.address,
+            workers=parent._workers_dv,
+            threads=parent._total_nthreads,
+            tasks=parent._tasks,
         )
-        return text
 
     def identity(self, comm=None):
         """Basic information about ourselves and our cluster"""
@@ -4241,9 +4252,10 @@ class Scheduler(SchedulerState, ServerNode):
             worker_msgs: dict = {}
             if nbytes:
                 assert isinstance(nbytes, dict)
+                already_released_keys = list()
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
-                    if ts is not None:
+                    if ts is not None and ts.state != "released":
                         if ts.state == "memory":
                             self.add_keys(worker=address, keys=[key])
                         else:
@@ -4259,7 +4271,18 @@ class Scheduler(SchedulerState, ServerNode):
                                 recommendations, client_msgs, worker_msgs
                             )
                             recommendations = {}
-
+                    else:
+                        already_released_keys.append(key)
+                if already_released_keys:
+                    if address not in worker_msgs:
+                        worker_msgs[address] = list()
+                    worker_msgs[address].append(
+                        {
+                            "op": "free-keys",
+                            "keys": already_released_keys,
+                            "reason": f"reconnect-already-released-{time()}",
+                        }
+                    )
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
                 if valid is None or ws in valid:
@@ -4668,37 +4691,33 @@ class Scheduler(SchedulerState, ServerNode):
         client_msgs: dict = {}
         worker_msgs: dict = {}
 
-        ts: TaskState = parent._tasks.get(key)
-        if ts is None:
-            return recommendations, client_msgs, worker_msgs
-
-        if ts.state == "memory":
-            self.add_keys(worker=worker, keys=[key])
-            return recommendations, client_msgs, worker_msgs
-
         ws: WorkerState = parent._workers_dv[worker]
-        ts._metadata.update(kwargs["metadata"])
-
-        if ts._state != "released":
+        ts: TaskState = parent._tasks.get(key)
+        if ts is None or ts._state == "released":
+            logger.debug(
+                "Received already computed task, worker: %s, state: %s"
+                ", key: %s, who_has: %s",
+                worker,
+                ts._state if ts else "forgotten",
+                key,
+                ts._who_has if ts else {},
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "reason": f"already-released-or-forgotten-{time()}",
+                }
+            ]
+        elif ts.state == "memory":
+            self.add_keys(worker=worker, keys=[key])
+        else:
+            ts._metadata.update(kwargs["metadata"])
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
             if ts._state == "memory":
                 assert ws in ts._who_has
-        else:
-            logger.debug(
-                "Received already computed task, worker: %s, state: %s"
-                ", key: %s, who_has: %s",
-                worker,
-                ts._state,
-                key,
-                ts._who_has,
-            )
-            if ws not in ts._who_has:
-                worker_msgs[worker] = [
-                    {"op": "free-keys", "keys": [key], "reason": "Stimulus Finished"}
-                ]
-
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
@@ -5022,7 +5041,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts not in parent._unrunnable
         for dts in ts._dependencies:
             # We are waiting on a dependency iff it's not stored
-            assert (not not dts._who_has) != (dts in ts._waiting_on)
+            assert bool(dts._who_has) != (dts in ts._waiting_on)
             assert ts in dts._waiters  # XXX even if dts._who_has?
 
     def validate_processing(self, key):
@@ -7335,7 +7354,19 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(text=html)
+        html = Div(
+            text=html,
+            style={
+                "width": "100%",
+                "height": "100%",
+                "max-width": "1920px",
+                "max-height": "1080px",
+                "padding": "12px",
+                "border": "1px solid lightgray",
+                "box-shadow": "inset 1px 0 8px 0 lightgray",
+                "overflow": "auto",
+            },
+        )
 
         html = Panel(child=html, title="Summary")
         compute = Panel(child=compute, title="Worker Profile (compute)")

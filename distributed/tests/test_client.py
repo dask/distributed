@@ -70,6 +70,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import is_valid_xml, mp_context, sync, tmp_text, tmpfile
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
+    _UnhashableCallable,
     async_wait_for,
     asyncinc,
     captured_logger,
@@ -5595,9 +5596,9 @@ async def test_warn_when_submitting_large_values(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_unhashable_function(c, s, a, b):
-    d = {"a": 1}
-    result = await c.submit(d.get, "a")
-    assert result == 1
+    func = _UnhashableCallable()
+    result = await c.submit(func, 1)
+    assert result == 2
 
 
 @gen_cluster()
@@ -6773,6 +6774,25 @@ def test_computation_object_code_dask_compute(client):
     assert code == test_function_code
 
 
+def test_computation_object_code_not_available(client):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame({"a": range(10)})
+    ddf = dd.from_pandas(df, npartitions=3)
+    result = np.where(ddf.a > 4)
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert len(comp.code) == 1
+        return comp.code[0]
+
+    code = client.run_on_scheduler(fetch_comp_code)
+    assert code == "<Code not available>"
+
+
 @gen_cluster(client=True)
 async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")
@@ -6923,3 +6943,29 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         assert results[n.worker_address] == 123
 
     assert files == set(os.listdir())  # no change
+
+
+@gen_cluster(client=True)
+async def test_exception_text(c, s, a, b):
+    def bad(x):
+        raise Exception(x)
+
+    future = c.submit(bad, 123)
+    await wait(future)
+
+    ts = s.tasks[future.key]
+
+    assert isinstance(ts.exception_text, str)
+    assert "123" in ts.exception_text
+    assert "Exception(x)" in ts.traceback_text
+    assert "bad" in ts.traceback_text
+
+
+@gen_cluster(client=True)
+async def test_async_task(c, s, a, b):
+    async def f(x):
+        return x + 1
+
+    future = c.submit(f, 10)
+    result = await future
+    assert result == 11

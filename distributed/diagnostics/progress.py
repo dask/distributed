@@ -124,7 +124,9 @@ class Progress(SchedulerPlugin):
             self.scheduler.plugins.remove(self)
         if exception:
             self.status = "error"
-            self.extra.update({"exception": self.scheduler.exceptions[key], "key": key})
+            self.extra.update(
+                {"exception": self.scheduler.tasks[key].exception, "key": key}
+            )
         else:
             self.status = "finished"
         logger.debug("Remove Progress plugin")
@@ -157,9 +159,7 @@ class MultiProgress(Progress):
         self, keys, scheduler=None, func=key_split, minimum=0, dt=0.1, complete=False
     ):
         self.func = func
-        Progress.__init__(
-            self, keys, scheduler, minimum=minimum, dt=dt, complete=complete
-        )
+        super().__init__(keys, scheduler, minimum=minimum, dt=dt, complete=complete)
 
     async def setup(self):
         keys = self.keys
