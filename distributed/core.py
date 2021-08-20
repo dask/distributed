@@ -502,7 +502,7 @@ class Server:
                             result = await result
                     except (CommClosedError, CancelledError):
                         if self.status == Status.running:
-                            logger.info("Lost connection %r", address, exc_info=True)
+                            logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
                         logger.exception("Exception while handling op %s", op)
