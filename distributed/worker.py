@@ -1020,7 +1020,7 @@ class Worker(ServerNode):
             self.bandwidth_workers.clear()
             self.bandwidth_types.clear()
         except CommClosedError:
-            logger.warning("Heartbeat to scheduler failed")
+            logger.warning("Heartbeat to scheduler failed", exc_info=True)
             if not self.reconnect:
                 await self.close(report=False)
         except OSError as e:
