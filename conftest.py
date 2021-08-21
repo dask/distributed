@@ -64,5 +64,7 @@ def initialize_test():
         logging.getLogger(name).setLevel(level)
 
     # Ensure a clean config
-    with dask.config.set(copy.deepcopy(_original_config)):
-        yield
+    dask.config.config.clear()
+    dask.config.config.update(copy.deepcopy(_original_config))
+
+    yield
