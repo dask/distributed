@@ -1,4 +1,6 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
+import copy
+
 import pytest
 
 import dask
@@ -39,22 +41,15 @@ def pytest_collection_modifyitems(config, items):
 pytest_plugins = ["distributed.pytest_resourceleaks"]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def clean_preloads():
-    # Custom preloads can interact with the test suite in unexpected ways.
-    # Temporarily remove any configured preloads while tests are being run.
-    original = {}
-    nodes = ["scheduler", "worker", "nanny"]
-    for node in nodes:
-        preload = f"distributed.{node}.preload"
-        preload_argv = f"distributed.{node}.preload-argv"
-        original[preload] = dask.config.get(preload)
-        original[preload_argv] = dask.config.get(preload_argv)
-        dask.config.set({preload: []})
-        dask.config.set({preload_argv: []})
+_original_config = copy.deepcopy(dask.config.config)
+# Custom preloads can interact with the test suite in unexpected ways
+# so we remove them when running tests
+for node in ["scheduler", "worker", "nanny"]:
+    _original_config["distributed"][node]["preload"] = []
+    _original_config["distributed"][node]["preload-argv"] = []
 
-    yield
 
-    for node in nodes:
-        dask.config.set({preload: original[f"distributed.{node}.preload"]})
-        dask.config.set({preload_argv: original[f"distributed.{node}.preload-argv"]})
+@pytest.fixture(autouse=True)
+def clean_config():
+    with dask.config.set(copy.deepcopy(_original_config)):
+        yield
