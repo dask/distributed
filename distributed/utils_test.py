@@ -77,12 +77,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-logging_levels = {
-    name: logger.level
-    for name, logger in logging.root.manager.loggerDict.items()
-    if isinstance(logger, logging.Logger)
-}
-
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
@@ -1580,11 +1574,6 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
                         with dask.config.set(
                             {"distributed.comm.timeouts.connect": "5s"}
                         ):
-                            # Restore default logging levels
-                            # XXX use pytest hooks/fixtures instead?
-                            for name, level in logging_levels.items():
-                                logging.getLogger(name).setLevel(level)
-
                             yield loop
 
                             with suppress(AttributeError):

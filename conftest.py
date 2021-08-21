@@ -1,5 +1,6 @@
 # https://pytest.org/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 import copy
+import logging
 
 import pytest
 
@@ -48,8 +49,20 @@ for node in ["scheduler", "worker", "nanny"]:
     _original_config["distributed"][node]["preload"] = []
     _original_config["distributed"][node]["preload-argv"] = []
 
+_logging_levels = {
+    name: logger.level
+    for name, logger in logging.root.manager.loggerDict.items()
+    if isinstance(logger, logging.Logger)
+}
+
 
 @pytest.fixture(autouse=True)
 def clean_config():
+
+    # Restore default logging levels
+    for name, level in _logging_levels.items():
+        logging.getLogger(name).setLevel(level)
+
+    # Ensure a clean config
     with dask.config.set(copy.deepcopy(_original_config)):
         yield
