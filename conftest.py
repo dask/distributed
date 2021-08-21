@@ -57,7 +57,7 @@ _logging_levels = {
 
 
 @pytest.fixture(autouse=True)
-def clean_config():
+def initialize_test():
 
     # Restore default logging levels
     for name, level in _logging_levels.items():
