@@ -2722,3 +2722,29 @@ async def test_memory_prioritization(c, s, w):
     assert min(w.tasks[future.key].priority for future in arrays) > max(
         w.tasks[future.key].priority for future in sums
     )
+
+
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)],
+    client=True,
+    worker_kwargs={
+        "memory_spill_fraction": False,  # don't spill
+        "memory_target_fraction": False,
+        "memory_pause_fraction": False,
+    },
+)
+async def test_pause_memory_producing_computations(c, s, a):
+    memory = psutil.Process().memory_info().rss
+    a.memory_limit = memory + 400_000_000
+    np = pytest.importorskip("numpy")
+
+    def f(_):
+        x = np.ones(int(300_000_000), dtype="u1")
+        assert not any(k.startswith("f") for k in get_worker().data)
+        get_worker().monitor.update()
+        return x
+
+    data = c.map(f, range(10))
+    results = c.map(np.sum, data)
+    del data
+    await c.gather(results)
