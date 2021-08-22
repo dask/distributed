@@ -1,6 +1,6 @@
 import pytest
 
-from distributed import Worker, WorkerPlugin
+from distributed import PipInstall, Worker, WorkerPlugin
 from distributed.utils_test import async_wait_for, gen_cluster, inc
 
 
@@ -219,3 +219,14 @@ async def test_default_name(c, s, w):
     await c.register_worker_plugin(MyCustomPlugin())
     assert len(w.plugins) == 1
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_PipInstall_name(c, s, w):
+    x = PipInstall(packages=["foo"])
+    x2 = PipInstall(packages=["foo"])
+    assert x.name == x2.name
+    y = PipInstall(packages=["foo", "bar"])
+    z = PipInstall(packages=["foo", "bar"], restart=True)
+    assert all("pipinstall" in p.name for p in (x, y, z))
+    assert len(set([x.name, y.name, z.name])) == 3

@@ -6,6 +6,7 @@ import sys
 import uuid
 import zipfile
 
+from dask.base import tokenize
 from dask.utils import funcname, tmpfile
 
 logger = logging.getLogger(__name__)
@@ -263,14 +264,16 @@ class PipInstall(WorkerPlugin):
     >>> client.register_worker_plugin(plugin)
     """
 
-    name = "pip"
-
     def __init__(self, packages, pip_options=None, restart=False):
         self.packages = packages
         self.restart = restart
         if pip_options is None:
             pip_options = []
         self.pip_options = pip_options
+
+    @property
+    def name(self):
+        return f"pipinstall-{tokenize(self.__dict__)}"
 
     async def setup(self, worker):
         from ..lock import Lock
