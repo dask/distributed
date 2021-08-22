@@ -105,6 +105,21 @@ DEFAULT_DATA_SIZE = parse_bytes(
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
+class TaskPrefix:
+    def __init__(self, key):
+        self.key = key
+        self.bytes_consumed = 0
+        self.bytes_produced = 0
+        self.n_processed = 0
+
+    def __repr__(self):
+        return (
+            f"<TaskPrefix: {self.key} -- {self.n_processed} tasks converted"
+            f" {format_bytes(self.bytes_consumed)} into"
+            f" {format_bytes(self.bytes_produced)}"
+        )
+
+
 class TaskState:
     """Holds volatile state relating to an individual Dask task
 
@@ -188,6 +203,7 @@ class TaskState:
         self.nbytes = None
         self.annotations = None
         self.scheduler_holds_ref = False
+        self.prefix = None
 
     def __repr__(self):
         return f"<Task {self.key!r} {self.state}>"
@@ -421,6 +437,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
+        self.prefixes = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -891,6 +908,15 @@ class Worker(ServerNode):
             "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
         }
+
+    def get_prefix(self, key: str) -> TaskPrefix:
+        prefix = key_split(key)
+        try:
+            return self.prefixes[prefix]
+        except KeyError:
+            tp = TaskPrefix(prefix)
+            self.prefixes[prefix] = tp
+            return tp
 
     #####################
     # External Services #
@@ -1633,8 +1659,24 @@ class Worker(ServerNode):
             # This will require a chained recommendation transition system like
             # the scheduler
 
+            tp = self.get_prefix(ts.key)
+
             if priority is not None:
-                priority = tuple(priority) + (self.generation,)
+                user, scheduler_generation, graph = priority
+                if (
+                    tp.bytes_consumed > 1_000_000
+                    and tp.bytes_produced < 5 * tp.bytes_consumed
+                ):
+                    memory = -1
+                elif (
+                    tp.bytes_produced > 1_000_000
+                    and tp.bytes_produced > 5 * tp.bytes_consumed
+                ):
+                    memory = 1
+                else:
+                    memory = 0
+                priority = (user, scheduler_generation, memory, graph, self.generation)
+
                 self.generation -= 1
 
             if actor:
@@ -2026,6 +2068,13 @@ class Worker(ServerNode):
                     out = "error"
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
+
+            if ts.nbytes is not None:
+                tp = self.get_prefix(ts.key)
+                tp.n_processed += 1
+                tp.bytes_produced += ts.nbytes
+                for dep in ts.dependencies:
+                    tp.bytes_consumed += dep.nbytes
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
