@@ -186,24 +186,6 @@ async def test_dependent_tasks(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_registering_with_name_arg(c, s, w):
-    class FooWorkerPlugin:
-        def setup(self, worker):
-            if hasattr(worker, "foo"):
-                raise RuntimeError(f"Worker {worker.address} already has foo!")
-
-            worker.foo = True
-
-    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-    assert list(responses.values()) == [{"status": "OK"}]
-
-    async with Worker(s.address, loop=s.loop):
-        with pytest.warns(FutureWarning, match="worker plugin will be overwritten"):
-            responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-        assert list(responses.values()) == [{"status": "repeat"}] * 2
-
-
-@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_empty_plugin(c, s, w):
     class EmptyPlugin:
         pass
@@ -219,3 +201,47 @@ async def test_default_name(c, s, w):
     await c.register_worker_plugin(MyCustomPlugin())
     assert len(w.plugins) == 1
     assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_WorkerPlugin_overwrite(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.foo = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.foo = 123
+
+        def teardown(self, worker):
+            del self.worker.foo
+
+    await c.register_worker_plugin(MyCustomPlugin)
+
+    assert w.foo == 0
+
+    await c.submit(inc, 0)
+    assert w.foo == 123
+
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.bar = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.bar = 456
+
+        def teardown(self, worker):
+            del self.worker.bar
+
+    await c.register_worker_plugin(MyCustomPlugin)
+
+    assert not hasattr(w, "foo")
+    assert w.bar == 0
+
+    await c.submit(inc, 0)
+    assert w.bar == 456
