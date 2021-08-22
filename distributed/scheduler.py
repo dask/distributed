@@ -5482,7 +5482,7 @@ class Scheduler(SchedulerState, ServerNode):
                 category=UserWarning,
             )
 
-        if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
+        if idempotent and name in self.plugins:
             return
 
         self.plugins[name] = plugin
@@ -7008,9 +7008,12 @@ class Scheduler(SchedulerState, ServerNode):
     def get_task_stream(self, comm=None, start=None, stop=None, count=None):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
-        self.add_plugin(TaskStreamPlugin, idempotent=True)
-        tsp = [p for p in self.plugins.values() if isinstance(p, TaskStreamPlugin)][0]
-        return tsp.collect(start=start, stop=stop, count=count)
+        if TaskStreamPlugin.name not in self.plugins:
+            self.add_plugin(TaskStreamPlugin)
+
+        plugin = self.plugins[TaskStreamPlugin.name]
+
+        return plugin.collect(start=start, stop=stop, count=count)
 
     def start_task_metadata(self, comm=None, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)

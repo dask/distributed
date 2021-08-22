@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
+    name = "task-stream"
+
     def __init__(self, scheduler, maxlen=None):
-        self.name = "TaskStream"
         if maxlen is None:
             maxlen = max(
                 dask.config.get(

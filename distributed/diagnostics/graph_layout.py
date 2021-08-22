@@ -11,8 +11,9 @@ class GraphLayout(SchedulerPlugin):
     is rendered at /graph on the diagnostic dashboard.
     """
 
+    name = "graph-layout"
+
     def __init__(self, scheduler):
-        self.name = "GraphLayout"
         self.x = {}
         self.y = {}
         self.collision = {}
