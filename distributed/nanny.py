@@ -50,7 +50,7 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
-    it gets to the terminate fractiom of its memory limit.
+    it gets to the terminate fraction of its memory limit.
 
     The parameters for the Nanny are mostly the same as those for the Worker
     with exceptions listed below.
