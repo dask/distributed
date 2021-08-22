@@ -2774,28 +2774,21 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
-                warnings.warn(
-                    "Attempting to add a worker plugin with the same name as an already registered "
-                    f"plugin ({name}). Currently this results in no change and the previously registered "
-                    "plugin is not overwritten. This behavior is deprecated and in a future release "
-                    f"the previously registered {name} worker plugin will be overwritten.",
-                    category=FutureWarning,
-                )
-                return {"status": "repeat"}
-            else:
-                self.plugins[name] = plugin
+                await self.plugin_remove(comm=comm, name=name)
 
-                logger.info("Starting Worker plugin %s" % name)
-                if hasattr(plugin, "setup"):
-                    try:
-                        result = plugin.setup(worker=self)
-                        if isawaitable(result):
-                            result = await result
-                    except Exception as e:
-                        msg = error_message(e)
-                        return msg
+            self.plugins[name] = plugin
 
-                return {"status": "OK"}
+            logger.info("Starting Worker plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(worker=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+
+            return {"status": "OK"}
 
     async def plugin_remove(self, comm=None, name=None):
         with log_errors(pdb=False):
