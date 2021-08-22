@@ -5478,10 +5478,9 @@ class Scheduler(SchedulerState, ServerNode):
         if name in self.plugins:
             warnings.warn(
                 f"Scheduler already contains a plugin with name {name}; "
-                "no action is being taken.",
+                "overwriting.",
                 category=UserWarning,
             )
-            return
 
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
             return
