@@ -60,12 +60,7 @@ from .core import (
     connect,
     rpc,
 )
-from .diagnostics.plugin import (
-    NannyPlugin,
-    UploadFile,
-    WorkerPlugin,
-    _get_worker_plugin_name,
-)
+from .diagnostics.plugin import NannyPlugin, UploadFile, WorkerPlugin, _get_plugin_name
 from .metrics import time
 from .objects import HasWhat, SchedulerInfo, WhoHas
 from .protocol import to_serialize
@@ -3969,15 +3964,16 @@ class Client:
         else:
             return msgs
 
-    async def _register_scheduler_plugin(self, plugin, **kwargs):
+    async def _register_scheduler_plugin(self, plugin, name, **kwargs):
         if isinstance(plugin, type):
             plugin = plugin(**kwargs)
 
         return await self.scheduler.register_scheduler_plugin(
-            plugin=dumps(plugin, protocol=4)
+            plugin=dumps(plugin, protocol=4),
+            name=name,
         )
 
-    def register_scheduler_plugin(self, plugin, **kwargs):
+    def register_scheduler_plugin(self, plugin, name=None, **kwargs):
         """Register a scheduler plugin.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html#scheduler-plugins
@@ -3986,14 +3982,21 @@ class Client:
         ----------
         plugin : SchedulerPlugin
             Plugin class or object to pass to the scheduler.
+        name : str
+            Name for the plugin; if None, a name is taken from the
+            plugin instance or automatically generated if not present.
         **kwargs : Any
             Arguments passed to the Plugin class (if Plugin is an
             instance kwargs are unused).
 
         """
+        if name is None:
+            name = _get_plugin_name(plugin)
+
         return self.sync(
             self._register_scheduler_plugin,
             plugin=plugin,
+            name=name,
             **kwargs,
         )
 
@@ -4103,7 +4106,7 @@ class Client:
             plugin = plugin(**kwargs)
 
         if name is None:
-            name = _get_worker_plugin_name(plugin)
+            name = _get_plugin_name(plugin)
 
         assert name
 

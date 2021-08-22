@@ -88,7 +88,7 @@ async def test_client(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
 
-    tasks = [p for p in s.plugins if isinstance(p, TaskStreamPlugin)][0]
+    tasks = s.plugins[TaskStreamPlugin.name]
     L = await c.get_task_stream()
     assert L == tuple(tasks.buffer)
 

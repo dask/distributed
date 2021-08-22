@@ -9,7 +9,7 @@ async def test_simple(c, s, a, b):
     class Counter(SchedulerPlugin):
         def start(self, scheduler):
             self.scheduler = scheduler
-            scheduler.add_plugin(self)
+            scheduler.add_plugin(self, name="counter")
             self.count = 0
 
         def transition(self, key, start, finish, *args, **kwargs):
@@ -18,7 +18,7 @@ async def test_simple(c, s, a, b):
 
     counter = Counter()
     counter.start(s)
-    assert counter in s.plugins
+    assert counter in s.plugins.values()
 
     assert counter.count == 0
 
@@ -29,7 +29,7 @@ async def test_simple(c, s, a, b):
     await z
 
     assert counter.count == 3
-    s.remove_plugin(counter)
+    s.remove_plugin(name="counter")
     assert counter not in s.plugins
 
 
@@ -38,6 +38,8 @@ async def test_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
+        name = "MyPlugin"
+
         def add_worker(self, worker, scheduler):
             assert scheduler is s
             events.append(("add_worker", worker))
@@ -76,6 +78,8 @@ async def test_async_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
+        name = "MyPlugin"
+
         async def add_worker(self, worker, scheduler):
             assert scheduler is s
             events.append(("add_worker", worker))
@@ -105,6 +109,19 @@ async def test_async_add_remove_worker(s):
         pass
     assert events == []
 
+    class UnnamedPlugin(SchedulerPlugin):
+        async def start(self, scheduler):
+            self.scheduler = scheduler
+
+    plugin = UnnamedPlugin()
+    s.add_plugin(plugin)
+    s.add_plugin(plugin, name="another")
+    with pytest.raises(ValueError) as excinfo:
+        s.remove_plugin(plugin)
+
+    msg = str(excinfo.value)
+    assert "Multiple instances of" in msg
+
 
 @gen_test()
 async def test_lifecycle():
@@ -130,6 +147,8 @@ async def test_lifecycle():
 @gen_cluster(client=True)
 async def test_register_scheduler_plugin(c, s, a, b):
     class Dummy1(SchedulerPlugin):
+        name = "Dummy1"
+
         def start(self, scheduler):
             scheduler.foo = "bar"
 
@@ -137,7 +156,13 @@ async def test_register_scheduler_plugin(c, s, a, b):
     await c.register_scheduler_plugin(Dummy1)
     assert s.foo == "bar"
 
+    with pytest.warns(UserWarning) as w:
+        await c.register_scheduler_plugin(Dummy1)
+    assert "Scheduler already contains" in w[0].message.args[0]
+
     class Dummy2(SchedulerPlugin):
+        name = "Dummy2"
+
         def start(self, scheduler):
             raise RuntimeError("raising in start method")
 

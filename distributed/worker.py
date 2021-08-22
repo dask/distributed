@@ -47,7 +47,7 @@ from .core import (
     send_recv,
 )
 from .diagnostics import nvml
-from .diagnostics.plugin import _get_worker_plugin_name
+from .diagnostics.plugin import _get_plugin_name
 from .diskutils import WorkSpace
 from .http import get_handlers
 from .metrics import time
@@ -2769,7 +2769,7 @@ class Worker(ServerNode):
                 plugin = pickle.loads(plugin)
 
             if name is None:
-                name = _get_worker_plugin_name(plugin)
+                name = _get_plugin_name(plugin)
 
             assert name
 

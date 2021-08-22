@@ -215,9 +215,12 @@ class NannyPlugin:
         """Run when the nanny to which the plugin is attached to is closed"""
 
 
-def _get_worker_plugin_name(plugin) -> str:
-    """Returns the worker plugin name. If plugin has no name attribute
-    a random name is used."""
+def _get_plugin_name(plugin) -> str:
+    """Return plugin name.
+
+    If plugin has no name attribute a random name is used.
+
+    """
     if hasattr(plugin, "name"):
         return plugin.name
     else:

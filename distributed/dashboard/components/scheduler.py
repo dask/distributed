@@ -1078,11 +1078,10 @@ class ComputePerKey(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(
+                    plugin=TaskStreamPlugin,
+                )
 
             compute_data = {
                 "times": [0.2, 0.1],
@@ -1243,11 +1242,8 @@ class AggregateAction(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -1771,11 +1767,13 @@ class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
-        es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-        if not es:
-            self.plugin = TaskStreamPlugin(self.scheduler)
-        else:
-            self.plugin = es[0]
+
+        if TaskStreamPlugin.name not in self.scheduler.plugins:
+            self.scheduler.add_plugin(
+                plugin=TaskStreamPlugin,
+            )
+        self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
+
         self.index = max(0, self.plugin.index - n_rectangles)
         self.workers = dict()
         self.n_rectangles = n_rectangles
