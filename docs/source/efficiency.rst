@@ -11,7 +11,7 @@ Leave data on the cluster
 
 Wait as long as possible to gather data locally.  If you want to ask a question
 of a large piece of data on the cluster it is often faster to submit a function
-onto that data then to bring the data down to your local computer.
+onto that data than to bring the data down to your local computer.
 
 
 For example if we have a numpy array on the cluster and we want to know its
