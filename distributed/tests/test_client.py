@@ -6774,6 +6774,25 @@ def test_computation_object_code_dask_compute(client):
     assert code == test_function_code
 
 
+def test_computation_object_code_not_available(client):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame({"a": range(10)})
+    ddf = dd.from_pandas(df, npartitions=3)
+    result = np.where(ddf.a > 4)
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert len(comp.code) == 1
+        return comp.code[0]
+
+    code = client.run_on_scheduler(fetch_comp_code)
+    assert code == "<Code not available>"
+
+
 @gen_cluster(client=True)
 async def test_computation_object_code_dask_persist(c, s, a, b):
     da = pytest.importorskip("dask.array")

@@ -120,8 +120,12 @@ class WorkerPlugin:
     ...
     ...     def transition(self, key, start, finish, *args, **kwargs):
     ...         if finish == 'error':
-    ...             exc = self.worker.exceptions[key]
-    ...             self.logger.error("Task '%s' has failed with exception: %s" % (key, str(exc)))
+    ...             ts = self.worker.tasks[key]
+    ...             exc_info = (type(ts.exception), ts.exception, ts.traceback)
+    ...             self.logger.error(
+    ...                 "Error during computation of '%s'.", key,
+    ...                 exc_info=exc_info
+    ...             )
 
     >>> plugin = ErrorLogger()
     >>> client.register_worker_plugin(plugin)  # doctest: +SKIP

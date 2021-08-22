@@ -38,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from . import preloading, profile
 from . import versions as version_module
@@ -81,7 +82,6 @@ from .utils import (
 from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers
 from .utils_perf import disable_gc_diagnosis, enable_gc_diagnosis
 from .variable import VariableExtension
-from .widgets import get_template
 
 try:
     from cython import compiled
@@ -5203,7 +5203,9 @@ class Scheduler(SchedulerState, ServerNode):
                 # logger.debug("Scheduler sends message to client %s", msg)
             except CommClosedError:
                 if self.status == Status.running:
-                    logger.critical("Tried writing to closed comm: %s", msg)
+                    logger.critical(
+                        "Closed comm %r while trying to write %s", c, msg, exc_info=True
+                    )
 
     async def add_client(self, comm, client=None, versions=None):
         """Add client to network
@@ -5563,7 +5565,9 @@ class Scheduler(SchedulerState, ServerNode):
             c.send(msg)
         except CommClosedError:
             if self.status == Status.running:
-                logger.critical("Tried writing to closed comm: %s", msg)
+                logger.critical(
+                    "Closed comm %r while trying to write %s", c, msg, exc_info=True
+                )
 
     def send_all(self, client_msgs: dict, worker_msgs: dict):
         """Send messages to client and workers"""
@@ -5579,7 +5583,12 @@ class Scheduler(SchedulerState, ServerNode):
                 c.send(*msgs)
             except CommClosedError:
                 if self.status == Status.running:
-                    logger.critical("Tried writing to closed comm: %s", msgs)
+                    logger.critical(
+                        "Closed comm %r while trying to write %s",
+                        c,
+                        msgs,
+                        exc_info=True,
+                    )
 
         for worker, msgs in worker_msgs.items():
             try:

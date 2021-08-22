@@ -1,6 +1,29 @@
 Changelog
 =========
 
+2021.08.1
+---------
+
+Released on August 20, 2021
+
+- Rename plots to fit in the labextension (:pr:`5239`) `Naty Clementi`_
+- Log messages for ``CommClosedError`` now includes information about remote address (:pr:`5209`) `Florian Jetter`_
+- Add ``target='_blank'`` for redirects of dashboard link (:pr:`5237`) `Naty Clementi`_
+- Update computation code retrieval logic (:pr:`5236`) `James Bourbeau`_
+- Minor polish on cfexecutor (:pr:`5233`) `crusaderky`_
+- Use development version of ``dask`` in gpuCI build (:pr:`5232`) `James Bourbeau`_
+- Use upstream ``dask.widgets`` (:pr:`5205`) `Jacob Tomlinson`_
+- Fix flaky ``test_worker_reconnects_mid_compute`` (:pr:`5227`) `Florian Jetter`_
+- Update ``WorkerPlugin`` docstring about usage of ``TaskState`` objects (:pr:`5226`) `Florian Jetter`_
+- Worker Network Timeseries (:pr:`5129`) `Naty Clementi`_
+- Add HTML Repr for ``ProcessInterface`` class and all its subclasses (:pr:`5181`) `Freyam Mehta`_
+- Fix an issue where a reconnecting worker could cause an invalid transition (:pr:`5210`) `Florian Jetter`_
+- Minor fixes for cfexecutor (:pr:`5177`) `Florian Jetter`_
+- Add HTML Repr for ``Security`` class (:pr:`5178`) `Freyam Mehta`_
+- Fix performance report sizing issue (:pr:`5213`) `Ian Rose`_
+- Drop RMM compatibility code from RAPIDS < 0.11 (:pr:`5214`) `Peter Andreas Entschev`_
+
+
 2021.08.0
 ---------
 

@@ -177,7 +177,7 @@ class WorkStealing(SchedulerPlugin):
             self.in_flight_occupancy[victim] -= victim_duration
             self.in_flight_occupancy[thief] += thief_duration
         except CommClosedError:
-            logger.info("Worker comm closed while stealing: %s", victim)
+            logger.info("Worker comm %r closed while stealing: %r", victim, ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

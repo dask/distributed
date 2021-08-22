@@ -224,7 +224,7 @@ class Listener(ABC):
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
-            raise CommClosedError() from e
+            raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr

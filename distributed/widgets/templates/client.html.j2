@@ -11,7 +11,7 @@
             <td style="text-align: left;"></td>
         {% elif cluster %}
             <td style="text-align: left;"><strong>Connection method:</strong> Cluster object</td>
-            <td style="text-align: left;"><strong>Cluster type:</strong> {{ cluster | type }}</td>
+            <td style="text-align: left;"><strong>Cluster type:</strong> {{ cluster | type | typename(short=True) }}</td>
         {% elif scheduler_file %}
             <td style="text-align: left;"><strong>Connection method:</strong> Scheduler file</td>
             <td style="text-align: left;"><strong>Scheduler file:</strong> {{ scheduler_file }}</td>
@@ -21,7 +21,7 @@
         {% if dashboard_link %}
             <tr>
                 <td style="text-align: left;">
-                    <strong>Dashboard: </strong> <a href="{{ dashboard_link }}">{{ dashboard_link }}</a>
+                    <strong>Dashboard: </strong> <a href="{{ dashboard_link }}" target="_blank">{{ dashboard_link }}</a>
                 </td>
                 <td style="text-align: left;"></td>
             </tr>

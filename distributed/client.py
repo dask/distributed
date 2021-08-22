@@ -38,7 +38,9 @@ from dask.utils import (
     funcname,
     parse_timedelta,
     stringify,
+    typename,
 )
+from dask.widgets import get_template
 
 try:
     from dask.delayed import single_key
@@ -80,7 +82,6 @@ from .utils import (
     no_default,
     sync,
     thread_state,
-    typename,
 )
 from .utils_comm import (
     WrappedKey,
@@ -90,7 +91,6 @@ from .utils_comm import (
     scatter_to_workers,
     unpack_remotedata,
 )
-from .widgets import get_template
 from .worker import get_client, get_worker, secede
 
 logger = logging.getLogger(__name__)
@@ -2517,7 +2517,7 @@ class Client:
 
         for fr, _ in traceback.walk_stack(None):
             if pattern is None or (
-                not pattern.match(fr.f_globals["__name__"])
+                not pattern.match(fr.f_globals.get("__name__", ""))
                 and fr.f_code.co_name not in ("<listcomp>", "<dictcomp>")
             ):
                 try:
