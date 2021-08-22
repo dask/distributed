@@ -2947,7 +2947,7 @@ class Worker(ServerNode):
             raise
 
     def ensure_computing(self):
-        if not self.ready:
+        if not self.ready and not self.constrained:
             return
 
         if self.paused:
