@@ -6,7 +6,6 @@ from click.testing import CliRunner
 pytest.importorskip("requests")
 
 import os
-import socket
 from multiprocessing import cpu_count
 from time import sleep
 
@@ -18,7 +17,13 @@ from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import parse_ports, sync, tmpfile
-from distributed.utils_test import gen_cluster, popen, terminate_process, wait_for_port
+from distributed.utils_test import (
+    gen_cluster,
+    popen,
+    requires_ipv6,
+    terminate_process,
+    wait_for_port,
+)
 
 
 def test_nanny_worker_ports(loop):
@@ -307,7 +312,7 @@ def test_contact_listen_address(loop, nanny, listen_address):
                 assert client.run(func) == {"tcp://127.0.0.2:39837": listen_address}
 
 
-@pytest.mark.skipif(not socket.has_ipv6, reason="Needs IPv6 support to test")
+@requires_ipv6
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 @pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
 def test_listen_address_ipv6(loop, nanny, listen_address):
