@@ -7,7 +7,6 @@ from distributed.client import wait
 from distributed.compatibility import LINUX
 from distributed.diagnostics.progress import (
     AllProgress,
-    GroupProgress,
     MultiProgress,
     Progress,
     SchedulerPlugin,
@@ -193,28 +192,3 @@ async def test_AllProgress_lost_key(c, s, a, b):
 
     while len(p.state["memory"]["inc"]) > 0:
         await asyncio.sleep(0.01)
-
-
-@gen_cluster(client=True)
-async def test_GroupProgress(c, s, a, b):
-    da = pytest.importorskip("dask.array")
-    fp = GroupProgress(s)
-    x = da.ones(100, chunks=10)
-    y = x + 1
-    z = (x * y).sum().persist(optimize_graph=False)
-
-    await wait(z)
-    assert 3 < len(fp.groups) < 10
-    for k, g in fp.groups.items():
-        assert fp.keys[k]
-        assert len(fp.keys[k]) == sum(g.values())
-        assert all(v >= 0 for v in g.values())
-
-    assert fp.dependencies[y.name] == {x.name}
-    assert fp.dependents[x.name] == {y.name, (x * y).name}
-
-    del x, y, z
-    while s.tasks:
-        await asyncio.sleep(0.01)
-
-    assert not fp.groups
