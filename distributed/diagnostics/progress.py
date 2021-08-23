@@ -61,6 +61,7 @@ class Progress(SchedulerPlugin):
     """
 
     def __init__(self, keys, scheduler, minimum=0, dt=0.1, complete=False):
+        self.name = "Progress"
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
         self.keys = {stringify(k) for k in self.keys}
         self.scheduler = scheduler
@@ -120,8 +121,8 @@ class Progress(SchedulerPlugin):
         self.stop()
 
     def stop(self, exception=None, key=None):
-        if self in self.scheduler.plugins:
-            self.scheduler.plugins.remove(self)
+        if self.name in self.scheduler.plugins:
+            self.scheduler.remove_plugin(name=self.name)
         if exception:
             self.status = "error"
             self.extra.update(

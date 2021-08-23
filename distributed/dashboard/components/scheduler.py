@@ -196,7 +196,7 @@ class ProcessingHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Tasks Processing (Histogram)",
+                title="Tasks Processing (count)",
                 id="bk-nprocessing-histogram-plot",
                 name="processing",
                 y_axis_label="frequency",
@@ -523,7 +523,7 @@ class WorkersMemoryHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes stored per worker (Histogram)",
+                title="Bytes stored per worker",
                 name="workers_memory",
                 id="bk-workers-memory-histogram-plot",
                 y_axis_label="frequency",
@@ -1078,11 +1078,10 @@ class ComputePerKey(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(
+                    plugin=TaskStreamPlugin,
+                )
 
             compute_data = {
                 "times": [0.2, 0.1],
@@ -1243,11 +1242,8 @@ class AggregateAction(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -1771,11 +1767,13 @@ class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
-        es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-        if not es:
-            self.plugin = TaskStreamPlugin(self.scheduler)
-        else:
-            self.plugin = es[0]
+
+        if TaskStreamPlugin.name not in self.scheduler.plugins:
+            self.scheduler.add_plugin(
+                plugin=TaskStreamPlugin,
+            )
+        self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
+
         self.index = max(0, self.plugin.index - n_rectangles)
         self.workers = dict()
         self.n_rectangles = n_rectangles
@@ -3144,7 +3142,7 @@ def status_doc(scheduler, extra, doc):
         add_periodic_callback(doc, cluster_memory, 100)
         doc.add_root(cluster_memory.root)
 
-        if len(scheduler.workers) < 50:
+        if len(scheduler.workers) <= 100:
             workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 

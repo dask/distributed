@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
+    name = "task-stream"
+
     def __init__(self, scheduler, maxlen=None):
         if maxlen is None:
             maxlen = max(

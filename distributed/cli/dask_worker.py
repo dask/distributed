@@ -97,7 +97,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--listen-address",
     type=str,
     default=None,
-    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000",
+    help="The address to which the worker binds. Example: tcp://0.0.0.0:9000 or tcp://:9000 for IPv4+IPv6",
 )
 @click.option(
     "--contact-address",
@@ -339,6 +339,9 @@ def main(
     try:
         if listen_address:
             (host, worker_port) = get_address_host_port(listen_address, strict=True)
+            if ":" in host:
+                # IPv6 -- bracket to pass as user args
+                host = f"[{host}]"
 
         if contact_address:
             # we only need this to verify it is getting parsed
