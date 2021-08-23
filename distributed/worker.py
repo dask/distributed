@@ -36,7 +36,7 @@ from dask.utils import (
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
 from .comm import connect, get_address_host
-from .comm.addressing import address_from_user_args
+from .comm.addressing import address_from_user_args, parse_address
 from .comm.utils import OFFLOAD_THRESHOLD
 from .core import (
     CommClosedError,
@@ -560,13 +560,16 @@ class Worker(ServerNode):
             if len(protocol_address) == 2:
                 protocol = protocol_address[0]
 
-        # Target interface on which we contact the scheduler by default
-        # TODO: it is unfortunate that we special-case inproc here
-        if not host and not interface and not scheduler_addr.startswith("inproc://"):
-            host = get_ip(get_address_host(scheduler_addr))
-
         self._start_port = port
         self._start_host = host
+        if host:
+            # Helpful error message if IPv6 specified incorrectly
+            _, host_address = parse_address(host)
+            if host_address.count(":") > 1 and not host_address.startswith("["):
+                raise ValueError(
+                    "Host address with IPv6 must be bracketed like '[::1]'; "
+                    f"got {host_address}"
+                )
         self._interface = interface
         self._protocol = protocol
 
@@ -1152,10 +1155,14 @@ class Worker(ServerNode):
                 protocol=self._protocol,
                 security=self.security,
             )
-            try:
-                await self.listen(
-                    start_address, **self.security.get_listen_args("worker")
+            kwargs = self.security.get_listen_args("worker")
+            if self._protocol in ("tcp", "tls"):
+                kwargs = kwargs.copy()
+                kwargs["default_host"] = get_ip(
+                    get_address_host(self.scheduler.address)
                 )
+            try:
+                await self.listen(start_address, **kwargs)
             except OSError as e:
                 if len(ports) > 1 and e.errno == errno.EADDRINUSE:
                     continue
