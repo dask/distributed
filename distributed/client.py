@@ -360,7 +360,7 @@ class Future(WrappedKey):
                 logger.exception("Error in callback %s of %s:", fn, fut)
 
         self.client.loop.add_callback(
-            done_callback, self, partial(cls._cb_executor.submit, 
+            done_callback, self, partial(cls._cb_executor.submit,
                                          execute_callback)
         )
 
@@ -410,7 +410,7 @@ class Future(WrappedKey):
         ----------
         timeout : number, optional
             Time in seconds after which to raise a
-            ``dask.distributed.TimeoutError``  
+            ``dask.distributed.TimeoutError``
             If *timeout* seconds are elapsed before returning, a
             ``dask.distributed.TimeoutError`` is raised.
 
@@ -454,7 +454,7 @@ class Future(WrappedKey):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
-                self.client.loop.add_callback(self.client._dec_ref, 
+                self.client.loop.add_callback(self.client._dec_ref,
                                               stringify(self.key))
             except TypeError:
                 pass  # Shutting down, add_callback may be None
@@ -538,7 +538,7 @@ class FutureState:
 
     def finish(self, type=None):
         """ Sets the status to 'finished' and sets the event
-        
+
         Parameters
         ----------
         type : any
@@ -562,9 +562,10 @@ class FutureState:
         self._get_event().clear()
 
     def set_error(self, exception, traceback):
-        """ Sets the error data 
-        
-        Sets the status to 'error'. Sets the exception, the traceback, and the event
+        """ Sets the error data
+
+        Sets the status to 'error'. Sets the exception, the traceback,
+        and the event
         
         Parameters
         ----------
@@ -594,11 +595,12 @@ class FutureState:
 
     async def wait(self, timeout=None):
         """ Wait for the awaitable to complete with a timeout.
-        
+
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
         """
         await asyncio.wait_for(self._get_event().wait(), timeout)
 
@@ -607,8 +609,8 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """ Coroutine that waits on the future, then calls the callback 
-        
+    """ Coroutine that waits on the future, then calls the callback
+
     Parameters
     ----------
     future : asyncio.Future  
@@ -624,7 +626,7 @@ async def done_callback(future, callback):
 @partial(normalize_token.register, Future)
 def normalize_future(f):
     """ Returns the key and the type as a list
-        
+
     Parameters
     ----------
     list  
