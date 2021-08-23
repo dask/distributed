@@ -214,7 +214,7 @@ class Future(WrappedKey):
 
     @property
     def executor(self):
-        """ Returns the executor, which is the client.
+        """Returns the executor, which is the client.
 
         Returns
         -------
@@ -268,8 +268,7 @@ class Future(WrappedKey):
             return self.client.sync(self._result, callback_timeout=timeout)
 
         # shorten error traceback
-        result = self.client.sync(self._result, callback_timeout=timeout,
-                                  raiseit=False)
+        result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
             raise exc.with_traceback(tb)
@@ -326,8 +325,7 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
-        return self.client.sync(self._exception, callback_timeout=timeout,
-                                **kwargs)
+        return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
 
     def add_done_callback(self, fn):
         """Call callback on future when callback has finished
@@ -360,8 +358,7 @@ class Future(WrappedKey):
                 logger.exception("Error in callback %s of %s:", fn, fut)
 
         self.client.loop.add_callback(
-            done_callback, self, partial(cls._cb_executor.submit,
-                                         execute_callback)
+            done_callback, self, partial(cls._cb_executor.submit, execute_callback)
         )
 
     def cancel(self, **kwargs):
@@ -383,7 +380,7 @@ class Future(WrappedKey):
         return self.client.retry([self], **kwargs)
 
     def cancelled(self):
-        """ Returns True if the future has been cancelled
+        """Returns True if the future has been cancelled
 
         Returns
         -------
@@ -430,12 +427,11 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return self.client.sync(self._traceback, callback_timeout=timeout,
-                                **kwargs)
+        return self.client.sync(self._traceback, callback_timeout=timeout, **kwargs)
 
     @property
     def type(self):
-        """ Returns the type """
+        """Returns the type"""
         return self._state.type
 
     def release(self, _in_destructor=False):
@@ -454,8 +450,7 @@ class Future(WrappedKey):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
-                self.client.loop.add_callback(self.client._dec_ref,
-                                              stringify(self.key))
+                self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
             except TypeError:
                 pass  # Shutting down, add_callback may be None
 
@@ -531,13 +526,13 @@ class FutureState:
         return event
 
     def cancel(self):
-        """ Cancels the operation """
+        """Cancels the operation"""
         self.status = "cancelled"
         self.exception = CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
-        """ Sets the status to 'finished' and sets the event
+        """Sets the status to 'finished' and sets the event
 
         Parameters
         ----------
@@ -550,19 +545,17 @@ class FutureState:
             self.type = type
 
     def lose(self):
-        """ Sets the status to 'lost' and clears the event
-        """
+        """Sets the status to 'lost' and clears the event"""
         self.status = "lost"
         self._get_event().clear()
 
     def retry(self):
-        """ Sets the status to 'pending' and clears the event
-        """
+        """Sets the status to 'pending' and clears the event"""
         self.status = "pending"
         self._get_event().clear()
 
     def set_error(self, exception, traceback):
-        """ Sets the error data
+        """Sets the error data
 
         Sets the status to 'error'. Sets the exception, the traceback,
         and the event
@@ -582,19 +575,17 @@ class FutureState:
         self._get_event().set()
 
     def done(self):
-        """ Returns 'True' if the event is not None and the event is set
-        """
+        """Returns 'True' if the event is not None and the event is set"""
         return self._event is not None and self._event.is_set()
 
     def reset(self):
-        """ Sets the status to 'pending' and clears the event
-        """
+        """Sets the status to 'pending' and clears the event"""
         self.status = "pending"
         if self._event is not None:
             self._event.clear()
 
     async def wait(self, timeout=None):
-        """ Wait for the awaitable to complete with a timeout.
+        """Wait for the awaitable to complete with a timeout.
 
         Parameters
         ----------
@@ -609,7 +600,7 @@ class FutureState:
 
 
 async def done_callback(future, callback):
-    """ Coroutine that waits on the future, then calls the callback
+    """Coroutine that waits on the future, then calls the callback
 
     Parameters
     ----------
@@ -625,7 +616,7 @@ async def done_callback(future, callback):
 
 @partial(normalize_token.register, Future)
 def normalize_future(f):
-    """ Returns the key and the type as a list
+    """Returns the key and the type as a list
 
     Parameters
     ----------
@@ -812,8 +803,7 @@ class Client(SyncMethodMixin):
         if address is None:
             address = dask.config.get("scheduler-address", None)
             if address:
-                logger.info("Config value `scheduler-address` found: %s",
-                            address)
+                logger.info("Config value `scheduler-address` found: %s", address)
 
         if address is not None and kwargs:
             raise ValueError(f"Unexpected keyword arguments: {sorted(kwargs)}")
@@ -864,8 +854,7 @@ class Client(SyncMethodMixin):
         heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
 
         scheduler_info_interval = parse_timedelta(
-            dask.config.get("distributed.client.scheduler-info-interval",
-                            default="ms")
+            dask.config.get("distributed.client.scheduler-info-interval", default="ms")
         )
 
         self._periodic_callbacks = dict()
@@ -1305,7 +1294,7 @@ class Client(SyncMethodMixin):
         timeout : number, optional
             Time in seconds after which to raise a
             ``dask.distributed.TimeoutError``
-         """
+        """
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
     def _heartbeat(self):
@@ -2385,7 +2374,7 @@ class Client(SyncMethodMixin):
             If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
-         """
+        """
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
     async def _retry(self, futures):
@@ -3419,17 +3408,15 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
 
-    async def _replicate(self, futures, n=None, workers=None,
-                         branching_factor=2):
+    async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
         futures = self.futures_of(futures)
         await _wait(futures)
         keys = {stringify(f.key) for f in futures}
         await self.scheduler.replicate(
-            keys=list(keys), n=n, workers=workers,
-            branching_factor=branching_factor)
+            keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
+        )
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2,
-                  **kwargs):
+    def replicate(self, futures, n=None, workers=None, branching_factor=2, **kwargs):
         """Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
@@ -3649,8 +3636,7 @@ class Client(SyncMethodMixin):
         --------
         Client.who_has
         """
-        return self.sync(self.scheduler.nbytes, keys=keys, summary=summary,
-                         **kwargs)
+        return self.sync(self.scheduler.nbytes, keys=keys, summary=summary, **kwargs)
 
     def call_stack(self, futures=None, keys=None):
         """The actively running call stack of all relevant keys
@@ -3976,8 +3962,7 @@ class Client(SyncMethodMixin):
         """
         if not isinstance(keys, (list, tuple)):
             keys = (keys,)
-        return self.sync(self.scheduler.get_metadata, keys=keys,
-                         default=default)
+        return self.sync(self.scheduler.get_metadata, keys=keys, default=default)
 
     def get_scheduler_logs(self, n=None):
         """Get logs from scheduler
@@ -4016,8 +4001,7 @@ class Client(SyncMethodMixin):
         Dictionary mapping worker address to logs.
         Logs are returned in reversed order (newest first)
         """
-        return self.sync(self.scheduler.worker_logs, n=n, workers=workers,
-                         nanny=nanny)
+        return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
 
     def log_event(self, topic, msg):
         """Log an event under a given topic
@@ -4252,8 +4236,8 @@ class Client(SyncMethodMixin):
         return workers, responses
 
     def start_ipython_workers(
-            self, workers=None, magic_names=False, qtconsole=False,
-            qtconsole_args=None):
+        self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None
+    ):
         """Start IPython kernels on workers
 
         Parameters
@@ -4302,8 +4286,7 @@ class Client(SyncMethodMixin):
         if isinstance(workers, (str, Number)):
             workers = [workers]
 
-        (workers, info_dict) = sync(self.loop, self._start_ipython_workers,
-                                    workers)
+        (workers, info_dict) = sync(self.loop, self._start_ipython_workers, workers)
 
         if magic_names and isinstance(magic_names, str):
             if "*" in magic_names:
@@ -4328,13 +4311,12 @@ class Client(SyncMethodMixin):
 
             for worker, connection_info in info_dict.items():
                 name = "dask-" + worker.replace(":", "-").replace("/", "-")
-                connect_qtconsole(connection_info, name=name,
-                                  extra_args=qtconsole_args)
+                connect_qtconsole(connection_info, name=name, extra_args=qtconsole_args)
         return info_dict
 
     def start_ipython_scheduler(
-            self, magic_name="scheduler_if_ipython", qtconsole=False,
-            qtconsole_args=None):
+        self, magic_name="scheduler_if_ipython", qtconsole=False, qtconsole_args=None
+    ):
         """Start IPython kernel on the scheduler
 
         Parameters
@@ -4386,8 +4368,7 @@ class Client(SyncMethodMixin):
         if qtconsole:
             from ._ipython_utils import connect_qtconsole
 
-            connect_qtconsole(info, name="dask-scheduler",
-                              extra_args=qtconsole_args)
+            connect_qtconsole(info, name="dask-scheduler", extra_args=qtconsole_args)
         return info
 
     @classmethod
@@ -4499,8 +4480,7 @@ class Client(SyncMethodMixin):
         filename="task-stream.html",
         bokeh_resources=None,
     ):
-        msgs = await self.scheduler.get_task_stream(start=start, stop=stop,
-                                                    count=count)
+        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
             from .diagnostics.task_stream import rectangles
 
@@ -4897,8 +4877,7 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False,
-                 raise_errors=True):
+    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5091,7 +5070,7 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started
+    """Return a client if one has started
 
     Parameters
     ----------
@@ -5128,7 +5107,7 @@ def ensure_default_client(client):
 
 
 def redict_collection(c, dsk):
-    """ Change the dictionary in the collection
+    """Change the dictionary in the collection
 
     Parameters
     ----------
