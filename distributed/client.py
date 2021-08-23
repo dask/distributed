@@ -566,7 +566,7 @@ class FutureState:
 
         Sets the status to 'error'. Sets the exception, the traceback,
         and the event
-        
+
         Parameters
         ----------
         exception: Exception
@@ -613,7 +613,7 @@ async def done_callback(future, callback):
 
     Parameters
     ----------
-    future : asyncio.Future  
+    future : asyncio.Future
         The future
     callback : callable
         The callback
@@ -629,7 +629,7 @@ def normalize_future(f):
 
     Parameters
     ----------
-    list  
+    list
         The key and the type
     """
     return [f.key, type(f)]
@@ -675,7 +675,7 @@ class Client(SyncMethodMixin):
     address: string, or Cluster
         This can be the address of a ``Scheduler`` server like a string
         ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
-    loop : 
+    loop
         The event loop
     timeout: int
         Timeout duration for initial connection to the scheduler
@@ -707,7 +707,7 @@ class Client(SyncMethodMixin):
         the scheduler to serve as intermediary.
     connection_limit : int
         The number of open comms to maintain at once in the connection pool
-    
+
     **kwargs:
         If you do not pass a scheduler address, Client will create a
         ``LocalCluster`` object, passing any extra keyword arguments.
@@ -812,7 +812,8 @@ class Client(SyncMethodMixin):
         if address is None:
             address = dask.config.get("scheduler-address", None)
             if address:
-                logger.info("Config value `scheduler-address` found: %s", address)
+                logger.info("Config value `scheduler-address` found: %s",
+                            address)
 
         if address is not None and kwargs:
             raise ValueError(f"Unexpected keyword arguments: {sorted(kwargs)}")
@@ -863,7 +864,8 @@ class Client(SyncMethodMixin):
         heartbeat_interval = parse_timedelta(heartbeat_interval, default="ms")
 
         scheduler_info_interval = parse_timedelta(
-            dask.config.get("distributed.client.scheduler-info-interval", default="ms")
+            dask.config.get("distributed.client.scheduler-info-interval",
+                            default="ms")
         )
 
         self._periodic_callbacks = dict()
