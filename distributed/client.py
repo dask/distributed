@@ -4576,9 +4576,9 @@ class Client(SyncMethodMixin):
         Registers a lifecycle worker plugin for all current and future workers.
 
         This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate itself
-        on all currently connected workers. It will also be run on any worker
-        that connects in the future.
+        teardown for workers in this cluster. The plugin will instantiate
+	itself on all currently connected workers. It will also be run on any
+	worker that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
         and ``release_key``.  See the
@@ -4778,7 +4778,8 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     ----------
     fs : List[Future]
     timeout : number, optional
-        Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+        Time in seconds after which to raise a
+	``dask.distributed.TimeoutError``
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4839,8 +4840,8 @@ class as_completed:
         Whether to wait and include results of futures as well;
         in this case `as_completed` yields a tuple of (future, result)
     raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an exception;
-        only affects behavior when `with_results=True`.
+        Whether we should raise when the result of a future raises an
+	exception; only affects behavior when `with_results=True`.
 
     Examples
     --------
@@ -5070,10 +5071,10 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started 
+    """ Return a client if one has started
 
     Parameters
-	----------
+    ----------
     c : Client
         The client
 
@@ -5414,7 +5415,7 @@ def temp_default_client(c):
        ``Client.as_current`` instead.
 
     .. note::
-       Unlike ``Client.as_current``, this context manager is neither thread-local 
+       Unlike ``Client.as_current``, this context manager is neither thread-local
        nor task-local.
 
     Parameters
