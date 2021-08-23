@@ -902,16 +902,17 @@ class Client:
 
     @contextmanager
     def as_current(self):
-        """Thread-local, Task-local context manager that causes the Client.current class
-        method to return self. Any Future objects deserialized inside this context
-        manager will be automatically attached to this Client.
+        """Thread-local, Task-local context manager that causes the Client.current
+        class method to return self. Any Future objects deserialized inside this
+        context manager will be automatically attached to this Client.
         """
         # In Python 3.6, contextvars are thread-local but not Task-local.
         # We can still detect a race condition though.
         if sys.version_info < (3, 7) and _current_client.get() not in (self, None):
             raise RuntimeError(
-                "Detected race condition where multiple asynchronous clients tried "
-                "entering the as_current() context manager at the same time. "
+                "Detected race condition where multiple asynchronous clients "
+                "tried entering the as_current() context manager at the same "
+                "time. "
                 "Please upgrade to Python 3.7+."
             )
 
@@ -926,11 +927,11 @@ class Client:
         """When running within the context of `as_client`, return the context-local
         current client. Otherwise, return the latest initialised Client.
         If no Client instances exist, raise ValueError.
-        If allow_global is set to False, raise ValueError if running outside of the
-        `as_client` context manager.
+        If allow_global is set to False, raise ValueError if running outside of
+        the `as_client` context manager.
 
         Parameters
-    	----------
+        ----------
         allow_global : bool
             If True returns the default client
 
@@ -940,7 +941,7 @@ class Client:
             The current client
 
         Raises
-	    ------
+        ------
         ValueError
             If there is no client set, a ValueError is raised
         """
@@ -969,8 +970,9 @@ class Client:
         Returns
         -------
         bool
-            True if we are in asynchronous mode and we are running in the event loop.
-            Otherwise False 
+            True if we are in asynchronous mode and we are running in the event
+            loop.
+            Otherwise False
         """
         try:
             return self._asynchronous and self.loop is IOLoop.current()
@@ -1009,13 +1011,14 @@ class Client:
         asynchronous: bool
             If True the client is in asynchronous mode
         callback_timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
 
         Returns
         -------
         asyncio.Future
-            If running in asynchronous mode, returns the future. Otherwise returns the 
-            concrete value
+            If running in asynchronous mode, returns the future. Otherwise
+            returns the concrete value
         """
         callback_timeout = parse_timedelta(callback_timeout)
         if (
@@ -1365,13 +1368,14 @@ class Client:
 
     def wait_for_workers(self, n_workers=0, timeout=None):
         """Blocking call to wait for n workers before continuing
-	    
+
         Parameters
-    	----------
+        ----------
         n_workers : int
             The number of workers
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
          """
         return self.sync(self._wait_for_workers, n_workers, timeout=timeout)
 
@@ -1601,10 +1605,11 @@ class Client:
         will also close the local cluster that was started at the same time.
 
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         timeout : number
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
 
         See Also
         --------
@@ -1671,7 +1676,8 @@ class Client:
 
     def get_executor(self, **kwargs):
         """
-        Return a concurrent.futures Executor for submitting tasks on this Client
+        Return a concurrent.futures Executor for submitting tasks on this
+        Client
 
         Parameters
         ----------
@@ -1682,8 +1688,8 @@ class Client:
         Returns
         -------
         ClientExecutor
-            An Executor object that's fully compatible with the concurrent.futures
-            API.
+            An Executor object that's fully compatible with the
+            concurrent.futures API.
         """
         return ClientExecutor(self, **kwargs)
 
@@ -1717,8 +1723,8 @@ class Client:
             A set of worker addresses or hostnames on which computations may be
             performed. Leave empty to default to all workers (common case)
         resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
+            Defines the ``resources`` each instance of this mapped task
+            requires on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         retries : int (default to 0)
@@ -1748,15 +1754,15 @@ class Client:
         Returns
         -------
         Future
-            If running in asynchronous mode, returns the future. Otherwise returns the 
-            concrete value
+            If running in asynchronous mode, returns the future. Otherwise
+            returns the concrete value
 
         Raises
-    	------
+        ------
         TypeError
             If 'func' is not callable, a TypeError is raised
         ValueError
-            If 'allow_other_workers'is True and 'workers' is None, a 
+            If 'allow_other_workers'is True and 'workers' is None, a
             ValueError is raised
 
         See Also
@@ -1869,7 +1875,8 @@ class Client:
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
         batch_size : int, optional
-            Submit tasks to the scheduler in batches of (at most) ``batch_size``.
+            Submit tasks to the scheduler in batches of (at most)
+            ``batch_size``.
             Larger batch sizes can be useful for very large ``iterables``,
             as the cluster can start processing tasks while later ones are
             submitted asynchronously.
@@ -2149,7 +2156,7 @@ class Client:
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
         asynchronous: bool
-            If True the client is in asynchronous mode            
+            If True the client is in asynchronous mode
 
         Returns
         -------
@@ -2324,7 +2331,8 @@ class Client:
             Data to scatter out to workers.  Output type matches input type.
         workers : list of tuples (optional)
             Optionally constrain locations of data.
-            Specify workers as hostname/port pairs, e.g. ``('127.0.0.1', 8787)``.
+            Specify workers as hostname/port pairs, e.g.
+            ``('127.0.0.1', 8787)``.
         broadcast : bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
@@ -2336,10 +2344,11 @@ class Client:
             Whether or not to hash data to determine key.
             If False then this uses a random key
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
         asynchronous: bool
             If True the client is in asynchronous mode
-        
+
         Returns
         -------
         List, dict, iterator, or queue of futures matching the type of input.
@@ -2423,7 +2432,7 @@ class Client:
         futures : List[Future]
             The list of Futures
         asynchronous: bool
-            If True the client is in asynchronous mode 
+            If True the client is in asynchronous mode
         force : boolean (False)
             Cancel this future even if other clients desire it
          """
