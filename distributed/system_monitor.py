@@ -41,7 +41,7 @@ class SystemMonitor:
             self._collect_disk_io_counters = False
         else:
             if disk_ioc is None:  # diskless machine
-                self._collect_net_io_counters = False
+                self._collect_disk_io_counters = False
             else:
                 self.last_time_disk = time()
                 self.read_bytes_disk = deque(maxlen=n)
