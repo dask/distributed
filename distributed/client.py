@@ -2484,7 +2484,7 @@ class Client(SyncMethodMixin):
     def unpublish_dataset(self, name, **kwargs):
         """
         Remove named datasets from scheduler
-        
+
         Parameters
         ----------
         name : str
@@ -2537,7 +2537,8 @@ class Client(SyncMethodMixin):
             name of the dataset to retrieve
         default : str
             optional, not set by default
-            If set, do not raise a KeyError if the name is not present but return this default
+            If set, do not raise a KeyError if the name is not present but
+            return this default
         kwargs : dict
             additional keyword arguments to _get_dataset
 
@@ -2572,8 +2573,8 @@ class Client(SyncMethodMixin):
         keyword argument ``dask_scheduler=``, which will be given the scheduler
         object itself.
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         function : callable
             The function to run on the scheduler process
         *args : tuple
@@ -2686,7 +2687,8 @@ class Client(SyncMethodMixin):
         **kwargs : dict
             Optional keyword arguments for the remote function
         workers : list
-            Workers on which to run the function. Defaults to all known workers.
+            Workers on which to run the function. Defaults to all known
+            workers.
         wait : boolean (optional)
             If the function is asynchronous whether or not to wait until that
             function finishes.
@@ -2915,8 +2917,8 @@ class Client(SyncMethodMixin):
             Used with ``workers``. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
         resources : dict (defaults to {})
-            Defines the ``resources`` each instance of this mapped task requires
-            on the worker; e.g. ``{'GPU': 2}``.
+            Defines the ``resources`` each instance of this mapped task
+            requires on the worker; e.g. ``{'GPU': 2}``.
             See :doc:`worker resources <resources>` for details on defining
             resources.
         sync : bool (optional)
@@ -2943,9 +2945,10 @@ class Client(SyncMethodMixin):
         Returns
         -------
         results
-            If 'sync' is True, returns the results. Otherwise, returns the known data
-        packed
-            If 'sync' is False, returns the known data. Otherwise, returns the results
+            If 'sync' is True, returns the results. Otherwise, returns the
+            known data packed
+            If 'sync' is False, returns the known data. Otherwise, returns
+            the results
 
         Examples
         --------
@@ -3019,8 +3022,8 @@ class Client(SyncMethodMixin):
         known futures within the scheduler.  It returns a copy of the
         collection with a task graph that includes the overlapping futures.
 
-	    Parameters
-    	----------
+        Parameters
+        ----------
         collection
 
         Returns
@@ -3772,11 +3775,11 @@ class Client(SyncMethodMixin):
     def scheduler_info(self, **kwargs):
         """Basic information about the workers in the cluster
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         **kwargs : dict
             Optional keyword arguments for the remote function
-    
+
         Examples
         --------
         >>> c.scheduler_info()  # doctest: +SKIP
@@ -3994,9 +3997,9 @@ class Client(SyncMethodMixin):
         workers : iterable
             List of worker addresses to retrieve.  Gets all workers by default.
         nanny : bool, default False
-            Whether to get the logs from the workers (False) or the nannies (True). If
-            specified, the addresses in `workers` should still be the worker addresses,
-            not the nanny addresses.
+            Whether to get the logs from the workers (False) or the nannies
+            (True). If specified, the addresses in `workers` should still be
+            the worker addresses, not the nanny addresses.
 
         Returns
         -------
@@ -4094,8 +4097,8 @@ class Client(SyncMethodMixin):
 
         See dask.distributed.Scheduler.retire_workers for the full docstring.
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         workers
         close_workers
         **kwargs : dict
@@ -4209,8 +4212,8 @@ class Client(SyncMethodMixin):
     def futures_of(self, futures):
         """Wrapper method of futures_of
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         futures : tuple
             The futures
         """
@@ -4219,8 +4222,8 @@ class Client(SyncMethodMixin):
     def start_ipython(self, *args, **kwargs):
         """Deprecated - Method moved to start_ipython_workers
 
-    	Parameters
-    	----------
+        Parameters
+        ----------
         *args : tuple
             Optional arguments for the function
         **kwargs : dict
@@ -4238,8 +4241,8 @@ class Client(SyncMethodMixin):
         return workers, responses
 
     def start_ipython_workers(
-        self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None
-    ):
+            self, workers=None, magic_names=False, qtconsole=False,
+            qtconsole_args=None):
         """Start IPython kernels on workers
 
         Parameters
@@ -4317,8 +4320,8 @@ class Client(SyncMethodMixin):
         return info_dict
 
     def start_ipython_scheduler(
-        self, magic_name="scheduler_if_ipython", qtconsole=False, qtconsole_args=None
-    ):
+            self, magic_name="scheduler_if_ipython", qtconsole=False,
+            qtconsole_args=None):
         """Start IPython kernel on the scheduler
 
         Parameters
@@ -4577,8 +4580,8 @@ class Client(SyncMethodMixin):
 
         This registers a new object to handle setup, task state transitions and
         teardown for workers in this cluster. The plugin will instantiate
-	itself on all currently connected workers. It will also be run on any
-	worker that connects in the future.
+        itself on all currently connected workers. It will also be run on any
+        worker that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
         and ``release_key``.  See the
@@ -4779,7 +4782,7 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     fs : List[Future]
     timeout : number, optional
         Time in seconds after which to raise a
-	``dask.distributed.TimeoutError``
+        ``dask.distributed.TimeoutError``
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4841,7 +4844,7 @@ class as_completed:
         in this case `as_completed` yields a tuple of (future, result)
     raise_errors: bool (True)
         Whether we should raise when the result of a future raises an
-	exception; only affects behavior when `with_results=True`.
+        exception; only affects behavior when `with_results=True`.
 
     Examples
     --------
