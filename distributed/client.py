@@ -4724,7 +4724,7 @@ def default_client(c=None):
     Returns
     -------
     c : Client
-        The client, if one has started 
+        The client, if one has started
     """
     c = c or _get_global_client()
     if c:
@@ -4742,7 +4742,7 @@ def ensure_default_get(client):
     """ Sets the scheduler and the default client
 
     Parameters
-	----------
+    ----------
     client : Client
         The client
     """
@@ -4754,7 +4754,7 @@ def redict_collection(c, dsk):
     """ Change the dictionary in the collection
 
     Parameters
-	----------
+    ----------
     c : collection
         The collection
     dsk : dict
@@ -4765,8 +4765,8 @@ def redict_collection(c, dsk):
     c : Delayed
         If the collection is a 'Delayed' object the collection is returned
     cc : collection
-        If the collection is not a 'Delayed' object a copy of the collection with
-        the new dictionary is returned
+        If the collection is not a 'Delayed' object a copy of the
+        collection with xthe new dictionary is returned
 
     """
     from dask.delayed import Delayed
@@ -4795,8 +4795,8 @@ def futures_of(o, client=None):
     [<Future: finished key: ...>,
      <Future: pending  key: ...>]
 
-	Raises
-	------
+    Raises
+    ------
     CancelledError
         If one of the futures is cancelled a CancelledError is raised
 
@@ -5041,12 +5041,13 @@ def temp_default_client(c):
     """Set the default client for the duration of the context
 
     .. note::
-       This function should be used exclusively for unit testing the default client
-       functionality. In all other cases, please use ``Client.as_current`` instead.
+       This function should be used exclusively for unit testing the default
+       client functionality. In all other cases, please use
+       ``Client.as_current`` instead.
 
     .. note::
-       Unlike ``Client.as_current``, this context manager is neither thread-local nor
-       task-local.
+       Unlike ``Client.as_current``, this context manager is neither thread-local 
+       nor task-local.
 
     Parameters
     ----------
