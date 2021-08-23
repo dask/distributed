@@ -199,9 +199,9 @@ class Future(WrappedKey):
 
     @property
     def executor(self):
-        """ Returns the executor, which is the client. 
-        
-        Returns
+        """ Returns the executor, which is the client.
+
+	Returns
         -------
         Client
             The executor
@@ -210,7 +210,7 @@ class Future(WrappedKey):
 
     @property
     def status(self):
-        """Returns the status 
+        """Returns the status
 
         Returns
         -------
@@ -221,8 +221,8 @@ class Future(WrappedKey):
 
     def done(self):
         """Returns whether or not the computation completed.
-        
-        Returns
+
+	Returns
         -------
         bool
             True if the computation is complete, otherwise False
@@ -231,11 +231,12 @@ class Future(WrappedKey):
 
     def result(self, timeout=None):
         """Wait until computation completes, gather result to local process.
-        
+
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a 
+	    ``dask.distributed.TimeoutError``
 
         Raises
         ------
@@ -252,7 +253,8 @@ class Future(WrappedKey):
             return self.client.sync(self._result, callback_timeout=timeout)
 
         # shorten error traceback
-        result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
+        result = self.client.sync(self._result, callback_timeout=timeout,
+				  raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
             raise exc.with_traceback(tb)
@@ -289,11 +291,12 @@ class Future(WrappedKey):
 
     def exception(self, timeout=None, **kwargs):
         """Return the exception of a failed task
-        
+
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a 
+	    ``dask.distributed.TimeoutError``
         **kwargs : dict
             Optional keyword arguments for the function
 
@@ -308,7 +311,8 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
-        return self.client.sync(self._exception, callback_timeout=timeout, **kwargs)
+        return self.client.sync(self._exception, callback_timeout=timeout,
+				**kwargs)
 
     def add_done_callback(self, fn):
         """Call callback on future when callback has finished
