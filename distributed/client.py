@@ -27,8 +27,7 @@ import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten
 from dask.optimization import SubgraphCallable
-from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes, funcname, stringify
+from dask.utils import apply, ensure_dict, format_bytes, funcname, stringify
 from dask.highlevelgraph import HighLevelGraph
 
 from tlz import first, groupby, merge, valmap, keymap, partition_all
