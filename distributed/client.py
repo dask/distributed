@@ -3419,15 +3419,17 @@ class Client(SyncMethodMixin):
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
 
-    async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
+    async def _replicate(self, futures, n=None, workers=None,
+                         branching_factor=2):
         futures = self.futures_of(futures)
         await _wait(futures)
         keys = {stringify(f.key) for f in futures}
         await self.scheduler.replicate(
-            keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
-        )
+            keys=list(keys), n=n, workers=workers,
+            branching_factor=branching_factor)
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2, **kwargs):
+    def replicate(self, futures, n=None, workers=None, branching_factor=2,
+                  **kwargs):
         """Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
@@ -3647,7 +3649,8 @@ class Client(SyncMethodMixin):
         --------
         Client.who_has
         """
-        return self.sync(self.scheduler.nbytes, keys=keys, summary=summary, **kwargs)
+        return self.sync(self.scheduler.nbytes, keys=keys, summary=summary,
+                         **kwargs)
 
     def call_stack(self, futures=None, keys=None):
         """The actively running call stack of all relevant keys
@@ -3973,7 +3976,8 @@ class Client(SyncMethodMixin):
         """
         if not isinstance(keys, (list, tuple)):
             keys = (keys,)
-        return self.sync(self.scheduler.get_metadata, keys=keys, default=default)
+        return self.sync(self.scheduler.get_metadata, keys=keys,
+                         default=default)
 
     def get_scheduler_logs(self, n=None):
         """Get logs from scheduler
@@ -4012,7 +4016,8 @@ class Client(SyncMethodMixin):
         Dictionary mapping worker address to logs.
         Logs are returned in reversed order (newest first)
         """
-        return self.sync(self.scheduler.worker_logs, n=n, workers=workers, nanny=nanny)
+        return self.sync(self.scheduler.worker_logs, n=n, workers=workers,
+                         nanny=nanny)
 
     def log_event(self, topic, msg):
         """Log an event under a given topic
@@ -4297,7 +4302,8 @@ class Client(SyncMethodMixin):
         if isinstance(workers, (str, Number)):
             workers = [workers]
 
-        (workers, info_dict) = sync(self.loop, self._start_ipython_workers, workers)
+        (workers, info_dict) = sync(self.loop, self._start_ipython_workers,
+                                    workers)
 
         if magic_names and isinstance(magic_names, str):
             if "*" in magic_names:
@@ -4322,7 +4328,8 @@ class Client(SyncMethodMixin):
 
             for worker, connection_info in info_dict.items():
                 name = "dask-" + worker.replace(":", "-").replace("/", "-")
-                connect_qtconsole(connection_info, name=name, extra_args=qtconsole_args)
+                connect_qtconsole(connection_info, name=name,
+                                  extra_args=qtconsole_args)
         return info_dict
 
     def start_ipython_scheduler(
@@ -4379,7 +4386,8 @@ class Client(SyncMethodMixin):
         if qtconsole:
             from ._ipython_utils import connect_qtconsole
 
-            connect_qtconsole(info, name="dask-scheduler", extra_args=qtconsole_args)
+            connect_qtconsole(info, name="dask-scheduler",
+                              extra_args=qtconsole_args)
         return info
 
     @classmethod
@@ -4491,7 +4499,8 @@ class Client(SyncMethodMixin):
         filename="task-stream.html",
         bokeh_resources=None,
     ):
-        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
+        msgs = await self.scheduler.get_task_stream(start=start, stop=stop,
+                                                    count=count)
         if plot:
             from .diagnostics.task_stream import rectangles
 
@@ -4625,7 +4634,8 @@ class Client(SyncMethodMixin):
         ...         pass
         ...     def teardown(self, worker: dask.distributed.Worker):
         ...         pass
-        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
+        ...     def transition(self, key: str, start: str, finish: str,
+        ...                    **kwargs):
         ...         pass
         ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
@@ -4887,7 +4897,8 @@ class as_completed:
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(self, futures=None, loop=None, with_results=False,
+                 raise_errors=True):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -5424,8 +5435,8 @@ def temp_default_client(c):
        ``Client.as_current`` instead.
 
     .. note::
-       Unlike ``Client.as_current``, this context manager is neither thread-local
-       nor task-local.
+       Unlike ``Client.as_current``, this context manager is neither
+       thread-local nor task-local.
 
     Parameters
     ----------
