@@ -4287,9 +4287,9 @@ class Client:
         Registers a lifecycle worker plugin for all current and future workers.
 
         This registers a new object to handle setup, task state transitions and
-        teardown for workers in this cluster. The plugin will instantiate itself
-        on all currently connected workers. It will also be run on any worker
-        that connects in the future.
+        teardown for workers in this cluster. The plugin will instantiate
+	itself on all currently connected workers. It will also be run on any
+	worker that connects in the future.
 
         The plugin may include methods ``setup``, ``teardown``, ``transition``,
         ``release_key``, and ``release_dep``.  See the
@@ -4298,8 +4298,8 @@ class Client:
         cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
-        used then that will control idempotency.  If a plugin with that name has
-        already been registered then any future plugins will not run.
+        used then that will control idempotency.  If a plugin with that name
+	has already been registered then any future plugins will not run.
 
         For alternatives to plugins, you may also wish to look into preload
         scripts.
@@ -4312,8 +4312,8 @@ class Client:
             A name for the plugin.
             Registering a plugin with the same name will have no effect.
         **kwargs : dict, optional
-            If you pass a class as the plugin, instead of a class instance, then the
-            class will be instantiated with any extra keyword arguments.
+            If you pass a class as the plugin, instead of a class instance, then
+	    the class will be instantiated with any extra keyword arguments.
 
         Examples
         --------
@@ -4424,7 +4424,8 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     ----------
     fs : List[Future]
     timeout : number, optional
-        Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+        Time in seconds after which to raise a
+	``dask.distributed.TimeoutError``
     return_when : str, optional
         One of `ALL_COMPLETED` or `FIRST_COMPLETED`
 
@@ -4485,8 +4486,8 @@ class as_completed:
         Whether to wait and include results of futures as well;
         in this case `as_completed` yields a tuple of (future, result)
     raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an exception;
-        only affects behavior when `with_results=True`.
+        Whether we should raise when the result of a future raises an
+	exception; only affects behavior when `with_results=True`.
 
     Examples
     --------
@@ -4714,10 +4715,10 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return a client if one has started 
+    """ Return a client if one has started
 
     Parameters
-	----------
+    ----------
     c : Client
         The client
 
@@ -5046,7 +5047,7 @@ def temp_default_client(c):
        ``Client.as_current`` instead.
 
     .. note::
-       Unlike ``Client.as_current``, this context manager is neither thread-local 
+       Unlike ``Client.as_current``, this context manager is neither thread-local
        nor task-local.
 
     Parameters
