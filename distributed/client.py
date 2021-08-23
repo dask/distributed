@@ -216,7 +216,7 @@ class Future(WrappedKey):
     def executor(self):
         """ Returns the executor, which is the client.
 
-	Returns
+        Returns
         -------
         Client
             The executor
@@ -237,7 +237,7 @@ class Future(WrappedKey):
     def done(self):
         """Returns whether or not the computation completed.
 
-	Returns
+        Returns
         -------
         bool
             True if the computation is complete, otherwise False
@@ -250,8 +250,8 @@ class Future(WrappedKey):
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a 
-	    ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
 
         Raises
         ------
@@ -269,7 +269,7 @@ class Future(WrappedKey):
 
         # shorten error traceback
         result = self.client.sync(self._result, callback_timeout=timeout,
-				  raiseit=False)
+                                  raiseit=False)
         if self.status == "error":
             typ, exc, tb = result
             raise exc.with_traceback(tb)
@@ -310,8 +310,8 @@ class Future(WrappedKey):
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a 
-	    ``dask.distributed.TimeoutError``
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``
         **kwargs : dict
             Optional keyword arguments for the function
 
@@ -327,7 +327,7 @@ class Future(WrappedKey):
         Future.traceback
         """
         return self.client.sync(self._exception, callback_timeout=timeout,
-				**kwargs)
+                                **kwargs)
 
     def add_done_callback(self, fn):
         """Call callback on future when callback has finished
@@ -360,7 +360,8 @@ class Future(WrappedKey):
                 logger.exception("Error in callback %s of %s:", fn, fut)
 
         self.client.loop.add_callback(
-            done_callback, self, partial(cls._cb_executor.submit, execute_callback)
+            done_callback, self, partial(cls._cb_executor.submit, 
+                                         execute_callback)
         )
 
     def cancel(self, **kwargs):
@@ -408,7 +409,8 @@ class Future(WrappedKey):
         Parameters
         ----------
         timeout : number, optional
-            Time in seconds after which to raise a ``dask.distributed.TimeoutError``  
+            Time in seconds after which to raise a
+            ``dask.distributed.TimeoutError``  
             If *timeout* seconds are elapsed before returning, a
             ``dask.distributed.TimeoutError`` is raised.
 
@@ -428,7 +430,8 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return self.client.sync(self._traceback, callback_timeout=timeout, **kwargs)
+        return self.client.sync(self._traceback, callback_timeout=timeout,
+                                **kwargs)
 
     @property
     def type(self):
@@ -437,7 +440,7 @@ class Future(WrappedKey):
 
     def release(self, _in_destructor=False):
         """
-        
+
         Parameters
         ----------
         _in_destructor: bool
@@ -451,7 +454,8 @@ class Future(WrappedKey):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
             try:
-                self.client.loop.add_callback(self.client._dec_ref, stringify(self.key))
+                self.client.loop.add_callback(self.client._dec_ref, 
+                                              stringify(self.key))
             except TypeError:
                 pass  # Shutting down, add_callback may be None
 
