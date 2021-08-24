@@ -2,8 +2,9 @@ from time import sleep
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 import dask
-from dask.utils import format_bytes
 
 from distributed import Client
 from distributed.comm.ucx import _scrub_ucx_config
@@ -21,6 +22,7 @@ rmm = pytest.importorskip("rmm")
 
 @pytest.mark.asyncio
 async def test_ucx_config(cleanup):
+    ucx_110 = ucp.get_ucx_version() >= (1, 10, 0)
 
     ucx = {
         "nvlink": True,
@@ -31,10 +33,14 @@ async def test_ucx_config(cleanup):
         "cuda_copy": True,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy,cuda_ipc"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
         assert ucx_config.get("NET_DEVICES") is None
 
     ucx = {
@@ -46,10 +52,14 @@ async def test_ucx_config(cleanup):
         "cuda_copy": False,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,sockcm"
-        assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "tcp"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,sockcm"
+            assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "sockcm"
         assert ucx_config.get("NET_DEVICES") == "mlx5_0:1"
 
     ucx = {
@@ -57,16 +67,17 @@ async def test_ucx_config(cleanup):
         "infiniband": True,
         "rdmacm": True,
         "net-devices": "all",
-        "MEMTYPE_CACHE": "y",
         "tcp": True,
         "cuda_copy": True,
     }
 
-    with dask.config.set(ucx=ucx):
+    with dask.config.set({"distributed.comm.ucx": ucx}):
         ucx_config = _scrub_ucx_config()
-        assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
+        if ucx_110:
+            assert ucx_config.get("TLS") == "rc,tcp,cuda_copy"
+        else:
+            assert ucx_config.get("TLS") == "rc,tcp,rdmacm,cuda_copy"
         assert ucx_config.get("SOCKADDR_TLS_PRIORITY") == "rdmacm"
-        assert ucx_config.get("MEMTYPE_CACHE") == "y"
 
 
 def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
@@ -95,12 +106,13 @@ def test_ucx_config_w_env_var(cleanup, loop, monkeypatch):
                 while not c.scheduler_info()["workers"]:
                     sleep(0.1)
 
-                # configured with 1G pool
-                rmm_usage = c.run_on_scheduler(rmm.get_info)
-                assert size == format_bytes(rmm_usage.free)
+                # Check for RMM pool resource type
+                rmm_resource = c.run_on_scheduler(
+                    rmm.mr.get_current_device_resource_type
+                )
+                assert rmm_resource == rmm.mr.PoolMemoryResource
 
-                # configured with 1G pool
                 worker_addr = list(c.scheduler_info()["workers"])[0]
-                worker_rmm_usage = c.run(rmm.get_info)
-                rmm_usage = worker_rmm_usage[worker_addr]
-                assert size == format_bytes(rmm_usage.free)
+                worker_rmm_usage = c.run(rmm.mr.get_current_device_resource_type)
+                rmm_resource = worker_rmm_usage[worker_addr]
+                assert rmm_resource == rmm.mr.PoolMemoryResource

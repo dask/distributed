@@ -500,9 +500,9 @@ class Server:
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
-                    except (CommClosedError, CancelledError) as e:
+                    except (CommClosedError, CancelledError):
                         if self.status == Status.running:
-                            logger.info("Lost connection to %r: %s", address, e)
+                            logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
                         logger.exception("Exception while handling op %s", op)
@@ -666,7 +666,7 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
             typ, exc, tb = clean_exception(**response)
             raise exc.with_traceback(tb)
         else:
-            raise Exception(response["text"])
+            raise Exception(response["exception_text"])
     return response
 
 
@@ -791,12 +791,20 @@ class rpc:
                 kwargs["serializers"] = self.serializers
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
+            comm = None
             try:
                 comm = await self.live_comm()
                 comm.name = "rpc." + key
                 result = await send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
-                raise e.__class__(f"{e}: while trying to call remote method {key!r}")
+                if comm:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} before comm was established."
+                    ) from e
+                else:
+                    raise type(e)(
+                        f"Exception while trying to call remote method {key!r} using comm {comm!r}."
+                    ) from e
 
             self.comms[comm] = True  # mark as open
             return result
@@ -1020,7 +1028,7 @@ class ConnectionPool:
         try:
             if self.status != Status.running:
                 raise CommClosedError(
-                    f"ConnectionPool not running.  Status: {self.status}"
+                    f"ConnectionPool not running. Status: {self.status}"
                 )
 
             fut = asyncio.ensure_future(
@@ -1044,7 +1052,7 @@ class ConnectionPool:
         except asyncio.CancelledError as exc:
             self.semaphore.release()
             raise CommClosedError(
-                f"ConnectionPool not running.  Status: {self.status}"
+                f"ConnectionPool not running. Status: {self.status}"
             ) from exc
         except Exception as exc:
             self.semaphore.release()
@@ -1179,7 +1187,13 @@ def error_message(e, status="error"):
     else:
         tb_result = protocol.to_serialize(tb)
 
-    return {"status": status, "exception": e4, "traceback": tb_result, "text": str(e2)}
+    return {
+        "status": status,
+        "exception": e4,
+        "traceback": tb_result,
+        "exception_text": repr(e2),
+        "traceback_text": "".join(traceback.format_tb(tb)),
+    }
 
 
 def clean_exception(exception, traceback, **kwargs):

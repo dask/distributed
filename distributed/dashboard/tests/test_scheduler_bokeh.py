@@ -31,16 +31,19 @@ from distributed.dashboard.components.scheduler import (
     StealingEvents,
     StealingTimeSeries,
     SystemMonitor,
+    SystemTimeseries,
     TaskGraph,
     TaskGroupGraph,
     TaskProgress,
     TaskStream,
+    WorkerNetworkBandwidth,
     WorkersMemory,
     WorkersMemoryHistogram,
     WorkerTable,
 )
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
+from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
@@ -57,7 +60,7 @@ async def test_simple(c, s, a, b):
 
     http_client = AsyncHTTPClient()
     for suffix in applications:
-        response = await http_client.fetch("http://localhost:%d%s" % (port, suffix))
+        response = await http_client.fetch(f"http://localhost:{port}{suffix}")
         body = response.body.decode()
         assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
@@ -477,6 +480,109 @@ async def test_WorkerTable_with_memory_limit_as_0(c, s, a, b):
 
 
 @gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth(c, s, a, b):
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    assert all(len(v) == 2 for v in nb.source.data.values())
+
+    assert nb.source.data["y_read"] == [0.75, 1.85]
+    assert nb.source.data["y_write"] == [0.25, 1.35]
+
+
+@gen_cluster(client=True)
+async def test_WorkerNetworkBandwidth_metrics(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    nb = WorkerNetworkBandwidth(s)
+    nb.update()
+
+    for idx, ws in enumerate(s.workers.values()):
+        assert ws.metrics["read_bytes"] == nb.source.data["x_read"][idx]
+        assert ws.metrics["write_bytes"] == nb.source.data["x_write"][idx]
+        assert ws.metrics["read_bytes_disk"] == nb.source.data["x_read_disk"][idx]
+        assert ws.metrics["write_bytes_disk"] == nb.source.data["x_write_disk"][idx]
+
+
+@gen_cluster(client=True)
+async def test_SystemTimeseries(c, s, a, b):
+    # Disable system monitor periodic callback to allow us to manually control
+    # when it is called below
+    a.periodic_callbacks["monitor"].stop()
+    b.periodic_callbacks["monitor"].stop()
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+
+    systs = SystemTimeseries(s)
+    workers = s.workers.values()
+
+    assert all(len(v) == 1 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][0] == sum(
+        [ws.metrics["read_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][0] == sum(
+        [ws.metrics["write_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["cpu"][0] == sum(
+        [ws.metrics["cpu"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["memory"][0] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][0] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][0] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][0]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
+
+    # Update worker system monitors and send updated metrics to the scheduler
+    a.monitor.update()
+    b.monitor.update()
+    await asyncio.gather(a.heartbeat(), b.heartbeat())
+    systs.update()
+
+    assert all(len(v) == 2 for v in systs.source.data.values())
+    assert systs.source.data["read_bytes"][1] == sum(
+        [ws.metrics["read_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes"][1] == sum(
+        [ws.metrics["write_bytes"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["cpu"][1] == sum(
+        [ws.metrics["cpu"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["memory"][1] == sum(
+        [ws.metrics["memory"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["read_bytes_disk"][1] == sum(
+        [ws.metrics["read_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert systs.source.data["write_bytes_disk"][1] == sum(
+        [ws.metrics["write_bytes_disk"] for ws in workers]
+    ) / len(workers)
+    assert (
+        systs.source.data["time"][1]
+        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+    )
+
+
+@gen_cluster(client=True)
 async def test_TaskGraph(c, s, a, b):
     gp = TaskGraph(s)
     futures = c.map(inc, range(5))
@@ -752,7 +858,7 @@ async def test_lots_of_tasks(c, s, a, b):
     futures = c.map(toolz.identity, range(100))
     await wait(futures)
 
-    tsp = [p for p in s.plugins if "taskstream" in type(p).__name__.lower()][0]
+    tsp = s.plugins[TaskStreamPlugin.name]
     assert len(tsp.buffer) == 10
     ts.update()
     assert len(ts.source.data["start"]) == 10

@@ -1,12 +1,124 @@
 Changelog
 =========
 
+2021.08.1
+---------
+
+Released on August 20, 2021
+
+- Rename plots to fit in the labextension (:pr:`5239`) `Naty Clementi`_
+- Log messages for ``CommClosedError`` now includes information about remote address (:pr:`5209`) `Florian Jetter`_
+- Add ``target='_blank'`` for redirects of dashboard link (:pr:`5237`) `Naty Clementi`_
+- Update computation code retrieval logic (:pr:`5236`) `James Bourbeau`_
+- Minor polish on cfexecutor (:pr:`5233`) `crusaderky`_
+- Use development version of ``dask`` in gpuCI build (:pr:`5232`) `James Bourbeau`_
+- Use upstream ``dask.widgets`` (:pr:`5205`) `Jacob Tomlinson`_
+- Fix flaky ``test_worker_reconnects_mid_compute`` (:pr:`5227`) `Florian Jetter`_
+- Update ``WorkerPlugin`` docstring about usage of ``TaskState`` objects (:pr:`5226`) `Florian Jetter`_
+- Worker Network Timeseries (:pr:`5129`) `Naty Clementi`_
+- Add HTML Repr for ``ProcessInterface`` class and all its subclasses (:pr:`5181`) `Freyam Mehta`_
+- Fix an issue where a reconnecting worker could cause an invalid transition (:pr:`5210`) `Florian Jetter`_
+- Minor fixes for cfexecutor (:pr:`5177`) `Florian Jetter`_
+- Add HTML Repr for ``Security`` class (:pr:`5178`) `Freyam Mehta`_
+- Fix performance report sizing issue (:pr:`5213`) `Ian Rose`_
+- Drop RMM compatibility code from RAPIDS < 0.11 (:pr:`5214`) `Peter Andreas Entschev`_
+
+
+2021.08.0
+---------
+
+Released on August 13, 2021
+
+- Include addresses in closed comm repr  (:pr:`5203`) `James Bourbeau`_
+- Test ``nanny.environ`` precedence (:pr:`5204`) `Florian Jetter`_
+- Migrating HTML reprs to jinja2 (:pr:`5188`) `Jacob Tomlinson`_
+- Fix ``test_process_executor_kills_process`` flakyness (:pr:`5183`) `crusaderky`_
+- Remove ``urllib3`` as a dependency downloading preloads (:pr:`5199`) `Marcos Moyano`_
+- Download preload urls in the ``Preload`` constructor  (:pr:`5194`) `Marcos Moyano`_
+- Avoid recursion error in ``profile.merge`` (:pr:`5195`) `Matthew Rocklin`_
+- Add text exceptions to the ``Scheduler`` (:pr:`5148`) `Matthew Rocklin`_
+- Use ``kwarg`` for ``Theme`` filename (:pr:`5190`) `Bryan Van de Ven`_
+- Add a ``.git-ignore-revs`` file (:pr:`5187`) `Florian Jetter`_
+- Replace ``not not`` with ``bool()`` (:pr:`5182`) `Jacob Tomlinson`_
+- Resolve deadlock cause by transition error after fetching dependency (:pr:`5157`) `Florian Jetter`_
+- Set z-index of data-table lower (:pr:`5175`) `Julia Signell`_
+- Add ``no-worker`` - ``memory`` transition to scheduler (:pr:`5174`) `Florian Jetter`_
+- Deprecate worker plugin overwrite policy (:pr:`5146`) `James Bourbeau`_
+- Fix flaky tests in CI (:pr:`5168`) `crusaderky`_
+- Instructions for jemalloc with brew on macOS (:pr:`4996`) `Gabe Joseph`_
+- Bump ``RAPIDS_VER`` to 21.10 (:pr:`5165`) `Charles Blackmon-Luca`_
+- Tweak verbiage around ``async`` functions (:pr:`5166`) `crusaderky`_
+- Use Python 3 ``super()`` calls (:pr:`5167`) `crusaderky`_
+- Support asynchronous tasks (:pr:`5151`) `Matthew Rocklin`_
+- Rename total comm bytes and provide doc string (:pr:`5155`) `Florian Jetter`_
+- Add GPU executor if GPU is present (:pr:`5123`) `Matthew Rocklin`_
+- Fix RMM and UCX tests (:pr:`5158`) `Peter Andreas Entschev`_
+- Remove excessive timeout of ``test_steal_during_task_deserialization`` (:pr:`5156`) `Florian Jetter`_
+- Add gpuCI build script (:pr:`5147`) `Charles Blackmon-Luca`_
+- Demote ``Worker.ensure_computing`` to function (:pr:`5153`) `Florian Jetter`_
+
+
+2021.07.2
+---------
+
+Released on July 30, 2021
+
+- Fix a deadlock connected to task stealing and task deserialization (:pr:`5128`) `Florian Jetter`_
+- Include maximum shard size in second ``to_frames`` method (:pr:`5145`) `Matthew Rocklin`_
+- Minor dashboard style updates (:pr:`5143`) `Bryan Van de Ven`_
+- Cap maximum shard size at the size of an integer (:pr:`5141`) `Matthew Rocklin`_
+- Document automatic ``MALLOC_TRIM_THRESHOLD_`` environment variable (:pr:`5139`) `James Bourbeau`_
+- Mark ``ucx-py`` tests for GPU (:pr:`5133`) `Charles Blackmon-Luca`_
+- Update individual profile plot sizing (:pr:`5131`) `James Bourbeau`_
+- Handle ``NVMLError_Unknown`` in NVML diagnostics (:pr:`5121`) `Peter Andreas Entschev`_
+- Unit tests to use a random port for the dashboard (:pr:`5060`) `crusaderky`_
+- Ensure worker reconnect registers existing tasks properly (:pr:`5103`) `Florian Jetter`_
+- Halve CI runtime! (:pr:`5074`) `crusaderky`_
+- Add ``NannyPlugins`` (:pr:`5118`) `Matthew Rocklin`_
+- Add ``WorkerNetworkBandwidth`` chart to dashboard (:pr:`5104`) `Naty Clementi`_
+- Set nanny environment variables in config (:pr:`5098`) `Matthew Rocklin`_
+- Read smaller frames to workaround OpenSSL bug (:pr:`5115`) `jakirkham`_
+- Move UCX/RMM config variables to Distributed namespace  (:pr:`4916`) `Charles Blackmon-Luca`_
+- Allow ws(s) messages greater than 10Mb (:pr:`5110`) `Marcos Moyano`_
+- Short-circuit root-ish check for many deps (:pr:`5113`) `Gabe Joseph`_
+
+
+2021.07.1
+---------
+
+Released on July 23, 2021
+
+- Remove experimental feature warning from actors docs (:pr:`5108`) `James Bourbeau`_
+- Keep dependents in worker dependency if TS is still known (:pr:`5034`) `Florian Jetter`_
+- Add ``Scheduler.set_restrictions`` (:pr:`5101`) `Matthew Rocklin`_
+- Make ``Actor`` futures awaitable and work with ``as_completed`` (:pr:`5092`) `Martin Durant`_
+- Simplify ``test_secede_balances`` (:pr:`5071`) `Florian Jetter`_
+- ``Computation`` class (:pr:`5001`) `Florian Jetter`_
+- Some light dashboard cleanup (:pr:`5102`) `Bryan Van de Ven`_
+- Don't package tests (:pr:`5054`) `James Bourbeau`_
+- Add pytest marker for GPU tests (:pr:`5023`) `Charles Blackmon-Luca`_
+- Actor: don't hold key references on workers (:pr:`4937`) `Gabe Joseph`_
+- Collapse nav to hamburger sooner (:pr:`5094`) `Julia Signell`_
+- Verify that actors survive pickling (:pr:`5086`) `Matthew Rocklin`_
+- Reenable UCX-Py tests that used to segfault (:pr:`5076`) `Peter Andreas Entschev`_
+- Better support ``ProcessPoolExecutors`` (:pr:`5063`) `Matthew Rocklin`_
+- Simplify ``test_worker_heartbeat_after_cancel`` (:pr:`5067`) `Florian Jetter`_
+- Avoid property validation in Bokeh (:pr:`5065`) `Matthew Rocklin`_
+- Reduce default websocket frame size and make configurable (:pr:`5070`) `Ian Rose`_
+- Disable pytest-timeout ``SIGALARM`` on MacOS (:pr:`5057`) `crusaderky`_
+- ``rebalance()`` resilience to computations (:pr:`4968`) `crusaderky`_
+- Improve CI stability (:pr:`5022`) `crusaderky`_
+- Ensure heartbeats after cancelation do not raise ``KeyError`` s (:pr:`5053`) `Florian Jetter`_
+- Add more useful exception message on TLS cert mismatch (:pr:`5040`) `Jacob Tomlinson`_
+- Add bokeh ``mode`` parameter to performance reports (:pr:`5025`) `James Bourbeau`_
+
+
 2021.07.0
 ---------
 
 Released on July 9, 2021
 
-- Fix Nbytes jitter - less expensive (#5043) `Naty Clementi`_
+- Fix Nbytes jitter - less expensive (:pr:`5043`) `Naty Clementi`_
 - Use native GH actions cancel feature (:pr:`5037`) `Florian Jetter`_
 - Don't require workers to report to scheduler if scheduler shuts down (:pr:`5032`) `Florian Jetter`_
 - Add pandas to the list of checked packages for ``client.get_versions()`` (:pr:`5029`) `Ian Rose`_
@@ -2492,3 +2604,4 @@ significantly without many new features.
 .. _`Gabe Joseph`: https://github.com/gjoseph92
 .. _`Freyam Mehta`: https://github.com/freyam
 .. _`gerrymanoim`: https://github.com/gerrymanoim
+.. _`Bryan Van de Ven`: https://github.com/bryevdv

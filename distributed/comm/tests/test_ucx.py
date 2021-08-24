@@ -2,14 +2,16 @@ import asyncio
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 ucp = pytest.importorskip("ucp")
 
-from distributed import Client, Scheduler, Worker, wait
+from distributed import Client, Scheduler, wait
 from distributed.comm import connect, listen, parse_address, ucx
 from distributed.comm.registry import backends, get_backend
 from distributed.deploy.local import LocalCluster
 from distributed.protocol import to_serialize
-from distributed.utils_test import gen_test, inc
+from distributed.utils_test import gen_cluster, gen_test, inc
 
 try:
     HOST = ucp.get_address()
@@ -234,8 +236,8 @@ async def test_large_cupy(n, cleanup):
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_ping_pong_numba(cleanup):
+@gen_test()
+async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
     import numba.cuda
@@ -256,9 +258,9 @@ async def test_ping_pong_numba(cleanup):
 @pytest.mark.asyncio
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
-        protocol="ucx:://",
+        protocol="ucx",
         host=HOST,
-        dashboard_address=None,
+        dashboard_address=":0",
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
@@ -274,20 +276,20 @@ async def test_ucx_localcluster(processes, cleanup):
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
-async def test_stress(cleanup):
+@gen_test(timeout=240)
+async def test_stress():
     da = pytest.importorskip("dask.array")
 
     chunksize = "10 MB"
 
     async with LocalCluster(
         protocol="ucx",
-        dashboard_address=None,
+        dashboard_address=":0",
         asynchronous=True,
         processes=False,
         host=HOST,
     ) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
+        async with Client(cluster, asynchronous=True):
             rs = da.random.RandomState()
             x = rs.random((10000, 10000), chunks=(-1, chunksize))
             x = x.persist()
@@ -300,31 +302,25 @@ async def test_stress(cleanup):
                 await wait(x)
 
 
-@pytest.mark.asyncio
-async def test_simple(cleanup):
-    async with Scheduler(protocol="ucx") as s:
-        async with Worker(s.address) as a:
-            async with Client(s.address, asynchronous=True) as c:
-                result = await c.submit(lambda x: x + 1, 10)
-                assert result == 11
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
+async def test_simple(c, s, a, b):
+    assert s.address.startswith("ucx://")
+    assert await c.submit(lambda x: x + 1, 10) == 11
 
 
-@pytest.mark.asyncio
-async def test_transpose(cleanup):
+@gen_cluster(client=True, scheduler_kwargs={"protocol": "ucx"})
+async def test_transpose(c, s, a, b):
     da = pytest.importorskip("dask.array")
 
-    async with Scheduler(protocol="ucx") as s:
-        async with Worker(s.address) as a, Worker(s.address) as b:
-            async with Client(s.address, asynchronous=True) as c:
-                x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
-                await x
-
-                y = (x + x.T).sum()
-                await y
+    assert s.address.startswith("ucx://")
+    x = da.ones((10000, 10000), chunks=(1000, 1000)).persist()
+    await x
+    y = (x + x.T).sum()
+    await y
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("port", [0, 1234])
 async def test_ucx_protocol(cleanup, port):
-    async with Scheduler(protocol="ucx", port=port) as s:
+    async with Scheduler(protocol="ucx", port=port, dashboard_address=":0") as s:
         assert s.address.startswith("ucx://")
