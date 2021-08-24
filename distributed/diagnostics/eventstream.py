@@ -29,7 +29,7 @@ def swap_buffer(scheduler, es):
 
 
 def teardown(scheduler, es):
-    scheduler.remove_plugin(es)
+    scheduler.remove_plugin(name=es.name)
 
 
 async def eventstream(address, interval):
