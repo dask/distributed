@@ -76,7 +76,7 @@ and so this only added a few milliseconds to our total processing time.
 Extended Example
 ~~~~~~~~~~~~~~~~
 
-Computing the Fibonacci numbers creates involves a recursive function. When the
+Computing the Fibonacci numbers involves a recursive function. When the
 function is run, it calls itself using values it computed. We will use this as
 an example throughout this documentation to illustrate different techniques of
 submitting tasks from tasks.

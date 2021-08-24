@@ -2,6 +2,8 @@ import pickle
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 from distributed.protocol import deserialize, serialize
 
 cupy = pytest.importorskip("cupy")

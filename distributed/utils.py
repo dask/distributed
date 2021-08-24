@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import html
 import importlib
 import inspect
 import json
@@ -42,6 +41,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import istask
 from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
 try:
     from tornado.ioloop import PollIOLoop
@@ -675,9 +675,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
@@ -1126,9 +1131,21 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-@functools.lru_cache(None)
-def iscoroutinefunction(f):
+def _iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+
+
+@functools.lru_cache(None)
+def _iscoroutinefunction_cached(f):
+    return _iscoroutinefunction(f)
+
+
+def iscoroutinefunction(f):
+    # Attempt to use lru_cache version and fall back to non-cached version if needed
+    try:
+        return _iscoroutinefunction_cached(f)
+    except TypeError:  # unhashable type
+        return _iscoroutinefunction(f)
 
 
 @contextmanager
@@ -1138,21 +1155,6 @@ def warn_on_duration(duration, msg):
     stop = time()
     if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
-
-
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
 
 
 def format_dashboard_link(host, port):
@@ -1230,43 +1232,15 @@ is_coroutine_function = iscoroutinefunction
 class Log(str):
     """A container for newline-delimited string of log entries"""
 
-    level_styles = {
-        "WARNING": "font-weight: bold; color: orange;",
-        "CRITICAL": "font-weight: bold; color: orangered;",
-        "ERROR": "font-weight: bold; color: crimson;",
-    }
-
     def _repr_html_(self):
-        logs_html = []
-        for message in self.split("\n"):
-            style = "font-family: monospace; margin: 0;"
-            for level in self.level_styles:
-                if level in message:
-                    style += self.level_styles[level]
-                    break
-
-            logs_html.append(
-                '<p style="{style}">{message}</p>'.format(
-                    style=html.escape(style),
-                    message=html.escape(message),
-                )
-            )
-
-        return "\n".join(logs_html)
+        return get_template("log.html.j2").render(log=self)
 
 
 class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        summaries = [
-            "<details>\n"
-            "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
-        ]
-        return "\n".join(summaries)
+        return get_template("logs.html.j2").render(logs=self)
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
@@ -1296,6 +1270,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1451,6 +1427,7 @@ _deprecations = {
     "funcname": "dask.utils.funcname",
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
 }
 
 

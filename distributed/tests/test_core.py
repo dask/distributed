@@ -648,7 +648,7 @@ async def test_connection_pool_close_while_connecting(monkeypatch):
     close_fut = asyncio.create_task(pool.close())
 
     with pytest.raises(
-        CommClosedError, match="ConnectionPool not running.  Status: Status.closed"
+        CommClosedError, match="ConnectionPool not running. Status: Status.closed"
     ):
         await asyncio.gather(*tasks)
 

@@ -15,6 +15,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
+  - jinja2
   - joblib  # overridden by git tip below
   - jupyter_client
   - lz4  # Only tested here

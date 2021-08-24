@@ -28,6 +28,8 @@ from distributed.utils_test import (
     slowinc,
 )
 
+pytestmark = pytest.mark.ci1
+
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module

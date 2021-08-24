@@ -11,6 +11,7 @@ class EventStream(SchedulerPlugin):
     """Maintain a copy of worker events"""
 
     def __init__(self, scheduler=None):
+        self.name = "EventStream"
         self.buffer = []
         if scheduler:
             scheduler.add_plugin(self)

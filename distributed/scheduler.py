@@ -1,6 +1,5 @@
 import asyncio
 import heapq
-import html
 import inspect
 import itertools
 import json
@@ -10,6 +9,7 @@ import operator
 import os
 import random
 import sys
+import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
@@ -38,6 +38,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 import dask
 from dask.highlevelgraph import HighLevelGraph
 from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from . import preloading, profile
 from . import versions as version_module
@@ -50,7 +51,7 @@ from .comm import (
 )
 from .comm.addressing import addresses_from_user_args
 from .core import CommClosedError, Status, clean_exception, rpc, send_recv
-from .diagnostics.plugin import SchedulerPlugin
+from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
 from .http import get_handlers
 from .lock import LockExtension
@@ -732,13 +733,12 @@ class WorkerState:
         )
 
     def _repr_html_(self):
-        text = (
-            f"<b>WorkerState: </b> {html.escape(self._address)} "
-            f'<font style="color: var(--jp-ui-font-color2, gray)">name: </font>{self.name} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">memory: </font>{len(self._has_what)} '
-            f'<font style="color: var(--jp-ui-font-color2, gray)">processing: </font>{len(self._processing)}'
+        return get_template("worker_state.html.j2").render(
+            address=self.address,
+            name=self.name,
+            has_what=self._has_what,
+            processing=self.processing,
         )
-        return text
 
     @ccall
     @exceptval(check=False)
@@ -763,6 +763,75 @@ class WorkerState:
     def ncores(self):
         warnings.warn("WorkerState.ncores has moved to WorkerState.nthreads")
         return self._nthreads
+
+
+@final
+@cclass
+class Computation:
+    """
+    Collection tracking a single compute or persist call
+
+    See also
+    --------
+    TaskPrefix
+    TaskGroup
+    TaskState
+    """
+
+    _start: double
+    _groups: set
+    _code: object
+    _id: object
+
+    def __init__(self):
+        self._start = time()
+        self._groups = set()
+        self._code = sortedcontainers.SortedSet()
+        self._id = uuid.uuid4()
+
+    @property
+    def code(self):
+        return self._code
+
+    @property
+    def start(self):
+        return self._start
+
+    @property
+    def stop(self):
+        if self.groups:
+            return max(tg.stop for tg in self.groups)
+        else:
+            return -1
+
+    @property
+    def states(self):
+        tg: TaskGroup
+        return merge_with(sum, [tg._states for tg in self._groups])
+
+    @property
+    def groups(self):
+        return self._groups
+
+    def __repr__(self):
+        return (
+            f"<Computation {self._id}: "
+            + "Tasks: "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
+
+    def _repr_html_(self):
+        return get_template("computation.html.j2").render(
+            id=self._id,
+            start=self.start,
+            stop=self.stop,
+            groups=self.groups,
+            states=self.states,
+            code=self.code,
+        )
 
 
 @final
@@ -1297,7 +1366,9 @@ class TaskState:
     _nbytes: Py_ssize_t
     _type: str
     _exception: object
+    _exception_text: str
     _traceback: object
+    _traceback_text: str
     _exception_blame: object
     _erred_on: set
     _suspicious: Py_ssize_t
@@ -1349,7 +1420,9 @@ class TaskState:
         # Which clients want us
         "_who_wants",
         "_exception",
+        "_exception_text",
         "_traceback",
+        "_traceback_text",
         "_erred_on",
         "_exception_blame",
         "_suspicious",
@@ -1368,6 +1441,7 @@ class TaskState:
         self._run_spec = run_spec
         self._state = None
         self._exception = self._traceback = self._exception_blame = None
+        self._exception_text = self._traceback_text = ""
         self._suspicious = self._retries = 0
         self._nbytes = -1
         self._priority = None
@@ -1486,8 +1560,16 @@ class TaskState:
         return self._exception
 
     @property
+    def exception_text(self):
+        return self._exception_text
+
+    @property
     def traceback(self):
         return self._traceback
+
+    @property
+    def traceback_text(self):
+        return self._traceback_text
 
     @property
     def exception_blame(self):
@@ -1570,16 +1652,11 @@ class TaskState:
         return f"<TaskState {self._key!r} {self._state}>"
 
     def _repr_html_(self):
-        color = (
-            "var(--jp-error-color0, red)"
-            if self._state == "erred"
-            else "var(--jp-ui-font-color0, black)"
+        return get_template("task_state.html.j2").render(
+            state=self._state,
+            nbytes=self._nbytes,
+            key=self._key,
         )
-        text = f'<b>TaskState: </b> <font style="color: {color}">{self._state} </font>'
-        if self._state == "memory":
-            text += f'<font style="color: var(--jp-ui-font-color2, gray)">nbytes: </font>{format_bytes(self._nbytes)} '
-        text += f'<font style="color: var(--jp-ui-font-color2, gray)">key: </font>{html.escape(self._key)}'
-        return text
 
     @ccall
     def validate(self):
@@ -1768,6 +1845,7 @@ class SchedulerState:
     _aliases: dict
     _bandwidth: double
     _clients: dict
+    _computations: object
     _extensions: dict
     _host_info: dict
     _idle: object
@@ -1838,6 +1916,9 @@ class SchedulerState:
             self._tasks = tasks
         else:
             self._tasks = dict()
+        self._computations = deque(
+            maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
+        )
         self._task_groups = dict()
         self._task_prefixes = dict()
         self._task_metadata = dict()
@@ -1853,6 +1934,7 @@ class SchedulerState:
             ("processing", "erred"): self.transition_processing_erred,
             ("no-worker", "released"): self.transition_no_worker_released,
             ("no-worker", "waiting"): self.transition_no_worker_waiting,
+            ("no-worker", "memory"): self.transition_no_worker_memory,
             ("released", "forgotten"): self.transition_released_forgotten,
             ("memory", "forgotten"): self.transition_memory_forgotten,
             ("erred", "released"): self.transition_erred_released,
@@ -1906,6 +1988,10 @@ class SchedulerState:
     @property
     def clients(self):
         return self._clients
+
+    @property
+    def computations(self):
+        return self._computations
 
     @property
     def extensions(self):
@@ -2011,7 +2097,9 @@ class SchedulerState:
 
     @ccall
     @exceptval(check=False)
-    def new_task(self, key: str, spec: object, state: str) -> TaskState:
+    def new_task(
+        self, key: str, spec: object, state: str, computation: Computation = None
+    ) -> TaskState:
         """Create a new task, and associated states"""
         ts: TaskState = TaskState(key, spec)
         ts._state = state
@@ -2028,6 +2116,8 @@ class SchedulerState:
         tg = self._task_groups.get(group_key)
         if tg is None:
             self._task_groups[group_key] = tg = TaskGroup(group_key)
+            if computation:
+                computation.groups.add(tg)
             tg._prefix = tp
             tp._groups.append(tg)
         tg.add(ts)
@@ -2091,7 +2181,7 @@ class SchedulerState:
                 self._transition_counter += 1
                 recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
-                assert not args and not kwargs
+                assert not args and not kwargs, (args, kwargs)
                 a_recs: dict
                 a_cmsgs: dict
                 a_wmsgs: dict
@@ -2155,7 +2245,7 @@ class SchedulerState:
                     ts._dependents = dependents
                     ts._dependencies = dependencies
                     parent._tasks[ts._key] = ts
-                for plugin in list(self.plugins):
+                for plugin in self.plugins.values():
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
@@ -2326,6 +2416,42 @@ class SchedulerState:
                 pdb.set_trace()
             raise
 
+    def transition_no_worker_memory(
+        self, key, nbytes=None, type=None, typename: str = None, worker=None
+    ):
+        try:
+            ws: WorkerState = self._workers_dv[worker]
+            ts: TaskState = self._tasks[key]
+            recommendations: dict = {}
+            client_msgs: dict = {}
+            worker_msgs: dict = {}
+
+            if self._validate:
+                assert not ts._processing_on
+                assert not ts._waiting_on
+                assert ts._state == "no-worker"
+
+            self._unrunnable.remove(ts)
+
+            if nbytes is not None:
+                ts.set_nbytes(nbytes)
+
+            self.check_idle_saturated(ws)
+
+            _add_to_memory(
+                self, ts, ws, recommendations, client_msgs, type=type, typename=typename
+            )
+            ts.state = "memory"
+
+            return recommendations, client_msgs, worker_msgs
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+
+                pdb.set_trace()
+            raise
+
     @ccall
     @exceptval(check=False)
     def decide_worker(self, ts: TaskState) -> WorkerState:
@@ -2361,6 +2487,7 @@ class SchedulerState:
         if (
             valid_workers is None
             and len(group) > self._total_nthreads * 2
+            and len(group._dependencies) < 5
             and sum(map(len, group._dependencies)) < 5
         ):
             ws: WorkerState = group._last_worker
@@ -2571,7 +2698,13 @@ class SchedulerState:
                     ws,
                     key,
                 )
-                return recommendations, client_msgs, worker_msgs
+                worker_msgs[ts._processing_on.address] = [
+                    {
+                        "op": "cancel-compute",
+                        "key": key,
+                        "reason": "Finished on different worker",
+                    }
+                ]
 
             has_compute_startstop: bool = False
             compute_start: double
@@ -2898,7 +3031,15 @@ class SchedulerState:
             raise
 
     def transition_processing_erred(
-        self, key, cause=None, exception=None, traceback=None, worker=None, **kwargs
+        self,
+        key: str,
+        cause: str = None,
+        exception=None,
+        traceback=None,
+        exception_text: str = None,
+        traceback_text: str = None,
+        worker: str = None,
+        **kwargs,
     ):
         ws: WorkerState
         try:
@@ -2924,8 +3065,10 @@ class SchedulerState:
             ts._erred_on.add(w or worker)
             if exception is not None:
                 ts._exception = exception
+                ts._exception_text = exception_text
             if traceback is not None:
                 ts._traceback = traceback
+                ts._traceback_text = traceback_text
             if cause is not None:
                 failing_ts = self._tasks[cause]
                 ts._exception_blame = failing_ts
@@ -3552,7 +3695,7 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.plugins = list(plugins)
+        self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -3566,6 +3709,7 @@ class Scheduler(SchedulerState, ServerNode):
         )
         self.event_counts = defaultdict(int)
         self.worker_plugins = dict()
+        self.nanny_plugins = dict()
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -3596,6 +3740,7 @@ class Scheduler(SchedulerState, ServerNode):
             "register-client": self.add_client,
             "scatter": self.scatter,
             "register-worker": self.add_worker,
+            "register_nanny": self.add_nanny,
             "unregister": self.remove_worker,
             "gather": self.gather,
             "cancel": self.stimulus_cancel,
@@ -3628,12 +3773,15 @@ class Scheduler(SchedulerState, ServerNode):
             "retire_workers": self.retire_workers,
             "get_metadata": self.get_metadata,
             "set_metadata": self.set_metadata,
+            "set_restrictions": self.set_restrictions,
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_scheduler_plugin": self.register_scheduler_plugin,
             "register_worker_plugin": self.register_worker_plugin,
             "unregister_worker_plugin": self.unregister_worker_plugin,
+            "register_nanny_plugin": self.register_nanny_plugin,
+            "unregister_nanny_plugin": self.unregister_nanny_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
             "subscribe_worker_status": self.subscribe_worker_status,
@@ -3696,13 +3844,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _repr_html_(self):
         parent: SchedulerState = cast(SchedulerState, self)
-        text = (
-            f"<b>Scheduler: </b>{html.escape(self.address)} "
-            f'<font color="gray">workers: </font>{len(parent._workers_dv)} '
-            f'<font color="gray">cores: </font>{parent._total_nthreads} '
-            f'<font color="gray">tasks: </font>{len(parent._tasks)}'
+        return get_template("scheduler.html.j2").render(
+            address=self.address,
+            workers=parent._workers_dv,
+            threads=parent._total_nthreads,
+            tasks=parent._tasks,
         )
-        return text
 
     def identity(self, comm=None):
         """Basic information about ourselves and our cluster"""
@@ -3802,7 +3949,7 @@ class Scheduler(SchedulerState, ServerNode):
         for preload in self.preloads:
             await preload.start()
 
-        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
+        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins.values()])
 
         self.start_periodic_callbacks()
 
@@ -3841,7 +3988,7 @@ class Scheduler(SchedulerState, ServerNode):
                 else:
                     break
 
-        await asyncio.gather(*[plugin.close() for plugin in self.plugins])
+        await asyncio.gather(*[plugin.close() for plugin in self.plugins.values()])
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -4092,7 +4239,7 @@ class Scheduler(SchedulerState, ServerNode):
             if ws._nthreads > len(ws._processing):
                 parent._idle[ws._address] = ws
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     result = plugin.add_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
@@ -4104,20 +4251,38 @@ class Scheduler(SchedulerState, ServerNode):
             client_msgs: dict = {}
             worker_msgs: dict = {}
             if nbytes:
+                assert isinstance(nbytes, dict)
+                already_released_keys = list()
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
-                    if ts is not None and ts._state in ("processing", "waiting"):
-                        t: tuple = parent._transition(
-                            key,
-                            "memory",
-                            worker=address,
-                            nbytes=nbytes[key],
-                            typename=types[key],
-                        )
-                        recommendations, client_msgs, worker_msgs = t
-                        parent._transitions(recommendations, client_msgs, worker_msgs)
-                        recommendations = {}
-
+                    if ts is not None and ts.state != "released":
+                        if ts.state == "memory":
+                            self.add_keys(worker=address, keys=[key])
+                        else:
+                            t: tuple = parent._transition(
+                                key,
+                                "memory",
+                                worker=address,
+                                nbytes=nbytes[key],
+                                typename=types[key],
+                            )
+                            recommendations, client_msgs, worker_msgs = t
+                            parent._transitions(
+                                recommendations, client_msgs, worker_msgs
+                            )
+                            recommendations = {}
+                    else:
+                        already_released_keys.append(key)
+                if already_released_keys:
+                    if address not in worker_msgs:
+                        worker_msgs[address] = list()
+                    worker_msgs[address].append(
+                        {
+                            "op": "free-keys",
+                            "keys": already_released_keys,
+                            "reason": f"reconnect-already-released-{time()}",
+                        }
+                    )
             for ts in list(parent._unrunnable):
                 valid: set = self.valid_workers(ts)
                 if valid is None or ws in valid:
@@ -4158,7 +4323,15 @@ class Scheduler(SchedulerState, ServerNode):
 
             if comm:
                 await comm.write(msg)
+
             await self.handle_worker(comm=comm, worker=address)
+
+    async def add_nanny(self, comm):
+        msg = {
+            "status": "OK",
+            "nanny-plugins": self.nanny_plugins,
+        }
+        return msg
 
     def update_graph_hlg(
         self,
@@ -4175,6 +4348,7 @@ class Scheduler(SchedulerState, ServerNode):
         user_priority=0,
         actors=None,
         fifo_timeout=0,
+        code=None,
     ):
         unpacked_graph = HighLevelGraph.__dask_distributed_unpack__(hlg)
         dsk = unpacked_graph["dsk"]
@@ -4213,6 +4387,7 @@ class Scheduler(SchedulerState, ServerNode):
             actors,
             fifo_timeout,
             annotations,
+            code=code,
         )
 
     def update_graph(
@@ -4231,6 +4406,7 @@ class Scheduler(SchedulerState, ServerNode):
         actors=None,
         fifo_timeout=0,
         annotations=None,
+        code=None,
     ):
         """
         Add new computations to the internal dask graph
@@ -4252,6 +4428,16 @@ class Scheduler(SchedulerState, ServerNode):
                 del tasks[k]
 
         dependencies = dependencies or {}
+
+        if parent._total_occupancy > 1e-9 and parent._computations:
+            # Still working on something. Assign new tasks to same computation
+            computation = cast(Computation, parent._computations[-1])
+        else:
+            computation = Computation()
+            parent._computations.append(computation)
+
+        if code and code not in computation._code:  # add new code blocks
+            computation._code.add(code)
 
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
@@ -4314,7 +4500,9 @@ class Scheduler(SchedulerState, ServerNode):
             # XXX Have a method get_task_state(self, k) ?
             ts = parent._tasks.get(k)
             if ts is None:
-                ts = parent.new_task(k, tasks.get(k), "released")
+                ts = parent.new_task(
+                    k, tasks.get(k), "released", computation=computation
+                )
             elif not ts._run_spec:
                 ts._run_spec = tasks.get(k)
 
@@ -4465,7 +4653,7 @@ class Scheduler(SchedulerState, ServerNode):
                     recommendations[ts._key] = "erred"
                     break
 
-        for plugin in self.plugins[:]:
+        for plugin in self.plugins.values():
             try:
                 plugin.update_graph(
                     self,
@@ -4503,32 +4691,33 @@ class Scheduler(SchedulerState, ServerNode):
         client_msgs: dict = {}
         worker_msgs: dict = {}
 
-        ts: TaskState = parent._tasks.get(key)
-        if ts is None:
-            return recommendations, client_msgs, worker_msgs
         ws: WorkerState = parent._workers_dv[worker]
-        ts._metadata.update(kwargs["metadata"])
-
-        if ts._state == "processing":
+        ts: TaskState = parent._tasks.get(key)
+        if ts is None or ts._state == "released":
+            logger.debug(
+                "Received already computed task, worker: %s, state: %s"
+                ", key: %s, who_has: %s",
+                worker,
+                ts._state if ts else "forgotten",
+                key,
+                ts._who_has if ts else {},
+            )
+            worker_msgs[worker] = [
+                {
+                    "op": "free-keys",
+                    "keys": [key],
+                    "reason": f"already-released-or-forgotten-{time()}",
+                }
+            ]
+        elif ts.state == "memory":
+            self.add_keys(worker=worker, keys=[key])
+        else:
+            ts._metadata.update(kwargs["metadata"])
             r: tuple = parent._transition(key, "memory", worker=worker, **kwargs)
             recommendations, client_msgs, worker_msgs = r
 
             if ts._state == "memory":
                 assert ws in ts._who_has
-        else:
-            logger.debug(
-                "Received already computed task, worker: %s, state: %s"
-                ", key: %s, who_has: %s",
-                worker,
-                ts._state,
-                key,
-                ts._who_has,
-            )
-            if ws not in ts._who_has:
-                worker_msgs[worker] = [
-                    {"op": "free-keys", "keys": [key], "reason": "Stimulus Finished"}
-                ]
-
         return recommendations, client_msgs, worker_msgs
 
     def stimulus_task_erred(
@@ -4727,7 +4916,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.transitions(recommendations)
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     result = plugin.remove_worker(scheduler=self, worker=address)
                     if inspect.isawaitable(result):
@@ -4852,7 +5041,7 @@ class Scheduler(SchedulerState, ServerNode):
         assert ts not in parent._unrunnable
         for dts in ts._dependencies:
             # We are waiting on a dependency iff it's not stored
-            assert (not not dts._who_has) != (dts in ts._waiting_on)
+            assert bool(dts._who_has) != (dts in ts._waiting_on)
             assert ts in dts._waiters  # XXX even if dts._who_has?
 
     def validate_processing(self, key):
@@ -5014,7 +5203,9 @@ class Scheduler(SchedulerState, ServerNode):
                 # logger.debug("Scheduler sends message to client %s", msg)
             except CommClosedError:
                 if self.status == Status.running:
-                    logger.critical("Tried writing to closed comm: %s", msg)
+                    logger.critical(
+                        "Closed comm %r while trying to write %s", c, msg, exc_info=True
+                    )
 
     async def add_client(self, comm, client=None, versions=None):
         """Add client to network
@@ -5028,7 +5219,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log_event(["all", client], {"action": "add-client", "client": client})
         parent._clients[client] = ClientState(client, versions=versions)
 
-        for plugin in self.plugins[:]:
+        for plugin in self.plugins.values():
             try:
                 plugin.add_client(scheduler=self, client=client)
             except Exception as e:
@@ -5083,7 +5274,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
             del parent._clients[client]
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     plugin.remove_client(scheduler=self, client=client)
                 except Exception as e:
@@ -5206,6 +5397,9 @@ class Scheduler(SchedulerState, ServerNode):
         duration accounting as if the task has stopped.
         """
         parent: SchedulerState = cast(SchedulerState, self)
+        if key not in parent._tasks:
+            logger.debug("Skipping long_running since key %s was already released", key)
+            return
         ts: TaskState = parent._tasks[key]
         steal = parent._extensions.get("stealing")
         if steal is not None:
@@ -5254,25 +5448,83 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_comm.abort()
                 await self.remove_worker(address=worker)
 
-    def add_plugin(self, plugin=None, idempotent=False, **kwargs):
-        """
-        Add external plugin to scheduler
+    def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
+        """Add external plugin to scheduler.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
+
+        Paramters
+        ---------
+        plugin : SchedulerPlugin
+            SchedulerPlugin class to add (can also be an instance)
+        idempotent : bool
+            If true, the plugin is assumed to already exist and no
+            action is taken.
+        name : str
+            A name for the plugin, if None, the name attribute is
+            checked on the Plugin instance and generated if not
+            discovered.
+        **kwargs
+            Additional arguments passed to the `plugin` class if it is
+            not already an instance.
+
         """
         if isinstance(plugin, type):
             plugin = plugin(self, **kwargs)
 
-        if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
+        if name is None:
+            name = _get_plugin_name(plugin)
+
+        if name in self.plugins:
+            warnings.warn(
+                f"Scheduler already contains a plugin with name {name}; "
+                "overwriting.",
+                category=UserWarning,
+            )
+
+        if idempotent and name in self.plugins:
             return
 
-        self.plugins.append(plugin)
+        self.plugins[name] = plugin
 
-    def remove_plugin(self, plugin):
-        """Remove external plugin from scheduler"""
-        self.plugins.remove(plugin)
+    def remove_plugin(self, plugin=None, name=None):
+        """Remove external plugin from scheduler
 
-    async def register_scheduler_plugin(self, comm=None, plugin=None):
+        Paramters
+        ---------
+        plugin : SchedulerPlugin
+            Deprecated; use `name` argument instead. Instance of a
+            SchedulerPlugin class to remove;
+        name : str
+            Name of the plugin to remove
+
+        """
+        if plugin is not None:
+            warnings.warn(
+                "Removing scheduler plugins by value is deprecated and will be disabled "
+                "in a future release. Please remove scheduler plugins by name instead.",
+                category=FutureWarning,
+            )
+        if name is not None:
+            self.plugins.pop(name)
+        elif hasattr(plugin, "name"):
+            self.plugins.pop(plugin.name)
+        else:
+            # TODO: Remove this block of code once removing plugins by value is disabled
+            if plugin in self.plugins.values():
+                if sum(plugin is p for p in self.plugins.values()) > 1:
+                    raise ValueError(
+                        f"Multiple instances of {plugin} were found in the current scheduler "
+                        "plugins, we cannot remove this plugin."
+                    )
+                else:
+                    warnings.warn(
+                        "Removing scheduler plugins by value is deprecated and will be disabled "
+                        "in a future release. Please remove scheduler plugins by name instead.",
+                        category=FutureWarning,
+                    )
+
+    async def register_scheduler_plugin(self, comm=None, plugin=None, name=None):
         """Register a plugin on the scheduler."""
         if not dask.config.get("distributed.scheduler.pickle"):
             raise ValueError(
@@ -5288,7 +5540,7 @@ class Scheduler(SchedulerState, ServerNode):
             if inspect.isawaitable(result):
                 result = await result
 
-        self.add_plugin(plugin=plugin)
+        self.add_plugin(plugin=plugin, name=name)
 
     def worker_send(self, worker, msg):
         """Send message to worker
@@ -5312,7 +5564,9 @@ class Scheduler(SchedulerState, ServerNode):
             c.send(msg)
         except CommClosedError:
             if self.status == Status.running:
-                logger.critical("Tried writing to closed comm: %s", msg)
+                logger.critical(
+                    "Closed comm %r while trying to write %s", c, msg, exc_info=True
+                )
 
     def send_all(self, client_msgs: dict, worker_msgs: dict):
         """Send messages to client and workers"""
@@ -5328,7 +5582,12 @@ class Scheduler(SchedulerState, ServerNode):
                 c.send(*msgs)
             except CommClosedError:
                 if self.status == Status.running:
-                    logger.critical("Tried writing to closed comm: %s", msgs)
+                    logger.critical(
+                        "Closed comm %r while trying to write %s",
+                        c,
+                        msgs,
+                        exc_info=True,
+                    )
 
         for worker, msgs in worker_msgs.items():
             try:
@@ -5424,12 +5683,11 @@ class Scheduler(SchedulerState, ServerNode):
                 # Remove suspicious workers from the scheduler but allow them to
                 # reconnect.
                 await asyncio.gather(
-                    *[
+                    *(
                         self.remove_worker(address=worker, close=False)
                         for worker in missing_workers
-                    ]
+                    )
                 )
-
                 recommendations: dict
                 client_msgs: dict = {}
                 worker_msgs: dict = {}
@@ -5497,7 +5755,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             self.clear_task_state()
 
-            for plugin in self.plugins[:]:
+            for plugin in self.plugins.values():
                 try:
                     plugin.restart(self)
                 except Exception as e:
@@ -6736,6 +6994,10 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 raise
 
+    def set_restrictions(self, comm=None, worker=None):
+        for key, restrictions in worker.items():
+            self.tasks[key]._worker_restrictions = set(restrictions)
+
     def get_task_status(self, comm=None, keys=None):
         parent: SchedulerState = cast(SchedulerState, self)
         return {
@@ -6746,9 +7008,12 @@ class Scheduler(SchedulerState, ServerNode):
     def get_task_stream(self, comm=None, start=None, stop=None, count=None):
         from distributed.diagnostics.task_stream import TaskStreamPlugin
 
-        self.add_plugin(TaskStreamPlugin, idempotent=True)
-        tsp = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
-        return tsp.collect(start=start, stop=stop, count=count)
+        if TaskStreamPlugin.name not in self.plugins:
+            self.add_plugin(TaskStreamPlugin)
+
+        plugin = self.plugins[TaskStreamPlugin.name]
+
+        return plugin.collect(start=start, stop=stop, count=count)
 
     def start_task_metadata(self, comm=None, name=None):
         plugin = CollectTaskMetaDataPlugin(scheduler=self, name=name)
@@ -6758,7 +7023,7 @@ class Scheduler(SchedulerState, ServerNode):
     def stop_task_metadata(self, comm=None, name=None):
         plugins = [
             p
-            for p in self.plugins
+            for p in self.plugins.values()
             if isinstance(p, CollectTaskMetaDataPlugin) and p.name == name
         ]
         if len(plugins) != 1:
@@ -6788,6 +7053,28 @@ class Scheduler(SchedulerState, ServerNode):
             raise ValueError(f"The worker plugin {name} does not exists")
 
         responses = await self.broadcast(msg=dict(op="plugin-remove", name=name))
+        return responses
+
+    async def register_nanny_plugin(self, comm, plugin, name=None):
+        """Registers a setup function, and call it on every worker"""
+        self.nanny_plugins[name] = plugin
+
+        responses = await self.broadcast(
+            msg=dict(op="plugin_add", plugin=plugin, name=name),
+            nanny=True,
+        )
+        return responses
+
+    async def unregister_nanny_plugin(self, comm, name):
+        """Unregisters a worker plugin"""
+        try:
+            self.nanny_plugins.pop(name)
+        except KeyError:
+            raise ValueError(f"The nanny plugin {name} does not exists")
+
+        responses = await self.broadcast(
+            msg=dict(op="plugin_remove", name=name), nanny=True
+        )
         return responses
 
     def transition(self, key, finish: str, *args, **kwargs):
@@ -7137,7 +7424,19 @@ class Scheduler(SchedulerState, ServerNode):
             dask_version=dask.__version__,
             distributed_version=distributed.__version__,
         )
-        html = Div(text=html)
+        html = Div(
+            text=html,
+            style={
+                "width": "100%",
+                "height": "100%",
+                "max-width": "1920px",
+                "max-height": "1080px",
+                "padding": "12px",
+                "border": "1px solid lightgray",
+                "box-shadow": "inset 1px 0 8px 0 lightgray",
+                "overflow": "auto",
+            },
+        )
 
         html = Panel(child=html, title="Summary")
         compute = Panel(child=compute, title="Worker Profile (compute)")

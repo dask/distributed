@@ -12,7 +12,6 @@ import pytest
 
 import dask
 
-from distributed.compatibility import MACOS
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
@@ -190,7 +189,8 @@ def test_locking_disabled(tmpdir):
         lock_file.assert_not_called()
 
 
-def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
+def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt, barrier):
+    barrier.wait()
     ws = WorkSpace(base_dir)
     n_purged = 0
     with captured_logger("distributed.diskutils", "ERROR") as sio:
@@ -213,9 +213,10 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
     purged_q.put(n_purged)
 
 
-def _test_workspace_concurrency(tmpdir, timeout, max_procs):
-    """
-    WorkSpace concurrency test.  We merely check that no exception or
+@pytest.mark.slow
+@pytest.mark.parametrize("timeout,max_procs", [(5.0, 6), (10.0, 16)])
+def test_workspace_concurrency(tmpdir, timeout, max_procs):
+    """WorkSpace concurrency test. We merely check that no exception or
     deadlock happens.
     """
     base_dir = str(tmpdir)
@@ -228,20 +229,21 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
     ws._purge_leftovers = lambda: None
 
     # Run a bunch of child processes that will try to purge concurrently
-    NPROCS = 2 if sys.platform == "win32" else max_procs
+    barrier = mp_context.Barrier(parties=max_procs + 1)
     processes = [
         mp_context.Process(
-            target=_workspace_concurrency, args=(base_dir, purged_q, err_q, stop_evt)
+            target=_workspace_concurrency,
+            args=(base_dir, purged_q, err_q, stop_evt, barrier),
         )
-        for i in range(NPROCS)
+        for _ in range(max_procs)
     ]
     for p in processes:
         p.start()
-
+    barrier.wait()
     n_created = 0
     n_purged = 0
+    t1 = time()
     try:
-        t1 = time()
         while time() - t1 < timeout:
             # Add a bunch of locks, and simulate forgetting them.
             # The concurrent processes should try to purge them.
@@ -249,7 +251,7 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
                 d = ws.new_work_dir(prefix="workspace-concurrency-")
                 d._finalizer.detach()
                 n_created += 1
-            sleep(1e-2)
+            sleep(0.01)
     finally:
         stop_evt.set()
         for p in processes:
@@ -268,19 +270,6 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
             n_purged += purged_q.get_nowait()
     except queue.Empty:
         pass
+    assert n_created >= 100
     # We attempted to purge most directories at some point
     assert n_purged >= 0.5 * n_created > 0
-    return n_created, n_purged
-
-
-@pytest.mark.slow
-@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
-def test_workspace_concurrency(tmpdir):
-    _test_workspace_concurrency(tmpdir, 5.0, 6)
-
-
-@pytest.mark.slow
-@pytest.mark.xfail(condition=MACOS, reason="extremely flaky")
-def test_workspace_concurrency_intense(tmpdir):
-    n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)
-    assert n_created >= 100
