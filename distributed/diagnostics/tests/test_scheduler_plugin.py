@@ -116,8 +116,8 @@ async def test_async_add_remove_worker(s):
     plugin = UnnamedPlugin()
     s.add_plugin(plugin)
     s.add_plugin(plugin, name="another")
-    with pytest.raises(ValueError) as excinfo:
-        with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
+    with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
+        with pytest.raises(ValueError) as excinfo:
             s.remove_plugin(plugin)
 
     msg = str(excinfo.value)
