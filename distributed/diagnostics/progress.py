@@ -240,6 +240,8 @@ def format_time(t):
 class AllProgress(SchedulerPlugin):
     """Keep track of all keys, grouped by key_split"""
 
+    name = "all-progress"
+
     def __init__(self, scheduler):
         self.all = defaultdict(set)
         self.nbytes = defaultdict(lambda: 0)
