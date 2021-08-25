@@ -8,6 +8,7 @@ except ImportError:
     ssl = None
 
 import dask
+from dask.widgets import get_template
 
 __all__ = ("Security",)
 
@@ -180,30 +181,7 @@ class Security:
         )
 
     def _repr_html_(self):
-        attr = self._attr_to_dict()
-
-        rows = ""
-
-        for key, val in attr.items():
-            rows += f"""
-            <tr>
-                <th style="text-align: left; width: 150px;">{key}</th>
-                <td style="text-align: left;">{val}</td>
-            </tr>
-            """
-
-        html = f"""
-        <div style="margin-left: auto;">
-            <h3 style="margin-bottom: 0px;"><b>Security</b></h3>
-            <p>
-                <table style="width: 100%;">
-                {rows}
-                </table>
-            </p>
-        </div>
-        """
-
-        return html
+        return get_template("security.html.j2").render(security=self._attr_to_dict())
 
     def get_tls_config_for_role(self, role):
         """
