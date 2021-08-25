@@ -3571,6 +3571,7 @@ class Scheduler(SchedulerState, ServerNode):
         else:
             self._zeroconf = None
         self._zeroconf_services = []
+        self._zeroconf_registration_tasks = []
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -3967,7 +3968,9 @@ class Scheduler(SchedulerState, ServerNode):
                     server=f"sched-{short_id}.dask.local.",
                 )
                 self._zeroconf_services.append(info)
-                await self._zeroconf.async_register_service(info)
+                self._zeroconf_registration_tasks.append(
+                    await self._zeroconf.async_register_service(info)
+                )
                 logger.info("  Advertising as: %25s", info.server)
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
@@ -4038,6 +4041,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         if self._zeroconf:
             await self._zeroconf.async_close()
+            for task in self._zeroconf_registration_tasks:
+                with suppress(asyncio.CancelledError):
+                    task.cancel()
 
         for ext in parent._extensions.values():
             with suppress(AttributeError):
