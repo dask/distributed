@@ -3568,7 +3568,9 @@ class Scheduler(SchedulerState, ServerNode):
         self.bandwidth_types = defaultdict(float)
         if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
             self._zeroconf = AsyncZeroconf(ip_version=zeroconf.IPVersion.V4Only)
-            self._zeroconf_services = []
+        else:
+            self._zeroconf = None
+        self._zeroconf_services = []
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -4034,9 +4036,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.stop_services()
 
-        if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
-            for info in self._zeroconf_services:
-                await self._zeroconf.async_unregister_service(info)
+        if self._zeroconf:
             await self._zeroconf.async_close()
 
         for ext in parent._extensions.values():
