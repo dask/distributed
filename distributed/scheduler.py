@@ -3943,7 +3943,11 @@ class Scheduler(SchedulerState, ServerNode):
 
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
-            if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
+            if (
+                zeroconf
+                and dask.config.get("distributed.scheduler.zeroconf")
+                and not self.address.startswith("inproc://")
+            ):
                 # Advertise service via mdns service discovery
                 try:
                     host, port = get_address_host_port(listener.contact_address)
