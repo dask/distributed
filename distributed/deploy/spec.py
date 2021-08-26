@@ -12,6 +12,7 @@ from tornado import gen
 
 import dask
 from dask.utils import parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
@@ -100,50 +101,7 @@ class ProcessInterface:
         return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
 
     def _repr_html_(self):
-        if self.status == Status.created:
-            status = "Created"
-            bg_color = "#caf0f8"
-            border_color = "#48cae4"
-        elif self.status == Status.running:
-            status = "Running"
-            bg_color = "#c7f9cc"
-            border_color = "#78c6a3"
-        elif self.status == Status.closed:
-            status = "Closed"
-            bg_color = "#ffbfad"
-            border_color = "#ff6132"
-
-        html = f"""
-          <div>
-            <div
-                style="
-                width: 24px;
-                height: 24px;
-                background-color: {bg_color};
-                border: 3px solid {border_color};
-                border-radius: 5px;
-                position: absolute;"
-            ></div>
-            <div style="margin-left: 48px">
-                <h3 style="margin-bottom: 0px">{dask.utils.typename(type(self))}</h3>
-                <p style="color: #9d9d9d; margin-bottom: 0px">Status: {status}</p>
-            </div>
-            <p>
-            <table style="width: 100%">
-                <tr>
-                <th style="text-align: left; width: 150px">Address</th>
-                <td style="text-align: left">{self.address}</td>
-                </tr>
-                <tr>
-                <th style="text-align: left; width: 150px">External Address</th>
-                <td style="text-align: left">{self.external_address}</td>
-                </tr>
-            </table> </p>
-            </div>
-          </div>
-        """
-
-        return html
+        return get_template("process_interface.html.j2").render(process_interface=self)
 
     async def __aenter__(self):
         await self
