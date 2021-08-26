@@ -67,7 +67,7 @@ async def test_add_remove_worker(s):
     ]
 
     events[:] = []
-    s.remove_plugin(plugin)
+    s.remove_plugin(name=plugin.name)
     a = await Worker(s.address)
     await a.close()
     assert events == []
@@ -104,7 +104,7 @@ async def test_async_add_remove_worker(s):
     }
 
     events[:] = []
-    s.remove_plugin(plugin)
+    s.remove_plugin(name=plugin.name)
     async with Worker(s.address):
         pass
     assert events == []
@@ -116,8 +116,9 @@ async def test_async_add_remove_worker(s):
     plugin = UnnamedPlugin()
     s.add_plugin(plugin)
     s.add_plugin(plugin, name="another")
-    with pytest.raises(ValueError) as excinfo:
-        s.remove_plugin(plugin)
+    with pytest.warns(FutureWarning, match="Removing scheduler plugins by value"):
+        with pytest.raises(ValueError) as excinfo:
+            s.remove_plugin(plugin)
 
     msg = str(excinfo.value)
     assert "Multiple instances of" in msg

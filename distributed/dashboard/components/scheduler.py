@@ -2113,7 +2113,7 @@ class TaskGraph(DashboardComponent):
             self.edge_source.patch({"visible": updates})
 
     def __del__(self):
-        self.scheduler.remove_plugin(self.layout)
+        self.scheduler.remove_plugin(name=self.layout.name)
 
 
 class TaskGroupGraph(DashboardComponent):
