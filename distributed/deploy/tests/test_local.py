@@ -1080,13 +1080,23 @@ async def test_cluster_info_sync():
     async with LocalCluster(
         processes=False, asynchronous=True, scheduler_sync_interval="1ms"
     ) as cluster:
-        assert cluster.cluster_info["name"] == cluster.name
-        await asyncio.sleep(0.01)
+        assert cluster._cluster_info["name"] == cluster.name
+
+        while "name" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
         info = await cluster.scheduler_comm.get_metadata(keys=["cluster-manager-info"])
         assert info["name"] == cluster.name
         info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
         assert info["name"] == cluster.name
 
-        cluster.cluster_info["foo"] = "bar"
-        await asyncio.sleep(0.01)
-        assert "foo" in cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        cluster._cluster_info["foo"] = "bar"
+        while "foo" not in cluster.scheduler.get_metadata(
+            keys=["cluster-manager-info"]
+        ):
+            await asyncio.sleep(0.01)
+
+        info = cluster.scheduler.get_metadata(keys=["cluster-manager-info"])
+        assert info["foo"] == "bar"

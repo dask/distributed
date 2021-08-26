@@ -10,20 +10,12 @@ from inspect import isawaitable
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import _deprecated, format_bytes, parse_timedelta
+from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
 from ..core import Status
 from ..objects import SchedulerInfo
-from ..utils import (
-    Log,
-    Logs,
-    format_dashboard_link,
-    log_errors,
-    sync,
-    thread_state,
-    typename,
-)
+from ..utils import Log, Logs, format_dashboard_link, log_errors, sync, thread_state
 from .adaptive import Adaptive
 
 logger = logging.getLogger(__name__)
@@ -53,7 +45,6 @@ class Cluster:
     """
 
     _supports_scaling = True
-    name = None
 
     def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
         self.scheduler_info = {"workers": {}}
@@ -72,16 +63,16 @@ class Cluster:
         if name is None:
             name = str(uuid.uuid4())[:8]
 
-        self.cluster_info = {"name": name, "type": typename(type(self))}
+        self._cluster_info = {"name": name, "type": typename(type(self))}
         self.status = Status.created
 
     @property
     def name(self):
-        return self.cluster_info["name"]
+        return self._cluster_info["name"]
 
     @name.setter
     def name(self, name):
-        self.cluster_info["name"] = name
+        self._cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
@@ -95,7 +86,7 @@ class Cluster:
         info = await self.scheduler_comm.get_metadata(
             keys=["cluster-manager-info"], default={}
         )
-        self.cluster_info.update(info)
+        self._cluster_info.update(info)
 
         self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
             self._sync_cluster_info, self._sync_interval * 1000
@@ -107,7 +98,7 @@ class Cluster:
     async def _sync_cluster_info(self):
         await self.scheduler_comm.set_metadata(
             keys=["cluster-manager-info"],
-            value=copy.copy(self.cluster_info),
+            value=copy.copy(self._cluster_info),
         )
 
     async def _close(self):
