@@ -6,6 +6,7 @@ import sys
 import uuid
 import zipfile
 
+import dask.config
 from dask.utils import funcname, tmpfile
 
 logger = logging.getLogger(__name__)
@@ -342,6 +343,8 @@ class Environ(NannyPlugin):
 
     async def setup(self, nanny):
         nanny.env.update(self.environ)
+        config = dask.config.collect_env(self.environ)
+        dask.config.update(nanny.config, config)
 
 
 class UploadDirectory(NannyPlugin):
