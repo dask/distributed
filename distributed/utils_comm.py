@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 from functools import partial
 from itertools import cycle
 
