@@ -2554,7 +2554,7 @@ class Worker(ServerNode):
             if not deps:
                 return
 
-            for dep in deps:
+            for dep in list(deps):
                 if dep.suspicious_count > 5:
                     deps.remove(dep)
                     self.bad_dep(dep)
@@ -2574,7 +2574,7 @@ class Worker(ServerNode):
             who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             still_missing = set()
-            for dep in deps:
+            for dep in list(deps):
                 dep.suspicious_count += 1
 
                 if not who_has.get(dep.key):
