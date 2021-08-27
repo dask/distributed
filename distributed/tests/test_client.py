@@ -5159,16 +5159,15 @@ async def test_secede_balances(c, s, a, b):
         total = client.submit(sum, futures).result()
         return total
 
-    futures = c.map(f, range(10), workers=[a.address])
+    futures = c.map(f, range(100))
 
     results = await c.gather(futures)
-    # We dispatch 10 tasks and every task generates 11 more tasks
-    # 10 * 11 + 10
-    assert a.executed_count + b.executed_count == 120
-    assert a.executed_count >= 10
-    assert b.executed_count > 0
 
-    assert results == [sum(map(inc, range(10)))] * 10
+    assert a.executed_count + b.executed_count == 1100
+    assert a.executed_count > 200
+    assert b.executed_count > 200
+
+    assert results == [sum(map(inc, range(10)))] * 100
 
 
 @gen_cluster(client=True)
