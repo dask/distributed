@@ -58,6 +58,7 @@ from distributed.dashboard.components.shared import (
 )
 from distributed.dashboard.utils import PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
+from distributed.diagnostics.progress import GroupTiming
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.diagnostics.task_stream import color_of as ts_color_of

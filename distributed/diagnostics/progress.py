@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from timeit import default_timer
+from typing import Dict, List, Tuple
 
 from tlz import groupby, valmap
 
@@ -291,3 +293,124 @@ class AllProgress(SchedulerPlugin):
     def restart(self, scheduler):
         self.all.clear()
         self.state.clear()
+
+
+class GroupProgress(SchedulerPlugin):
+    """Keep track of all keys, grouped by key_split"""
+
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.keys = dict()
+        self.groups = dict()
+        self.nbytes = dict()
+        self.durations = dict()
+        self.dependencies = defaultdict(set)
+        self.dependents = defaultdict(set)
+
+        for key, ts in self.scheduler.tasks.items():
+            k = key_split_group(key)
+            if k not in self.groups:
+                self.create(key, k)
+            self.keys[k].add(key)
+            self.groups[k][ts.state] += 1
+            if ts.state == "memory" and ts.nbytes >= 0:
+                self.nbytes[k] += ts.nbytes
+
+        scheduler.add_plugin(self)
+
+    def create(self, key, k):
+        with log_errors():
+            ts = self.scheduler.tasks[key]
+            g = {"memory": 0, "erred": 0, "waiting": 0, "released": 0, "processing": 0}
+            self.keys[k] = set()
+            self.groups[k] = g
+            self.nbytes[k] = 0
+            self.durations[k] = 0
+            self.dependents[k] = {key_split_group(dts.key) for dts in ts.dependents}
+            for dts in ts.dependencies:
+                d = key_split_group(dts.key)
+                self.dependents[d].add(k)
+                self.dependencies[k].add(d)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        with log_errors():
+            ts = self.scheduler.tasks[key]
+            k = key_split_group(key)
+            if k not in self.groups:
+                self.create(key, k)
+
+            g = self.groups[k]
+
+            if key not in self.keys[k]:
+                self.keys[k].add(key)
+            else:
+                g[start] -= 1
+
+            if finish != "forgotten":
+                g[finish] += 1
+            else:
+                self.keys[k].remove(key)
+                if not self.keys[k]:
+                    del self.groups[k]
+                    del self.nbytes[k]
+                    for dep in self.dependencies.pop(k):
+                        self.dependents[key_split_group(dep)].remove(k)
+
+            if start == "memory" and ts.nbytes >= 0:
+                self.nbytes[k] -= ts.nbytes
+            if finish == "memory" and ts.nbytes >= 0:
+                self.nbytes[k] += ts.nbytes
+
+    def restart(self, scheduler):
+        self.keys.clear()
+        self.groups.clear()
+        self.nbytes.clear()
+        self.durations.clear()
+        self.dependencies.clear()
+        self.dependents.clear()
+
+
+class GroupTiming(SchedulerPlugin):
+    """Keep track of high-level timing information for task group progress"""
+
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.states: Dict[str, List[Tuple[float, Dict[str, int]]]] = dict()
+        self.nbytes: Dict[str, List[Tuple[float, int]]] = dict()
+
+        t = time.time()
+        for name, group in self.scheduler.task_groups.items():
+            if name not in self.states:
+                self.create(name)
+                self.insert(t, name, group)
+
+        scheduler.add_plugin(self)
+
+    def create(self, name):
+        with log_errors():
+            self.states[name] = []
+            self.nbytes[name] = []
+
+    def insert(self, timestamp, name, group):
+        with log_errors():
+            state = {
+                "memory": group.states["memory"],
+                "erred": group.states["erred"],
+                "waiting": group.states["waiting"],
+                "released": group.states["released"],
+                "processing": group.states["processing"],
+            }
+            self.states[name].append((timestamp, state))
+            self.nbytes[name].append((timestamp, group.nbytes_total))
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        with log_errors():
+            t = time.time()
+            for name, group in self.scheduler.task_groups.items():
+                if name not in self.states:
+                    self.create(name)
+                self.insert(t, name, group)
+
+    def restart(self, scheduler):
+        self.states.clear()
+        self.nbytes.clear()
