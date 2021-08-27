@@ -1,10 +1,18 @@
 from unittest import mock
+from collections import OrderedDict
 
 import pytest
 
 from distributed.comm import Comm
 from distributed.core import ConnectionPool
-from distributed.utils_comm import gather_from_workers, pack_data, retry, subs_multiple
+from distributed.utils_comm import (
+    gather_from_workers,
+    pack_data,
+    retry,
+    subs_multiple,
+    unpack_remotedata,
+    WrappedKey,
+)
 from distributed.utils_test import gen_cluster
 
 
@@ -143,3 +151,13 @@ def test_retry_does_retry_and_sleep(loop):
 
     assert n_calls == 6
     assert sleep_calls == [0.0, 1.0, 3.0, 6.0, 6.0]
+
+
+@pytest.mark.parametrize("dict_type", [dict, OrderedDict])
+def test_unpack_remotedata_unpacks_dicts(dict_type):
+    rd1 = WrappedKey("key-1")
+    rd2 = WrappedKey("key-2")
+    assert unpack_remotedata(dict_type([(1, rd1), (2, rd2)])) == (
+        dict_type([(1, "key-1"), (2, "key-2")]),
+        {rd1, rd2},
+    )
