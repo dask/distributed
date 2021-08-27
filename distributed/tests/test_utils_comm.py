@@ -1,17 +1,17 @@
-from unittest import mock
 from collections import OrderedDict
+from unittest import mock
 
 import pytest
 
 from distributed.comm import Comm
 from distributed.core import ConnectionPool
 from distributed.utils_comm import (
+    WrappedKey,
     gather_from_workers,
     pack_data,
     retry,
     subs_multiple,
     unpack_remotedata,
-    WrappedKey,
 )
 from distributed.utils_test import gen_cluster
 

@@ -233,7 +233,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
     elif typ in (dict, OrderedDict):
         if not o:
             return o
-        return typ([[k, unpack_remotedata(v, byte_keys, myset)] for k, v in o.items()])
+        return typ((k, unpack_remotedata(v, byte_keys, myset)) for k, v in o.items())
     elif issubclass(typ, WrappedKey):  # TODO use type is Future
         k = o.key
         if byte_keys:
