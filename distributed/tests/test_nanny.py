@@ -598,7 +598,7 @@ async def test_failure_during_worker_initialization(s):
     assert "Restarting worker" not in logs.getvalue()
 
 
-@gen_cluster(client=True, Worker=Nanny, timeout=10000000)
+@gen_cluster(client=True, Worker=Nanny)
 async def test_environ_plugin(c, s, a, b):
     from dask.distributed import Environ
 
