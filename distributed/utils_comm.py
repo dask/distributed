@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from functools import partial
 from itertools import cycle
 
@@ -230,7 +230,7 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
             return o
         outs = [unpack_remotedata(item, byte_keys, myset) for item in o]
         return typ(outs)
-    elif typ is dict:
+    elif typ in (dict, OrderedDict):
         if o:
             return {k: unpack_remotedata(v, byte_keys, myset) for k, v in o.items()}
         else:
