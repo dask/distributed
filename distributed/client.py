@@ -1561,7 +1561,7 @@ class Client:
         )
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
-        print("\n\n")
+
         return futures[skey]
 
     def map(
@@ -2546,7 +2546,6 @@ class Client:
             # Make sure `dsk` is a high level graph
             if not isinstance(dsk, HighLevelGraph):
                 dsk = HighLevelGraph.from_collections(id(dsk), dsk, dependencies=())
-            print(dsk.keys())
 
             annotations = {}
             if user_priority:
