@@ -12,7 +12,7 @@ import traceback
 import warnings
 import weakref
 import zipfile
-from collections import deque
+from collections import deque, OrderedDict
 from contextlib import suppress
 from functools import partial
 from operator import add
@@ -6970,3 +6970,25 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+@pytest.mark.parametrize(
+    "nest",
+    [
+        lambda data: [data],
+        lambda data: tuple([data]),
+        lambda data: dict(key=data),
+        lambda data: OrderedDict(key=data),
+    ],
+    ids=["list", "tuple", "dict", "ordereddict"],
+)
+@gen_cluster(client=True)
+async def test_submit_resolves_nested_futures(c, s, a, b, nest):
+    def identity(x):
+        return x
+
+    future = c.submit(identity, "some-data")
+    outer_future = c.submit(identity, nest(future))
+    result = await outer_future
+    breakpoint()
+    assert result == nest("some-data")
