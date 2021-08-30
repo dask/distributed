@@ -675,9 +675,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:

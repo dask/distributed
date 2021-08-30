@@ -40,13 +40,16 @@ class SystemMonitor:
         except Exception:
             self._collect_disk_io_counters = False
         else:
-            self.last_time_disk = time()
-            self.read_bytes_disk = deque(maxlen=n)
-            self.write_bytes_disk = deque(maxlen=n)
-            self.quantities["read_bytes_disk"] = self.read_bytes_disk
-            self.quantities["write_bytes_disk"] = self.write_bytes_disk
-            self._last_disk_io_counters = disk_ioc
-            self._collect_disk_io_counters = True
+            if disk_ioc is None:  # diskless machine
+                self._collect_disk_io_counters = False
+            else:
+                self.last_time_disk = time()
+                self.read_bytes_disk = deque(maxlen=n)
+                self.write_bytes_disk = deque(maxlen=n)
+                self.quantities["read_bytes_disk"] = self.read_bytes_disk
+                self.quantities["write_bytes_disk"] = self.write_bytes_disk
+                self._last_disk_io_counters = disk_ioc
+                self._collect_disk_io_counters = True
 
         if not WINDOWS:
             self.num_fds = deque(maxlen=n)

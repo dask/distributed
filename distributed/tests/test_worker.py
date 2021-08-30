@@ -1045,6 +1045,26 @@ async def test_service_hosts_match_worker(s):
         sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
+    # See what happens with e.g. `dask-worker --listen-address tcp://:8811`
+    async with Worker(s.address, host="") as w:
+        sock = first(w.http_server._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        # Address must be a connectable address. 0.0.0.0 is not!
+        address_all = w.address.rsplit(":", 1)[0]
+        assert address_all in ("tcp://[::1]", "tcp://127.0.0.1")
+
+    # Check various malformed IPv6 addresses
+    # Since these hostnames get passed to distributed.comm.address_from_user_args,
+    # bracketing is mandatory for IPv6.
+    with pytest.raises(ValueError) as exc:
+        async with Worker(s.address, host="::") as w:
+            pass
+    assert "bracketed" in str(exc)
+    with pytest.raises(ValueError) as exc:
+        async with Worker(s.address, host="tcp://::1") as w:
+            pass
+    assert "bracketed" in str(exc)
+
 
 @gen_cluster(nthreads=[])
 async def test_start_services(s):
@@ -2389,6 +2409,11 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
+@pytest.mark.flaky(
+    condition=WINDOWS and sys.version_info[:2] == (3, 8),
+    reruns=20,
+    reruns_delay=5,
+)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
@@ -2454,6 +2479,11 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
+@pytest.mark.flaky(
+    condition=WINDOWS and sys.version_info[:2] == (3, 8),
+    reruns=20,
+    reruns_delay=5,
+)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """

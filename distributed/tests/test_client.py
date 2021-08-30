@@ -5149,7 +5149,8 @@ async def test_secede_simple(c, s, a):
 
 @gen_cluster(client=True)
 async def test_secede_balances(c, s, a, b):
-    count = threading.active_count()
+    """Ensure that tasks scheduled from a seceded thread can be scheduled
+    elsewhere"""
 
     def f(x):
         client = get_client()

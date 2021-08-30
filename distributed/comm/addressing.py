@@ -60,7 +60,9 @@ def parse_host_port(address, default_port=None):
         return address
 
     def _fail():
-        raise ValueError(f"invalid address {address!r}")
+        raise ValueError(
+            f"invalid address {address!r}; maybe: ipv6 needs brackets like [::1]"
+        )
 
     def _default():
         if default_port is None:
@@ -83,8 +85,9 @@ def parse_host_port(address, default_port=None):
             port = tail[1:]
     else:
         # Generic notation: 'addr:port' or 'addr'.
-        host, sep, port = address.partition(":")
+        host, sep, port = address.rpartition(":")
         if not sep:
+            host = port
             port = _default()
         elif ":" in host:
             _fail()
@@ -113,6 +116,8 @@ def get_address_host_port(addr, strict=False):
 
     >>> get_address_host_port('tcp://1.2.3.4:80')
     ('1.2.3.4', 80)
+    >>> get_address_host_port('tcp://[::1]:80')
+    ('::1', 80)
     """
     scheme, loc = parse_address(addr, strict=strict)
     backend = registry.get_backend(scheme)

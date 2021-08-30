@@ -17,7 +17,7 @@ dependencies:
   - ipywidgets
   - jinja2
   - joblib
-  - jupyter_client
+  - jupyter_client<7  # FIXME distributed#5272
   - msgpack-python
   - netcdf4
   - paramiko

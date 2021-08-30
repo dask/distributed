@@ -43,6 +43,7 @@ from distributed.dashboard.components.scheduler import (
 )
 from distributed.dashboard.components.worker import Counters
 from distributed.dashboard.scheduler import applications
+from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
@@ -857,7 +858,7 @@ async def test_lots_of_tasks(c, s, a, b):
     futures = c.map(toolz.identity, range(100))
     await wait(futures)
 
-    tsp = [p for p in s.plugins if "taskstream" in type(p).__name__.lower()][0]
+    tsp = s.plugins[TaskStreamPlugin.name]
     assert len(tsp.buffer) == 10
     ts.update()
     assert len(ts.source.data["start"]) == 10
