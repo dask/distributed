@@ -20,7 +20,7 @@ from typing import Dict, Hashable, Iterable, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
-import distributed
+
 import dask
 from dask.core import istask
 from dask.system import CPU_COUNT
@@ -32,6 +32,8 @@ from dask.utils import (
     parse_timedelta,
     typename,
 )
+
+import distributed
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -2813,7 +2815,12 @@ class Worker(ServerNode):
             return {"status": "OK"}
 
     async def actor_execute(
-        self, comm=None, actor=None, function=None, args=(), kwargs: Optional[dict] = None
+        self,
+        comm=None,
+        actor=None,
+        function=None,
+        args=(),
+        kwargs: Optional[dict] = None,
     ):
         kwargs = kwargs or {}
         separate_thread = kwargs.pop("separate_thread", True)
@@ -3442,14 +3449,14 @@ class Worker(ServerNode):
     #######################################
 
     @property
-    def client(self) -> 'distributed.Client':
+    def client(self) -> "distributed.Client":
         with self._lock:
             if self._client:
                 return self._client
             else:
                 return self._get_client()
 
-    def _get_client(self, timeout=None) -> 'distributed.Client':
+    def _get_client(self, timeout=None) -> "distributed.Client":
         """Get local client attached to this worker
 
         If no such client exists, create one
@@ -3558,7 +3565,9 @@ def get_worker() -> Worker:
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=None, resolve_address=True) -> 'distributed.Client':
+def get_client(
+    address=None, timeout=None, resolve_address=True
+) -> "distributed.Client":
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
