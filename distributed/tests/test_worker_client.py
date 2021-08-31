@@ -18,14 +18,7 @@ from distributed import (
     worker_client,
 )
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    client,
-    cluster_fixture,
-    double,
-    gen_cluster,
-    inc,
-    loop,
-)
+from distributed.utils_test import double, gen_cluster, inc
 
 
 @gen_cluster(client=True)
@@ -208,7 +201,7 @@ def test_dont_override_default_get(loop):
     b2 = b.map(f)
 
     with Client(
-        loop=loop, processes=False, set_as_default=True, dashboard_address=None
+        loop=loop, processes=False, set_as_default=True, dashboard_address=":0"
     ) as c:
         assert dask.base.get_scheduler() == c.get
         for i in range(2):

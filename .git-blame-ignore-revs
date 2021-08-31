@@ -1,0 +1,33 @@
+# Auto flake and pep8 (#1353)
+7d252089a27ede17e6c78cecde485f651c1a7bdb
+
+# Apply Black to standardize code styling (#2614)
+04ae4212cf6d1e513a4ea83666719c79b7e5867a
+
+# Update black (#2901)
+741ffb60b94b15d2f243fc4ad4a849df76c46092
+
+# Fixup black string normalization (#2929)
+cf10db7b6a4fd091c2e1385162e3d36ab59c8f6e
+
+726f65438815317bd6c430b983463cfdbe34712b
+# Use latest release of black (#3388)
+726f65438815317bd6c430b983463cfdbe34712b
+
+# Rerun `black` on the code base (#3444)
+9af811d8f9858c63b9586bcfb78ce2dec8f5d6b3
+
+# Update for black (#4081)
+44bf0b981039ef5e474fbc5ccc6cd5a98b42e5e4
+
+# Pin black pre-commit (#4533)
+fdeca218134dbfe6c2c46f947413c7d0e1d2acab
+
+# Add isort to pre-commit hooks, package resorting (#4647)
+20a55e91b52d8e51a62ba1b47ccc1ece07adb72e
+
+# Pyupgrade (#4741)
+5dc591bbdd4427fe49fe90338a34fc85ee35f2c9
+
+# Flake8 config cleanup (#4888)
+ee06a44cc4b43270b5ae6ee102481f3bbc9daf27

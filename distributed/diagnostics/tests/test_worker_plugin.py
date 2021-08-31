@@ -37,9 +37,6 @@ class MyPlugin(WorkerPlugin):
     def release_key(self, key, state, cause, reason, report):
         self.observed_notifications.append({"key": key, "state": state})
 
-    def release_dep(self, dep, state, report):
-        self.observed_notifications.append({"dep": dep, "state": state})
-
 
 @gen_cluster(client=True, nthreads=[])
 async def test_create_with_client(c, s):
@@ -51,6 +48,40 @@ async def test_create_with_client(c, s):
 
     await worker.close()
     assert worker._my_plugin_status == "teardown"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+    await c.register_worker_plugin(MyPlugin(546), name="bar")
+
+    worker = await Worker(s.address, loop=s.loop)
+    # remove the 'foo' plugin
+    await c.unregister_worker_plugin("foo")
+    assert worker._my_plugin_status == "teardown"
+
+    # check that on the scheduler registered worker plugins we only have 'bar'
+    assert len(s.worker_plugins) == 1
+    assert "bar" in s.worker_plugins
+
+    # check on the worker plugins that we only have 'bar'
+    assert len(worker.plugins) == 1
+    assert "bar" in worker.plugins
+
+    # let's remove 'bar' and we should have none worker plugins
+    await c.unregister_worker_plugin("bar")
+    assert worker._my_plugin_status == "teardown"
+    assert not s.worker_plugins
+    assert not worker.plugins
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_remove_with_client_raises(c, s):
+    await c.register_worker_plugin(MyPlugin(123), name="foo")
+
+    worker = await Worker(s.address, loop=s.loop)
+    with pytest.raises(ValueError, match="bar"):
+        await c.unregister_worker_plugin("bar")
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -100,6 +131,7 @@ async def test_failing_task_transitions_called(c, s, w):
         {"key": "task", "start": "waiting", "finish": "ready"},
         {"key": "task", "start": "ready", "finish": "executing"},
         {"key": "task", "start": "executing", "finish": "error"},
+        {"key": "task", "state": "error"},
     ]
 
     plugin = MyPlugin(1, expected_notifications=expected_notifications)
@@ -130,7 +162,7 @@ async def test_superseding_task_transitions_called(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_release_dep_called(c, s, w):
+async def test_dependent_tasks(c, s, w):
     dsk = {"dep": 1, "task": (inc, "dep")}
 
     expected_notifications = [
@@ -154,25 +186,62 @@ async def test_release_dep_called(c, s, w):
 
 
 @gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
-async def test_registering_with_name_arg(c, s, w):
-    class FooWorkerPlugin:
-        def setup(self, worker):
-            if hasattr(worker, "foo"):
-                raise RuntimeError(f"Worker {worker.address} already has foo!")
-
-            worker.foo = True
-
-    responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-    assert list(responses.values()) == [{"status": "OK"}]
-
-    async with Worker(s.address, loop=s.loop):
-        responses = await c.register_worker_plugin(FooWorkerPlugin(), name="foo")
-        assert list(responses.values()) == [{"status": "repeat"}] * 2
-
-
-@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
 async def test_empty_plugin(c, s, w):
     class EmptyPlugin:
         pass
 
     await c.register_worker_plugin(EmptyPlugin())
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_default_name(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        pass
+
+    await c.register_worker_plugin(MyCustomPlugin())
+    assert len(w.plugins) == 1
+    assert next(iter(w.plugins)).startswith("MyCustomPlugin-")
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_WorkerPlugin_overwrite(c, s, w):
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.foo = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.foo = 123
+
+        def teardown(self, worker):
+            del self.worker.foo
+
+    await c.register_worker_plugin(MyCustomPlugin)
+
+    assert w.foo == 0
+
+    await c.submit(inc, 0)
+    assert w.foo == 123
+
+    class MyCustomPlugin(WorkerPlugin):
+        name = "custom"
+
+        def setup(self, worker):
+            self.worker = worker
+            self.worker.bar = 0
+
+        def transition(self, *args, **kwargs):
+            self.worker.bar = 456
+
+        def teardown(self, worker):
+            del self.worker.bar
+
+    await c.register_worker_plugin(MyCustomPlugin)
+
+    assert not hasattr(w, "foo")
+    assert w.bar == 0
+
+    await c.submit(inc, 0)
+    assert w.bar == 456

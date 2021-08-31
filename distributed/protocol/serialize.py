@@ -8,8 +8,9 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword, typename
+from ..utils import ensure_bytes, has_keyword
 from . import pickle
 from .compression import decompress, maybe_compress
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
@@ -196,7 +197,9 @@ def check_dask_serializable(x):
     return False
 
 
-def serialize(x, serializers=None, on_error="message", context=None):
+def serialize(
+    x, serializers=None, on_error="message", context=None, iterate_collection=None
+):
     r"""
     Convert object to a header and list of bytestrings
 
@@ -209,6 +212,12 @@ def serialize(x, serializers=None, on_error="message", context=None):
     to the de/serialize functions. The name 'dask' is special, and will use the
     per-class serialization methods. ``None`` gives the default list
     ``['dask', 'pickle']``.
+
+    Notes on the ``iterate_collection`` argument (only relevant when
+    ``x`` is a collection):
+    - ``iterate_collection=True``: Serialize collection elements separately.
+    - ``iterate_collection=False``: Serialize collection elements together.
+    - ``iterate_collection=None`` (default): Infer the best setting.
 
     Examples
     --------
@@ -235,11 +244,20 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if serializers is None:
         serializers = ("dask", "pickle")  # TODO: get from configuration
 
+    # Handle obects that are marked as `Serialize`, or that are
+    # already `Serialized` objects (don't want to serialize them twice)
     if isinstance(x, Serialized):
         return x.header, x.frames
+    if isinstance(x, Serialize):
+        return serialize(
+            x.data,
+            serializers=serializers,
+            on_error=on_error,
+            context=context,
+            iterate_collection=True,
+        )
 
-    if type(x) in (list, set, tuple, dict):
-        iterate_collection = False
+    if iterate_collection is None and type(x) in (list, set, tuple, dict):
         if type(x) is list and "msgpack" in serializers:
             # Note: "msgpack" will always convert lists to tuples
             #       (see GitHub #3716), so we should iterate
@@ -307,14 +325,14 @@ def serialize(x, serializers=None, on_error="message", context=None):
     tb = ""
 
     for name in serializers:
-        dumps, loads, wants_context = families[name]
+        dumps, _, wants_context = families[name]
         try:
             header, frames = dumps(x, context=context) if wants_context else dumps(x)
             header["serializer"] = name
             return header, frames
         except NotImplementedError:
             continue
-        except Exception as e:
+        except Exception:
             tb = traceback.format_exc()
             break
 
@@ -389,7 +407,9 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-def serialize_and_split(x, serializers=None, on_error="message", context=None):
+def serialize_and_split(
+    x, serializers=None, on_error="message", context=None, size=None
+):
     """Serialize and split compressable frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
@@ -411,7 +431,7 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
         frames, header.get("compression") or [None] * len(frames)
     ):
         if compression is None:  # default behavior
-            sub_frames = frame_split_size(frame)
+            sub_frames = frame_split_size(frame, n=size)
             num_sub_frames.append(len(sub_frames))
             offsets.append(len(out_frames))
             out_frames.extend(sub_frames)

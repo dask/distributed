@@ -10,16 +10,9 @@ import struct
 import weakref
 
 import dask
+from dask.utils import parse_bytes
 
-from ..utils import (
-    CancelledError,
-    ensure_ip,
-    get_ip,
-    get_ipv6,
-    log_errors,
-    nbytes,
-    parse_bytes,
-)
+from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
 from .registry import Backend, backends
@@ -53,12 +46,25 @@ def init_once():
     if ucp is not None:
         return
 
+    # remove/process dask.ucx flags for valid ucx options
+    ucx_config = _scrub_ucx_config()
+
+    # We ensure the CUDA context is created before initializing UCX. This can't
+    # be safely handled externally because communications in Dask start before
+    # preload scripts run.
+    if "TLS" in ucx_config and "cuda_copy" in ucx_config["TLS"]:
+        try:
+            import numba.cuda
+        except ImportError:
+            raise ImportError(
+                "CUDA support with UCX requires Numba for context management"
+            )
+
+        numba.cuda.current_context()
+
     import ucp as _ucp
 
     ucp = _ucp
-
-    # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _scrub_ucx_config()
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
@@ -74,17 +80,7 @@ def init_once():
     try:
         import rmm
 
-        if hasattr(rmm, "DeviceBuffer"):
-            device_array = lambda n: rmm.DeviceBuffer(size=n)
-        else:  # pre-0.11.0
-            import numba.cuda
-
-            def rmm_device_array(n):
-                a = rmm.device_array(n, dtype="u1")
-                weakref.finalize(a, numba.cuda.current_context)
-                return a
-
-            device_array = rmm_device_array
+        device_array = lambda n: rmm.DeviceBuffer(size=n)
     except ImportError:
         try:
             import numba.cuda
@@ -102,7 +98,7 @@ def init_once():
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
 
-    pool_size_str = dask.config.get("rmm.pool-size")
+    pool_size_str = dask.config.get("distributed.rmm.pool-size")
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
         rmm.reinitialize(
@@ -115,12 +111,15 @@ def init_once():
         ucx_create_endpoint = ucp.create_endpoint
         ucx_create_listener = ucp.create_listener
     else:
-        if dask.config.get("ucx.reuse-endpoints"):
-            ucx_create_endpoint = EndpointReuse.create_endpoint
-            ucx_create_listener = EndpointReuse.create_listener
-        else:
+        reuse_endpoints = dask.config.get("distributed.comm.ucx.reuse-endpoints")
+        if (
+            reuse_endpoints is None and ucp.get_ucx_version() >= (1, 11, 0)
+        ) or reuse_endpoints is False:
             ucx_create_endpoint = ucp.create_endpoint
             ucx_create_listener = ucp.create_listener
+        else:
+            ucx_create_endpoint = EndpointReuse.create_endpoint
+            ucx_create_listener = EndpointReuse.create_listener
 
 
 class UCX(Comm):
@@ -158,7 +157,7 @@ class UCX(Comm):
     """
 
     def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
-        Comm.__init__(self)
+        super().__init__()
         self._ep = ep
         if local_addr:
             assert local_addr.startswith("ucx")
@@ -253,7 +252,7 @@ class UCX(Comm):
                 (shutdown, nframes) = struct.unpack("?Q", msg)
 
                 if shutdown:  # The writer is closing the connection
-                    raise CancelledError("Connection closed by writer")
+                    raise CommClosedError("Connection closed by writer")
 
                 # Recv which frames are CUDA (bool) and
                 # how large each frame is (uint64)
@@ -262,9 +261,12 @@ class UCX(Comm):
                 await self.ep.recv(header)
                 header = struct.unpack(header_fmt, header)
                 cuda_frames, sizes = header[:nframes], header[nframes:]
-            except (ucp.exceptions.UCXBaseException, CancelledError):
+            except (
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
                 self.abort()
-                raise CommClosedError("While reading, the connection was closed")
+                raise CommClosedError("Connection closed by writer")
             else:
                 # Recv frames
                 frames = [
@@ -298,7 +300,11 @@ class UCX(Comm):
         if self._ep is not None:
             try:
                 await self.ep.send(struct.pack("?Q", True, 0))
-            except ucp.exceptions.UCXError:
+            except (
+                ucp.exceptions.UCXError,
+                ucp.exceptions.UCXCloseError,
+                ucp.exceptions.UCXCanceled,
+            ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
                 # If the other end is in the process of closing,
                 # UCX will sometimes raise a `Input/output` error,
                 # which we can ignore.
@@ -331,7 +337,13 @@ class UCXConnector(Connector):
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
         init_once()
-        ep = await ucx_create_endpoint(ip, port)
+        try:
+            ep = await ucx_create_endpoint(ip, port)
+        except (
+            ucp.exceptions.UCXCloseError,
+            ucp.exceptions.UCXCanceled,
+        ) + (getattr(ucp.exceptions, "UCXConnectionReset", ()),):
+            raise CommClosedError("Connection closed before handshake completed")
         return self.comm_class(
             ep,
             local_addr=None,
@@ -351,7 +363,7 @@ class UCXListener(Listener):
         comm_handler: None,
         deserialize=False,
         allow_offload=True,
-        **connection_args
+        **connection_args,
     ):
         if not address.startswith("ucx"):
             address = "ucx://" + address
@@ -458,7 +470,9 @@ def _scrub_ucx_config():
     # 2) explicitly defined UCX configuration flags
 
     # import does not initialize ucp -- this will occur outside this function
-    from ucp import get_config
+    from ucp import get_config, get_ucx_version
+
+    ucx_110 = get_ucx_version() >= (1, 10, 0)
 
     options = {}
 
@@ -467,43 +481,46 @@ def _scrub_ucx_config():
     # leave UCX to its default configuration
     if any(
         [
-            dask.config.get("ucx.tcp"),
-            dask.config.get("ucx.nvlink"),
-            dask.config.get("ucx.infiniband"),
+            dask.config.get("distributed.comm.ucx.tcp"),
+            dask.config.get("distributed.comm.ucx.nvlink"),
+            dask.config.get("distributed.comm.ucx.infiniband"),
         ]
     ):
-        if dask.config.get("ucx.rdmacm"):
-            tls = "tcp,rdmacm"
+        if dask.config.get("distributed.comm.ucx.rdmacm"):
+            tls = "tcp" if ucx_110 else "tcp,rdmacm"
             tls_priority = "rdmacm"
         else:
-            tls = "tcp,sockcm"
-            tls_priority = "sockcm"
+            tls = "tcp" if ucx_110 else "tcp,sockcm"
+            tls_priority = "tcp" if ucx_110 else "sockcm"
 
         # CUDA COPY can optionally be used with ucx -- we rely on the user
         # to define when messages will include CUDA objects.  Note:
         # defining only the Infiniband flag will not enable cuda_copy
-        if any([dask.config.get("ucx.nvlink"), dask.config.get("ucx.cuda_copy")]):
+        if any(
+            [
+                dask.config.get("distributed.comm.ucx.nvlink"),
+                dask.config.get("distributed.comm.ucx.cuda_copy"),
+            ]
+        ):
             tls = tls + ",cuda_copy"
 
-        if dask.config.get("ucx.infiniband"):
+        if dask.config.get("distributed.comm.ucx.infiniband"):
             tls = "rc," + tls
-        if dask.config.get("ucx.nvlink"):
+        if dask.config.get("distributed.comm.ucx.nvlink"):
             tls = tls + ",cuda_ipc"
 
         options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
 
-        net_devices = dask.config.get("ucx.net-devices")
+        net_devices = dask.config.get("distributed.comm.ucx.net-devices")
         if net_devices is not None and net_devices != "":
             options["NET_DEVICES"] = net_devices
 
     # ANY UCX options defined in config will overwrite high level dask.ucx flags
-    valid_ucx_keys = list(get_config().keys())
-    for k, v in dask.config.get("ucx").items():
-        if k in valid_ucx_keys:
-            options[k] = v
-        else:
+    valid_ucx_vars = list(get_config().keys())
+    for k, v in options.items():
+        if k not in valid_ucx_vars:
             logger.debug(
-                "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
+                f"Key: {k} with value: {v} not a valid UCX configuration option"
             )
 
     return options

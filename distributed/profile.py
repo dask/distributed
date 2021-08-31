@@ -33,8 +33,10 @@ from time import sleep
 
 import tlz as toolz
 
+from dask.utils import format_time, parse_timedelta
+
 from .metrics import time
-from .utils import color_of, format_time, parse_timedelta
+from .utils import color_of
 
 
 def identifier(frame):
@@ -55,9 +57,9 @@ def identifier(frame):
 
 
 def repr_frame(frame):
-    """ Render a frame as a line for inclusion into a text traceback """
+    """Render a frame as a line for inclusion into a text traceback"""
     co = frame.f_code
-    text = '  File "%s", line %s, in %s' % (co.co_filename, frame.f_lineno, co.co_name)
+    text = f'  File "{co.co_filename}", line {frame.f_lineno}, in {co.co_name}'
     line = linecache.getline(co.co_filename, frame.f_lineno, frame.f_globals).lstrip()
     return text + "\n\t" + line
 
@@ -126,7 +128,7 @@ def process(frame, child, state, stop=None, omit=None):
 
 
 def merge(*args):
-    """ Merge multiple frame states together """
+    """Merge multiple frame states together"""
     if not args:
         return create()
     s = {arg["identifier"] for arg in args}
@@ -137,7 +139,10 @@ def merge(*args):
         for child in arg["children"]:
             children[child].append(arg["children"][child])
 
-    children = {k: merge(*v) for k, v in children.items()}
+    try:
+        children = {k: merge(*v) for k, v in children.items()}
+    except RecursionError:
+        children = {}
     count = sum(arg["count"] for arg in args)
     return {
         "description": args[0]["description"],
@@ -208,8 +213,6 @@ def plot_data(state, profile_interval=0.010):
         line_numbers.append(desc["line_number"])
         names.append(desc["name"])
 
-        ident = state["identifier"]
-
         try:
             fn = desc["filename"]
         except IndexError:
@@ -224,13 +227,13 @@ def plot_data(state, profile_interval=0.010):
 
         x = start
 
-        for name, child in state["children"].items():
+        for _, child in state["children"].items():
             width = child["count"] * delta
             traverse(child, x, x + width, height + 1)
             x += width
 
     traverse(state, 0, 1, 0)
-    percentages = ["{:.1f}%".format(100 * w) for w in widths]
+    percentages = [f"{100 * w:.1f}%" for w in widths]
     return {
         "left": starts,
         "right": stops,
@@ -335,7 +338,6 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
     start : time
     stop : time
     """
-    now = time()
     if start is None:
         istart = 0
     else:
@@ -490,7 +492,7 @@ def llprocess(frames, child, state):
 
 
 def ll_get_stack(tid):
-    """ Collect low level stack information from thread id """
+    """Collect low level stack information from thread id"""
     from stacktrace import get_thread_stack
 
     frames = get_thread_stack(tid, show_python=False)

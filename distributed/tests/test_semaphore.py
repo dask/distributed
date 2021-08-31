@@ -2,7 +2,7 @@ import asyncio
 import logging
 import pickle
 from datetime import timedelta
-from time import sleep, time
+from time import sleep
 
 import pytest
 
@@ -11,20 +11,9 @@ from dask.distributed import Client
 
 from distributed import Semaphore, fire_and_forget
 from distributed.comm import Comm
-from distributed.compatibility import WINDOWS
 from distributed.core import ConnectionPool
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    async_wait_for,
-    captured_logger,
-    cleanup,
-    client,
-    cluster,
-    cluster_fixture,
-    gen_cluster,
-    loop,
-    slowidentity,
-)
+from distributed.utils_test import captured_logger, cluster, gen_cluster, slowidentity
 
 
 @gen_cluster(client=True)
@@ -101,21 +90,17 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(
-    client=True,
-    timeout=20,
     config={
         "distributed.scheduler.locks.lease-validation-interval": "200ms",
         "distributed.scheduler.locks.lease-timeout": "200ms",
     },
 )
-async def test_release_semaphore_after_timeout(c, s, a, b):
+async def test_release_semaphore_after_timeout(s, a, b):
     sem = await Semaphore(name="x", max_leases=2)
     await sem.acquire()  # leases: 2 - 1 = 1
 
     semB = await Semaphore(name="x", max_leases=2)
-
     assert await semB.acquire()  # leases: 1 - 1 = 0
-
     assert not (await sem.acquire(timeout=0.01))
     assert not (await semB.acquire(timeout=0.01))
 
@@ -124,9 +109,7 @@ async def test_release_semaphore_after_timeout(c, s, a, b):
 
     semB.refresh_callback.stop()
     del semB
-
     assert await sem.acquire(timeout=1)
-
     assert not (await sem.acquire(timeout=0.1))
 
 
@@ -140,7 +123,11 @@ async def test_async_ctx(s, a, b):
 
 @pytest.mark.slow
 def test_worker_dies():
-    with cluster() as (scheduler, workers):
+    with cluster(
+        config={
+            "distributed.scheduler.locks.lease-timeout": "0.1s",
+        }
+    ) as (scheduler, workers):
         with Client(scheduler["address"]) as client:
             sem = Semaphore(name="x", max_leases=1)
 
@@ -156,11 +143,11 @@ def test_worker_dies():
                     return x
 
             futures = client.map(
-                f, range(100), sem=sem, kill_address=workers[0]["address"]
+                f, range(10), sem=sem, kill_address=workers[0]["address"]
             )
             results = client.gather(futures)
 
-            assert sorted(results) == list(range(100))
+            assert sorted(results) == list(range(10))
 
 
 @gen_cluster(client=True)
@@ -196,7 +183,8 @@ async def test_access_semaphore_by_name(c, s, a, b):
     assert result.count(False) == 9
 
 
-@gen_cluster(client=True)
+@pytest.mark.slow
+@gen_cluster(client=True, timeout=120)
 async def test_close_async(c, s, a, b):
     sem = await Semaphore(name="test")
 
@@ -289,10 +277,10 @@ class BrokenComm(Comm):
         pass
 
     def read(self, deserializers=None):
-        raise EnvironmentError
+        raise OSError()
 
     def write(self, msg, serializers=None, on_error=None):
-        raise EnvironmentError
+        raise OSError()
 
 
 class FlakyConnectionPool(ConnectionPool):
@@ -344,7 +332,6 @@ async def test_retry_acquire(c, s, a, b):
         assert result is False
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={
@@ -443,12 +430,13 @@ async def test_oversubscribing_leases(c, s, a, b):
     logs = caplog.getvalue().split("\n")
     timeouts = [log for log in logs if "timed out" in log]
     refresh_unknown = [log for log in logs if "Refreshing an unknown lease ID" in log]
-    assert len(timeouts) == 2
-    assert len(refresh_unknown) == 2
+    assert len(timeouts) >= 2
+    assert len(refresh_unknown) >= 2
 
     assert sorted(payload) == [0, 1]
     # Back to normal
-    assert await sem.get_value() == 0
+    while await sem.get_value():
+        await asyncio.sleep(0.01)
 
 
 @gen_cluster(client=True)
@@ -509,25 +497,40 @@ async def test_metrics(c, s, a, b):
 def test_threadpoolworkers_pick_correct_ioloop(cleanup):
     # gh4057
 
+    # About picking appropriate values for the various timings
+    # * Sleep time in `access_limited` impacts test runtime but is arbitrary
+    # * `lease-timeout` should be smaller than the sleep time. This is what the
+    #   test builds on. assuming the leases cannot be refreshed, e.g. wrong
+    #   event loop picked / PeriodicCallback never scheduled, the semaphore
+    #   would become oversubscribed and the len(protected_resources) becomes
+    #   non zero. This should also trigger a log message about "unknown leases"
+    #   and fails the test.
+    # * `lease-validation-interval` interval should be the smallest quantity.
+    #   How often leases are checked for staleness is hard coded atm and a fifth
+    #   of the `lease-timeout`. Accounting for this and some jitter, this should
+    #   be sufficiently small to ensure smooth operation.
+
     with dask.config.set(
         {
             "distributed.scheduler.locks.lease-validation-interval": 0.01,
-            "distributed.scheduler.locks.lease-timeout": 0.05,
+            "distributed.scheduler.locks.lease-timeout": 0.1,
         }
     ):
-        with Client(processes=False, threads_per_worker=4) as client:
+        with Client(
+            processes=False, dashboard_address=":0", threads_per_worker=4
+        ) as client:
             sem = Semaphore(max_leases=1, name="database")
-            protected_ressource = []
+            protected_resource = []
 
             def access_limited(val, sem):
                 import time
 
                 with sem:
-                    assert len(protected_ressource) == 0
-                    protected_ressource.append(val)
+                    assert len(protected_resource) == 0
+                    protected_resource.append(val)
                     # Interact with the DB
-                    time.sleep(0.1)
-                    protected_ressource.remove(val)
+                    time.sleep(0.2)
+                    protected_resource.remove(val)
 
             client.gather(client.map(access_limited, range(10), sem=sem))
 
@@ -557,7 +560,6 @@ async def test_release_retry(c, s, a, b):
         assert await semaphore.release() is True
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @gen_cluster(
     client=True,
     config={

@@ -16,6 +16,7 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
+  - jinja2
   - joblib  # overridden by git tip below
   - jupyter_client
   - lz4  # Only tested here
@@ -24,6 +25,7 @@ dependencies:
   - paramiko
   - prometheus_client
   - psutil
+  - pynvml  # Only tested here
   - pytest
   - pytest-asyncio<0.14.0
   - pytest-cov

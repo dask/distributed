@@ -29,11 +29,9 @@ from distributed.comm import (
 )
 from distributed.comm.registry import backends, get_backend
 from distributed.comm.tcp import TCP, TCPBackend, TCPConnector
-from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.protocol import Serialized, deserialize, serialize, to_serialize
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import loop  # noqa: F401
 from distributed.utils_test import (
     get_cert,
     get_client_ssl_context,
@@ -111,7 +109,7 @@ async def debug_loop():
     while True:
         loop = ioloop.IOLoop.current()
         print(".", loop, loop._handlers)
-        await asyncio.sleep(0.50)
+        await asyncio.sleep(0.5)
 
 
 #
@@ -863,7 +861,7 @@ async def test_retry_connect(monkeypatch):
                 return await super().connect(address, deserialize, **connection_args)
             else:
                 self.failures += 1
-                raise IOError()
+                raise OSError()
 
     class UnreliableBackend(TCPBackend):
         _connector_class = UnreliableConnector
@@ -951,8 +949,8 @@ async def check_many_listeners(addr):
         listener = await listen(addr, handle_comm)
         listeners.append(listener)
 
-    assert len(set(l.listen_address for l in listeners)) == N
-    assert len(set(l.contact_address for l in listeners)) == N
+    assert len({l.listen_address for l in listeners}) == N
+    assert len({l.contact_address for l in listeners}) == N
 
     for listener in listeners:
         listener.stop()
@@ -1108,7 +1106,6 @@ async def check_deserialize(addr):
     await check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
-@pytest.mark.flaky(reruns=10, reruns_delay=5, condition=WINDOWS)
 @pytest.mark.asyncio
 async def test_tcp_deserialize():
     await check_deserialize("tcp://")
@@ -1202,8 +1199,12 @@ async def check_repr(a, b):
     assert "closed" not in repr(b)
     await a.close()
     assert "closed" in repr(a)
+    assert a.local_address in repr(a)
+    assert b.peer_address in repr(a)
     await b.close()
     assert "closed" in repr(b)
+    assert a.local_address in repr(b)
+    assert b.peer_address in repr(b)
 
 
 @pytest.mark.asyncio
@@ -1276,5 +1277,9 @@ def test_register_backend_entrypoint():
         "udp", mod.__name__, attrs=["UDPBackend"], dist=dist
     )
 
-    result = get_backend("udp")
+    # The require is disabled here since particularly unit tests may install
+    # dirty or dev versions which are conflicting with backend entrypoints if
+    # they are demanding for exact, stable versions. This should not fail the
+    # test
+    result = get_backend("udp", require=False)
     assert result == 1

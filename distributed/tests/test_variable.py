@@ -10,16 +10,7 @@ from tornado.ioloop import IOLoop
 from distributed import Client, Nanny, TimeoutError, Variable, wait, worker_client
 from distributed.compatibility import WINDOWS
 from distributed.metrics import time
-from distributed.utils_test import (  # noqa: F401
-    captured_logger,
-    client,
-    cluster_fixture,
-    div,
-    gen_cluster,
-    inc,
-    loop,
-    popen,
-)
+from distributed.utils_test import captured_logger, div, gen_cluster, inc, popen
 
 
 @gen_cluster(client=True)
@@ -200,7 +191,7 @@ async def test_timeout_get(c, s, a, b):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=60)
 async def test_race(c, s, *workers):
     NITERS = 50
 
@@ -225,10 +216,8 @@ async def test_race(c, s, *workers):
     results = await c.gather(futures)
     assert all(r > NITERS * 0.8 for r in results)
 
-    start = time()
     while len(s.wants_what["variable-x"]) != 1:
         await asyncio.sleep(0.01)
-        assert time() - start < 2
 
 
 @gen_cluster(client=True)

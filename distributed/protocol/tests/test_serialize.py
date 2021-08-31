@@ -11,7 +11,7 @@ try:
 except ImportError:
     np = None
 
-from dask.utils_test import inc
+import dask
 
 from distributed import Nanny, wait
 from distributed.comm.utils import from_frames, to_frames
@@ -143,6 +143,23 @@ def test_nested_deserialize():
         "y": {"a": ["abc", "def"], "b": b"ghi"},
     }
     assert x == x_orig  # x wasn't mutated
+
+
+def test_serialize_iterate_collection():
+    # Use iterate_collection to ensure elements of
+    # a collection will be serialized seperately
+
+    arr = "special-data"
+    sarr = Serialized(*serialize(arr))
+    sdarr = to_serialize(arr)
+
+    task1 = (0, sarr, "('fake-key', 3)", None)
+    task2 = (0, sdarr, "('fake-key', 3)", None)
+    expect = (0, arr, "('fake-key', 3)", None)
+
+    # Check serialize/deserialize directly
+    assert deserialize(*serialize(task1, iterate_collection=True)) == expect
+    assert deserialize(*serialize(task2, iterate_collection=True)) == expect
 
 
 from dask import delayed
@@ -427,6 +444,21 @@ def test_compression_numpy_list():
     assert header["compression"] == [False, False]
 
 
+@gen_test()
+async def test_frame_split():
+    data = b"1234abcd" * (2 ** 20)  # 8 MiB
+    assert dask.sizeof.sizeof(data) == dask.utils.parse_bytes("8MiB")
+
+    size = dask.utils.parse_bytes("3MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    print(split_frames)
+    assert len(split_frames) == 3 + 2  # Three splits and two headers
+
+    size = dask.utils.parse_bytes("5MiB")
+    split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
+    assert len(split_frames) == 2 + 2  # Two splits and two headers
+
+
 @pytest.mark.parametrize(
     "data,is_serializable",
     [
@@ -488,7 +520,7 @@ def test_serialize_lists(serializers):
 )
 def test_deser_memoryview(data_in):
     header, frames = serialize(data_in)
-    assert header["type"] == "builtins.memoryview"
+    assert header["type"] == "memoryview"
     assert frames[0] is data_in
     data_out = deserialize(header, frames)
     assert data_in == data_out

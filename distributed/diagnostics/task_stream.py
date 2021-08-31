@@ -2,9 +2,10 @@ import logging
 from collections import deque
 
 import dask
+from dask.utils import format_time, parse_timedelta
 
 from ..metrics import time
-from ..utils import format_time, key_split, parse_timedelta
+from ..utils import key_split
 from .plugin import SchedulerPlugin
 from .progress_stream import color_of
 
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
+    name = "task-stream"
+
     def __init__(self, scheduler, maxlen=None):
         if maxlen is None:
             maxlen = max(
