@@ -4051,7 +4051,7 @@ def convert_args_to_str(args, max_len: Optional[int] = None) -> str:
         return "({})".format(", ".join(strs))
 
 
-def convert_kwargs_to_str(kwargs, max_len: Optional[int] = None):
+def convert_kwargs_to_str(kwargs: dict, max_len: Optional[int] = None) -> str:
     """Convert kwargs to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
