@@ -6917,7 +6917,8 @@ async def test_computation_object_code_client_compute(c, s, a, b):
 async def test_upload_directory(c, s, a, b, tmp_path):
     from dask.distributed import UploadDirectory
 
-    files = set(os.listdir())
+    # Be sure to exclude code coverage reports
+    files_start = set(f for f in os.listdir() if not f.startswith(".coverage"))
 
     with open(tmp_path / "foo.py", "w") as f:
         f.write("x = 123")
@@ -6943,7 +6944,8 @@ async def test_upload_directory(c, s, a, b, tmp_path):
         results = await c.run(f)
         assert results[n.worker_address] == 123
 
-    assert files == set(os.listdir())  # no change
+    files_end = set(f for f in os.listdir() if not f.startswith(".coverage"))
+    assert files_start == files_end  # no change
 
 
 @gen_cluster(client=True)
