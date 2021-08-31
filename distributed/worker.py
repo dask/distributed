@@ -3449,14 +3449,14 @@ class Worker(ServerNode):
     #######################################
 
     @property
-    def client(self) -> "distributed.Client":
+    def client(self) -> Client:
         with self._lock:
             if self._client:
                 return self._client
             else:
                 return self._get_client()
 
-    def _get_client(self, timeout=None) -> "distributed.Client":
+    def _get_client(self, timeout=None) -> Client:
         """Get local client attached to this worker
 
         If no such client exists, create one
@@ -3567,7 +3567,7 @@ def get_worker() -> Worker:
 
 def get_client(
     address=None, timeout=None, resolve_address=True
-) -> "distributed.Client":
+) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
