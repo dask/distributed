@@ -154,7 +154,7 @@ class ActiveMemoryManagerExtension:
         ts: TaskState
         nreplicas: int
 
-        for policy in self.policies:
+        for policy in list(self.policies):  # a policy may remove itself
             policy_gen = policy.run()
             ws = None
             while True:
