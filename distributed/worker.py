@@ -2857,7 +2857,7 @@ class Worker(ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    def meets_resource_constraints(self, key) -> bool:
+    def meets_resource_constraints(self, key: str) -> bool:
         ts = self.tasks[key]
         if not ts.resource_restrictions:
             return True
