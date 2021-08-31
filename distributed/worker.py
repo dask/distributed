@@ -2574,7 +2574,7 @@ class Worker(ServerNode):
             who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             still_missing = set()
-            for dep in list(deps):
+            for dep in deps:
                 dep.suspicious_count += 1
 
                 if not who_has.get(dep.key):
