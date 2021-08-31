@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import bisect
 import concurrent.futures
@@ -16,7 +18,10 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Hashable, Iterable, Optional
+from typing import TYPE_CHECKING, Dict, Hashable, Iterable, Optional
+
+if TYPE_CHECKING:
+    from .client import Client
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -32,8 +37,6 @@ from dask.utils import (
     parse_timedelta,
     typename,
 )
-
-import distributed
 
 from . import comm, preloading, profile, system, utils
 from .batched import BatchedSend
@@ -3565,9 +3568,7 @@ def get_worker() -> Worker:
             raise ValueError("No workers found")
 
 
-def get_client(
-    address=None, timeout=None, resolve_address=True
-) -> Client:
+def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
