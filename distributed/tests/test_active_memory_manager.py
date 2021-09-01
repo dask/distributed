@@ -73,7 +73,7 @@ async def test_drop(c, s, *workers):
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
     # The last copy is never dropped even if the policy asks so
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 1
 
 
@@ -88,14 +88,16 @@ async def test_start_stop(c, s, a, b):
     await c.scheduler.amm_stop()
     # AMM is not running anymore
     await c.replicate(x, 2)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 2
 
 
-@gen_cluster(client=True, config=demo_config("drop", start=True))
+@gen_cluster(client=True, config=demo_config("drop", start=True, interval=0.1))
 async def test_auto_start(c, s, a, b):
     futures = await c.scatter({"x": 123}, broadcast=True)
-    await asyncio.sleep(0.3)
+    # The AMM should run within 0.1s of the broadcast.
+    # Add generous extra padding to prevent flakiness.
+    await asyncio.sleep(0.5)
     assert len(s.tasks["x"].who_has) == 1
 
 
@@ -138,7 +140,7 @@ async def test_drop_with_waiter(c, s, a, b):
             await asyncio.sleep(0.01)
 
     s.extensions["amm"].run_once()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert {ws.address for ws in s.tasks["x"].who_has} == {a.address, b.address}
     assert await y1 == 2
     # y1 is finished so there's a worker available without a waiter
@@ -170,7 +172,7 @@ async def test_double_drop(c, s, a, b):
     amm.run_once()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 1
 
 
@@ -183,7 +185,7 @@ async def test_double_drop_stress(c, s, a, b):
         s.extensions["amm"].run_once()
     while len(s.tasks["x"].who_has) > 1:
         await asyncio.sleep(0.01)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 1
 
 
@@ -234,7 +236,7 @@ async def test_drop_with_empty_candidates(c, s, a, b):
     """
     futures = await c.scatter({"x": 1}, broadcast=True)
     s.extensions["amm"].run_once()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 2
 
 
@@ -250,7 +252,7 @@ async def test_drop_from_candidates_without_key(c, s, *workers):
     assert s.tasks["x"].who_has == {ws0, ws1}
 
     s.extensions["amm"].run_once()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert s.tasks["x"].who_has == {ws0, ws1}
 
 
@@ -316,7 +318,7 @@ async def test_replicate(c, s, *workers):
     s.extensions["amm"].run_once()
     while len(s.tasks["x"].who_has) < 3:
         await asyncio.sleep(0.01)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 3
 
     s.extensions["amm"].run_once()
@@ -402,7 +404,7 @@ async def test_replicate_with_empty_candidates(c, s, a, b):
     """
     futures = await c.scatter({"x": 1})
     s.extensions["amm"].run_once()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert len(s.tasks["x"].who_has) == 1
 
 
@@ -412,7 +414,7 @@ async def test_replicate_to_candidates_with_key(c, s, a, b):
     ws0, ws1 = s.workers.values()  # Not necessarily a, b; it could be b, a!
     futures = await c.scatter({"x": 1}, workers=[ws0.address])
     s.extensions["amm"].run_once()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     assert s.tasks["x"].who_has == {ws0}
 
 

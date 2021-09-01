@@ -46,10 +46,10 @@ class ActiveMemoryManagerExtension:
         scheduler: SchedulerState,
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
-        policies: set[ActiveMemoryManagerPolicy] = None,
+        policies: Optional[set[ActiveMemoryManagerPolicy]] = None,
         register: bool = True,
-        start: bool = None,
-        interval: float = None,
+        start: Optional[bool] = None,
+        interval: Optional[float] = None,
     ):
         self.scheduler = scheduler
 
@@ -91,7 +91,7 @@ class ActiveMemoryManagerExtension:
             self.start()
 
     def start(self, comm=None) -> None:
-        """Start executing very <interval> seconds until scheduler shutdown"""
+        """Start executing every ``self.interval`` seconds until scheduler shutdown"""
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
         self.scheduler.periodic_callbacks["amm"] = pc
         pc.start()
@@ -188,7 +188,7 @@ class ActiveMemoryManagerExtension:
         candidates: Optional[set[WorkerState]],
         pending_repl: set[WorkerState],
     ) -> Optional[WorkerState]:
-        """Choose a worker to acquire a new replica of an-in-memory task among a set of
+        """Choose a worker to acquire a new replica of an in-memory task among a set of
         candidates. If candidates is None, default to all workers in the cluster that do
         not hold a replica yet. The worker with the lowest memory usage (downstream of
         pending replications and drops) will be returned.
@@ -201,10 +201,7 @@ class ActiveMemoryManagerExtension:
         candidates -= pending_repl
         if not candidates:
             return None
-        # id(ws) is there just to prevent WorkerState objects to be compared in the
-        # unlikely event that they have exactly the same amount of bytes allocated.
-        _, _, ws = min((self.workers_memory[ws], id(ws), ws) for ws in candidates)
-        return ws
+        return min(candidates, key=self.workers_memory.get)
 
     def _find_dropper(
         self,
@@ -227,10 +224,7 @@ class ActiveMemoryManagerExtension:
         candidates -= {waiter_ts.processing_on for waiter_ts in ts.waiters}
         if not candidates:
             return None
-        # id(ws) is there just to prevent WorkerState objects to be compared in the
-        # unlikely event that they have exactly the same amount of bytes allocated.
-        _, _, ws = max((self.workers_memory[ws], id(ws), ws) for ws in candidates)
-        return ws
+        return max(candidates, key=self.workers_memory.get)
 
 
 class ActiveMemoryManagerPolicy:
@@ -297,9 +291,18 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
                 continue
 
             desired_replicas = 1  # TODO have a marker on TaskState
-            ndrop = len(ts.who_has) - max(desired_replicas, len(ts.waiters))
+
+            # If a dependent task has not been assigned to a worker yet, err on the side
+            # of caution and preserve an additional replica for it.
+            # However, if two dependent tasks have been already assigned to the same
+            # worker, don't double count them.
+            nwaiters = len({waiter.processing_on or waiter for waiter in ts.waiters})
+
+            ndrop = len(ts.who_has) - max(desired_replicas, nwaiters)
             if ts in self.manager.pending:
                 pending_repl, pending_drop = self.manager.pending[ts]
                 ndrop += len(pending_repl) - len(pending_drop)
+
+            # ndrop could be negative, which for range() is the same as 0.
             for _ in range(ndrop):
                 yield "drop", ts, None
