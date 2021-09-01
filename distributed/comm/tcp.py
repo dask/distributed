@@ -1,38 +1,42 @@
+import ctypes
 import errno
 import functools
 import logging
 import socket
-from ssl import SSLError
 import struct
 import sys
-from tornado import gen
 import weakref
+from ssl import SSLCertVerificationError, SSLError
+
+from tornado import gen
 
 try:
     import ssl
 except ImportError:
     ssl = None
 
-import dask
+from tlz import sliding_window
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
+import dask
+from dask.utils import parse_timedelta
+
+from ..protocol.utils import pack_frames_prelude, unpack_frames
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
-
-from .registry import Backend, backends
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
-from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
-from ..protocol.utils import pack_frames_prelude, unpack_frames
-
+from .core import Comm, CommClosedError, Connector, FatalCommClosedError, Listener
+from .registry import Backend, backends
+from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to_frames
 
 logger = logging.getLogger(__name__)
 
 
+C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -91,7 +95,7 @@ def set_tcp_timeout(comm):
             logger.debug("Setting TCP user timeout: %d ms", timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
-    except EnvironmentError as e:
+    except OSError as e:
         logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
@@ -104,7 +108,7 @@ def get_stream_address(comm):
 
     try:
         return unparse_host_port(*comm.socket.getsockname()[:2])
-    except EnvironmentError:
+    except OSError:
         # Probably EBADF
         return "<closed>"
 
@@ -118,14 +122,10 @@ def convert_stream_closed_error(obj, exc):
         exc = exc.real_error
         if ssl and isinstance(exc, ssl.SSLError):
             if "UNKNOWN_CA" in exc.reason:
-                raise FatalCommClosedError(
-                    "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
-                )
-        raise CommClosedError(
-            "in %s: %s: %s" % (obj, exc.__class__.__name__, exc)
-        ) from exc
+                raise FatalCommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}")
+        raise CommClosedError(f"in {obj}: {exc.__class__.__name__}: {exc}") from exc
     else:
-        raise CommClosedError("in %s: %s" % (obj, exc)) from exc
+        raise CommClosedError(f"in {obj}: {exc}") from exc
 
 
 def _close_comm(ref):
@@ -145,9 +145,11 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
+    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
@@ -169,8 +171,9 @@ class TCP(Comm):
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
-            if not stream.closed():
-                logger.warning("Closing dangling stream in %s" % (r,))
+            # stream is None if a StreamClosedError is raised during interpreter shutdown
+            if stream is not None and not stream.closed():
+                logger.warning(f"Closing dangling stream in {r}")
                 stream.close()
 
         return finalize
@@ -186,7 +189,7 @@ class TCP(Comm):
     async def read(self, deserializers=None):
         stream = self.stream
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
 
         fmt = "Q"
         fmt_size = struct.calcsize(fmt)
@@ -195,13 +198,19 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = bytearray(frames_nbytes)
-            n = await stream.read_into(frames)
-            assert n == frames_nbytes, (n, frames_nbytes)
+            frames = memoryview(bytearray(frames_nbytes))
+            # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+            for i, j in sliding_window(
+                2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
+            ):
+                chunk = frames[i:j]
+                chunk_nbytes = len(chunk)
+                n = await stream.read_into(chunk)
+                assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not shutting_down():
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
             # Some OSError or a another "low-level" exception. We do not really know what
@@ -228,9 +237,8 @@ class TCP(Comm):
 
     async def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
-        bytes_since_last_yield = 0
         if stream is None:
-            raise CommClosedError
+            raise CommClosedError()
 
         frames = await to_frames(
             msg,
@@ -242,24 +250,35 @@ class TCP(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=self.max_shard_size,
         )
-        frames_nbytes = sum(map(nbytes, frames))
+        frames_nbytes = [nbytes(f) for f in frames]
+        frames_nbytes_total = sum(frames_nbytes)
 
         header = pack_frames_prelude(frames)
-        header = struct.pack("Q", nbytes(header) + frames_nbytes) + header
+        header = struct.pack("Q", nbytes(header) + frames_nbytes_total) + header
 
         frames = [header, *frames]
-        frames_nbytes += nbytes(header)
+        frames_nbytes = [nbytes(header), *frames_nbytes]
+        frames_nbytes_total += frames_nbytes[0]
 
-        if frames_nbytes < 2 ** 17:  # 128kiB
+        if frames_nbytes_total < 2 ** 17:  # 128kiB
             # small enough, send in one go
             frames = [b"".join(frames)]
+            frames_nbytes = [frames_nbytes_total]
 
         try:
             # trick to enque all frames for writing beforehand
-            for each_frame in frames:
-                each_frame_nbytes = nbytes(each_frame)
+            for each_frame_nbytes, each_frame in zip(frames_nbytes, frames):
                 if each_frame_nbytes:
+                    if stream._write_buffer is None:
+                        raise StreamClosedError()
+
+                    if isinstance(each_frame, memoryview):
+                        # Make sure that `len(data) == data.nbytes`
+                        # See <https://github.com/tornadoweb/tornado/pull/2996>
+                        each_frame = memoryview(each_frame).cast("B")
+
                     stream._write_buffer.append(each_frame)
                     stream._total_write_index += each_frame_nbytes
 
@@ -268,19 +287,17 @@ class TCP(Comm):
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
-            if not shutting_down():
+            if not sys.is_finalizing():
                 convert_stream_closed_error(self, e)
         except Exception:
-            # Some OSError or a another "low-level" exception. We do not really know what
-            # was already written to the underlying socket, so it is not even safe to retry
-            # here using the same stream. The only safe thing to do is to abort.
-            # (See also GitHub #4133).
-            if stream._write_buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
+            # Some OSError or a another "low-level" exception. We do not really know
+            # what was already written to the underlying socket, so it is not even safe
+            # to retry here using the same stream. The only safe thing to do is to
+            # abort. (See also GitHub #4133).
             self.abort()
             raise
 
-        return frames_nbytes
+        return frames_nbytes_total
 
     @gen.coroutine
     def close(self):
@@ -295,7 +312,7 @@ class TCP(Comm):
                 if stream.writing():
                     yield stream.write(b"")
                 stream.socket.shutdown(socket.SHUT_RDWR)
-            except EnvironmentError:
+            except OSError:
                 pass
             finally:
                 self._finalizer.detach()
@@ -320,6 +337,9 @@ class TLS(TCP):
     """
     A TLS-specific version of TCP.
     """
+
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
 
     def _read_extra(self):
         TCP._read_extra(self)
@@ -381,6 +401,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLCertVerificationError as err:
+            raise FatalCommClosedError(
+                "TLS certificate does not match. Check your security settings. "
+                "More info at https://distributed.dask.org/en/latest/tls.html"
+            ) from err
         except SSLError as err:
             raise FatalCommClosedError() from err
 
@@ -418,11 +443,13 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         comm_handler,
         deserialize=True,
         allow_offload=True,
+        default_host=None,
         default_port=0,
         **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
+        self.default_host = default_host
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.allow_offload = allow_offload
@@ -443,7 +470,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                 sockets = netutil.bind_sockets(
                     self.port, address=self.ip, backlog=backlog
                 )
-            except EnvironmentError as e:
+            except OSError as e:
                 # EADDRINUSE can happen sporadically when trying to bind
                 # to an ephemeral port
                 if self.port != 0 or e.errno != errno.EADDRINUSE:
@@ -479,7 +506,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         try:
             await self.on_connection(comm)
         except CommClosedError:
-            logger.info("Connection closed before handshake completed")
+            logger.info("Connection from %s closed before handshake completed", address)
             return
 
         await self.comm_handler(comm)
@@ -508,7 +535,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         The contact address as a string.
         """
         host, port = self.get_host_port()
-        host = ensure_concrete_host(host)
+        host = ensure_concrete_host(host, default_host=self.default_host)
         return self.prefix + unparse_host_port(host, port)
 
 
@@ -536,7 +563,7 @@ class TLSListener(BaseTCPListener):
     async def _prepare_stream(self, stream, address):
         try:
             await stream.wait_for_handshake()
-        except EnvironmentError as e:
+        except OSError as e:
             # The handshake went wrong, log and ignore
             logger.warning(
                 "Listener on %r: TLS handshake failed with remote %r: %s",

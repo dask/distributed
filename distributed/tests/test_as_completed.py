@@ -1,21 +1,20 @@
 import asyncio
-from collections.abc import Iterator
-from operator import add
 import queue
 import random
+from collections.abc import Iterator
+from operator import add
 from time import sleep
 
 import pytest
 
-from distributed.client import _as_completed, as_completed, _first_completed, wait
+from distributed.client import _as_completed, _first_completed, as_completed, wait
 from distributed.metrics import time
 from distributed.utils import CancelledError
 from distributed.utils_test import gen_cluster, inc, throws
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 
 
 @gen_cluster(client=True)
-async def test__as_completed(c, s, a, b):
+async def test_as_completed_async(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 1)
     z = c.submit(inc, 2)
@@ -30,7 +29,7 @@ async def test__as_completed(c, s, a, b):
     assert result in [x, y, z]
 
 
-def test_as_completed(client):
+def test_as_completed_sync(client):
     x = client.submit(inc, 1)
     y = client.submit(inc, 2)
     z = client.submit(inc, 1)
@@ -212,7 +211,7 @@ def test_as_completed_with_results_no_raise(client):
     res = list(ac)
 
     dd = {r[0]: r[1:] for r in res}
-    assert set(dd.keys()) == {y, x, z}
+    assert dd.keys() == {x, y, z}
     assert x.status == "error"
     assert y.status == "cancelled"
     assert z.status == "finished"
@@ -260,7 +259,7 @@ async def test_as_completed_with_results_no_raise_async(c, s, a, b):
     assert dd[z][0] == 2
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_clear(c, s, a, b):
     futures = c.map(inc, range(3))
     ac = as_completed(futures)

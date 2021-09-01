@@ -1,18 +1,18 @@
-from contextlib import suppress
 import logging
 import warnings
 import weakref
+from contextlib import suppress
 
-from tornado.httpserver import HTTPServer
 import tlz
+from tornado.httpserver import HTTPServer
+
 import dask
 
-from .comm import get_tcp_server_address
-from .comm import get_address_host
+from .comm import get_address_host, get_tcp_server_addresses
 from .core import Server
 from .http.routing import RoutingApplication
-from .versions import get_versions
 from .utils import DequeHandler, clean_dashboard_address
+from .versions import get_versions
 
 
 class ServerNode(Server):
@@ -63,7 +63,7 @@ class ServerNode(Server):
                 self.services[k] = service
             except Exception as e:
                 warnings.warn(
-                    "\nCould not launch service '%s' on port %s. " % (k, port)
+                    f"\nCould not launch service '{k}' on port {port}. "
                     + "Got the following message:\n\n"
                     + str(e),
                     stacklevel=3,
@@ -99,7 +99,7 @@ class ServerNode(Server):
     def start_http_server(
         self, routes, dashboard_address, default_port=0, ssl_options=None
     ):
-        """ This creates an HTTP Server running on this node """
+        """This creates an HTTP Server running on this node"""
 
         self.http_application = RoutingApplication(routes)
 
@@ -119,39 +119,46 @@ class ServerNode(Server):
             ssl_options.verify_mode = ssl.CERT_NONE
 
         self.http_server = HTTPServer(self.http_application, ssl_options=ssl_options)
-        http_address = clean_dashboard_address(dashboard_address or default_port)
 
-        if http_address["address"] is None:
-            address = self._start_address
-            if isinstance(address, (list, tuple)):
-                address = address[0]
-            if address:
-                with suppress(ValueError):
-                    http_address["address"] = get_address_host(address)
+        http_addresses = clean_dashboard_address(dashboard_address or default_port)
 
-        change_port = False
-        retries_left = 3
-        while True:
-            try:
-                if not change_port:
-                    self.http_server.listen(**http_address)
-                else:
-                    self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
-                break
-            except Exception:
-                change_port = True
-                retries_left = retries_left - 1
-                if retries_left < 1:
-                    raise
+        for http_address in http_addresses:
+            if http_address["address"] is None:
+                address = self._start_address
+                if isinstance(address, (list, tuple)):
+                    address = address[0]
+                if address:
+                    with suppress(ValueError):
+                        http_address["address"] = get_address_host(address)
 
-        self.http_server.port = get_tcp_server_address(self.http_server)[1]
+            change_port = False
+            retries_left = 3
+            while True:
+                try:
+                    if not change_port:
+                        self.http_server.listen(**http_address)
+                    else:
+                        self.http_server.listen(**tlz.merge(http_address, {"port": 0}))
+                    break
+                except Exception:
+                    change_port = True
+                    retries_left = retries_left - 1
+                    if retries_left < 1:
+                        raise
+
+        bound_addresses = get_tcp_server_addresses(self.http_server)
+
+        # If more than one address is configured we just use the first here
+        self.http_server.port = bound_addresses[0][1]
         self.services["dashboard"] = self.http_server
 
-        if change_port and dashboard_address:
-            warnings.warn(
-                "Port {} is already in use.\n"
-                "Perhaps you already have a cluster running?\n"
-                "Hosting the HTTP server on port {} instead".format(
-                    http_address["port"], self.http_server.port
+        # Warn on port changes
+        for expected, actual in zip(
+            [a["port"] for a in http_addresses], [b[1] for b in bound_addresses]
+        ):
+            if expected != actual and expected > 0:
+                warnings.warn(
+                    f"Port {expected} is already in use.\n"
+                    "Perhaps you already have a cluster running?\n"
+                    f"Hosting the HTTP server on port {actual} instead"
                 )
-            )

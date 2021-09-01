@@ -1,21 +1,21 @@
-from abc import ABC, abstractmethod, abstractproperty
 import asyncio
-from contextlib import suppress
 import inspect
 import logging
 import random
 import sys
 import weakref
+from abc import ABC, abstractmethod, abstractproperty
+from contextlib import suppress
 
 import dask
+from dask.utils import parse_timedelta
 
 from ..metrics import time
-from ..utils import parse_timedelta, TimeoutError
+from ..protocol import pickle
+from ..protocol.compression import get_default_compression
+from ..utils import TimeoutError
 from . import registry
 from .addressing import parse_address
-from ..protocol.compression import get_default_compression
-from ..protocol import pickle
-
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +53,11 @@ class Comm(ABC):
     # XXX add set_close_callback()?
 
     @abstractmethod
-    def read(self, deserializers=None):
+    async def read(self, deserializers=None):
         """
         Read and return a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
@@ -67,11 +67,11 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, serializers=None, on_error=None):
+    async def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
@@ -82,12 +82,12 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def close(self):
+    async def close(self):
         """
         Close the communication cleanly.  This will attempt to flush
         outgoing buffers before actually closing the underlying transport.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
 
     @abstractmethod
@@ -155,16 +155,13 @@ class Comm(ABC):
         return out
 
     def __repr__(self):
-        clsname = self.__class__.__name__
-        if self.closed():
-            return "<closed %s>" % (clsname,)
-        else:
-            return "<%s %s local=%s remote=%s>" % (
-                clsname,
-                self.name or "",
-                self.local_address,
-                self.peer_address,
-            )
+        return "<{}{} {} local={} remote={}>".format(
+            self.__class__.__name__,
+            " (closed)" if self.closed() else "",
+            self.name or "",
+            self.local_address,
+            self.peer_address,
+        )
 
 
 class Listener(ABC):
@@ -220,14 +217,14 @@ class Listener(ABC):
             # Timeout is to ensure that we'll terminate connections eventually.
             # Connector side will employ smaller timeouts and we should only
             # reach this if the comm is dead anyhow.
-            write = await asyncio.wait_for(comm.write(local_info), timeout=timeout)
+            await asyncio.wait_for(comm.write(local_info), timeout=timeout)
             handshake = await asyncio.wait_for(comm.read(), timeout=timeout)
             # This would be better, but connections leak if worker is closed quickly
             # write, handshake = await asyncio.gather(comm.write(local_info), comm.read())
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
-            raise CommClosedError() from e
+            raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
@@ -241,10 +238,10 @@ class Listener(ABC):
 
 class Connector(ABC):
     @abstractmethod
-    def connect(self, address, deserialize=True):
+    async def connect(self, address, deserialize=True):
         """
         Connect to the given address and return a Comm object.
-        This function is a coroutine.   It may raise EnvironmentError
+        This function returns a coroutine. It may raise EnvironmentError
         if the other endpoint is unreachable or unavailable.  It
         may raise ValueError if the address is malformed.
         """
@@ -302,10 +299,12 @@ async def connect(
             upper_cap = min(time_left(), backoff_base * (2 ** attempt))
             backoff = random.uniform(0, upper_cap)
             attempt += 1
-            logger.debug("Could not connect, waiting for %s before retrying", backoff)
+            logger.debug(
+                "Could not connect to %s, waiting for %s before retrying", loc, backoff
+            )
             await asyncio.sleep(backoff)
     else:
-        raise IOError(
+        raise OSError(
             f"Timed out trying to connect to {addr} after {timeout} s"
         ) from active_exception
 
@@ -321,7 +320,7 @@ async def connect(
     except Exception as exc:
         with suppress(Exception):
             await comm.close()
-        raise IOError(
+        raise OSError(
             f"Timed out during handshake while connecting to {addr} after {timeout} s"
         ) from exc
 

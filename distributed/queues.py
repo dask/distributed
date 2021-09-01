@@ -1,14 +1,13 @@
 import asyncio
-from collections import defaultdict
 import logging
 import uuid
+from collections import defaultdict
 
-from dask.utils import stringify
+from dask.utils import parse_timedelta, stringify
 
-from .client import Future, Client
+from .client import Client, Future
 from .utils import sync, thread_state
 from .worker import get_client, get_worker
-from .utils import parse_timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +46,7 @@ class QueueExtension:
         self.scheduler.extensions["queues"] = self
 
     def create(self, comm=None, name=None, client=None, maxsize=0):
-        logger.debug("Queue name: {}".format(name))
+        logger.debug(f"Queue name: {name}")
         if name not in self.queues:
             self.queues[name] = asyncio.Queue(maxsize=maxsize)
             self.client_refcount[name] = 1
@@ -86,7 +85,7 @@ class QueueExtension:
 
     async def get(self, comm=None, name=None, client=None, timeout=None, batch=False):
         def process(record):
-            """ Add task status if known """
+            """Add task status if known"""
             if record["type"] == "Future":
                 record = record.copy()
                 key = record["value"]
@@ -245,7 +244,7 @@ class Queue:
         return self.client.sync(self._get, timeout=timeout, batch=batch, **kwargs)
 
     def qsize(self, **kwargs):
-        """ Current number of elements in the queue """
+        """Current number of elements in the queue"""
         return self.client.sync(self._qsize, **kwargs)
 
     async def _get(self, timeout=None, batch=False):

@@ -1,10 +1,12 @@
-from inspect import isawaitable
 import logging
-import dask.config
+from inspect import isawaitable
 
-from .adaptive_core import AdaptiveCore
-from ..utils import log_errors, parse_timedelta
+import dask.config
+from dask.utils import parse_timedelta
+
 from ..protocol import pickle
+from ..utils import log_errors
+from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +86,7 @@ class Adaptive(AdaptiveCore):
         wait_count=None,
         target_duration=None,
         worker_key=None,
-        **kwargs
+        **kwargs,
     ):
         self.cluster = cluster
         self.worker_key = worker_key
@@ -176,26 +178,30 @@ class Adaptive(AdaptiveCore):
             target=target,
             key=pickle.dumps(self.worker_key) if self.worker_key else None,
             attribute="name",
-            **self._workers_to_close_kwargs
+            **self._workers_to_close_kwargs,
         )
 
     async def scale_down(self, workers):
         if not workers:
             return
         with log_errors():
+            logger.info("Retiring workers %s", workers)
             # Ask scheduler to cleanly retire workers
             await self.scheduler.retire_workers(
-                names=workers, remove=True, close_workers=True
+                names=workers,
+                remove=True,
+                close_workers=True,
             )
 
             # close workers more forcefully
-            logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
             if isawaitable(f):
                 await f
 
     async def scale_up(self, n):
-        self.cluster.scale(n)
+        f = self.cluster.scale(n)
+        if isawaitable(f):
+            await f
 
     @property
     def loop(self):

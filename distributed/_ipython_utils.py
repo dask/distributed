@@ -12,19 +12,17 @@ try:
 except ImportError:
     # Python 2
     import Queue as queue
-from subprocess import Popen
-import sys
-from threading import Thread
-from uuid import uuid4
 
-from tornado.gen import TimeoutError
-from tornado.ioloop import IOLoop
-from threading import Event
+import sys
+from subprocess import Popen
+from threading import Event, Thread
+from uuid import uuid4
 
 from IPython import get_ipython
 from jupyter_client import BlockingKernelClient, write_connection_file
 from jupyter_core.paths import jupyter_runtime_dir
-
+from tornado.gen import TimeoutError
+from tornado.ioloop import IOLoop
 
 OUTPUT_TIMEOUT = 10
 
@@ -78,10 +76,8 @@ def register_worker_magic(connection_info, magic_name="worker"):
     which run the given cell in a remote kernel.
     """
     ip = get_ipython()
-    info = dict(connection_info)  # copy
-    key = info.pop("key")
-    kc = BlockingKernelClient(**connection_info)
-    kc.session.key = key
+    kc = BlockingKernelClient()
+    kc.load_connection_info(connection_info)
     kc.start_channels()
 
     def remote(line, cell=None):
@@ -124,13 +120,12 @@ def remote_magic(line, cell=None):
 
     # turn info dict to hashable str for use as lookup key in _clients cache
     key = ",".join(map(str, sorted(connection_info.items())))
-    session_key = connection_info.pop("key")
 
     if key in remote_magic._clients:
         kc = remote_magic._clients[key]
     else:
-        kc = BlockingKernelClient(**connection_info)
-        kc.session.key = session_key
+        kc = BlockingKernelClient()
+        kc.load_connection_info(connection_info)
         kc.start_channels()
         kc.wait_for_ready(timeout=10)
         remote_magic._clients[key] = kc
@@ -199,15 +194,7 @@ def start_ipython(ip=None, ns=None, log=None):
     if get_ipython() is not None:
         raise RuntimeError("Cannot start IPython, it's already running.")
 
-    from zmq.eventloop.ioloop import ZMQIOLoop
     from ipykernel.kernelapp import IPKernelApp
-
-    # save the global IOLoop instance
-    # since IPython relies on it, but we are going to put it in a thread.
-    save_inst = IOLoop.instance()
-    IOLoop.clear_instance()
-    zmq_loop = ZMQIOLoop()
-    zmq_loop.install()
 
     # start IPython, disabling its signal handlers that won't work due to running in a thread:
     app = IPKernelApp.instance(log=log)
@@ -234,20 +221,17 @@ def start_ipython(ip=None, ns=None, log=None):
         app.kernel.pre_handler_hook = noop
         app.kernel.post_handler_hook = noop
         app.kernel.start()
-        app.kernel.loop = IOLoop.instance()
         # save self in the IPython namespace as 'worker'
         # inject things into the IPython namespace
         if ns:
             app.kernel.shell.user_ns.update(ns)
         evt.set()
-        zmq_loop.start()
+        # start the app's IOLoop in its thread
+        IOLoop.current().start()
 
     zmq_loop_thread = Thread(target=_start)
     zmq_loop_thread.daemon = True
     zmq_loop_thread.start()
     assert evt.wait(timeout=5), "IPython didn't start in a reasonable amount of time."
 
-    # put the global IOLoop instance back:
-    IOLoop.clear_instance()
-    save_inst.install()
     return app

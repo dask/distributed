@@ -1,7 +1,8 @@
 import os
-from tornado import web
+
 import tornado.httputil
 import tornado.routing
+from tornado import web
 
 
 def _descend_routes(router, routers=set(), out=set()):

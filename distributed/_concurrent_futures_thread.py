@@ -8,16 +8,17 @@
 __author__ = "Brian Quinlan (brian@sweetapp.com)"
 
 import atexit
-from concurrent.futures import _base
 import itertools
+from concurrent.futures import _base
 
 try:
     import queue
 except ImportError:
     import Queue as queue
+
+import os
 import threading
 import weakref
-import os
 
 # Workers are created as daemon threads. This is done to allow the interpreter
 # to exit when there are still idle threads in a ThreadPoolExecutor's thread

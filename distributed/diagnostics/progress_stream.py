@@ -1,14 +1,13 @@
 import logging
+from functools import partial
 
-from tlz import valmap, merge
+from tlz import merge, valmap
 
-from .progress import AllProgress
-
-from ..core import connect, coerce_to_address
+from ..core import coerce_to_address, connect
 from ..scheduler import Scheduler
-from ..utils import key_split, color_of
+from ..utils import color_of, key_split
 from ..worker import dumps_function
-
+from .progress import AllProgress
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +20,12 @@ def counts(scheduler, allprogress):
             for state in ["memory", "erred", "released", "processing"]
         },
     )
+
+
+def remove_plugin(**kwargs):
+    # Wrapper function around `Scheduler.remove_plugin` to avoid raising a
+    # `PicklingError` when using a cythonized scheduler
+    return Scheduler.remove_plugin(**kwargs)
 
 
 async def progress_stream(address, interval):
@@ -49,7 +54,7 @@ async def progress_stream(address, interval):
             "setup": dumps_function(AllProgress),
             "function": dumps_function(counts),
             "interval": interval,
-            "teardown": dumps_function(Scheduler.remove_plugin),
+            "teardown": dumps_function(partial(remove_plugin, name=AllProgress.name)),
         }
     )
     return comm

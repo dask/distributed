@@ -1,11 +1,9 @@
 import itertools
+
 import dask
 
-from . import registry
 from ..utils import get_ip_interface
-
-
-DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
+from . import registry
 
 
 def parse_address(addr, strict=False):
@@ -28,7 +26,7 @@ def parse_address(addr, strict=False):
         )
         raise ValueError(msg)
     if not sep:
-        scheme = DEFAULT_SCHEME
+        scheme = dask.config.get("distributed.comm.default-scheme")
     return scheme, loc
 
 
@@ -39,7 +37,7 @@ def unparse_address(scheme, loc):
     >>> unparse_address('tcp', '127.0.0.1')
     'tcp://127.0.0.1'
     """
-    return "%s://%s" % (scheme, loc)
+    return f"{scheme}://{loc}"
 
 
 def normalize_address(addr):
@@ -62,11 +60,13 @@ def parse_host_port(address, default_port=None):
         return address
 
     def _fail():
-        raise ValueError("invalid address %r" % (address,))
+        raise ValueError(
+            f"invalid address {address!r}; maybe: ipv6 needs brackets like [::1]"
+        )
 
     def _default():
         if default_port is None:
-            raise ValueError("missing port number in address %r" % (address,))
+            raise ValueError(f"missing port number in address {address!r}")
         return default_port
 
     if "://" in address:
@@ -85,8 +85,9 @@ def parse_host_port(address, default_port=None):
             port = tail[1:]
     else:
         # Generic notation: 'addr:port' or 'addr'.
-        host, sep, port = address.partition(":")
+        host, sep, port = address.rpartition(":")
         if not sep:
+            host = port
             port = _default()
         elif ":" in host:
             _fail()
@@ -101,7 +102,7 @@ def unparse_host_port(host, port=None):
     if ":" in host and not host.startswith("["):
         host = "[%s]" % host
     if port is not None:
-        return "%s:%s" % (host, port)
+        return f"{host}:{port}"
     else:
         return host
 
@@ -115,6 +116,8 @@ def get_address_host_port(addr, strict=False):
 
     >>> get_address_host_port('tcp://1.2.3.4:80')
     ('1.2.3.4', 80)
+    >>> get_address_host_port('tcp://[::1]:80')
+    ('::1', 80)
     """
     scheme, loc = parse_address(addr, strict=strict)
     backend = registry.get_backend(scheme)
@@ -122,7 +125,7 @@ def get_address_host_port(addr, strict=False):
         return backend.get_address_host_port(loc)
     except NotImplementedError:
         raise ValueError(
-            "don't know how to extract host and port for address %r" % (addr,)
+            f"don't know how to extract host and port for address {addr!r}"
         )
 
 
@@ -264,7 +267,7 @@ def address_from_user_args(
     security=None,
     default_port=0,
 ) -> str:
-    """ Get an address to listen on from common user provided arguments """
+    """Get an address to listen on from common user provided arguments"""
 
     if security and security.require_encryption and not protocol:
         protocol = "tls"

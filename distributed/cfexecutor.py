@@ -2,11 +2,12 @@ import concurrent.futures as cf
 import weakref
 
 from tlz import merge
-
 from tornado import gen
 
+from dask.utils import parse_timedelta
+
 from .metrics import time
-from .utils import sync, TimeoutError
+from .utils import TimeoutError, sync
 
 
 @gen.coroutine
@@ -118,6 +119,7 @@ class ClientExecutor(cf.Executor):
         """
         timeout = kwargs.pop("timeout", None)
         if timeout is not None:
+            timeout = parse_timedelta(timeout)
             end_time = timeout + time()
         if "chunksize" in kwargs:
             del kwargs["chunksize"]
@@ -125,6 +127,10 @@ class ClientExecutor(cf.Executor):
             raise TypeError("unexpected arguments to map(): %s" % sorted(kwargs))
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
+
+        # Below iterator relies on fs being an iterator itself, and not just an iterable
+        # (such as a list), in order to cancel remaining futures
+        fs = iter(fs)
 
         # Yield must be hidden in closure so that the tasks are submitted
         # before the first iterator value is required.
@@ -141,8 +147,7 @@ class ClientExecutor(cf.Executor):
                         yield future.result()
             finally:
                 remaining = list(fs)
-                for future in remaining:
-                    self._futures.add(future)
+                self._futures.update(remaining)
                 self._client.cancel(remaining)
 
         return result_iterator()

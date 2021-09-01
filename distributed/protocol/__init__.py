@@ -1,25 +1,25 @@
 from contextlib import suppress
-from functools import partial
 from distutils.version import LooseVersion
+from functools import partial
 
 from .compression import compressions, default_compression
-from .core import dumps, loads, maybe_compress, decompress, msgpack
-from .cuda import cuda_serialize, cuda_deserialize
+from .core import decompress, dumps, loads, maybe_compress, msgpack
+from .cuda import cuda_deserialize, cuda_serialize
 from .serialize import (
-    serialize,
-    deserialize,
-    nested_deserialize,
     Serialize,
     Serialized,
-    to_serialize,
-    register_serialization,
-    dask_serialize,
     dask_deserialize,
-    serialize_bytes,
+    dask_serialize,
+    deserialize,
     deserialize_bytes,
-    serialize_bytelist,
-    register_serialization_family,
+    nested_deserialize,
     register_generic,
+    register_serialization,
+    register_serialization_family,
+    serialize,
+    serialize_bytelist,
+    serialize_bytes,
+    to_serialize,
 )
 
 

@@ -1,14 +1,13 @@
 import ast
 
-import dask
+import pytest
 
+import dask
 import dask.array as da
 import dask.dataframe as dd
 
-from distributed.utils_test import gen_cluster
 from distributed.diagnostics import SchedulerPlugin
-
-import pytest
+from distributed.utils_test import gen_cluster
 
 np = pytest.importorskip("numpy")
 pd = pytest.importorskip("pandas")
@@ -91,7 +90,7 @@ async def test_shuffle(c, s, a, b):
     assert (res == 10.0).all()
 
 
-class TestAnnotationPlugin(SchedulerPlugin):
+class ExampleAnnotationPlugin(SchedulerPlugin):
     def __init__(self, priority_fn=None, qux="", resource="", retries=0):
         self.priority_fn = priority_fn or (lambda k: 0)
         self.qux = qux
@@ -134,10 +133,10 @@ async def test_array_annotations(c, s, a, b):
     qux = "baz"
     resource = "widget"
 
-    plugin = TestAnnotationPlugin(priority_fn=fn, qux=qux, resource=resource)
+    plugin = ExampleAnnotationPlugin(priority_fn=fn, qux=qux, resource=resource)
     s.add_plugin(plugin)
 
-    assert plugin in s.plugins
+    assert plugin in s.plugins.values()
 
     with dask.annotate(priority=fn, qux=qux):
         A = da.ones((10, 10), chunks=(2, 2))
@@ -159,10 +158,10 @@ async def test_array_annotations(c, s, a, b):
 @gen_cluster(client=True)
 async def test_dataframe_annotations(c, s, a, b):
     retries = 5
-    plugin = TestAnnotationPlugin(retries=retries)
+    plugin = ExampleAnnotationPlugin(retries=retries)
     s.add_plugin(plugin)
 
-    assert plugin in s.plugins
+    assert plugin in s.plugins.values()
 
     df = dd.from_pandas(
         pd.DataFrame(

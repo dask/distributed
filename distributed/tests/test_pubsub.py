@@ -5,12 +5,12 @@ from time import sleep
 import pytest
 import tlz as toolz
 
-from distributed import Pub, Sub, wait, get_worker, TimeoutError
-from distributed.utils_test import gen_cluster
+from distributed import Pub, Sub, TimeoutError, get_worker, wait
 from distributed.metrics import time
+from distributed.utils_test import gen_cluster
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 async def test_speed(c, s, a, b):
     """
     This tests how quickly we can move messages back and forth
@@ -37,7 +37,7 @@ async def test_speed(c, s, a, b):
             #     print(a, b, i)
         return n
 
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     x = np.random.random(1000)
 
@@ -138,7 +138,7 @@ async def test_repr(c, s, a, b):
     assert "Sub" in str(sub)
 
 
-@pytest.mark.xfail(reason="out of order execution")
+@pytest.mark.xfail(reason="flaky and re-fails on reruns; out of order execution")
 @gen_cluster(client=True)
 async def test_basic(c, s, a, b):
     async def publish():

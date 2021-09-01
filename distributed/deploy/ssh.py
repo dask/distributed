@@ -1,17 +1,17 @@
 import logging
 import sys
-from typing import List, Union
 import warnings
 import weakref
+from typing import List, Union
 
 import dask
+import dask.config
 
-from .spec import SpecCluster, ProcessInterface
 from ..core import Status
-from ..utils import cli_keywords
 from ..scheduler import Scheduler as _Scheduler
+from ..utils import cli_keywords
 from ..worker import Worker as _Worker
-from ..utils import serialize_for_cli
+from .spec import ProcessInterface, SpecCluster
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +41,6 @@ class Process(ProcessInterface):
         self.proc.kill()  # https://github.com/ronf/asyncssh/issues/112
         self.connection.close()
         await super().close()
-
-    def __repr__(self):
-        return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
 
 
 class Worker(Process):
@@ -95,13 +92,13 @@ class Worker(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -176,13 +173,13 @@ class Scheduler(Process):
         result = await self.connection.run("uname")
         if result.exit_status == 0:
             set_env = 'env DASK_INTERNAL_INHERIT_CONFIG="{}"'.format(
-                serialize_for_cli(dask.config.global_config)
+                dask.config.serialize(dask.config.global_config)
             )
         else:
             result = await self.connection.run("cmd /c ver")
             if result.exit_status == 0:
                 set_env = "set DASK_INTERNAL_INHERIT_CONFIG={} &&".format(
-                    serialize_for_cli(dask.config.global_config)
+                    dask.config.serialize(dask.config.global_config)
                 )
             else:
                 raise Exception(
@@ -302,7 +299,7 @@ def SSHCluster(
     ...     ["localhost", "hostwithgpus", "anothergpuhost"],
     ...     connect_options={"known_hosts": None},
     ...     scheduler_options={"port": 0, "dashboard_address": ":8797"},
-    ...     worker_module='dask_cuda.dask_cuda_worker')
+    ...     worker_module="dask_cuda.cli.dask_cuda_worker")
     >>> client = Client(cluster)
 
     See Also

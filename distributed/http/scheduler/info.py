@@ -1,19 +1,19 @@
-from datetime import datetime
 import json
 import logging
 import os
 import os.path
+from datetime import datetime
 
-from dask.utils import format_bytes
-
+from tlz import first, merge
 from tornado import escape
 from tornado.websocket import WebSocketHandler
-from tlz import first, merge
 
-from ..utils import RequestHandler, redirect
+from dask.utils import format_bytes, format_time
+
 from ...diagnostics.websocket import WebsocketPlugin
 from ...metrics import time
-from ...utils import log_errors, format_time
+from ...utils import log_errors
+from ..utils import RequestHandler, redirect
 
 ns = {
     func.__name__: func
@@ -204,7 +204,7 @@ class EventstreamHandler(WebSocketHandler):
             self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
-        self.server.remove_plugin(self.plugin)
+        self.server.remove_plugin(name=self.plugin.name)
 
 
 routes = [

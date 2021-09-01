@@ -39,7 +39,7 @@ The main way to observe these times is with the task stream plot on the
 scheduler's ``/status`` page where the colors of the bars correspond to the
 colors listed above.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/bokeh-task-stream.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/bokeh-task-stream.gif
    :alt: Dask task stream
    :width: 50%
 
@@ -73,7 +73,7 @@ any of the bars in the profile will zoom the user into just that section, as is
 typical with most profiling tools.  There is a timeline at the bottom of the
 page to allow users to select different periods in time.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/daskboard-profile.gif
+.. image:: https://raw.githubusercontent.com/dask/dask-org/main/images/daskboard-profile.gif
    :alt: Dask profiler
    :width: 70%
 
@@ -121,7 +121,8 @@ Performance Reports
 Often when benchmarking and/or profiling, users may want to record a
 particular computation or even a full workflow.  Dask can save the bokeh
 dashboards as static HTML plots including the task stream, worker profiles,
-bandwidths, etc. This is done wrapping a computation with the ``performance_report`` context manager:
+bandwidths, etc. This is done wrapping a computation with the
+:class:`distributed.performance_report` context manager:
 
 .. code-block:: python
 

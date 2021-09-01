@@ -4,10 +4,9 @@ from time import sleep
 
 import pytest
 
-from distributed import Client, Queue, Nanny, worker_client, wait, TimeoutError
+from distributed import Client, Nanny, Queue, TimeoutError, wait, worker_client
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, div, popen
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import div, gen_cluster, inc, popen
 
 
 @gen_cluster(client=True)
@@ -111,7 +110,7 @@ def test_picklability_sync(client):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 5, Worker=Nanny, timeout=60)
 async def test_race(c, s, *workers):
     def f(i):
         with worker_client() as c:

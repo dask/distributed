@@ -1,20 +1,21 @@
 import asyncio
-from collections import defaultdict, deque
-from contextlib import suppress
 import logging
 import threading
 import weakref
+from collections import defaultdict, deque
+
+from dask.utils import parse_timedelta
 
 from .core import CommClosedError
 from .metrics import time
-from .utils import sync, TimeoutError, parse_timedelta
 from .protocol.serialize import to_serialize
+from .utils import TimeoutError, sync
 
 logger = logging.getLogger(__name__)
 
 
 class PubSubSchedulerExtension:
-    """ Extend Dask's scheduler with routes to handle PubSub machinery """
+    """Extend Dask's scheduler with routes to handle PubSub machinery"""
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
@@ -117,7 +118,7 @@ class PubSubSchedulerExtension:
 
 
 class PubSubWorkerExtension:
-    """ Extend Dask's Worker with routes to handle PubSub machinery """
+    """Extend Dask's Worker with routes to handle PubSub machinery"""
 
     def __init__(self, worker):
         self.worker = worker
@@ -170,7 +171,7 @@ class PubSubWorkerExtension:
 
 
 class PubSubClientExtension:
-    """ Extend Dask's Client with handlers to handle PubSub machinery """
+    """Extend Dask's Client with handlers to handle PubSub machinery"""
 
     def __init__(self, client):
         self.client = client
@@ -225,7 +226,7 @@ class Pub:
     Pubs and Subs use the central scheduler to find each other, but not to
     mediate the communication.  This means that there is very little additional
     latency or overhead, and they are appropriate for very frequent data
-    transfers.  For context, most data transfer first checks with the scheduler to 
+    transfers.  For context, most data transfer first checks with the scheduler to
     find which workers should participate, and then does direct worker-to-worker
     transfers.  This checking in with the scheduler provides some stability
     guarantees, but also adds in a few extra network hops.  PubSub doesn't do
@@ -284,7 +285,7 @@ class Pub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed import get_worker, get_client
+            from distributed import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -345,11 +346,11 @@ class Pub:
             self.client.scheduler_comm.send(data)
 
     def put(self, msg):
-        """ Publish a message to all subscribers of this topic """
+        """Publish a message to all subscribers of this topic"""
         self.loop.add_callback(self._put, msg)
 
     def __repr__(self):
-        return "<Pub: {}>".format(self.name)
+        return f"<Pub: {self.name}>"
 
     __str__ = __repr__
 
@@ -364,7 +365,7 @@ class Sub:
 
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
-            from distributed.worker import get_worker, get_client
+            from distributed.worker import get_client, get_worker
 
             try:
                 worker = get_worker()
@@ -421,8 +422,7 @@ class Sub:
             try:
                 await asyncio.wait_for(_(), timeout2)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 fails here sometimes
-                    self.condition.release()
+                self.condition.release()
 
         return self.buffer.popleft()
 
@@ -462,6 +462,6 @@ class Sub:
             self.condition.notify()
 
     def __repr__(self):
-        return "<Sub: {}>".format(self.name)
+        return f"<Sub: {self.name}>"
 
     __str__ = __repr__

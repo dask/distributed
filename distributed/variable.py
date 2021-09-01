@@ -1,14 +1,15 @@
 import asyncio
-from collections import defaultdict
-from contextlib import suppress
 import logging
 import uuid
+from collections import defaultdict
+from contextlib import suppress
 
 from tlz import merge
 
-from dask.utils import stringify
-from .client import Future, Client
-from .utils import log_errors, TimeoutError, parse_timedelta
+from dask.utils import parse_timedelta, stringify
+
+from .client import Client, Future
+from .utils import TimeoutError, log_errors
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
@@ -89,8 +90,7 @@ class VariableExtension:
 
                 await asyncio.wait_for(_(), timeout=left)
             finally:
-                with suppress(RuntimeError):  # Python 3.6 loses lock on finally clause
-                    self.started.release()
+                self.started.release()
 
         record = self.variables[name]
         if record["type"] == "Future":

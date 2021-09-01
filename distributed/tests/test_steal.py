@@ -7,9 +7,13 @@ import weakref
 from operator import mul
 from time import sleep
 
-import dask
 import pytest
+from tlz import concat, sliding_window
+
+import dask
+
 from distributed import Nanny, Worker, wait, worker_client
+from distributed.compatibility import LINUX, WINDOWS
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import key_split
@@ -24,17 +28,16 @@ from distributed.utils_test import (
     slowidentity,
     slowinc,
 )
-from tlz import concat, sliding_window
+
+pytestmark = pytest.mark.ci1
 
 # Most tests here are timing-dependent
 setup_module = nodebug_setup_module
 teardown_module = nodebug_teardown_module
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)], timeout=20)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 2), ("127.0.0.2", 2)])
 async def test_work_stealing(c, s, a, b):
     [x] = await c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
@@ -73,7 +76,7 @@ async def test_steal_cheap_data_slow_computation(c, s, a, b):
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
-@pytest.mark.avoid_travis
+@pytest.mark.avoid_ci
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -107,7 +110,7 @@ async def test_worksteal_many_thieves(c, s, *workers):
     assert sum(map(len, s.has_what.values())) < 150
 
 
-@pytest.mark.xfail(reason="GH#3574")
+@pytest.mark.flaky(reruns=10, reruns_delay=5, reason="GH#3574")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
 async def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
@@ -142,23 +145,20 @@ async def test_steal_related_tasks(e, s, a, b, c):
     assert nearby > 10
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10, timeout=1000)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 10)
 async def test_dont_steal_fast_tasks_compute_time(c, s, *workers):
-    np = pytest.importorskip("numpy")
-    x = c.submit(np.random.random, 10000000, workers=workers[0].address)
-
     def do_nothing(x, y=None):
         pass
 
-    # execute and measure runtime once
-    await wait(c.submit(do_nothing, 1))
+    xs = c.map(do_nothing, range(10), workers=workers[0].address)
+    await wait(xs)
 
-    futures = c.map(do_nothing, range(1000), y=x)
+    futures = c.map(do_nothing, range(100), y=xs)
 
     await wait(futures)
 
-    assert len(s.who_has[x.key]) == 1
-    assert len(s.has_what[workers[0].address]) == 1001
+    assert len(set.union(*(s.who_has[x.key] for x in xs))) == 1
+    assert len(s.has_what[workers[0].address]) == len(xs) + len(futures)
 
 
 @gen_cluster(client=True)
@@ -198,7 +198,7 @@ async def test_dont_steal_fast_tasks_blacklist(c, s, a, b):
     assert len(s.has_what[b.address]) == 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)], timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
 async def test_new_worker_steals(c, s, a):
     await wait(c.submit(slowinc, 1, delay=0.01))
 
@@ -220,7 +220,7 @@ async def test_new_worker_steals(c, s, a):
     await b.close()
 
 
-@gen_cluster(client=True, timeout=20)
+@gen_cluster(client=True)
 async def test_work_steal_no_kwargs(c, s, a, b):
     await wait(c.submit(slowinc, 1, delay=0.05))
 
@@ -286,9 +286,7 @@ async def test_steal_worker_restrictions(c, s, wa, wb, wc):
     assert len(wc.tasks) == 0
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 1)])
 async def test_dont_steal_host_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
@@ -307,9 +305,7 @@ async def test_dont_steal_host_restrictions(c, s, a, b):
     assert len(b.tasks) == 0
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
-)
+@pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.2", 2)])
 async def test_steal_host_restrictions(c, s, wa, wb):
     future = c.submit(slowinc, 1, delay=0.10, workers=wa.address)
@@ -355,9 +351,7 @@ async def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.tasks) == 0
 
 
-@gen_cluster(
-    client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})], timeout=3
-)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})])
 async def test_steal_resource_restrictions(c, s, a):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     await future
@@ -369,10 +363,8 @@ async def test_steal_resource_restrictions(c, s, a):
 
     b = await Worker(s.address, loop=s.loop, nthreads=1, resources={"A": 4})
 
-    start = time()
     while not b.tasks or len(a.tasks) == 101:
         await asyncio.sleep(0.01)
-        assert time() < start + 3
 
     assert len(b.tasks) > 0
     assert len(a.tasks) < 101
@@ -380,7 +372,7 @@ async def test_steal_resource_restrictions(c, s, a):
     await b.close()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5, timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 5)
 async def test_balance_without_dependencies(c, s, *workers):
     s.extensions["stealing"]._pc.callback_time = 20
 
@@ -405,6 +397,22 @@ async def test_dont_steal_executing_tasks(c, s, a, b):
     await wait(futures)
     assert len(a.data) == 4
     assert len(b.data) == 0
+
+
+@gen_cluster(client=True)
+async def test_dont_steal_executing_tasks_2(c, s, a, b):
+    steal = s.extensions["stealing"]
+
+    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
+    while not a.executing_count:
+        await asyncio.sleep(0.01)
+
+    steal.move_task_request(
+        s.tasks[future.key], s.workers[a.address], s.workers[b.address]
+    )
+    await asyncio.sleep(0.1)
+    assert a.tasks[future.key].state == "executing"
+    assert not b.executing_count
 
 
 @gen_cluster(
@@ -535,7 +543,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
 
         if result2 == expected2:
             return
-    raise Exception("Expected: {}; got: {}".format(str(expected2), str(result2)))
+    raise Exception(f"Expected: {expected2}; got: {result2}")
 
 
 @pytest.mark.parametrize(
@@ -563,6 +571,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
         pytest.param(
             [[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
             [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
+            # Can't mark as flaky as when it fails it does so every time for some reason
             marks=pytest.mark.xfail(
                 reason="Some uncertainty based on executing stolen task"
             ),
@@ -585,7 +594,7 @@ def test_balance(inp, expected):
     test()
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=20)
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2, Worker=Nanny, timeout=60)
 async def test_restart(c, s, a, b):
     futures = c.map(
         slowinc, range(100), delay=0.1, workers=a.address, allow_other_workers=True
@@ -597,7 +606,7 @@ async def test_restart(c, s, a, b):
     assert any(st for st in steal.stealable_all)
     assert any(x for L in steal.stealable.values() for x in L)
 
-    await c.restart(timeout=10)
+    await c.restart()
 
     assert not any(x for x in steal.stealable_all)
     assert not any(x for L in steal.stealable.values() for x in L)
@@ -635,6 +644,12 @@ async def test_steal_communication_heavy_tasks(c, s, a, b):
     assert s.processing[b.address]
 
 
+@pytest.mark.flaky(
+    condition=WINDOWS and sys.version_info[:2] == (3, 7),
+    reruns=20,
+    reruns_delay=5,
+    reason="b.in_flight_tasks == 1",
+)
 @gen_cluster(client=True)
 async def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
@@ -659,32 +674,20 @@ async def test_steal_twice(c, s, a, b):
         )
     assert max(map(len, has_what.values())) < 30
 
+    assert a.in_flight_tasks == 0
+    assert b.in_flight_tasks == 0
+
     await c._close()
     await asyncio.gather(*[w.close() for w in workers])
-
-
-@gen_cluster(client=True)
-async def test_dont_steal_executing_tasks(c, s, a, b):
-    steal = s.extensions["stealing"]
-
-    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
-    while not a.executing_count:
-        await asyncio.sleep(0.01)
-
-    steal.move_task_request(
-        s.tasks[future.key], s.workers[a.address], s.workers[b.address]
-    )
-    await asyncio.sleep(0.1)
-    assert a.tasks[future.key].state == "executing"
-    assert not b.executing_count
 
 
 @gen_cluster(client=True)
 async def test_dont_steal_already_released(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.05, workers=a.address)
     key = future.key
-    await asyncio.sleep(0.05)
-    assert key in a.tasks
+    while key not in a.tasks:
+        await asyncio.sleep(0.05)
+
     del future
     await asyncio.sleep(0.05)
     # In case the system is slow (e.g. network) ensure that nothing bad happens
@@ -697,10 +700,9 @@ async def test_dont_steal_already_released(c, s, a, b):
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG
     ) as stealing_logs:
-        await asyncio.sleep(0.05)
-
-    logs = stealing_logs.getvalue()
-    assert f"Key released between request and confirm: {key}" in logs
+        msg = f"Key released between request and confirm: {key}"
+        while msg not in stealing_logs.getvalue():
+            await asyncio.sleep(0.05)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
@@ -737,11 +739,6 @@ async def test_dont_steal_long_running_tasks(c, s, a, b):
         ) <= 1
 
 
-@pytest.mark.xfail(
-    sys.version_info[:2] == (3, 8),
-    reason="Sporadic failure on Python 3.8",
-    strict=False,
-)
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 5)] * 2)
 async def test_cleanup_repeated_tasks(c, s, a, b):
     class Foo:
@@ -825,3 +822,38 @@ async def test_balance_with_longer_task(c, s, a, b):
     )  # a task after y, suggesting a, but open to b
     await z
     assert z.key in b.data
+
+
+@gen_cluster(client=True)
+async def test_blacklist_shuffle_split(c, s, a, b):
+
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    npart = 10
+    df = dd.from_pandas(pd.DataFrame({"A": range(100), "B": 1}), npartitions=npart)
+    graph = df.shuffle(
+        "A",
+        shuffle="tasks",
+        # If we don't have enough partitions, we'll fall back to a simple shuffle
+        max_branch=npart - 1,
+    ).sum()
+    res = c.compute(graph)
+
+    while not s.tasks:
+        await asyncio.sleep(0.005)
+    prefixes = set(s.task_prefixes.keys())
+    from distributed.stealing import fast_tasks
+
+    blacklisted = fast_tasks & prefixes
+    assert blacklisted
+    assert any(["split" in prefix for prefix in blacklisted])
+
+    stealable = s.extensions["stealing"].stealable
+    while not res.done():
+        for tasks_per_level in stealable.values():
+            for tasks in tasks_per_level:
+                for ts in tasks:
+                    assert ts.prefix.name not in fast_tasks
+                    assert "split" not in ts.prefix.name
+        await asyncio.sleep(0.001)
+    await res

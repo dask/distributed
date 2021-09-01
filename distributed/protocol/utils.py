@@ -1,8 +1,10 @@
 import struct
 
+import dask
+
 from ..utils import nbytes
 
-BIG_BYTES_SHARD_SIZE = 2 ** 26
+BIG_BYTES_SHARD_SIZE = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
 
 
 msgpack_opts = {
@@ -23,6 +25,7 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
+    n = n or BIG_BYTES_SHARD_SIZE
     frame = memoryview(frame)
 
     if frame.nbytes <= n:
@@ -32,57 +35,6 @@ def frame_split_size(frame, n=BIG_BYTES_SHARD_SIZE) -> list:
     items_per_shard = n // frame.itemsize
 
     return [frame[i : i + items_per_shard] for i in range(0, nitems, items_per_shard)]
-
-
-def merge_frames(header, frames):
-    """Merge frames into original lengths
-
-    Examples
-    --------
-    >>> merge_frames({'lengths': [3, 3]}, [b'123456'])
-    [b'123', b'456']
-    >>> merge_frames({'lengths': [6]}, [b'123', b'456'])
-    [b'123456']
-    """
-    lengths = list(header["lengths"])
-    writeables = list(header["writeable"])
-
-    assert len(lengths) == len(writeables)
-    assert sum(lengths) == sum(map(nbytes, frames))
-
-    if all(len(f) == l for f, l in zip(frames, lengths)):
-        return [
-            (bytearray(f) if w else bytes(f)) if w == memoryview(f).readonly else f
-            for w, f in zip(header["writeable"], frames)
-        ]
-
-    frames = frames[::-1]
-    lengths = lengths[::-1]
-    writeables = writeables[::-1]
-
-    out = []
-    while lengths:
-        l = lengths.pop()
-        w = writeables.pop()
-        L = []
-        while l:
-            frame = frames.pop()
-            if nbytes(frame) <= l:
-                L.append(frame)
-                l -= nbytes(frame)
-            else:
-                frame = memoryview(frame)
-                L.append(frame[:l])
-                frames.append(frame[l:])
-                l = 0
-        if len(L) == 1 and w != memoryview(L[0]).readonly:  # no work necessary
-            out.extend(L)
-        elif w:
-            out.append(bytearray().join(L))
-        else:
-            out.append(bytes().join(L))
-
-    return out
 
 
 def pack_frames_prelude(frames):

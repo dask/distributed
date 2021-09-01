@@ -3,10 +3,9 @@ import sys
 
 import pytest
 
-from distributed.versions import get_versions, error_message
 from distributed import Client, Worker
-from distributed.utils_test import gen_cluster, loop  # noqa: F401
-
+from distributed.utils_test import gen_cluster
+from distributed.versions import error_message, get_versions
 
 # if one of the nodes reports this version, there's a mismatch
 mismatched_version = get_versions()

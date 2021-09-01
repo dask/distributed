@@ -1,15 +1,15 @@
+import filecmp
 import inspect
 import logging
 import os
 import shutil
 import sys
-from typing import List
-from types import ModuleType
-import filecmp
+import urllib.request
 from importlib import import_module
+from types import ModuleType
+from typing import List
 
 import click
-from tornado.httpclient import AsyncHTTPClient
 
 from dask.utils import tmpfile
 
@@ -119,13 +119,13 @@ def _import_module(name, file_dir=None) -> ModuleType:
     return module
 
 
-async def _download_module(url: str) -> ModuleType:
+def _download_module(url: str) -> ModuleType:
     logger.info("Downloading preload at %s", url)
     assert is_webaddress(url)
 
-    client = AsyncHTTPClient()
-    response = await client.fetch(url)
-    source = response.body.decode()
+    request = urllib.request.Request(url, method="GET")
+    response = urllib.request.urlopen(request)
+    source = response.read().decode()
 
     compiled = compile(source, url, "exec")
     module = ModuleType(url)
@@ -155,16 +155,13 @@ class Preload:
         self.argv = argv
         self.file_dir = file_dir
 
-        if not is_webaddress(name):
-            self.module = _import_module(name, file_dir)
+        if is_webaddress(name):
+            self.module = _download_module(name)
         else:
-            self.module = None
+            self.module = _import_module(name, file_dir)
 
     async def start(self):
-        """ Run when the server finishes its start method """
-        if is_webaddress(self.name):
-            self.module = await _download_module(self.name)
-
+        """Run when the server finishes its start method"""
         dask_setup = getattr(self.module, "dask_setup", None)
 
         if dask_setup:
@@ -185,7 +182,7 @@ class Preload:
                 logger.info("Run preload setup function: %s", self.name)
 
     async def teardown(self):
-        """ Run when the server starts its close method """
+        """Run when the server starts its close method"""
         dask_teardown = getattr(self.module, "dask_teardown", None)
         if dask_teardown:
             future = dask_teardown(self.dask_server)

@@ -9,7 +9,6 @@ from dask.utils import parse_bytes
 from .. import protocol
 from ..utils import get_ip, get_ipv6, nbytes, offload
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -20,19 +19,18 @@ if isinstance(OFFLOAD_THRESHOLD, str):
 
 
 async def to_frames(
-    msg, serializers=None, on_error="message", context=None, allow_offload=True
+    msg,
+    allow_offload=True,
+    **kwargs,
 ):
     """
     Serialize a message into a list of Distributed protocol frames.
+    Any kwargs are forwarded to protocol.dumps().
     """
 
     def _to_frames():
         try:
-            return list(
-                protocol.dumps(
-                    msg, serializers=serializers, on_error=on_error, context=context
-                )
-            )
+            return list(protocol.dumps(msg, **kwargs))
         except Exception as e:
             logger.info("Unserializable Message: %s", msg)
             logger.exception(e)
@@ -82,39 +80,47 @@ async def from_frames(frames, deserialize=True, deserializers=None, allow_offloa
     return res
 
 
-def get_tcp_server_address(tcp_server):
+def get_tcp_server_addresses(tcp_server):
     """
-    Get the bound address of a started Tornado TCPServer.
+    Get all bound addresses of a started Tornado TCPServer.
     """
     sockets = list(tcp_server._sockets.values())
     if not sockets:
-        raise RuntimeError("TCP Server %r not started yet?" % (tcp_server,))
+        raise RuntimeError(f"TCP Server {tcp_server!r} not started yet?")
 
     def _look_for_family(fam):
+        socks = []
         for sock in sockets:
             if sock.family == fam:
-                return sock
-        return None
+                socks.append(sock)
+        return socks
 
     # If listening on both IPv4 and IPv6, prefer IPv4 as defective IPv6
     # is common (e.g. Travis-CI).
-    sock = _look_for_family(socket.AF_INET)
-    if sock is None:
-        sock = _look_for_family(socket.AF_INET6)
-    if sock is None:
+    socks = _look_for_family(socket.AF_INET)
+    if not socks:
+        socks = _look_for_family(socket.AF_INET6)
+    if not socks:
         raise RuntimeError("No Internet socket found on TCPServer??")
 
-    return sock.getsockname()
+    return [sock.getsockname() for sock in socks]
 
 
-def ensure_concrete_host(host):
+def get_tcp_server_address(tcp_server):
+    """
+    Get the first bound address of a started Tornado TCPServer.
+    """
+    return get_tcp_server_addresses(tcp_server)[0]
+
+
+def ensure_concrete_host(host, default_host=None):
     """
     Ensure the given host string (or IP) denotes a concrete host, not a
     wildcard listening address.
     """
     if host in ("0.0.0.0", ""):
-        return get_ip()
+        return default_host or get_ip()
     elif host == "::":
-        return get_ipv6()
+        return default_host or get_ipv6()
     else:
         return host
