@@ -375,42 +375,85 @@ class GroupTiming(SchedulerPlugin):
 
     def __init__(self, scheduler):
         self.scheduler = scheduler
+        # Time series of task states
         self.states: Dict[str, List[Tuple[float, Dict[str, int]]]] = dict()
+        # Time series of bytes stored per task group
         self.nbytes: Dict[str, List[Tuple[float, int]]] = dict()
+        # We snapshot the task state after every `delta` number of
+        # tasks are completed.
+        self._deltas: Dict[str, int] = dict()
 
         t = time.time()
         for name, group in self.scheduler.task_groups.items():
-            if name not in self.states:
-                self.create(name)
-                self.insert(t, name, group)
+            self.create(name, group)
+            self.insert(t, name, group)
 
         scheduler.add_plugin(self)
 
-    def create(self, name):
+    def create(self, name, group):
+        """
+        Set up timeseries data for a new task group
+        """
         with log_errors():
             self.states[name] = []
             self.nbytes[name] = []
+            # Snapshot states roughly after every 1% of tasks are completed.
+            # This could conceivably change if new tasks are added after delta
+            # is computed, so it's meant to be approximate.
+            n_tasks = sum(group.states.values())
+            delta = max(int(n_tasks / 100), 1)
+            self._deltas[name] = delta
 
     def insert(self, timestamp, name, group):
+        """
+        Append a new entry to our tasks timeseries.
+        """
         with log_errors():
-            state = {
-                "memory": group.states["memory"],
-                "erred": group.states["erred"],
-                "waiting": group.states["waiting"],
-                "released": group.states["released"],
-                "processing": group.states["processing"],
-            }
-            self.states[name].append((timestamp, state))
-            self.nbytes[name].append((timestamp, group.nbytes_total))
+            if not len(self.states[name]):
+                # If the timeseries is empty, just insert the current value.
+                state = {
+                    "memory": group.states["memory"],
+                    "erred": group.states["erred"],
+                    "waiting": group.states["waiting"],
+                    "released": group.states["released"],
+                    "processing": group.states["processing"],
+                }
+                self.states[name].append((timestamp, state))
+                self.nbytes[name].append((timestamp, group.nbytes_total))
+            else:
+                # If the timeseries exists, we check the most recent entry,
+                # and determine whether `delta` tasks have been completed since then.
+                prev = self.states[name][-1]
+                pstates = prev[1]
+                pcount = pstates["erred"] + pstates["memory"] + pstates["released"]
+
+                states = group.states
+                count = states["erred"] + states["memory"] + states["released"]
+
+                if count - pcount >= self._deltas[name]:
+                    state = {
+                        "memory": group.states["memory"],
+                        "erred": group.states["erred"],
+                        "waiting": group.states["waiting"],
+                        "released": group.states["released"],
+                        "processing": group.states["processing"],
+                    }
+                    self.states[name].append((timestamp, state))
+                    self.nbytes[name].append((timestamp, group.nbytes_total))
 
     def transition(self, key, start, finish, *args, **kwargs):
-        with log_errors():
-            t = time.time()
-            for name, group in self.scheduler.task_groups.items():
+        # We mostly are interested in when tasks are "processing", so we only
+        # check if the transition involves that state.
+        if start == "processing" or finish == "processing":
+            with log_errors():
+                name = key_split_group(key)
+                group = self.scheduler.task_groups[name]
+                t = time.time()
                 if name not in self.states:
-                    self.create(name)
+                    self.create(name, group)
                 self.insert(t, name, group)
 
     def restart(self, scheduler):
         self.states.clear()
         self.nbytes.clear()
+        self._deltas.clear()
