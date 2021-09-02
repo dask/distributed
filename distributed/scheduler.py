@@ -5417,13 +5417,12 @@ class Scheduler(SchedulerState, ServerNode):
 
     def release_worker_data(self, comm=None, key=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        if worker not in parent._workers_dv:
+        ws: WorkerState = parent._workers_dv.get(worker)
+        ts: TaskState = parent._tasks.get(key)
+        if not ws or not ts:
             return
-        ws: WorkerState = parent._workers_dv[worker]
-        ts: TaskState
-        ts = parent._tasks.get(key)
         recommendations: dict = {}
-        if ts and ts in ws._has_what:
+        if ts in ws._has_what:
             del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
             wh: set = ts._who_has

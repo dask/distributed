@@ -683,12 +683,10 @@ async def test_dont_steal_already_released(c, s, a, b):
 
     del future
 
-    # In case the system is slow (e.g. network) ensure that nothing bad happens
-    # if the key was already released
     while key in a.tasks and a.tasks[key].state != "released":
         await asyncio.sleep(0.05)
 
-    a.steal_request(key)
+    a.handle_steal_request(key)
     assert len(a.batched_stream.buffer) == 1
     msg = a.batched_stream.buffer[0]
     assert msg["op"] == "steal-response"
