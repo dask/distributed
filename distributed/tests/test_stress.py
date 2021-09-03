@@ -185,7 +185,7 @@ async def test_stress_communication(c, s, *workers):
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
+    z = da.blockwise(vsum, "ij", *concat(zip(ys, ["ij"] * n)), dtype="float64")
 
     future = c.compute(z.sum())
 

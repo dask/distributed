@@ -399,8 +399,13 @@ class LoopRunner:
 
         def run_loop(loop=self._loop):
             loop.add_callback(loop_cb)
+            # run loop forever if it's not running already
             try:
-                loop.start()
+                if (
+                    getattr(loop, "asyncio_loop", None) is None
+                    or not loop.asyncio_loop.is_running()
+                ):
+                    loop.start()
             except Exception as e:
                 start_exc[0] = e
             finally:
@@ -417,11 +422,13 @@ class LoopRunner:
         if actual_thread is not thread:
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
-            if not isinstance(start_exc[0], RuntimeError):
+            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
                 if not isinstance(
                     start_exc[0], Exception
                 ):  # track down infrequent error
-                    raise TypeError("not an exception", start_exc[0])
+                    raise TypeError(
+                        f"not an exception: {start_exc[0]!r}",
+                    )
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
