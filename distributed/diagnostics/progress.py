@@ -5,6 +5,7 @@ from timeit import default_timer
 
 from tlz import groupby, valmap
 
+from dask.base import tokenize
 from dask.utils import stringify
 
 from ..utils import key_split
@@ -60,8 +61,8 @@ class Progress(SchedulerPlugin):
     notably TextProgressBar and ProgressWidget, which do perform visualization.
     """
 
-    def __init__(self, keys, scheduler, minimum=0, dt=0.1, complete=False):
-        self.name = "Progress"
+    def __init__(self, keys, scheduler, minimum=0, dt=0.1, complete=False, name=None):
+        self.name = name or f"progress-{tokenize(keys, minimum, dt, complete)}"
         self.keys = {k.key if hasattr(k, "key") else k for k in keys}
         self.keys = {stringify(k) for k in self.keys}
         self.scheduler = scheduler
@@ -160,7 +161,10 @@ class MultiProgress(Progress):
         self, keys, scheduler=None, func=key_split, minimum=0, dt=0.1, complete=False
     ):
         self.func = func
-        super().__init__(keys, scheduler, minimum=minimum, dt=dt, complete=complete)
+        name = f"multi-progress-{tokenize(keys, func, minimum, dt, complete)}"
+        super().__init__(
+            keys, scheduler, minimum=minimum, dt=dt, complete=complete, name=name
+        )
 
     async def setup(self):
         keys = self.keys
