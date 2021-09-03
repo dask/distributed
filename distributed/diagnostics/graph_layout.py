@@ -29,8 +29,6 @@ class GraphLayout(SchedulerPlugin):
         self.visible_updates = []
         self.visible_edge_updates = []
 
-        scheduler.add_plugin(self)
-
         if self.scheduler.tasks:
             dependencies = {
                 k: [ds.key for ds in ts.dependencies]
