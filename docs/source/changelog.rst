@@ -1,6 +1,35 @@
 Changelog
 =========
 
+2021.09.0
+---------
+
+Released on September 3, 2021
+
+- Fix ``add_plugin`` warnings (:pr:`5267`) `Doug Davis`_
+- Add ``list`` around iterator in ``handle_missing_dep`` (:pr:`5285`) `Matthew Rocklin`_
+- Jupyter-client 7 compatiblity (:pr:`5286`) `Min RK`_
+- Replace ``atop`` with ``blockwise`` (:pr:`5289`) `James Bourbeau`_
+- Add pytest color to CI (:pr:`5276`) `James Bourbeau`_
+- Fix ``test_map`` and others (:pr:`5278`) `crusaderky`_
+- Use ``name`` argument with ``Scheduler.remove_plugin`` calls (:pr:`5260`) `Doug Davis`_
+- Downgrade to ``jupyter_client`` 6 (:pr:`5273`) `crusaderky`_
+- Migrate ``Security`` HTML repr to Jinja2 (:pr:`5264`) `Jacob Tomlinson`_
+- Migrate ``ProcessInterface`` HTML repr to Jinja2 (:pr:`5263`) `Jacob Tomlinson`_
+- Add support for diskless machines to system monitor (:pr:`5257`) `James Bourbeau`_
+- Avoid during-iteration scheduler plugin changes (:pr:`5259`) `Doug Davis`_
+- Remove ``GroupProgress`` scheduler plugin (:pr:`5256`) `James Bourbeau`_
+- Properly check for ipv6 availability (:pr:`5255`) `crusaderky`_
+- Improved IPv6 dask-worker support (:pr:`5197`) `Walt Woods`_
+- Overwrite worker plugins (:pr:`5248`) `Matthew Rocklin`_
+- Refactor scheduler plugins; store in a dictionary (:pr:`5120`) `Doug Davis`_
+- Fix "then" -> "than" typo in docs (:pr:`5247`) `David Chudzicki`_
+- Fix typo (remove extra verb "creates") in docs (:pr:`5244`) `David Chudzicki`_
+- Fix "fractiom" -> "fraction" typo in docstring (:pr:`5245`) `David Chudzicki`_
+- Fix "schedulers" -> "scheduler" typo in docs (:pr:`5246`) `David Chudzicki`_
+- Use non-histogram plots up to 100 workers (:pr:`5249`) `Matthew Rocklin`_
+
+
 2021.08.1
 ---------
 
@@ -2605,3 +2634,5 @@ significantly without many new features.
 .. _`Freyam Mehta`: https://github.com/freyam
 .. _`gerrymanoim`: https://github.com/gerrymanoim
 .. _`Bryan Van de Ven`: https://github.com/bryevdv
+.. _`David Chudzicki`: https://github.com/dchudz
+.. _`Walt Woods`: https://github.com/wwoods
