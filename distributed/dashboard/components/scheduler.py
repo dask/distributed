@@ -1943,6 +1943,7 @@ class TaskGraph(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
+        scheduler.add_plugin(self.layout)
         self.invisible_count = 0  # number of invisible nodes
 
         self.node_source = ColumnDataSource(

@@ -1,3 +1,5 @@
+import uuid
+
 from .plugin import SchedulerPlugin
 
 
@@ -11,9 +13,8 @@ class GraphLayout(SchedulerPlugin):
     is rendered at /graph on the diagnostic dashboard.
     """
 
-    name = "graph-layout"
-
     def __init__(self, scheduler):
+        self.name = f"graph-layout-{uuid.uuid4()}"
         self.x = {}
         self.y = {}
         self.collision = {}
@@ -28,8 +29,6 @@ class GraphLayout(SchedulerPlugin):
         self.state_updates = []
         self.visible_updates = []
         self.visible_edge_updates = []
-
-        scheduler.add_plugin(self)
 
         if self.scheduler.tasks:
             dependencies = {

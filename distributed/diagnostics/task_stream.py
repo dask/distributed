@@ -27,7 +27,6 @@ class TaskStreamPlugin(SchedulerPlugin):
             )
         self.buffer = deque(maxlen=maxlen)
         self.scheduler = scheduler
-        scheduler.add_plugin(self)
         self.index = 0
 
     def transition(self, key, start, finish, *args, **kwargs):

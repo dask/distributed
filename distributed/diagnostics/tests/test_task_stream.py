@@ -14,6 +14,7 @@ from distributed.utils_test import div, gen_cluster, inc, slowinc
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_TaskStreamPlugin(c, s, *workers):
     es = TaskStreamPlugin(s)
+    s.add_plugin(es)
     assert not es.buffer
 
     futures = c.map(div, [1] * 10, range(10))
@@ -46,6 +47,7 @@ async def test_TaskStreamPlugin(c, s, *workers):
 @gen_cluster(client=True)
 async def test_maxlen(c, s, a, b):
     tasks = TaskStreamPlugin(s, maxlen=5)
+    s.add_plugin(tasks)
     futures = c.map(inc, range(10))
     await wait(futures)
     assert len(tasks.buffer) == 5
@@ -54,6 +56,7 @@ async def test_maxlen(c, s, a, b):
 @gen_cluster(client=True)
 async def test_collect(c, s, a, b):
     tasks = TaskStreamPlugin(s)
+    s.add_plugin(tasks)
     start = time()
     futures = c.map(slowinc, range(10), delay=0.1)
     await wait(futures)
