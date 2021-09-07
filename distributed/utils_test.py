@@ -77,12 +77,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-logging_levels = {
-    name: logger.level
-    for name, logger in logging.root.manager.loggerDict.items()
-    if isinstance(logger, logging.Logger)
-}
-
 _TEST_TIMEOUT = 30
 _offload_executor.submit(lambda: None).result()  # create thread during import
 
@@ -213,14 +207,6 @@ def mock_ipython():
     for kc in remote_magic._clients.values():
         kc.stop_channels()
     remote_magic._clients.clear()
-
-
-original_config = copy.deepcopy(dask.config.config)
-
-
-def reset_config():
-    dask.config.config.clear()
-    dask.config.config.update(copy.deepcopy(original_config))
 
 
 def nodebug(func):
@@ -1585,18 +1571,13 @@ def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
             with check_process_leak(check=processes):
                 with check_instances() if instances else nullcontext():
                     with check_active_rpc(loop, timeout):
-                        reset_config()
+                        with dask.config.set(
+                            {"distributed.comm.timeouts.connect": "5s"}
+                        ):
+                            yield loop
 
-                        dask.config.set({"distributed.comm.timeouts.connect": "5s"})
-                        # Restore default logging levels
-                        # XXX use pytest hooks/fixtures instead?
-                        for name, level in logging_levels.items():
-                            logging.getLogger(name).setLevel(level)
-
-                        yield loop
-
-                        with suppress(AttributeError):
-                            del thread_state.on_event_loop_thread
+                            with suppress(AttributeError):
+                                del thread_state.on_event_loop_thread
 
 
 @pytest.fixture
