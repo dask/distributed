@@ -2939,7 +2939,7 @@ async def test_gather_on_worker(c, s, a, b):
     assert x_ts not in b_ws.has_what
     assert x_ts.who_has == {a_ws}
 
-    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
@@ -2955,14 +2955,14 @@ async def test_gather_on_worker_bad_recipient(c, s, a, b):
     x = await c.scatter("x")
     await b.close()
     assert s.workers.keys() == {a.address}
-    out = await s._gather_on_worker(b.address, {x.key: [a.address]})
+    out = await s.gather_on_worker(b.address, {x.key: [a.address]})
     assert out == {x.key}
 
 
 @gen_cluster(client=True, worker_kwargs={"timeout": "100ms"})
 async def test_gather_on_worker_bad_sender(c, s, a, b):
     """The only sender for a key is missing"""
-    out = await s._gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
+    out = await s.gather_on_worker(a.address, {"x": ["tcp://127.0.0.1:12345"]})
     assert out == {"x"}
 
 
@@ -2974,7 +2974,7 @@ async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first)
     bad_addr = "tcp://127.0.0.1:12345"
     # Order matters; test both
     addrs = [bad_addr, a.address] if missing_first else [a.address, bad_addr]
-    out = await s._gather_on_worker(b.address, {x.key: addrs})
+    out = await s.gather_on_worker(b.address, {x.key: addrs})
     assert out == set()
     assert a.data[x.key] == "x"
     assert b.data[x.key] == "x"
@@ -2983,7 +2983,7 @@ async def test_gather_on_worker_bad_sender_replicated(c, s, a, b, missing_first)
 @gen_cluster(client=True)
 async def test_gather_on_worker_key_not_on_sender(c, s, a, b):
     """The only sender for a key does not actually hold it"""
-    out = await s._gather_on_worker(a.address, {"x": [b.address]})
+    out = await s.gather_on_worker(a.address, {"x": [b.address]})
     assert out == {"x"}
 
 
@@ -2998,7 +2998,7 @@ async def test_gather_on_worker_key_not_on_sender_replicated(
     x = await client.scatter("x", workers=[a.address])
     # Order matters; test both
     addrs = [b.address, a.address] if missing_first else [a.address, b.address]
-    out = await s._gather_on_worker(c.address, {x.key: addrs})
+    out = await s.gather_on_worker(c.address, {x.key: addrs})
     assert out == set()
     assert a.data[x.key] == "x"
     assert c.data[x.key] == "x"
@@ -3015,8 +3015,8 @@ async def test_gather_on_worker_duplicate_task(client, s, a, b, c):
     assert x.key not in c.data
 
     out = await asyncio.gather(
-        s._gather_on_worker(c.address, {x.key: [a.address]}),
-        s._gather_on_worker(c.address, {x.key: [b.address]}),
+        s.gather_on_worker(c.address, {x.key: [a.address]}),
+        s.gather_on_worker(c.address, {x.key: [b.address]}),
     )
     assert out == [set(), set()]
     assert c.data[x.key] == "x"
@@ -3064,7 +3064,7 @@ async def test_delete_worker_data(c, s, a, b):
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {x.key, y.key, z.key}
 
-    await s._delete_worker_data(a.address, [x.key, y.key])
+    await s.delete_worker_data(a.address, [x.key, y.key])
     assert a.data == {z.key: "z"}
     assert b.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key, z.key}
@@ -3078,8 +3078,8 @@ async def test_delete_worker_data_double_delete(c, s, a):
     """
     x, y = await c.scatter(["x", "y"])
     await asyncio.gather(
-        s._delete_worker_data(a.address, [x.key]),
-        s._delete_worker_data(a.address, [x.key]),
+        s.delete_worker_data(a.address, [x.key]),
+        s.delete_worker_data(a.address, [x.key]),
     )
     assert a.data == {y.key: "y"}
     a_ws = s.workers[a.address]
@@ -3094,7 +3094,7 @@ async def test_delete_worker_data_bad_worker(s, a, b):
     """
     await a.close()
     assert s.workers.keys() == {b.address}
-    await s._delete_worker_data(a.address, ["x"])
+    await s.delete_worker_data(a.address, ["x"])
 
 
 @pytest.mark.parametrize("bad_first", [False, True])
@@ -3109,7 +3109,7 @@ async def test_delete_worker_data_bad_task(c, s, a, bad_first):
     assert s.tasks.keys() == {x.key, y.key}
 
     keys = ["notexist", x.key] if bad_first else [x.key, "notexist"]
-    await s._delete_worker_data(a.address, keys)
+    await s.delete_worker_data(a.address, keys)
     assert a.data == {y.key: "y"}
     assert s.tasks.keys() == {y.key}
     assert s.workers[a.address].nbytes == s.tasks[y.key].nbytes

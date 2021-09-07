@@ -42,6 +42,7 @@ from dask.widgets import get_template
 
 from . import preloading, profile
 from . import versions as version_module
+from .active_memory_manager import ActiveMemoryManagerExtension
 from .batched import BatchedSend
 from .comm import (
     get_address_host,
@@ -172,6 +173,7 @@ DEFAULT_EXTENSIONS = [
     PubSubSchedulerExtension,
     SemaphoreExtension,
     EventExtension,
+    ActiveMemoryManagerExtension,
 ]
 
 ALL_TASK_STATES = declare(
@@ -5859,8 +5861,8 @@ class Scheduler(SchedulerState, ServerNode):
         )
         return d[worker]
 
-    async def _gather_on_worker(
-        self, worker_address: str, who_has: "dict[Hashable, list[str]]"
+    async def gather_on_worker(
+        self, worker_address: str, who_has: "dict[str, list[str]]"
     ) -> set:
         """Peer-to-peer copy of keys from multiple workers to a single worker
 
@@ -5919,7 +5921,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         return keys_failed
 
-    async def _delete_worker_data(self, worker_address: str, keys: "list[str]") -> None:
+    async def delete_worker_data(self, worker_address: str, keys: "list[str]") -> None:
         """Delete data from a worker and update the corresponding worker/task states
 
         Parameters
@@ -6290,7 +6292,7 @@ class Scheduler(SchedulerState, ServerNode):
                 await asyncio.gather(
                     *(
                         # Note: this never raises exceptions
-                        self._gather_on_worker(w, who_has)
+                        self.gather_on_worker(w, who_has)
                         for w, who_has in to_recipients.items()
                     )
                 ),
@@ -6304,7 +6306,7 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Note: this never raises exceptions
         await asyncio.gather(
-            *(self._delete_worker_data(r, v) for r, v in to_senders.items())
+            *(self.delete_worker_data(r, v) for r, v in to_senders.items())
         )
 
         for r, v in to_recipients.items():
@@ -6390,7 +6392,7 @@ class Scheduler(SchedulerState, ServerNode):
                 # Note: this never raises exceptions
                 await asyncio.gather(
                     *[
-                        self._delete_worker_data(ws._address, [t.key for t in tasks])
+                        self.delete_worker_data(ws._address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
                     ]
                 )
@@ -6420,7 +6422,7 @@ class Scheduler(SchedulerState, ServerNode):
                 await asyncio.gather(
                     *(
                         # Note: this never raises exceptions
-                        self._gather_on_worker(w, who_has)
+                        self.gather_on_worker(w, who_has)
                         for w, who_has in gathers.items()
                     )
                 )
