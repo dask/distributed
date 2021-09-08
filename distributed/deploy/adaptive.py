@@ -1,17 +1,21 @@
+import collections
 import logging
 from inspect import isawaitable
+
+import tlz as toolz
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask.config
 from dask.utils import parse_timedelta
 
+from ..metrics import time
 from ..protocol import pickle
 from ..utils import log_errors
-from .adaptive_core import AdaptiveCore
 
 logger = logging.getLogger(__name__)
 
 
-class Adaptive(AdaptiveCore):
+class Adaptive:
     '''
     Adaptively allocate workers based on scheduler load.  A superclass.
 
@@ -104,12 +108,40 @@ class Adaptive(AdaptiveCore):
             target_duration = dask.config.get("distributed.adaptive.target-duration")
 
         self.target_duration = parse_timedelta(target_duration)
+        self.interval = parse_timedelta(interval, "seconds")
+        self.wait_count = wait_count
+        self.minimum = minimum
+        self.maximum = maximum
+        self.periodic_callback = None
+
+        def f():
+            try:
+                self.periodic_callback.start()
+            except AttributeError:
+                pass
+
+        if self.interval:
+            import weakref
+
+            self_ref = weakref.ref(self)
+
+            async def _adapt():
+                core = self_ref()
+                if core:
+                    await core.adapt()
+
+            self.periodic_callback = PeriodicCallback(_adapt, self.interval * 1000)
+            try:
+                self.loop.add_callback(f)
+            except AttributeError:
+                IOLoop.current().add_callback(f)
+
+        # internal state
+        self.close_counts = collections.defaultdict(int)
+        self._adapting = False
+        self.log = collections.deque(maxlen=10000)
 
         logger.info("Adaptive scaling started: minimum=%s maximum=%s", minimum, maximum)
-
-        super().__init__(
-            minimum=minimum, maximum=maximum, wait_count=wait_count, interval=interval
-        )
 
     @property
     def scheduler(self):
@@ -126,6 +158,13 @@ class Adaptive(AdaptiveCore):
     @property
     def observed(self):
         return self.cluster.observed
+
+    def stop(self):
+        logger.info("Adaptive stop")
+
+        if self.periodic_callback:
+            self.periodic_callback.stop()
+            self.periodic_callback = None
 
     async def target(self):
         """
@@ -148,13 +187,54 @@ class Adaptive(AdaptiveCore):
             target_duration=self.target_duration
         )
 
+    async def recommendations_helper(self, target: int) -> dict:
+        plan = self.plan
+        requested = self.requested
+        observed = self.observed
+
+        if target == len(plan):
+            self.close_counts.clear()
+            return {"status": "same"}
+
+        elif target > len(plan):
+            self.close_counts.clear()
+            return {"status": "up", "n": target}
+
+        elif target < len(plan):
+            not_yet_arrived = requested - observed
+            to_close = set()
+            if not_yet_arrived:
+                to_close.update(toolz.take(len(plan) - target, not_yet_arrived))
+
+            if target < len(plan) - len(to_close):
+                L = await self.workers_to_close(target=target)
+                to_close.update(L)
+
+            firmly_close = set()
+            for w in to_close:
+                self.close_counts[w] += 1
+                if self.close_counts[w] >= self.wait_count:
+                    firmly_close.add(w)
+
+            for k in list(self.close_counts):  # clear out unseen keys
+                if k in firmly_close or k not in to_close:
+                    del self.close_counts[k]
+
+            if firmly_close:
+                return {"status": "down", "workers": list(firmly_close)}
+            else:
+                return {"status": "same"}
+
     async def recommendations(self, target: int) -> dict:
+        """
+        Make scale up/down recommendations based on current state and target
+        """
         if len(self.plan) != len(self.requested):
             # Ensure that the number of planned and requested workers
             # are in sync before making recommendations.
             await self.cluster
 
-        return await super().recommendations(target)
+        return await self.recommendations_helper(target)
 
     async def workers_to_close(self, target: int):
         """
@@ -181,6 +261,17 @@ class Adaptive(AdaptiveCore):
             **self._workers_to_close_kwargs,
         )
 
+    async def safe_target(self) -> int:
+        """Used internally, like target, but respects minimum/maximum"""
+        n = await self.target()
+        if n > self.maximum:
+            n = self.maximum
+
+        if n < self.minimum:
+            n = self.minimum
+
+        return n
+
     async def scale_down(self, workers):
         if not workers:
             return
@@ -202,6 +293,46 @@ class Adaptive(AdaptiveCore):
         f = self.cluster.scale(n)
         if isawaitable(f):
             await f
+
+    async def adapt(self) -> None:
+        """
+        Check the current state, make recommendations, call scale
+
+        This is the main event of the system
+        """
+        if self._adapting:  # Semaphore to avoid overlapping adapt calls
+            return
+        self._adapting = True
+        status = None
+
+        try:
+
+            target = await self.safe_target()
+            recommendations = await self.recommendations(target)
+
+            if recommendations["status"] != "same":
+                self.log.append((time(), dict(recommendations)))
+
+            status = recommendations.pop("status")
+            if status == "same":
+                return
+            if status == "up":
+                await self.scale_up(**recommendations)
+            if status == "down":
+                await self.scale_down(**recommendations)
+        except OSError:
+            if status != "down":
+                logger.error("Adaptive stopping due to error", exc_info=True)
+                self.stop()
+            else:
+                logger.error(
+                    "Error during adaptive downscaling. Ignoring.", exc_info=True
+                )
+        finally:
+            self._adapting = False
+
+    def __del__(self):
+        self.stop()
 
     @property
     def loop(self):
