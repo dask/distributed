@@ -31,8 +31,8 @@ from dask.utils import (
     funcname,
     parse_bytes,
     parse_timedelta,
-    typename,
     stringify,
+    typename,
 )
 
 from . import comm, preloading, profile, system, utils
