@@ -162,6 +162,11 @@ properties:
               Whether or not to run consistency checks during execution.
               This is typically only used for debugging.
 
+          zeroconf:
+            type: boolean
+            description: |
+              Whether or not to advertise the scheduler via zeroconf.
+
           dashboard:
             type: object
             description: |

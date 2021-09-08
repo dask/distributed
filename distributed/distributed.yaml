@@ -30,6 +30,7 @@ distributed:
       rechunk-split: 1us
       split-shuffle: 1us
     validate: False         # Check scheduler state at every step for debugging
+    zeroconf: true
     dashboard:
       status:
         task-stream-length: 1000

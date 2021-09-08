@@ -22,7 +22,7 @@ from dask.utils import apply, parse_timedelta, stringify, typename
 
 from distributed import Client, Nanny, Worker, fire_and_forget, wait
 from distributed.comm import Comm
-from distributed.compatibility import LINUX, WINDOWS
+from distributed.compatibility import LINUX, MACOS, WINDOWS
 from distributed.core import ConnectionPool, Status, connect, rpc
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -3156,6 +3156,22 @@ async def test_transition_counter(c, s, a, b):
     assert s.transition_counter > 1
 
 
+@gen_cluster(
+    config={"distributed.scheduler.zeroconf": True},
+)
+async def test_zeroconf(s, *_):
+    zeroconf = pytest.importorskip("zeroconf")
+    assert len(s._zeroconf_services) == 1
+    async with zeroconf.asyncio.AsyncZeroconf(interfaces=["127.0.0.1"]) as aiozc:
+        service = s._zeroconf_services[0]
+        service = await aiozc.async_get_service_info("_dask._tcp.local.", service.name)
+        [address] = service.parsed_addresses()
+        assert str(address) in s.address
+        assert str(service.port) in s.address
+
+
+@pytest.mark.skipif(MACOS and sys.version_info < (3, 9), reason="GH#5056")
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1) for _ in range(10)],

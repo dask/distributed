@@ -8,6 +8,7 @@ import math
 import operator
 import os
 import random
+import socket
 import sys
 import uuid
 import warnings
@@ -50,7 +51,11 @@ from .comm import (
     resolve_address,
     unparse_host_port,
 )
-from .comm.addressing import addresses_from_user_args
+from .comm.addressing import (
+    addresses_from_user_args,
+    get_address_host_port,
+    parse_address,
+)
 from .core import CommClosedError, Status, clean_exception, rpc, send_recv
 from .diagnostics.plugin import SchedulerPlugin, _get_plugin_name
 from .event import EventExtension
@@ -88,6 +93,12 @@ try:
     from cython import compiled
 except ImportError:
     compiled = False
+
+try:
+    import zeroconf
+    from zeroconf.asyncio import AsyncServiceInfo, AsyncZeroconf
+except ImportError:
+    zeroconf = False
 
 if compiled:
     from cython import (
@@ -3557,6 +3568,12 @@ class Scheduler(SchedulerState, ServerNode):
         self._lock = asyncio.Lock()
         self.bandwidth_workers = defaultdict(float)
         self.bandwidth_types = defaultdict(float)
+        if zeroconf and dask.config.get("distributed.scheduler.zeroconf"):
+            self._zeroconf = AsyncZeroconf(ip_version=zeroconf.IPVersion.V4Only)
+        else:
+            self._zeroconf = None
+        self._zeroconf_services = []
+        self._zeroconf_registration_tasks = []
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -3931,6 +3948,32 @@ class Scheduler(SchedulerState, ServerNode):
 
         for listener in self.listeners:
             logger.info("  Scheduler at: %25s", listener.contact_address)
+            if (
+                zeroconf
+                and dask.config.get("distributed.scheduler.zeroconf")
+                and not self.address.startswith("inproc://")
+            ):
+                # Advertise service via mdns service discovery
+                try:
+                    host, port = get_address_host_port(listener.contact_address)
+                except NotImplementedError:
+                    # If address is not IP based continue
+                    continue
+                protocol, _ = parse_address(listener.contact_address)
+                short_id = self.id.split("-")[1]
+                info = AsyncServiceInfo(
+                    "_dask._tcp.local.",
+                    f"_sched-{short_id}._dask._tcp.local.",
+                    addresses=[socket.inet_aton(host)],
+                    port=port,
+                    properties={"protocol": protocol},
+                    server=f"sched-{short_id}.dask.local.",
+                )
+                self._zeroconf_services.append(info)
+                self._zeroconf_registration_tasks.append(
+                    await self._zeroconf.async_register_service(info)
+                )
+                logger.info("  Advertising as: %25s", info.server)
         for k, v in self.services.items():
             logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
 
@@ -4001,6 +4044,12 @@ class Scheduler(SchedulerState, ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
+
+        if self._zeroconf:
+            await self._zeroconf.async_close()
+            for task in self._zeroconf_registration_tasks:
+                with suppress(asyncio.CancelledError):
+                    task.cancel()
 
         for ext in parent._extensions.values():
             with suppress(AttributeError):
