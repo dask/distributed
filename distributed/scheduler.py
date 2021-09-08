@@ -18,7 +18,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
+from typing import List, Optional
 
 import psutil
 import sortedcontainers
@@ -3724,6 +3724,7 @@ class Scheduler(SchedulerState, ServerNode):
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
+            "annotate-task": self.annotate_task,
         }
 
         client_handlers = {
@@ -5606,6 +5607,30 @@ class Scheduler(SchedulerState, ServerNode):
                 pass
             except (CommClosedError, AttributeError):
                 self.loop.add_callback(self.remove_worker, address=worker)
+
+    def annotate_task(
+        self,
+        worker=None,
+        key: str = None,
+        annotations: Mapping = None,
+        dependents: bool = None,
+    ):
+        """Update the annotations and restrictions of a task"""
+
+        parent: SchedulerState = cast(SchedulerState, self)
+        if worker not in parent._workers_dv:
+            return
+        validate_key(key)
+        ts: TaskState = parent.tasks[key]
+
+        # Find tasks to annotate
+        tasks: List[TaskState] = [ts]
+        if dependents:
+            tasks.extend(ts.dependents)
+
+        if annotations:
+            for dts in tasks:
+                dts.annotations.update(annotations)
 
     ############################
     # Less common interactions #

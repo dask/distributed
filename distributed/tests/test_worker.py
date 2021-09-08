@@ -54,7 +54,13 @@ from distributed.utils_test import (
     slowinc,
     slowsum,
 )
-from distributed.worker import Worker, error_message, logger, parse_memory_limit
+from distributed.worker import (
+    TaskState,
+    Worker,
+    error_message,
+    logger,
+    parse_memory_limit,
+)
 
 pytestmark = pytest.mark.ci1
 
@@ -2027,6 +2033,104 @@ async def test_process_executor(c, s, a, b):
             future = c.submit(os.getpid, pure=False)
 
         assert (await future) != os.getpid()
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_annotator_choose_executor(c, s):
+    """Test that it is possible for a task to choose executor"""
+
+    def get_thread_name(x):
+        return threading.current_thread().name
+
+    def set_executor_by_task_output(ts: TaskState, value: object) -> dict:
+        return {"annotations": {"executor": value}, "dependents": True}
+
+    def f(x):
+        return x
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        executor={
+            "exec1": ThreadPoolExecutor(1, thread_name_prefix="Executor1"),
+            "exec2": ThreadPoolExecutor(1, thread_name_prefix="Executor2"),
+        },
+        annotators=[set_executor_by_task_output],
+    ):
+        dsk = {
+            "f1": (f, "exec1"),
+            "g1": (get_thread_name, "f1"),
+            "f2": (f, "exec2"),
+            "g2": (get_thread_name, "f2"),
+        }
+        res1, res2 = c.get(dsk, ["g1", "g2"], sync=False, asynchronous=True)
+        assert "Executor1" in await res1
+        assert "Executor2" in await res2
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_annotator_raise_exception(c, s):
+    """Test that it is possible for a task to choose executor"""
+
+    def broken_annotator(ts: TaskState, value: object) -> dict:
+        raise RuntimeError()
+
+    def f(x):
+        return x
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        annotators=[broken_annotator],
+    ) as w:
+        res = await c.submit(f, "test")
+        assert any("ERROR" in log for log in w.get_logs())
+
+        # Notice, the task should succeed even when the annotator fails
+        assert res == "test"
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_annotator_choose_gpu_executor(c, s):
+    """
+    Demonstrate the possible of automatically choose a
+    GPU-Executor based on the type of the task output
+    """
+
+    numpy = pytest.importorskip("numpy")
+    cupy = pytest.importorskip("cupy")
+    dask_cuda = pytest.importorskip("dask_cuda.is_device_object")
+
+    def get_thread_name(x):
+        return threading.current_thread().name
+
+    def set_gpu_executor(ts: TaskState, value: object) -> dict:
+        if dask_cuda.is_device_object(value):
+            return {"annotations": {"executor": "gpu"}, "dependents": True}
+
+    def f(ary_type):
+        if ary_type == "numpy":
+            return numpy.arange(10)
+        elif ary_type == "cupy":
+            return cupy.arange(10)
+
+    async with Worker(
+        s.address,
+        nthreads=1,
+        executor={
+            "gpu": ThreadPoolExecutor(1, thread_name_prefix="GPU-Executor"),
+        },
+        annotators=[set_gpu_executor],
+    ):
+        dsk = {
+            "f1": (f, "numpy"),
+            "g1": (get_thread_name, "f1"),
+            "f2": (f, "cupy"),
+            "g2": (get_thread_name, "f2"),
+        }
+        res1, res2 = c.get(dsk, ["g1", "g2"], sync=False, asynchronous=True)
+        assert "Dask-Default-Threads" in await res1
+        assert "GPU-Executor" in await res2
 
 
 def kill_process():

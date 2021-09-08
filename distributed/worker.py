@@ -16,7 +16,7 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Hashable, Iterable, Optional
+from typing import Callable, Dict, Hashable, Iterable, Mapping, Optional
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -174,7 +174,7 @@ class TaskState:
         self.who_has = set()
         self.coming_from = None
         self.waiting_for_data = set()
-        self.resource_restrictions = None
+        self.resource_restrictions = {}
         self.exception = None
         self.exception_text = ""
         self.traceback = None
@@ -186,7 +186,7 @@ class TaskState:
         self.stop_time = None
         self.metadata = {}
         self.nbytes = None
-        self.annotations = None
+        self.annotations = {}
         self.scheduler_holds_ref = False
 
     def __repr__(self):
@@ -352,6 +352,10 @@ class Worker(ServerNode):
     lifetime_restart: bool
         Whether or not to restart a worker after it has reached its lifetime
         Default False
+    annotators: Iterable[Callable[[TaskState, object], bool]], optional
+        List of annotators, which are functions that given a `TaskState` and task
+        output modifies the `TaskState` and return whether any changes was made to
+        the `TaskState` or not.
 
     Examples
     --------
@@ -418,9 +422,10 @@ class Worker(ServerNode):
         lifetime=None,
         lifetime_stagger=None,
         lifetime_restart=None,
+        annotators=None,
         **kwargs,
     ):
-        self.tasks = dict()
+        self.tasks: Dict[str, TaskState] = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -689,6 +694,10 @@ class Worker(ServerNode):
         )
 
         self.low_level_profiler = low_level_profiler
+
+        self.annotators: Iterable[Callable[[TaskState, object], Mapping]] = (
+            annotators or ()
+        )
 
         handlers = {
             "gather": self.gather,
@@ -1503,11 +1512,15 @@ class Worker(ServerNode):
             self.log.append((key, "receive-from-scatter"))
 
         if report:
-
             self.log.append(
                 ("Notifying scheduler about in-memory in update-data", list(data))
             )
             self.batched_stream.send({"op": "add-keys", "keys": list(data)})
+
+        if self.annotators:
+            for key, value in data.items():
+                self.handle_annotators(self.tasks[key], value)
+
         info = {"nbytes": {k: sizeof(v) for k, v in data.items()}, "status": "OK"}
         return info
 
@@ -1653,7 +1666,7 @@ class Worker(ServerNode):
             ts.duration = duration
             if resource_restrictions:
                 ts.resource_restrictions = resource_restrictions
-            ts.annotations = annotations
+            ts.annotations = annotations or {}
 
             who_has = who_has or {}
 
@@ -1903,6 +1916,7 @@ class Worker(ServerNode):
 
             self.log.append(("Notifying scheduler about in-memory", ts.key))
             self.batched_stream.send({"op": "add-keys", "keys": [ts.key]})
+            self.handle_annotators(ts, value)
 
         except Exception as e:
             logger.exception(e)
@@ -1926,7 +1940,7 @@ class Worker(ServerNode):
 
             self.has_what[self.address].discard(ts.key)
 
-            if ts.resource_restrictions is not None:
+            if ts.resource_restrictions:
                 self.constrained.append(ts.key)
                 return "constrained"
             else:
@@ -1949,6 +1963,7 @@ class Worker(ServerNode):
             ts.waiting_for_data.clear()
             if value is not None:
                 self.put_key_in_memory(ts, value)
+            self.handle_annotators(ts, value)
             self.send_task_state_to_scheduler(ts)
         except Exception as e:
             logger.exception(e)
@@ -2009,9 +2024,8 @@ class Worker(ServerNode):
                 assert ts.key not in self.ready
 
             out = None
-            if ts.resource_restrictions is not None:
-                for resource, quantity in ts.resource_restrictions.items():
-                    self.available_resources[resource] += quantity
+            for resource, quantity in ts.resource_restrictions.items():
+                self.available_resources[resource] += quantity
 
             if ts.state == "executing":
                 self.executing_count -= 1
@@ -2034,11 +2048,12 @@ class Worker(ServerNode):
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
 
-            if report and self.batched_stream and self.status == Status.running:
-                self.send_task_state_to_scheduler(ts)
+            if self.batched_stream and self.status == Status.running:
+                self.handle_annotators(ts, value)
+                if report:
+                    self.send_task_state_to_scheduler(ts)
             else:
                 raise CommClosedError
-
             return out
 
         except OSError:
@@ -2219,7 +2234,7 @@ class Worker(ServerNode):
                 pdb.set_trace()
             raise
 
-    def send_task_state_to_scheduler(self, ts):
+    def send_task_state_to_scheduler(self, ts: TaskState):
         if ts.key in self.data or self.actors.get(ts.key):
             typ = ts.type
             if ts.nbytes is None or typ is None:
@@ -2298,6 +2313,48 @@ class Worker(ServerNode):
                 self.transition(dep, "ready")
 
         self.log.append((ts.key, "put-in-memory"))
+
+    def handle_annotators(
+        self,
+        ts: TaskState,
+        value: object = no_value,
+    ):
+        """Annotate task if applicable and report back to the scheduler"""
+
+        # Separate annotation updates into two cases:
+        a1 = {}  # when the task's dependents should also be updated
+        a2 = {}  # when only the task itself should be updated
+        for func in self.annotators:
+            try:
+                res = func(ts, value)
+            except Exception as e:
+                logger.exception(e)
+            else:
+                if res:
+                    if res["dependents"]:
+                        a1.update(res["annotations"])
+                    else:
+                        a2.update(res["annotations"])
+        if a1:
+            ts.annotations.update(a1)
+            self.batched_stream.send(
+                {
+                    "op": "annotate-task",
+                    "key": ts.key,
+                    "annotations": a1,
+                    "dependents": True,
+                }
+            )
+        if a2:
+            ts.annotations.update(a2)
+            self.batched_stream.send(
+                {
+                    "op": "annotate-task",
+                    "key": ts.key,
+                    "annotations": a2,
+                    "dependents": False,
+                }
+            )
 
     def select_keys_for_gather(self, worker, dep):
         assert isinstance(dep, str)
@@ -2854,12 +2911,9 @@ class Worker(ServerNode):
 
     def meets_resource_constraints(self, key):
         ts = self.tasks[key]
-        if not ts.resource_restrictions:
-            return True
         for resource, needed in ts.resource_restrictions.items():
             if self.available_resources[resource] < needed:
                 return False
-
         return True
 
     async def _maybe_deserialize_task(self, ts):
@@ -2946,10 +3000,7 @@ class Worker(ServerNode):
 
             args2, kwargs2 = self._prepare_args_for_execution(ts, args, kwargs)
 
-            if ts.annotations is not None and "executor" in ts.annotations:
-                executor = ts.annotations["executor"]
-            else:
-                executor = "default"
+            executor = ts.annotations.get("executor", "default")
             assert executor in self.executors
             assert key == ts.key
             self.active_keys.add(ts.key)
