@@ -78,6 +78,9 @@ def test_pickle_empty():
     assert header["serializer"] == "pickle"
     header["writeable"] = (False,) * len(frames)
     y = deserialize(header, frames)
+    assert isinstance(y, MemoryviewHolder)
+    assert isinstance(y.mv, memoryview)
+    assert y.mv == x.mv
     assert y.mv.nbytes == 0
     assert y.mv.readonly
 
