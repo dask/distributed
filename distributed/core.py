@@ -33,7 +33,6 @@ from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (
     CancelledError,
-    EventHandler,
     TimeoutError,
     get_traceback,
     has_keyword,
@@ -238,7 +237,6 @@ class Server:
         )
 
         self.__stopped = False
-        self._setup_event_logging(logger)
 
     @property
     def status(self):
@@ -625,33 +623,6 @@ class Server:
                 yield asyncio.sleep(0.01)
 
         self._event_finished.set()
-
-    def _setup_event_logging(self, logger):
-        level = dask.config.get("distributed.admin.log-events.level")
-        if not level:
-            return
-        loggers_to_register = list(
-            dask.config.get("distributed.admin.log-events.loggers")
-        )
-        loggers_to_register.append(logger.name)
-        handler = EventHandler._instance or EventHandler(level=level)
-        if self not in handler.servers:
-            handler.servers.append(self)
-        for logger_name in loggers_to_register:
-            logger = logging.getLogger(logger_name)
-            if handler not in logger.handlers:
-                logger.addHandler(handler)
-
-        def remove_from_servers(handler):
-            if self in handler.servers:
-                handler.servers.remove(self)
-            if not handler.servers:
-                logger.removeHandler(handler)
-
-        weakref.finalize(self, remove_from_servers, handler)
-
-    def log_event(self, topic, msg):
-        pass
 
 
 def pingpong(comm):

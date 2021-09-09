@@ -998,12 +998,12 @@ def json_load_robust(fn, load=json.load):
 
 
 class EventHandler(logging.Handler):
-    _instance = None
+    _instances_by_level = weakref.WeakValueDictionary()
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, level) -> None:
+        super().__init__(level)
         self.servers = []
-        EventHandler._instance = self
+        EventHandler._instances_by_level[level] = self
 
     def emit(self, record):
         self.servers[0].log_event(["logs", record.levelname], record.getMessage())

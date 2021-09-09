@@ -260,10 +260,8 @@ distributed:
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     log-events:
-      level: ERROR
-      loggers:
-        - tornado
-        - tornado.application
+      tornado: ERROR
+      distributed: ERROR
 
     pdb-on-err: False       # enter debug mode on scheduling error
     system-monitor:

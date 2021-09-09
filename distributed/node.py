@@ -11,7 +11,7 @@ import dask
 from .comm import get_address_host, get_tcp_server_addresses
 from .core import Server
 from .http.routing import RoutingApplication
-from .utils import DequeHandler, clean_dashboard_address
+from .utils import DequeHandler, EventHandler, clean_dashboard_address
 from .versions import get_versions
 
 
@@ -86,7 +86,32 @@ class ServerNode(Server):
         )
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
-        self._setup_event_logging(logger)
+
+        loggers_to_register = dask.config.get("distributed.admin.log-events")
+
+        for logger_name, level in loggers_to_register.items():
+            if level not in EventHandler._instances_by_level:
+                handler = EventHandler(level=level)
+
+                def remove_from_servers(handler):
+                    if self in handler.servers:
+                        handler.servers.remove(self)
+                    if not handler.servers:
+                        logger.removeHandler(handler)
+
+                weakref.finalize(self, remove_from_servers, handler)
+            else:
+                handler = EventHandler._instances_by_level[level]
+
+            if self not in handler.servers:
+                handler.servers.append(self)
+
+            logger = logging.getLogger(logger_name)
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+
+    def log_event(self, topic, msg):
+        pass
 
     def get_logs(self, comm=None, n=None):
         deque_handler = self._deque_handler
