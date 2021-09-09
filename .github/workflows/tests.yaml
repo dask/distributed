@@ -54,6 +54,12 @@ jobs:
         shell: bash -l {0}
         run: conda config --show
 
+      - name: Optionally install pickle5
+        shell: bash -l {0}
+        # pickle5 is used for out-of-band pickling support in Python 3.7
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version < '3.8' }}
+        run: mamba install -c conda-forge pickle5
+
       - name: Install stacktrace
         shell: bash -l {0}
         # stacktrace for Python 3.8 has not been released at the moment of writing
