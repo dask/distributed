@@ -17,7 +17,13 @@ from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils import parse_ports, sync, tmpfile
-from distributed.utils_test import gen_cluster, popen, terminate_process, wait_for_port
+from distributed.utils_test import (
+    gen_cluster,
+    popen,
+    requires_ipv6,
+    terminate_process,
+    wait_for_port,
+)
 
 
 def test_nanny_worker_ports(loop):
@@ -304,6 +310,40 @@ def test_contact_listen_address(loop, nanny, listen_address):
                     return dask_worker.listener.listen_address
 
                 assert client.run(func) == {"tcp://127.0.0.2:39837": listen_address}
+
+
+@requires_ipv6
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+@pytest.mark.parametrize("listen_address", ["tcp://:39838", "tcp://[::1]:39838"])
+def test_listen_address_ipv6(loop, nanny, listen_address):
+    with popen(["dask-scheduler", "--no-dashboard"]):
+        with popen(
+            [
+                "dask-worker",
+                "127.0.0.1:8786",
+                nanny,
+                "--no-dashboard",
+                "--listen-address",
+                listen_address,
+            ]
+        ):
+            # IPv4 used by default for name of global listener; IPv6 used by default when
+            # listening only on IPv6.
+            bind_all = "[::1]" not in listen_address
+            expected_ip = "127.0.0.1" if bind_all else "[::1]"
+            expected_name = f"tcp://{expected_ip}:39838"
+            expected_listen = "tcp://0.0.0.0:39838" if bind_all else listen_address
+            with Client("127.0.0.1:8786") as client:
+                while not client.nthreads():
+                    sleep(0.1)
+                info = client.scheduler_info()
+                assert expected_name in info["workers"]
+                assert client.submit(lambda x: x + 1, 10).result() == 11
+
+                def func(dask_worker):
+                    return dask_worker.listener.listen_address
+
+                assert client.run(func) == {expected_name: expected_listen}
 
 
 @pytest.mark.skipif(not LINUX, reason="Need 127.0.0.2 to mean localhost")

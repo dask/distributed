@@ -80,17 +80,7 @@ def init_once():
     try:
         import rmm
 
-        if hasattr(rmm, "DeviceBuffer"):
-            device_array = lambda n: rmm.DeviceBuffer(size=n)
-        else:  # pre-0.11.0
-            import numba.cuda
-
-            def rmm_device_array(n):
-                a = rmm.device_array(n, dtype="u1")
-                weakref.finalize(a, numba.cuda.current_context)
-                return a
-
-            device_array = rmm_device_array
+        device_array = lambda n: rmm.DeviceBuffer(size=n)
     except ImportError:
         try:
             import numba.cuda

@@ -4,6 +4,9 @@ from .task_stream import colors
 
 
 class WebsocketPlugin(SchedulerPlugin):
+
+    name = "websocket"
+
     def __init__(self, socket, scheduler):
         self.socket = socket
         self.scheduler = scheduler

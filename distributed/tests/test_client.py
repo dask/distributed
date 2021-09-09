@@ -5173,16 +5173,19 @@ async def test_secede_balances(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_sub_submit_priority(c, s, a, b):
-    def f():
+    def func():
         client = get_client()
-        client.submit(slowinc, 1, delay=0.2, key="slowinc")
+        f = client.submit(slowinc, 1, delay=0.5, key="slowinc")
+        client.gather(f)
 
-    future = c.submit(f, key="f")
-    await asyncio.sleep(0.1)
-    if len(s.tasks) == 2:
-        assert (
-            s.priorities["f"] > s.priorities["slowinc"]
-        )  # lower values schedule first
+    future = c.submit(func, key="f")
+    while len(s.tasks) != 2:
+        await asyncio.sleep(0.001)
+    # lower values schedule first
+    assert s.tasks["f"].priority > s.tasks["slowinc"].priority, (
+        s.tasks["f"].priority,
+        s.tasks["slowinc"].priority,
+    )
 
 
 def test_get_client_sync(c, s, a, b):
@@ -6774,6 +6777,25 @@ def test_computation_object_code_dask_compute(client):
     code = client.run_on_scheduler(fetch_comp_code)
 
     assert code == test_function_code
+
+
+def test_computation_object_code_not_available(client):
+    np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+    df = pd.DataFrame({"a": range(10)})
+    ddf = dd.from_pandas(df, npartitions=3)
+    result = np.where(ddf.a > 4)
+
+    def fetch_comp_code(dask_scheduler):
+        computations = list(dask_scheduler.computations)
+        assert len(computations) == 1
+        comp = computations[0]
+        assert len(comp.code) == 1
+        return comp.code[0]
+
+    code = client.run_on_scheduler(fetch_comp_code)
+    assert code == "<Code not available>"
 
 
 @gen_cluster(client=True)

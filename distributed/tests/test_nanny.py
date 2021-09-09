@@ -6,6 +6,7 @@ import os
 import random
 from contextlib import suppress
 from time import sleep
+from unittest import mock
 
 import psutil
 import pytest
@@ -373,6 +374,34 @@ async def test_environment_variable(c, s):
     results = await c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
     await asyncio.gather(a.close(), b.close())
+
+
+@gen_cluster(nthreads=[], client=True)
+async def test_environment_variable_by_config(c, s, monkeypatch):
+
+    with dask.config.set({"distributed.nanny.environ": "456"}):
+        with pytest.raises(TypeError, match="configuration must be of type dict"):
+            Nanny(s.address, loop=s.loop, memory_limit=0)
+
+    with dask.config.set({"distributed.nanny.environ": {"FOO": "456"}}):
+
+        # precedence
+        # kwargs > env var > config
+
+        with mock.patch.dict(os.environ, {"FOO": "BAR"}, clear=True):
+            a = Nanny(s.address, loop=s.loop, memory_limit=0, env={"FOO": "123"})
+            x = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        b = Nanny(s.address, loop=s.loop, memory_limit=0)
+
+        await asyncio.gather(a, b, x)
+        results = await c.run(lambda: os.environ["FOO"])
+        assert results == {
+            a.worker_address: "123",
+            b.worker_address: "456",
+            x.worker_address: "BAR",
+        }
+        await asyncio.gather(a.close(), b.close(), x.close())
 
 
 @gen_cluster(

@@ -168,7 +168,7 @@ class Adaptive(AdaptiveCore):
 
         Returns
         -------
-        List of worker addresses to close, if any
+        List of worker names to close, if any
 
         See Also
         --------

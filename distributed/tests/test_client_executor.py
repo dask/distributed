@@ -138,7 +138,7 @@ def test_map(client):
 
     with client.get_executor(pure=False) as e:
         N = 10
-        it = e.map(slowinc, range(N), [0.1] * N, timeout=0.4)
+        it = e.map(slowinc, range(N), [0.3] * N, timeout=1.2)
         results = []
         with pytest.raises(TimeoutError):
             for x in it:
@@ -148,7 +148,7 @@ def test_map(client):
     with client.get_executor(pure=False) as e:
         N = 10
         # Not consuming the iterator will cancel remaining tasks
-        it = e.map(slowinc, range(N), [0.1] * N)
+        it = e.map(slowinc, range(N), [0.3] * N)
         for x in take(2, it):
             pass
         # Some tasks still processing

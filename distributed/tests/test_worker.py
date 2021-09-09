@@ -1044,6 +1044,26 @@ async def test_service_hosts_match_worker(s):
         sock = first(w.http_server._sockets.values())
         assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
+    # See what happens with e.g. `dask-worker --listen-address tcp://:8811`
+    async with Worker(s.address, host="") as w:
+        sock = first(w.http_server._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
+        # Address must be a connectable address. 0.0.0.0 is not!
+        address_all = w.address.rsplit(":", 1)[0]
+        assert address_all in ("tcp://[::1]", "tcp://127.0.0.1")
+
+    # Check various malformed IPv6 addresses
+    # Since these hostnames get passed to distributed.comm.address_from_user_args,
+    # bracketing is mandatory for IPv6.
+    with pytest.raises(ValueError) as exc:
+        async with Worker(s.address, host="::") as w:
+            pass
+    assert "bracketed" in str(exc)
+    with pytest.raises(ValueError) as exc:
+        async with Worker(s.address, host="tcp://::1") as w:
+            pass
+    assert "bracketed" in str(exc)
+
 
 @gen_cluster(nthreads=[])
 async def test_start_services(s):
@@ -2051,33 +2071,36 @@ def kill_process():
     import os
     import signal
 
-    os.kill(os.getpid(), signal.SIGTERM)
+    if WINDOWS:
+        # There's no SIGKILL on Windows
+        sig = signal.SIGTERM
+    else:
+        # With SIGTERM there may be several seconds worth of delay before the worker
+        # actually shuts down - particularly on slow CI. Use SIGKILL for instant
+        # termination.
+        sig = signal.SIGKILL
+
+    os.kill(os.getpid(), sig)
+    sleep(60)  # Cope with non-instantaneous termination
 
 
-@gen_cluster(client=True)
-async def test_process_executor_kills_process(c, s, a, b):
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_process_executor_kills_process(c, s, a):
     with ProcessPoolExecutor() as e:
         a.executors["processes"] = e
-        b.executors["processes"] = e
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(kill_process)
 
-        with pytest.raises(
-            BrokenProcessPool,
-            match="A child process terminated abruptly, the process pool is not usable anymore",
-        ):
+        msg = "A child process terminated abruptly, the process pool is not usable anymore"
+        with pytest.raises(BrokenProcessPool, match=msg):
             await future
 
         with dask.annotate(executor="processes", retries=1):
             future = c.submit(inc, 1)
 
-        # FIXME: The processpool is now unusable and the worker is effectively
-        # dead
-        with pytest.raises(
-            BrokenProcessPool,
-            match="A child process terminated abruptly, the process pool is not usable anymore",
-        ):
-            assert await future == 2
+        # The process pool is now unusable and the worker is effectively dead
+        with pytest.raises(BrokenProcessPool, match=msg):
+            await future
 
 
 def raise_exc():
@@ -2433,11 +2456,11 @@ async def test_hold_on_to_replicas(c, s, *workers):
 
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
-    """
-    This test ensure that if a worker disconnects while computing a result, the scheduler will still accept the result.
+    """Ensure that, if a worker disconnects while computing a result, the scheduler will
+    still accept the result.
 
     There is also an edge case tested which ensures that the reconnect is
-    successful if a task is currently executing, see
+    successful if a task is currently executing; see
     https://github.com/dask/distributed/issues/5078
 
     See also distributed.tests.test_scheduler.py::test_gather_allow_worker_reconnect
@@ -2485,13 +2508,83 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    while not len(s.tasks[f2.key].who_has) == 2:
-        await asyncio.sleep(0.001)
+    # Ensure that all in-memory tasks on A have been restored on the
+    # scheduler after reconnect
+    for ts in a.tasks.values():
+        if ts.state == "memory":
+            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
 
     # Ensure that all keys have been properly registered and will also be
     # cleaned up nicely.
     del f1, f2
 
+    while any(w.tasks for w in [a, b]):
+        await asyncio.sleep(0.001)
+
+
+@gen_cluster(client=True, timeout=5)
+async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
+    """
+    Ensure that a reconnecting worker does not break the scheduler regardless of
+    what state the keys of the worker are in when it connects back
+
+    See also test_worker_reconnects_mid_compute which uses a smaller chain of
+    tasks and does not release f1 in between
+    """
+
+    with captured_logger("distributed.scheduler") as s_logs:
+        # Let's put one task in memory to ensure the reconnect has tasks in
+        # different states
+        f1 = c.submit(inc, 1, workers=[a.address], allow_other_workers=True)
+        f2 = c.submit(inc, f1, workers=[a.address], allow_other_workers=True)
+        a_address = a.address
+
+        a.periodic_callbacks["heartbeat"].stop()
+        await a.heartbeat()
+        a.heartbeat_active = True
+
+        from distributed import Lock
+
+        def fast_on_a(lock):
+            w = get_worker()
+            import time
+
+            if w.address != a_address:
+                lock.acquire()
+            else:
+                time.sleep(1)
+
+        lock = Lock()
+        # We want to be sure that A is the only one computing this result
+        async with lock:
+
+            f3 = c.submit(
+                fast_on_a, lock, workers=[a.address], allow_other_workers=True
+            )
+
+            while f3.key not in a.tasks:
+                await asyncio.sleep(0.01)
+
+            await s.stream_comms[a.address].close()
+            f1.release()
+            assert len(s.workers) == 1
+            while s.tasks[f1.key].state != "released":
+                await asyncio.sleep(0)
+            a.heartbeat_active = False
+            await a.heartbeat()
+            assert len(s.workers) == 2
+            # Since B is locked, this is ensured to originate from A
+            await f3
+
+    assert "Unexpected worker completed task" in s_logs.getvalue()
+
+    # Ensure that all in-memory tasks on A have been restored on the
+    # scheduler after reconnect
+    for ts in a.tasks.values():
+        if ts.state == "memory":
+            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
+
+    del f1, f2, f3
     while any(w.tasks for w in [a, b]):
         await asyncio.sleep(0.001)
 

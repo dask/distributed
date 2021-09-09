@@ -155,16 +155,13 @@ class Comm(ABC):
         return out
 
     def __repr__(self):
-        clsname = self.__class__.__name__
-        if self.closed():
-            return f"<closed {clsname}>"
-        else:
-            return "<{} {} local={} remote={}>".format(
-                clsname,
-                self.name or "",
-                self.local_address,
-                self.peer_address,
-            )
+        return "<{}{} {} local={} remote={}>".format(
+            self.__class__.__name__,
+            " (closed)" if self.closed() else "",
+            self.name or "",
+            self.local_address,
+            self.peer_address,
+        )
 
 
 class Listener(ABC):
@@ -227,7 +224,7 @@ class Listener(ABC):
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
-            raise CommClosedError() from e
+            raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
