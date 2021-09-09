@@ -2477,7 +2477,7 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@gen_cluster(client=True, timeout=5)
+@gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
     Ensure that a reconnecting worker does not break the scheduler regardless of
