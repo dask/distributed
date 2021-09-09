@@ -76,7 +76,7 @@ def test_pickle_empty():
     np = pytest.importorskip("numpy")
     x = np.arange(2)[0:0]  # Empty view
     header, frames = pickle_dumps(x)
-    header["writeable"] = [False] * len(frames)
+    header["writeable"] = (False,) * len(frames)
     y = deserialize(header, frames)
     assert memoryview(y).nbytes == 0
     assert memoryview(y).readonly
