@@ -5172,16 +5172,19 @@ async def test_secede_balances(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_sub_submit_priority(c, s, a, b):
-    def f():
+    def func():
         client = get_client()
-        client.submit(slowinc, 1, delay=0.2, key="slowinc")
+        f = client.submit(slowinc, 1, delay=0.5, key="slowinc")
+        client.gather(f)
 
-    future = c.submit(f, key="f")
-    await asyncio.sleep(0.1)
-    if len(s.tasks) == 2:
-        assert (
-            s.priorities["f"] > s.priorities["slowinc"]
-        )  # lower values schedule first
+    future = c.submit(func, key="f")
+    while len(s.tasks) != 2:
+        await asyncio.sleep(0.001)
+    # lower values schedule first
+    assert s.tasks["f"].priority > s.tasks["slowinc"].priority, (
+        s.tasks["f"].priority,
+        s.tasks["slowinc"].priority,
+    )
 
 
 def test_get_client_sync(c, s, a, b):
