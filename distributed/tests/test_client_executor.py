@@ -155,7 +155,7 @@ def test_map(client):
         assert number_of_processing_tasks(client) > 0
         # Garbage collect the iterator => remaining tasks are cancelled
         del it
-        time.sleep(0.1)
+        time.sleep(0.5)
         assert number_of_processing_tasks(client) == 0
 
 

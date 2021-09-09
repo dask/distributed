@@ -264,7 +264,7 @@ class WorkStealing(SchedulerPlugin):
                     await self.scheduler.remove_worker(thief.address)
                 self.log(("confirm", key, victim.address, thief.address))
             else:
-                raise ValueError(f"Unexpected task state: {ts}")
+                raise ValueError(f"Unexpected task state: {state}")
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
