@@ -73,14 +73,13 @@ def test_pickle_out_of_band():
 
 
 def test_pickle_empty():
-    np = pytest.importorskip("numpy")
-    x = np.arange(2)[0:0]  # Empty view
+    x = MemoryviewHolder(bytearray())  # Empty view
     header, frames = serialize(x, serializers=("pickle",))
     assert header["serializer"] == "pickle"
     header["writeable"] = (False,) * len(frames)
     y = deserialize(header, frames)
-    assert memoryview(y).nbytes == 0
-    assert memoryview(y).readonly
+    assert y.mv.nbytes == 0
+    assert y.mv.readonly
 
 
 def test_pickle_numpy():
