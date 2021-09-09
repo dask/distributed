@@ -18,6 +18,17 @@ else:
     import pickle
 
 
+class MemoryviewHolder:
+    def __init__(self, mv):
+        self.mv = memoryview(mv)
+
+    def __reduce_ex__(self, protocol):
+        if protocol >= 5:
+            return MemoryviewHolder, (pickle.PickleBuffer(self.mv),)
+        else:
+            return MemoryviewHolder, (self.mv.tobytes(),)
+
+
 def test_pickle_data():
     data = [1, b"123", "123", [123], {}, set()]
     for d in data:
@@ -26,16 +37,6 @@ def test_pickle_data():
 
 
 def test_pickle_out_of_band():
-    class MemoryviewHolder:
-        def __init__(self, mv):
-            self.mv = memoryview(mv)
-
-        def __reduce_ex__(self, protocol):
-            if protocol >= 5:
-                return MemoryviewHolder, (pickle.PickleBuffer(self.mv),)
-            else:
-                return MemoryviewHolder, (self.mv.tobytes(),)
-
     mv = memoryview(b"123")
     mvh = MemoryviewHolder(mv)
 
