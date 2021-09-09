@@ -75,11 +75,22 @@ def test_pickle_out_of_band():
 def test_pickle_empty():
     x = MemoryviewHolder(bytearray())  # Empty view
     header, frames = serialize(x, serializers=("pickle",))
+
     assert header["serializer"] == "pickle"
     assert len(frames) >= 1
     assert isinstance(frames[0], bytes)
-    header["writeable"] = (False,) * len(frames)
+
+    if HIGHEST_PROTOCOL >= 5:
+        assert len(frames) == 2
+        assert len(header["writeable"]) == 1
+
+        header["writeable"] = (False,) * len(frames)
+    else:
+        assert len(frames) == 1
+        assert len(header["writeable"]) == 0
+
     y = deserialize(header, frames)
+
     assert isinstance(y, MemoryviewHolder)
     assert isinstance(y.mv, memoryview)
     assert y.mv == x.mv
