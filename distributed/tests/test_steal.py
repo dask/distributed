@@ -703,10 +703,9 @@ async def test_dont_steal_already_released(c, s, a, b):
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG
     ) as stealing_logs:
-        logs = stealing_logs.getvalue()
-        while f"Key released between request and confirm: {key}" not in logs:
+        msg = f"Key released between request and confirm: {key}"
+        while msg not in stealing_logs.getvalue():
             await asyncio.sleep(0.05)
-            logs = stealing_logs.getvalue()
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
