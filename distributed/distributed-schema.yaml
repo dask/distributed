@@ -952,6 +952,20 @@ properties:
               The log format to emit.
 
               See https://docs.python.org/3/library/logging.html#logrecord-attributes
+          log-events:
+            type: object
+            description: |
+              Options to control how logs are fed into the events system
+            properties:
+              level:
+                type: string
+                description: |
+                  The minimum log level. Everything below this level is ignored.
+              loggers:
+                type: array
+                description: |
+                  A list of loggers to be considered on top of the distributed default loggers.
+
           event-loop:
             type: string
             description: |

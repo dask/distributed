@@ -86,6 +86,7 @@ class ServerNode(Server):
         )
         logger.addHandler(self._deque_handler)
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
+        self._setup_event_logging(logger)
 
     def get_logs(self, comm=None, n=None):
         deque_handler = self._deque_handler

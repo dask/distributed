@@ -997,6 +997,18 @@ def json_load_robust(fn, load=json.load):
         sleep(0.1)
 
 
+class EventHandler(logging.Handler):
+    _instance = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.servers = []
+        EventHandler._instance = self
+
+    def emit(self, record):
+        self.servers[0].log_event(["logs", record.levelname], record.getMessage())
+
+
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
