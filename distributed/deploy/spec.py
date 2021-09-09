@@ -245,6 +245,7 @@ class SpecCluster(Cluster):
         silence_logs=False,
         name=None,
         shutdown_on_close=True,
+        scheduler_sync_interval=1,
     ):
         self._created = weakref.WeakSet()
 
@@ -274,6 +275,7 @@ class SpecCluster(Cluster):
         super().__init__(
             asynchronous=asynchronous,
             name=name,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
         if not self.asynchronous:
