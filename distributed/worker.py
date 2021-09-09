@@ -1679,46 +1679,6 @@ class Worker(ServerNode):
 
         return recommendations, scheduler_msgs
 
-    def transition_table_to_dot(self, filename="worker-transitions", format=None):
-        import graphviz
-
-        from dask.dot import graphviz_to_file
-
-        g = graphviz.Digraph(
-            graph_attr={
-                "concentrate": "True",
-            },
-            # node_attr=node_attr,
-            # edge_attr=edge_attr
-        )
-        all_states = set()
-        for edge in self._transitions_table.keys():
-            all_states.update(set(edge))
-
-        seen = set()
-        with g.subgraph(name="cluster_0") as c:
-            c.attr(style="filled", color="lightgrey")
-            c.node_attr.update(style="filled", color="white")
-            c.attr(label="executable")
-            for state in (
-                "waiting",
-                "ready",
-                "executing",
-                "constrained",
-                "long-running",
-            ):
-                c.node(state, label=state)
-                seen.add(state)
-
-        with g.subgraph(name="cluster_1") as c:
-            for state in ["fetch", "flight", "missing"]:
-                c.attr(label="dependency")
-                c.node(state, label=state)
-                seen.add(state)
-
-        g.edges(self._transitions_table.keys())
-        return graphviz_to_file(g, filename=filename, format=format)
-
     def handle_compute_task(
         self,
         *,
@@ -1782,7 +1742,7 @@ class Worker(ServerNode):
             ts.dependencies.add(dep_ts)
             dep_ts.dependents.add(ts)
 
-        if ts.state in {"ready", "executing", "waiting"}:
+        if ts.state in {"ready", "executing", "waiting", "resumed"}:
             pass
         elif ts.state == "memory":
             recommendations[ts] = "memory"
@@ -1790,7 +1750,6 @@ class Worker(ServerNode):
         elif ts.state in {"released", "fetch", "flight", "missing", "cancelled"}:
             recommendations[ts] = "waiting"
         else:
-            # FIXME Either remove exception or handle resumed
             raise RuntimeError(f"Unexpected task state encountered {ts} {stimulus_id}")
 
         for msg in scheduler_msgs:
@@ -2135,7 +2094,7 @@ class Worker(ServerNode):
             if dep.state == "released" and not dep.dependents:
                 recommendations[dep] = "forgotten"
 
-        # Mark state as forgotten in case it is still referenced anymore
+        # Mark state as forgotten in case it is still referenced
         ts.state = "forgotten"
         self.tasks.pop(ts.key, None)
         return recommendations, []
@@ -2648,8 +2607,6 @@ class Worker(ServerNode):
             try:
                 if self.validate:
                     for ts in self._missing_dep_flight:
-                        # If this was collected somewhere else we should've transitioned
-                        # already, shouldn't we? maybe this is the place, let's see
                         assert not ts.who_has
 
                 stimulus_id = f"find-missing-{time()}"

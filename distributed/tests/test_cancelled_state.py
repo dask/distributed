@@ -2,7 +2,6 @@ import asyncio
 from unittest import mock
 
 import distributed
-from distributed import Nanny
 from distributed.core import CommClosedError
 from distributed.utils_test import _LockedCommPool, gen_cluster, inc, slowinc
 
@@ -20,42 +19,42 @@ async def wait_for_cancelled(key, dask_worker):
     assert False
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_release(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await c.run(wait_for_state, fut.key, "executing")
+    await wait_for_state(fut.key, "executing", a)
     fut.release()
-    await c.run(wait_for_cancelled, fut.key)
+    await wait_for_cancelled(fut.key, a)
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_reschedule(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await c.run(wait_for_state, fut.key, "executing")
+    await wait_for_state(fut.key, "executing", a)
     fut.release()
-    await c.run(wait_for_cancelled, fut.key)
+    await wait_for_cancelled(fut.key, a)
     fut = c.submit(slowinc, 1, delay=0.1)
     await fut
 
 
-@gen_cluster(client=True, nthreads=[("", 1)], Worker=Nanny)
+@gen_cluster(client=True, nthreads=[("", 1)])
 async def test_abort_execution_add_as_dependency(c, s, a):
     fut = c.submit(slowinc, 1, delay=1)
-    await c.run(wait_for_state, fut.key, "executing")
+    await wait_for_state(fut.key, "executing", a)
     fut.release()
-    await c.run(wait_for_cancelled, fut.key)
+    await wait_for_cancelled(fut.key, a)
 
     fut = c.submit(slowinc, 1, delay=1)
     fut = c.submit(slowinc, fut, delay=1)
     await fut
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True)
 async def test_abort_execution_to_fetch(c, s, a, b):
     fut = c.submit(slowinc, 1, delay=2, key="f1", workers=[a.worker_address])
-    await c.run(wait_for_state, fut.key, "executing", workers=[a.worker_address])
+    await wait_for_state(fut.key, "executing", a)
     fut.release()
-    await c.run(wait_for_cancelled, fut.key, workers=[a.worker_address])
+    await wait_for_cancelled(fut.key, a)
 
     # While the first worker is still trying to compute f1, we'll resubmit it to
     # another worker with a smaller delay. The key is still the same
