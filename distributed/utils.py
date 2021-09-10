@@ -495,6 +495,15 @@ class LoopRunner:
         return self._loop
 
 
+def loop_is_current(loop: IOLoop) -> bool:
+    "Whether an event loop object is the currently-running loop for this thread"
+    try:
+        return loop is IOLoop.current(instance=False)
+        # ^ `instance=False` prevents creating a new loop object if one doesn't exist
+    except RuntimeError:
+        return False
+
+
 @contextmanager
 def set_thread_state(**kwargs):
     old = {}

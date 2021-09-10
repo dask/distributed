@@ -4,6 +4,7 @@ import io
 import os
 import queue
 import socket
+import threading
 import traceback
 from time import sleep
 
@@ -30,6 +31,7 @@ from distributed.utils import (
     is_kernel,
     is_valid_xml,
     iscoroutinefunction,
+    loop_is_current,
     nbytes,
     offload,
     open_port,
@@ -444,7 +446,7 @@ def test_two_loop_runners(loop_in_thread):
 @gen_test()
 async def test_loop_runner_gen():
     runner = LoopRunner(asynchronous=True)
-    assert runner.loop is IOLoop.current()
+    assert loop_is_current(runner.loop)
     assert not runner.is_started()
     await asyncio.sleep(0.01)
     runner.start()
@@ -604,3 +606,25 @@ def test_typename_deprecated():
 def test_iscoroutinefunction_unhashable_input():
     # Ensure iscoroutinefunction can handle unhashable callables
     assert not iscoroutinefunction(_UnhashableCallable())
+
+
+def test_loop_is_current():
+    loop = IOLoop.current()
+    assert loop_is_current(loop)
+    assert not loop_is_current(IOLoop())
+
+    err = []
+
+    def from_thread():
+        try:
+            assert not loop_is_current(loop)
+            assert IOLoop.current(instance=False) is None
+        except Exception as e:
+            err.append(e)
+
+    t = threading.Thread(target=from_thread)
+    t.start()
+    t.join()
+
+    if err:
+        raise err[0]

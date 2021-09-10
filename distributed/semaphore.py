@@ -5,7 +5,7 @@ import warnings
 from asyncio import TimeoutError
 from collections import defaultdict, deque
 
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 
 import dask
 from dask.utils import parse_timedelta
@@ -13,7 +13,7 @@ from dask.utils import parse_timedelta
 from distributed.utils_comm import retry_operation
 
 from .metrics import time
-from .utils import log_errors, sync, thread_state
+from .utils import log_errors, loop_is_current, sync, thread_state
 from .worker import get_client, get_worker
 
 logger = logging.getLogger(__name__)
@@ -412,7 +412,7 @@ class Semaphore:
 
     @property
     def asynchronous(self):
-        return self.loop is IOLoop.current()
+        return loop_is_current(self.loop)
 
     async def _register(self):
         await retry_operation(
