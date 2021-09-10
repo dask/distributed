@@ -70,7 +70,6 @@ from .utils import (
     json_load_robust,
     key_split,
     log_errors,
-    loop_is_current,
     offload,
     parse_ports,
     silence_logging,
@@ -3496,7 +3495,7 @@ class Worker(ServerNode):
         if not self._client:
             from .client import Client
 
-            asynchronous = loop_is_current(self.loop)
+            asynchronous = self.loop is IOLoop.current(instance=False)
             self._client = Client(
                 self.scheduler,
                 loop=self.loop,

@@ -47,7 +47,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.ioloop import PeriodicCallback
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from . import versions as version_module
 from .batched import BatchedSend
@@ -79,7 +79,6 @@ from .utils import (
     format_dashboard_link,
     has_keyword,
     log_errors,
-    loop_is_current,
     no_default,
     sync,
     thread_state,
@@ -786,7 +785,7 @@ class Client:
         find ourselves in contexts when it is better to operate synchronously.
         """
         try:
-            return self._asynchronous and loop_is_current(self.loop)
+            return self._asynchronous and self.loop is IOLoop.current(instance=False)
         except RuntimeError:
             return False
 
@@ -855,7 +854,7 @@ class Client:
         elif (
             self._loop_runner.is_started()
             and self.scheduler
-            and not (self.asynchronous and loop_is_current(self.loop))
+            and not (self.asynchronous and self.loop is IOLoop.current(instance=False))
         ):
             info = sync(self.loop, self.scheduler.identity)
             scheduler = self.scheduler
