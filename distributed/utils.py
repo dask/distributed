@@ -350,10 +350,9 @@ class LoopRunner:
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
-        current = IOLoop.current()
         if loop is None:
             if asynchronous:
-                self._loop = current
+                self._loop = IOLoop.current()
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
