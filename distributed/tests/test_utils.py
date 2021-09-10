@@ -4,6 +4,7 @@ import io
 import os
 import queue
 import socket
+import threading
 import traceback
 from time import sleep
 
@@ -384,6 +385,38 @@ def test_loop_runner(loop_in_thread):
     runner.stop()
     assert not runner.is_started()
     assert_not_running(runner.loop)
+
+
+def test_loop_runner_in_separate_thread():
+    loop = IOLoop.current()
+
+    err = []
+
+    def thread():
+        try:
+            runner = LoopRunner(loop=loop, asynchronous=True)
+            assert (
+                IOLoop.current(instance=False) is None
+            ), "No loop should be created for thread"
+            assert runner.loop is loop
+            assert not runner.is_started()
+            assert_not_running(runner.loop)
+            runner.start()
+            assert runner.is_started()
+            assert_not_running(runner.loop)
+            runner.stop()
+            assert not runner.is_started()
+            assert_not_running(runner.loop)
+        except Exception as e:
+            err.append(e)
+
+    t = threading.Thread(target=thread)
+    t.start()
+    t.join()
+
+    if err:
+        raise err[0]
+    assert_not_running(loop)
 
 
 def test_two_loop_runners(loop_in_thread):
