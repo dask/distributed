@@ -16,7 +16,7 @@ from distributed import Client, Scheduler
 from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import parse_ports, sync, tmpfile
+from distributed.utils import parse_ports, sync
 from distributed.utils_test import (
     gen_cluster,
     popen,
@@ -188,7 +188,7 @@ def test_resources(loop):
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_local_directory(loop, nanny):
-    with tmpfile() as fn:
+    with tempfile.TemporaryFile() as fn:
         with popen(["dask-scheduler", "--no-dashboard"]):
             with popen(
                 [
@@ -212,7 +212,7 @@ def test_local_directory(loop, nanny):
 
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_scheduler_file(loop, nanny):
-    with tmpfile() as fn:
+    with tempfile.TemporaryFile() as fn:
         with popen(["dask-scheduler", "--no-dashboard", "--scheduler-file", fn]):
             with popen(
                 ["dask-worker", "--scheduler-file", fn, nanny, "--no-dashboard"]
