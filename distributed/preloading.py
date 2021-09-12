@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 import urllib.request
 from importlib import import_module
 from types import ModuleType
