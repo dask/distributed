@@ -18,7 +18,7 @@ from distributed.protocol.numpy import itemsize
 from distributed.protocol.pickle import HIGHEST_PROTOCOL
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.system import MEMORY_LIMIT
-from distributed.utils import ensure_bytes, nbytes, tmpfile
+from distributed.utils import ensure_bytes, nbytes
 from distributed.utils_test import gen_cluster
 
 
@@ -162,7 +162,7 @@ def test_dumps_serialize_numpy_custom_dtype():
 
 
 def test_memmap():
-    with tmpfile("npy") as fn:
+    with tempfile.TemporaryFile(suffix="npy") as fn:
         with open(fn, "wb") as f:  # touch file
             pass
         x = np.memmap(fn, shape=(5, 5), dtype="i4", mode="readwrite")
