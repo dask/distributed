@@ -90,25 +90,14 @@ class ServerNode(Server):
         loggers_to_register = dask.config.get("distributed.admin.log-events")
 
         for logger_name, level in loggers_to_register.items():
-            if level not in EventHandler._instances_by_level:
-                handler = EventHandler(level=level)
-
-                def remove_from_servers(handler):
-                    if self in handler.servers:
-                        handler.servers.remove(self)
-                    if not handler.servers:
-                        logger.removeHandler(handler)
-
-                weakref.finalize(self, remove_from_servers, handler)
-            else:
-                handler = EventHandler._instances_by_level[level]
-
-            if self not in handler.servers:
-                handler.servers.append(self)
-
+            handler = EventHandler(level=level, server=self)
             logger = logging.getLogger(logger_name)
-            if handler not in logger.handlers:
+            if not any(
+                isinstance(handler, EventHandler) for handler in logger.handlers
+            ):
                 logger.addHandler(handler)
+                handler.addLogger(logger)
+                weakref.finalize(self, logger.removeHandler, handler)
 
     def log_event(self, topic, msg):
         pass

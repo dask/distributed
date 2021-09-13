@@ -7516,13 +7516,13 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _report_event(self, name, event):
         for client in self.event_subscriber[name]:
-            self.report(
+            self.client_send(
+                client,
                 {
                     "op": "event",
                     "topic": name,
                     "event": event,
                 },
-                client=client,
             )
 
     def subscribe_topic(self, topic, client):

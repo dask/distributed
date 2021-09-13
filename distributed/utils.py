@@ -998,15 +998,28 @@ def json_load_robust(fn, load=json.load):
 
 
 class EventHandler(logging.Handler):
-    _instances_by_level = weakref.WeakValueDictionary()
+    _instances = weakref.WeakSet()
 
-    def __init__(self, level) -> None:
+    def __init__(self, level, server) -> None:
+        self.server = weakref.ref(server)
+
+        self.loggers = []
         super().__init__(level)
-        self.servers = []
-        EventHandler._instances_by_level[level] = self
+        EventHandler._instances.add(self)
 
     def emit(self, record):
-        self.servers[0].log_event(["logs", record.levelname], record.getMessage())
+        server = self.server()
+        if server:
+            server.log_event(["logs", record.levelname], record.getMessage())
+
+    def addLogger(self, logger):
+        self.loggers.append(logger)
+
+    @classmethod
+    def remove_all_instances(cls):
+        for handler in EventHandler._instances:
+            for logger in handler.loggers:
+                logger.removeHandler(handler)
 
 
 class DequeHandler(logging.Handler):

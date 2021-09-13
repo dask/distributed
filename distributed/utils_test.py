@@ -55,6 +55,7 @@ from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
     DequeHandler,
+    EventHandler,
     TimeoutError,
     _offload_executor,
     get_ip,
@@ -1576,6 +1577,7 @@ def check_instances():
 
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
+    EventHandler.remove_all_instances()
 
 
 @contextmanager
