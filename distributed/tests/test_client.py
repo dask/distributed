@@ -6973,3 +6973,148 @@ async def test_async_task(c, s, a, b):
     future = c.submit(f, 10)
     result = await future
     assert result == 11
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_subscribe_topic(c, s, a):
+
+    log = []
+
+    def user_event_handler(event):
+        log.append(event)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {"important": "event"})
+
+    while len(log) != 1:
+        await asyncio.sleep(0.01)
+
+    time_, msg = log[0]
+    assert isinstance(time_, float)
+    assert msg == {"important": "event"}
+
+    c.unsubscribe_topic("test-topic")
+
+    while s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {"forget": "me"})
+
+    while len(s.events["test-topic"]) == 1:
+        await asyncio.sleep(0.01)
+
+    assert len(log) == 1
+
+    async def async_user_event_handler(event):
+        log.append(event)
+        await asyncio.sleep(0)
+
+    c.subscribe_topic("test-topic", async_user_event_handler)
+
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    a.log_event("test-topic", {"async": "event"})
+
+    while len(log) == 1:
+        await asyncio.sleep(0.01)
+
+    assert len(log) == 2
+    time_, msg = log[1]
+    assert isinstance(time_, float)
+    assert msg == {"async": "event"}
+
+    # Even though the middle event was not subscribed to, the scheduler still
+    # knows about all and we can retrieve them
+    all_events = await c.get_events(topic="test-topic")
+    assert len(all_events) == 3
+
+
+@gen_cluster(client=True, nthreads=[("", 1)])
+async def test_events_all_servers_use_same_channel(c, s, a):
+    """Ensure that logs from all server types (scheduler, worker, nanny)
+    and the clients themselves arrive"""
+
+    log = []
+
+    def user_event_handler(event):
+        log.append(event)
+
+    c.subscribe_topic("test-topic", user_event_handler)
+
+    while not s.event_subscriber["test-topic"]:
+        await asyncio.sleep(0.01)
+
+    async with Nanny(s.address) as n:
+        a.log_event("test-topic", "worker")
+        n.log_event("test-topic", "nanny")
+        s.log_event("test-topic", "scheduler")
+        await c.log_event("test-topic", "client")
+
+    while not len(log) == 4 == len(set(log)):
+        await asyncio.sleep(0.1)
+
+
+@gen_cluster(client=True, nthreads=[])
+async def test_events_unsubscribe_raises_if_unknown(c, s):
+    with pytest.raises(ValueError, match="No event handler known for topic unknown"):
+        c.unsubscribe_topic("unknown")
+
+
+@gen_cluster(client=True)
+async def test_log_event_warn(c, s, a, b):
+    def foo():
+        get_worker().log_event(["foo", "warn"], "Hello!")
+
+    with pytest.warns(Warning, match="Hello!"):
+        await c.submit(foo)
+
+
+@gen_cluster(client=True)
+async def test_log_event_warn_dask_warns(c, s, a, b):
+    from dask.distributed import warn
+
+    def foo():
+        warn("Hello!")
+
+    with pytest.warns(Warning, match="Hello!"):
+        await c.submit(foo)
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print(c, s, a, b, capsys):
+    from dask.distributed import print
+
+    def foo():
+        print("Hello!", 123, sep=":")
+
+    await c.submit(foo)
+
+    out, err = capsys.readouterr()
+    assert "Hello!:123" in out
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_print_non_msgpack_serializable(c, s, a, b, capsys):
+    from dask.distributed import print
+
+    def foo():
+        print(object())
+
+    await c.submit(foo)
+
+    out, err = capsys.readouterr()
+    assert "<object object at" in out
+
+
+def test_print_simple(capsys):
+    from dask.distributed import print
+
+    print("Hello!", 123, sep=":")
+
+    out, err = capsys.readouterr()
+    assert "Hello!:123" in out

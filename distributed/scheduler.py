@@ -3710,6 +3710,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         self.event_counts = defaultdict(int)
+        self.event_subscriber = defaultdict(set)
         self.worker_plugins = dict()
         self.nanny_plugins = dict()
 
@@ -3736,6 +3737,8 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
             "restart": self.restart,
+            "subscribe-topic": self.subscribe_topic,
+            "unsubscribe-topic": self.unsubscribe_topic,
         }
 
         self.handlers = {
@@ -7501,13 +7504,32 @@ class Scheduler(SchedulerState, ServerNode):
 
     def log_event(self, name, msg):
         event = (time(), msg)
-        if isinstance(name, list):
+        if isinstance(name, (list, tuple)):
             for n in name:
                 self.events[n].append(event)
                 self.event_counts[n] += 1
+                self._report_event(n, event)
         else:
             self.events[name].append(event)
             self.event_counts[name] += 1
+            self._report_event(name, event)
+
+    def _report_event(self, name, event):
+        for client in self.event_subscriber[name]:
+            self.report(
+                {
+                    "op": "event",
+                    "topic": name,
+                    "event": event,
+                },
+                client=client,
+            )
+
+    def subscribe_topic(self, topic, client):
+        self.event_subscriber[topic].add(client)
+
+    def unsubscribe_topic(self, topic, client):
+        self.event_subscriber[topic].discard(client)
 
     def get_events(self, comm=None, topic=None):
         if topic is not None:
