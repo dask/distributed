@@ -1,4 +1,5 @@
 from . import config  # isort:skip; load distributed configuration first
+from . import widgets  # isort:skip; load distributed widgets second
 import dask
 from dask.config import config
 from dask.utils import import_required
@@ -21,7 +22,15 @@ from .client import (
 )
 from .core import Status, connect, rpc
 from .deploy import Adaptive, LocalCluster, SpecCluster, SSHCluster
-from .diagnostics.plugin import PipInstall, SchedulerPlugin, WorkerPlugin
+from .diagnostics.plugin import (
+    Environ,
+    NannyPlugin,
+    PipInstall,
+    SchedulerPlugin,
+    UploadDirectory,
+    UploadFile,
+    WorkerPlugin,
+)
 from .diagnostics.progressbar import progress
 from .event import Event
 from .lock import Lock
@@ -35,7 +44,7 @@ from .semaphore import Semaphore
 from .threadpoolexecutor import rejoin
 from .utils import CancelledError, TimeoutError, sync
 from .variable import Variable
-from .worker import Reschedule, Worker, get_client, get_worker, secede
+from .worker import Reschedule, Worker, get_client, get_worker, print, secede, warn
 from .worker_client import local_client, worker_client
 
 versions = get_versions()

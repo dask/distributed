@@ -11,18 +11,13 @@ from inspect import isawaitable
 from tornado import gen
 
 import dask
+from dask.utils import parse_bytes, parse_timedelta
+from dask.widgets import get_template
 
 from ..core import CommClosedError, Status, rpc
 from ..scheduler import Scheduler
 from ..security import Security
-from ..utils import (
-    LoopRunner,
-    TimeoutError,
-    import_term,
-    parse_bytes,
-    parse_timedelta,
-    silence_logging,
-)
+from ..utils import LoopRunner, TimeoutError, import_term, silence_logging
 from .adaptive import Adaptive
 from .cluster import Cluster
 
@@ -103,7 +98,10 @@ class ProcessInterface:
         await self._event_finished.wait()
 
     def __repr__(self):
-        return "<%s: status=%s>" % (type(self).__name__, self.status)
+        return f"<{dask.utils.typename(type(self))}: status={self.status.name}>"
+
+    def _repr_html_(self):
+        return get_template("process_interface.html.j2").render(process_interface=self)
 
     async def __aenter__(self):
         await self
@@ -247,6 +245,7 @@ class SpecCluster(Cluster):
         silence_logs=False,
         name=None,
         shutdown_on_close=True,
+        scheduler_sync_interval=1,
     ):
         self._created = weakref.WeakSet()
 
@@ -276,6 +275,7 @@ class SpecCluster(Cluster):
         super().__init__(
             asynchronous=asynchronous,
             name=name,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
         if not self.asynchronous:
@@ -534,7 +534,7 @@ class SpecCluster(Cluster):
 
     @property
     def _supports_scaling(self):
-        return not not self.new_spec
+        return bool(self.new_spec)
 
     async def scale_down(self, workers):
         # We may have groups, if so, map worker addresses to job names

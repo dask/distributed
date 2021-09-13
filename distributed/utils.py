@@ -1,6 +1,5 @@
 import asyncio
 import functools
-import html
 import importlib
 import inspect
 import json
@@ -41,19 +40,8 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import istask
-
-# Import config serialization functions here for backward compatibility
-from dask.config import deserialize as deserialize_for_cli  # noqa
-from dask.config import serialize as serialize_for_cli  # noqa
-
-# provide format_bytes here for backwards compatibility
-from dask.utils import (  # noqa: F401
-    format_bytes,
-    format_time,
-    funcname,
-    parse_bytes,
-    parse_timedelta,
-)
+from dask.utils import parse_timedelta as _parse_timedelta
+from dask.widgets import get_template
 
 try:
     from tornado.ioloop import PollIOLoop
@@ -146,7 +134,7 @@ def _get_ip(host, port, family):
         sock.connect((host, port))
         ip = sock.getsockname()[0]
         return ip
-    except EnvironmentError as e:
+    except OSError as e:
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
@@ -199,7 +187,7 @@ def get_ip_interface(ifname):
     for info in net_if_addrs[ifname]:
         if info.family == socket.AF_INET:
             return info.address
-    raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
+    raise ValueError(f"interface {ifname!r} doesn't have an IPv4 address")
 
 
 async def All(args, quiet_exceptions=()):
@@ -286,7 +274,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
-    callback_timeout = parse_timedelta(callback_timeout, "s")
+    callback_timeout = _parse_timedelta(callback_timeout, "s")
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
     if PollIOLoop and (
         (isinstance(loop, PollIOLoop) and getattr(loop, "_closing", False))
@@ -329,7 +317,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError(f"timed out after {callback_timeout} s.")
     else:
         while not e.is_set():
             e.wait(10)
@@ -411,8 +399,13 @@ class LoopRunner:
 
         def run_loop(loop=self._loop):
             loop.add_callback(loop_cb)
+            # run loop forever if it's not running already
             try:
-                loop.start()
+                if (
+                    getattr(loop, "asyncio_loop", None) is None
+                    or not loop.asyncio_loop.is_running()
+                ):
+                    loop.start()
             except Exception as e:
                 start_exc[0] = e
             finally:
@@ -429,11 +422,13 @@ class LoopRunner:
         if actual_thread is not thread:
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
-            if not isinstance(start_exc[0], RuntimeError):
+            if start_exc[0] is not None and not isinstance(start_exc[0], RuntimeError):
                 if not isinstance(
                     start_exc[0], Exception
                 ):  # track down infrequent error
-                    raise TypeError("not an exception", start_exc[0])
+                    raise TypeError(
+                        f"not an exception: {start_exc[0]!r}",
+                    )
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
@@ -687,9 +682,14 @@ def ensure_ip(hostname):
     --------
     >>> ensure_ip('localhost')
     '127.0.0.1'
+    >>> ensure_ip('')  # Maps as localhost for binding e.g. 'tcp://:8811'
+    '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
+    if not hostname:
+        hostname = "localhost"
+
     # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
@@ -738,7 +738,7 @@ def validate_key(k):
     """Validate a key as received on a stream."""
     typ = type(k)
     if typ is not str and typ is not bytes:
-        raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
+        raise TypeError(f"Unexpected key type {typ} (value: {k!r})")
 
 
 def _maybe_complex(task):
@@ -1097,13 +1097,11 @@ def command_has_keyword(cmd, k):
         if isinstance(getattr(cmd, "main"), click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
-            cmd_params = set(
-                [
-                    p.human_readable_name
-                    for p in cmd.params
-                    if isinstance(p, click.core.Option)
-                ]
-            )
+            cmd_params = {
+                p.human_readable_name
+                for p in cmd.params
+                if isinstance(p, click.core.Option)
+            }
             return k in cmd_params
 
     return False
@@ -1140,9 +1138,21 @@ def color_of(x, palette=palette):
     return palette[n % len(palette)]
 
 
-@functools.lru_cache(None)
-def iscoroutinefunction(f):
+def _iscoroutinefunction(f):
     return inspect.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+
+
+@functools.lru_cache(None)
+def _iscoroutinefunction_cached(f):
+    return _iscoroutinefunction(f)
+
+
+def iscoroutinefunction(f):
+    # Attempt to use lru_cache version and fall back to non-cached version if needed
+    try:
+        return _iscoroutinefunction_cached(f)
+    except TypeError:  # unhashable type
+        return _iscoroutinefunction(f)
 
 
 @contextmanager
@@ -1150,23 +1160,8 @@ def warn_on_duration(duration, msg):
     start = time()
     yield
     stop = time()
-    if stop - start > parse_timedelta(duration):
+    if stop - start > _parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
-
-
-def typename(typ):
-    """Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    try:
-        return typ.__module__ + "." + typ.__name__
-    except AttributeError:
-        return str(typ)
 
 
 def format_dashboard_link(host, port):
@@ -1244,43 +1239,15 @@ is_coroutine_function = iscoroutinefunction
 class Log(str):
     """A container for newline-delimited string of log entries"""
 
-    level_styles = {
-        "WARNING": "font-weight: bold; color: orange;",
-        "CRITICAL": "font-weight: bold; color: orangered;",
-        "ERROR": "font-weight: bold; color: crimson;",
-    }
-
     def _repr_html_(self):
-        logs_html = []
-        for message in self.split("\n"):
-            style = "font-family: monospace; margin: 0;"
-            for level in self.level_styles:
-                if level in message:
-                    style += self.level_styles[level]
-                    break
-
-            logs_html.append(
-                '<p style="{style}">{message}</p>'.format(
-                    style=html.escape(style),
-                    message=html.escape(message),
-                )
-            )
-
-        return "\n".join(logs_html)
+        return get_template("log.html.j2").render(log=self)
 
 
 class Logs(dict):
     """A container for a dict mapping names to strings of log entries"""
 
     def _repr_html_(self):
-        summaries = [
-            "<details>\n"
-            "<summary style='display:list-item'>{title}</summary>\n"
-            "{log}\n"
-            "</details>".format(title=title, log=log._repr_html_())
-            for title, log in sorted(self.items())
-        ]
-        return "\n".join(summaries)
+        return get_template("logs.html.j2").render(logs=self)
 
 
 def cli_keywords(d: dict, cls=None, cmd=None):
@@ -1310,6 +1277,8 @@ def cli_keywords(d: dict, cls=None, cmd=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
+    from dask.utils import typename
+
     if cls or cmd:
         for k in d:
             if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
@@ -1320,11 +1289,11 @@ def cli_keywords(d: dict, cls=None, cmd=None):
                     )
                 elif cls:
                     raise ValueError(
-                        "Class %s does not support keyword %s" % (typename(cls), k)
+                        f"Class {typename(cls)} does not support keyword {k}"
                     )
                 else:
                     raise ValueError(
-                        "Module %s does not support keyword %s" % (typename(cmd), k)
+                        f"Module {typename(cmd)} does not support keyword {k}"
                     )
 
     def convert_value(v):
@@ -1455,3 +1424,30 @@ def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List
 
         addresses.append({"address": host, "port": port})
     return addresses
+
+
+_deprecations = {
+    "deserialize_for_cli": "dask.config.deserialize",
+    "serialize_for_cli": "dask.config.serialize",
+    "format_bytes": "dask.utils.format_bytes",
+    "format_time": "dask.utils.format_time",
+    "funcname": "dask.utils.funcname",
+    "parse_bytes": "dask.utils.parse_bytes",
+    "parse_timedelta": "dask.utils.parse_timedelta",
+    "typename": "dask.utils.typename",
+}
+
+
+def __getattr__(name):
+    if name in _deprecations:
+        use_instead = _deprecations[name]
+
+        warnings.warn(
+            f"{name} is deprecated and will be removed in a future release. "
+            f"Please use {use_instead} instead.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+        return import_term(use_instead)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")

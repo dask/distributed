@@ -52,7 +52,7 @@ class AsyncProcess:
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
-            raise TypeError("`target` needs to be callable, not %r" % (type(target),))
+            raise TypeError(f"`target` needs to be callable, not {type(target)!r}")
         self._state = _ProcessState()
         self._loop = loop or IOLoop.current(instance=False)
 
@@ -91,7 +91,7 @@ class AsyncProcess:
         self._start_threads()
 
     def __repr__(self):
-        return "<%s %s>" % (self.__class__.__name__, self._name)
+        return f"<{self.__class__.__name__} {self._name}>"
 
     def _check_closed(self):
         if self._closed:
@@ -211,11 +211,11 @@ class AsyncProcess:
 
             state.is_alive = True
             state.pid = process.pid
-            logger.debug("[%s] created process with pid %r" % (r, state.pid))
+            logger.debug(f"[{r}] created process with pid {state.pid!r}")
 
         while True:
             msg = q.get()
-            logger.debug("[%s] got message %r" % (r, msg))
+            logger.debug(f"[{r}] got message {msg!r}")
             op = msg["op"]
             if op == "start":
                 _call_and_set_future(loop, msg["future"], _start)
@@ -249,7 +249,7 @@ class AsyncProcess:
         """
         Start the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -260,7 +260,7 @@ class AsyncProcess:
         """
         Terminate the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -271,7 +271,7 @@ class AsyncProcess:
         """
         Wait for the child process to exit.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
         self._check_closed()
         assert self._state.pid is not None, "can only join a started process"
@@ -338,7 +338,7 @@ class AsyncProcess:
 def _asyncprocess_finalizer(proc):
     if proc.is_alive():
         try:
-            logger.info("reaping stray process %s" % (proc,))
+            logger.info(f"reaping stray process {proc}")
             proc.terminate()
         except OSError:
             pass

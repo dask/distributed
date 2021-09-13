@@ -42,9 +42,6 @@ class Process(ProcessInterface):
         self.connection.close()
         await super().close()
 
-    def __repr__(self):
-        return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
-
 
 class Worker(Process):
     """A Remote Dask Worker controled by SSH
