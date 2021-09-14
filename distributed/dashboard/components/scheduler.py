@@ -1938,6 +1938,8 @@ class TaskGraph(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
+        if "graph_layout_name" in kwargs:
+            self.layout.name = kwargs.pop("graph_layout_name")
         scheduler.add_plugin(self.layout)
         self.invisible_count = 0  # number of invisible nodes
 
@@ -3400,7 +3402,11 @@ def tasks_doc(scheduler, extra, doc):
 
 def graph_doc(scheduler, extra, doc):
     with log_errors():
-        graph = TaskGraph(scheduler, sizing_mode="stretch_both")
+        graph = TaskGraph(
+            scheduler,
+            sizing_mode="stretch_both",
+            graph_layout_name="graph-doc-graph-layout",
+        )
         doc.title = "Dask: Task Graph"
         graph.update()
         add_periodic_callback(doc, graph, 200)

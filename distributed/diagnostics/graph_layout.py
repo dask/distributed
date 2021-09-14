@@ -1,5 +1,3 @@
-import uuid
-
 from .plugin import SchedulerPlugin
 
 
@@ -14,7 +12,7 @@ class GraphLayout(SchedulerPlugin):
     """
 
     def __init__(self, scheduler):
-        self.name = f"graph-layout-{uuid.uuid4()}"
+        self.name = "graph-layout"
         self.x = {}
         self.y = {}
         self.collision = {}

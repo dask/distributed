@@ -58,7 +58,9 @@ applications = {
         TaskStream, 100, n_rectangles=1000, clear_interval="10s"
     ),
     "/individual-progress": individual_doc(TaskProgress, 100, height=160),
-    "/individual-graph": individual_doc(TaskGraph, 200),
+    "/individual-graph": individual_doc(
+        TaskGraph, 200, graph_layout_name="indiv-graph-layout"
+    ),
     "/individual-groups": individual_doc(TaskGroupGraph, 200),
     "/individual-group-progress": individual_doc(TaskGroupProgress, 200),
     "/individual-workers-memory": individual_doc(WorkersMemory, 100),
