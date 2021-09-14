@@ -2561,13 +2561,18 @@ class TaskGroupGraph(DashboardComponent):
 class TaskGroupProgress(DashboardComponent):
     """Stacked area chart showing task groups through time"""
 
-    def __init__(self, scheduler, **kwargs):
+    def __init__(self, scheduler, window="120s", n_interp=100, **kwargs):
         self.scheduler = scheduler
+        self.window = parse_timedelta(window)
         self.source = ColumnDataSource()
+        self.n_interp = n_interp
 
         if GroupTiming.name not in self.scheduler.plugins:
             self.scheduler.add_plugin(plugin=GroupTiming)
         self.plugin = self.scheduler.plugins[GroupTiming.name]
+
+        times = np.linspace(-self.window, 0, self.n_interp)
+        self.source.add(times, "time")
 
         self.root = figure(
             id="bk-task-group-progress-plot",
@@ -2584,16 +2589,15 @@ class TaskGroupProgress(DashboardComponent):
         new_data = {}
         states = self.plugin.states
 
-        tmin = min([v[0][0] for v in states.values()]) if states else 0
-        tmax = max([v[-1][0] for v in states.values()]) if states else 0
-        time = np.linspace(tmin, tmax, min(max(int(tmax - tmin), 0), 1000))
-        new_data["time"] = time
+        now = time()
+        times = np.linspace(-self.window, 0, self.n_interp)
+        new_data["time"] = times
 
-        for k in self.plugin.states.keys():
-            timing = self.plugin.states[k]
-            xp = list(pluck(0, timing))
+        for k in states.keys():
+            timing = states[k]
+            xp = np.array(list(pluck(0, timing))) - now
             yp = list(pluck("processing", pluck(1, timing)))
-            y = np.interp(time, xp, yp)
+            y = np.interp(times, xp, yp, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
         self.source.data = new_data
