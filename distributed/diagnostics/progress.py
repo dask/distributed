@@ -10,7 +10,7 @@ from tlz import groupby, valmap
 from dask.base import tokenize
 from dask.utils import stringify
 
-from ..utils import key_split
+from ..utils import key_split, key_split_group, log_errors
 from .plugin import SchedulerPlugin
 
 logger = logging.getLogger(__name__)
@@ -295,83 +295,10 @@ class AllProgress(SchedulerPlugin):
         self.state.clear()
 
 
-class GroupProgress(SchedulerPlugin):
-    """Keep track of all keys, grouped by key_split"""
-
-    def __init__(self, scheduler):
-        self.scheduler = scheduler
-        self.keys = dict()
-        self.groups = dict()
-        self.nbytes = dict()
-        self.durations = dict()
-        self.dependencies = defaultdict(set)
-        self.dependents = defaultdict(set)
-
-        for key, ts in self.scheduler.tasks.items():
-            k = key_split_group(key)
-            if k not in self.groups:
-                self.create(key, k)
-            self.keys[k].add(key)
-            self.groups[k][ts.state] += 1
-            if ts.state == "memory" and ts.nbytes >= 0:
-                self.nbytes[k] += ts.nbytes
-
-        scheduler.add_plugin(self)
-
-    def create(self, key, k):
-        with log_errors():
-            ts = self.scheduler.tasks[key]
-            g = {"memory": 0, "erred": 0, "waiting": 0, "released": 0, "processing": 0}
-            self.keys[k] = set()
-            self.groups[k] = g
-            self.nbytes[k] = 0
-            self.durations[k] = 0
-            self.dependents[k] = {key_split_group(dts.key) for dts in ts.dependents}
-            for dts in ts.dependencies:
-                d = key_split_group(dts.key)
-                self.dependents[d].add(k)
-                self.dependencies[k].add(d)
-
-    def transition(self, key, start, finish, *args, **kwargs):
-        with log_errors():
-            ts = self.scheduler.tasks[key]
-            k = key_split_group(key)
-            if k not in self.groups:
-                self.create(key, k)
-
-            g = self.groups[k]
-
-            if key not in self.keys[k]:
-                self.keys[k].add(key)
-            else:
-                g[start] -= 1
-
-            if finish != "forgotten":
-                g[finish] += 1
-            else:
-                self.keys[k].remove(key)
-                if not self.keys[k]:
-                    del self.groups[k]
-                    del self.nbytes[k]
-                    for dep in self.dependencies.pop(k):
-                        self.dependents[key_split_group(dep)].remove(k)
-
-            if start == "memory" and ts.nbytes >= 0:
-                self.nbytes[k] -= ts.nbytes
-            if finish == "memory" and ts.nbytes >= 0:
-                self.nbytes[k] += ts.nbytes
-
-    def restart(self, scheduler):
-        self.keys.clear()
-        self.groups.clear()
-        self.nbytes.clear()
-        self.durations.clear()
-        self.dependencies.clear()
-        self.dependents.clear()
-
-
 class GroupTiming(SchedulerPlugin):
     """Keep track of high-level timing information for task group progress"""
+
+    name = "group-timing"
 
     def __init__(self, scheduler):
         self.scheduler = scheduler

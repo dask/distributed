@@ -41,7 +41,7 @@ from bokeh.palettes import Viridis11
 from bokeh.plotting import figure
 from bokeh.themes import Theme
 from bokeh.transform import cumsum, factor_cmap, linear_cmap
-from tlz import curry, pipe
+from tlz import curry, pipe, pluck
 from tlz.curried import concat, groupby, map
 from tornado import escape
 
@@ -2556,6 +2556,58 @@ class TaskGroupGraph(DashboardComponent):
 
         self.nodes_source.data.update(nodes_data)
         self.arrows_source.data.update(arrows_data)
+
+
+class TaskGroupProgress(DashboardComponent):
+    """Stacked area chart showing task groups through time"""
+
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource()
+
+        if GroupTiming.name not in self.scheduler.plugins:
+            self.scheduler.add_plugin(plugin=GroupTiming)
+        self.plugin = self.scheduler.plugins[GroupTiming.name]
+
+        self.root = figure(
+            id="bk-task-group-progress-plot",
+            title="Task Group Progress",
+            name="task_group_progress",
+            toolbar_location=None,
+            tools="",
+            min_border_bottom=50,
+            **kwargs,
+        )
+
+    def _get_timing_data(self):
+        self.color = []
+        new_data = {}
+        states = self.plugin.states
+
+        tmin = min([v[0][0] for v in states.values()]) if states else 0
+        tmax = max([v[-1][0] for v in states.values()]) if states else 0
+        time = np.linspace(tmin, tmax, min(max(int(tmax - tmin), 0), 1000))
+        new_data["time"] = time
+
+        for k in self.plugin.states.keys():
+            timing = self.plugin.states[k]
+            xp = list(pluck(0, timing))
+            yp = list(pluck("processing", pluck(1, timing)))
+            y = np.interp(time, xp, yp)
+            self.color.append(color_of(key_split(k)))
+            new_data[k] = y
+        self.source.data = new_data
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            self._get_timing_data()
+            self.root.varea_stack(
+                stackers=list(self.plugin.states.keys()),
+                color=self.color,
+                x="time",
+                source=self.source,
+            )
 
 
 class TaskProgress(DashboardComponent):
