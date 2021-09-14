@@ -2600,18 +2600,24 @@ class TaskGroupProgress(DashboardComponent):
             y = np.interp(times, xp, yp, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
-        self.source.data = new_data
+        return new_data
 
     @without_property_validation
     def update(self):
         with log_errors():
-            self._get_timing_data()
-            self.root.varea_stack(
-                stackers=list(self.plugin.states.keys()),
-                color=self.color,
-                x="time",
-                source=self.source,
-            )
+            new_data = self._get_timing_data()
+            if set(self.source.data.keys()) != set(new_data.keys()):
+                renderers = self.root.renderers
+                for r in renderers:
+                    self.root.renderers.remove(r)
+
+                self.root.varea_stack(
+                    stackers=list(self.plugin.states.keys()),
+                    color=self.color,
+                    x="time",
+                    source=self.source,
+                )
+            self.source.data = new_data
 
 
 class TaskProgress(DashboardComponent):
