@@ -2561,7 +2561,7 @@ class TaskGroupGraph(DashboardComponent):
 class TaskGroupProgress(DashboardComponent):
     """Stacked area chart showing task groups through time"""
 
-    def __init__(self, scheduler, window="120s", n_interp=100, **kwargs):
+    def __init__(self, scheduler, window="120s", n_interp=200, **kwargs):
         self.scheduler = scheduler
         self.window = parse_timedelta(window)
         self.source = ColumnDataSource()
@@ -2578,8 +2578,7 @@ class TaskGroupProgress(DashboardComponent):
             id="bk-task-group-progress-plot",
             title="Task Group Progress",
             name="task_group_progress",
-            toolbar_location=None,
-            tools="",
+            toolbar_location="above",
             min_border_bottom=50,
             **kwargs,
         )
@@ -2590,7 +2589,11 @@ class TaskGroupProgress(DashboardComponent):
         states = self.plugin.states
 
         now = time()
-        times = np.linspace(-self.window, 0, self.n_interp)
+        tmin = min([v[0][0] for v in states.values()]) - now if states else -self.window
+        tmin = max(-self.window, tmin)
+        tmax = max([v[-1][0] for v in states.values()]) - now if states else 0
+        tmax = max(tmax, tmin + self.window)
+        times = np.linspace(tmin, tmax, self.n_interp)
         new_data["time"] = times
 
         for k in states.keys():
@@ -2611,13 +2614,15 @@ class TaskGroupProgress(DashboardComponent):
                 for r in renderers:
                     self.root.renderers.remove(r)
 
+                self.source.data = new_data
                 self.root.varea_stack(
                     stackers=list(self.plugin.states.keys()),
                     color=self.color,
                     x="time",
                     source=self.source,
                 )
-            self.source.data = new_data
+            else:
+                self.source.data = new_data
 
 
 class TaskProgress(DashboardComponent):
