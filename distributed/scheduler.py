@@ -3455,12 +3455,13 @@ class SchedulerState:
     def remove_all_replicas(self, ts: TaskState):
         """Remove all replicas of a task from all workers"""
         ws: WorkerState
-        nbytes = ts.get_nbytes()
+        nbytes: Py_ssize_t = ts.get_nbytes()
         for ws in ts._who_has:
             ws._nbytes -= nbytes
             del ws._has_what[ts]
+        if len(ts._who_has) > 1:
+            self._replicated_tasks.remove(ts)
         ts._who_has.clear()
-        self._replicated_tasks.discard(ts)
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -4788,16 +4789,6 @@ class Scheduler(SchedulerState, ServerNode):
                 **kwargs,
             )
 
-    def stimulus_missing_data(self, key=None):
-        """Mark that certain keys have gone missing. Recover."""
-        parent: SchedulerState = cast(SchedulerState, self)
-        with log_errors():
-            logger.debug("Stimulus missing data: %r", key)
-            ts: TaskState = parent._tasks.get(key)
-            if ts is None or ts._state == "memory":
-                return {}, {}, {}
-            return {key: "released"}, {}, {}
-
     def stimulus_retry(self, comm=None, keys=None, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.info("Client %s requests to retry %d keys", client, len(keys))
@@ -5345,23 +5336,14 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_release_data(self, key=None, worker=None, client=None, **msg):
+    def handle_release_data(self, key=None, worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
         ts: TaskState = parent._tasks.get(key)
-        if ts is None:
+        if ts is None or ts._state == "memory":
             return
         ws: WorkerState = parent._workers_dv[worker]
-        if ts._processing_on != ws:
-            return
-
-        recommendations: dict
-        client_msgs: dict
-        worker_msgs: dict
-
-        recommendations, client_msgs, worker_msgs = self.stimulus_missing_data(key=key)
-        parent._transitions(recommendations, client_msgs, worker_msgs)
-
-        self.send_all(client_msgs, worker_msgs)
+        if ts._processing_on == ws:
+            parent._transitions({key: "released"}, {}, {})
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
