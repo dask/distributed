@@ -607,6 +607,15 @@ class Nanny(ServerNode):
             await comm.write("OK")
         await super().close()
 
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
+
 
 class WorkerProcess:
     # The interval how often to check the msg queue for init

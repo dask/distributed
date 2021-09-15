@@ -121,6 +121,7 @@ class LocalCluster(SpecCluster):
         interface=None,
         worker_class=None,
         scheduler_kwargs=None,
+        scheduler_sync_interval=1,
         **worker_kwargs,
     ):
         if ip is not None:
@@ -241,6 +242,7 @@ class LocalCluster(SpecCluster):
             asynchronous=asynchronous,
             silence_logs=silence_logs,
             security=security,
+            scheduler_sync_interval=scheduler_sync_interval,
         )
 
     def start_worker(self, *args, **kwargs):

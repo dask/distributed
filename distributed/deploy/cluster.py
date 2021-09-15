@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 import logging
 import threading
@@ -9,7 +10,7 @@ from inspect import isawaitable
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import _deprecated, format_bytes, parse_timedelta
+from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
 from dask.widgets import get_template
 
 from ..core import Status
@@ -44,9 +45,8 @@ class Cluster:
     """
 
     _supports_scaling = True
-    name = None
 
-    def __init__(self, asynchronous, quiet=False, name=None):
+    def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
@@ -56,12 +56,23 @@ class Cluster:
         self.quiet = quiet
         self.scheduler_comm = None
         self._adaptive = None
+        self._sync_interval = parse_timedelta(
+            scheduler_sync_interval, default="seconds"
+        )
 
-        if name is not None:
-            self.name = name
-        elif self.name is None:
-            self.name = str(uuid.uuid4())[:8]
+        if name is None:
+            name = str(uuid.uuid4())[:8]
+
+        self._cluster_info = {"name": name, "type": typename(type(self))}
         self.status = Status.created
+
+    @property
+    def name(self):
+        return self._cluster_info["name"]
+
+    @name.setter
+    def name(self, name):
+        self._cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
@@ -71,7 +82,24 @@ class Cluster:
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
+
+        info = await self.scheduler_comm.get_metadata(
+            keys=["cluster-manager-info"], default={}
+        )
+        self._cluster_info.update(info)
+
+        self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
+            self._sync_cluster_info, self._sync_interval * 1000
+        )
+        for pc in self.periodic_callbacks.values():
+            pc.start()
         self.status = Status.running
+
+    async def _sync_cluster_info(self):
+        await self.scheduler_comm.set_metadata(
+            keys=["cluster-manager-info"],
+            value=copy.copy(self._cluster_info),
+        )
 
     async def _close(self):
         if self.status == Status.closed:
@@ -85,11 +113,11 @@ class Cluster:
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
 
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         self.status = Status.closed
 

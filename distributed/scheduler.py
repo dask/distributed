@@ -3748,6 +3748,7 @@ class Scheduler(SchedulerState, ServerNode):
             )
         )
         self.event_counts = defaultdict(int)
+        self.event_subscriber = defaultdict(set)
         self.worker_plugins = dict()
         self.nanny_plugins = dict()
 
@@ -3774,6 +3775,8 @@ class Scheduler(SchedulerState, ServerNode):
             "heartbeat-client": self.client_heartbeat,
             "close-client": self.remove_client,
             "restart": self.restart,
+            "subscribe-topic": self.subscribe_topic,
+            "unsubscribe-topic": self.unsubscribe_topic,
         }
 
         self.handlers = {
@@ -4753,7 +4756,7 @@ class Scheduler(SchedulerState, ServerNode):
                     "reason": f"already-released-or-forgotten-{time()}",
                 }
             ]
-        elif ts.state == "memory":
+        elif ts._state == "memory":
             self.add_keys(worker=worker, keys=[key])
         else:
             ts._metadata.update(kwargs["metadata"])
@@ -5341,8 +5344,8 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks.get(key)
         if ts is None or ts._state == "memory":
             return
-        ws: WorkerState = parent._workers_dv[worker]
-        if ts._processing_on == ws:
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if ws is not None and ts._processing_on == ws:
             parent._transitions({key: "released"}, {}, {})
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
@@ -5364,7 +5367,9 @@ class Scheduler(SchedulerState, ServerNode):
 
     def release_worker_data(self, comm=None, keys=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers_dv[worker]
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if not ws:
+            return
         tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
         removed_tasks: set = tasks.intersection(ws._has_what)
 
@@ -5580,6 +5585,9 @@ class Scheduler(SchedulerState, ServerNode):
             try:
                 w = stream_comms[worker]
                 w.send(*msgs)
+            except KeyError:
+                # worker already gone
+                pass
             except (CommClosedError, AttributeError):
                 self.loop.add_callback(self.remove_worker, address=worker)
 
@@ -7465,13 +7473,32 @@ class Scheduler(SchedulerState, ServerNode):
 
     def log_event(self, name, msg):
         event = (time(), msg)
-        if isinstance(name, list):
+        if isinstance(name, (list, tuple)):
             for n in name:
                 self.events[n].append(event)
                 self.event_counts[n] += 1
+                self._report_event(n, event)
         else:
             self.events[name].append(event)
             self.event_counts[name] += 1
+            self._report_event(name, event)
+
+    def _report_event(self, name, event):
+        for client in self.event_subscriber[name]:
+            self.report(
+                {
+                    "op": "event",
+                    "topic": name,
+                    "event": event,
+                },
+                client=client,
+            )
+
+    def subscribe_topic(self, topic, client):
+        self.event_subscriber[topic].add(client)
+
+    def unsubscribe_topic(self, topic, client):
+        self.event_subscriber[topic].discard(client)
 
     def get_events(self, comm=None, topic=None):
         if topic is not None:

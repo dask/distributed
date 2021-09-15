@@ -43,7 +43,7 @@ def test_adaptive_local_cluster(loop):
             start = time()
             while cluster.scheduler.nthreads:
                 sleep(0.01)
-                assert time() < start + 5
+                assert time() < start + 30
 
             assert not c.nthreads()
 
@@ -163,8 +163,8 @@ async def test_min_max():
         await cluster.close()
 
 
-@pytest.mark.asyncio
-async def test_avoid_churn(cleanup):
+@gen_test()
+async def test_avoid_churn():
     """We want to avoid creating and deleting workers frequently
 
     Instead we want to wait a few beats before removing a worker in case the
@@ -187,7 +187,7 @@ async def test_avoid_churn(cleanup):
             assert len(adapt.log) == 1
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adapt_quickly():
     """We want to avoid creating and deleting workers frequently
 
@@ -232,7 +232,6 @@ async def test_adapt_quickly():
 
         # Don't scale up for large sequential computations
         x = await client.scatter(1)
-        log = list(cluster._adaptive.log)
         for i in range(100):
             x = client.submit(slowinc, x)
 
@@ -325,8 +324,8 @@ async def test_target_duration():
             assert adapt.log[1][1] == {"status": "up", "n": 20}
 
 
-@pytest.mark.asyncio
-async def test_worker_keys(cleanup):
+@gen_test()
+async def test_worker_keys():
     """Ensure that redefining adapt with a lower maximum removes workers"""
     async with SpecCluster(
         scheduler={"cls": Scheduler, "options": {"dashboard_address": ":0"}},
@@ -354,8 +353,8 @@ async def test_worker_keys(cleanup):
         assert names == {"a-1", "a-2"} or names == {"b-1", "b-2"}
 
 
-@pytest.mark.asyncio
-async def test_adapt_cores_memory(cleanup):
+@gen_test()
+async def test_adapt_cores_memory():
     async with LocalCluster(
         n_workers=0,
         threads_per_worker=2,
@@ -394,8 +393,8 @@ def test_adaptive_config():
         assert adapt.wait_count == 8
 
 
-@pytest.mark.asyncio
-async def test_update_adaptive(cleanup):
+@gen_test()
+async def test_update_adaptive():
     async with LocalCluster(
         n_workers=0,
         threads_per_worker=2,
@@ -412,9 +411,9 @@ async def test_update_adaptive(cleanup):
         assert second.periodic_callback.is_running()
 
 
-@pytest.mark.asyncio
-async def test_adaptive_no_memory_limit(cleanup):
-    """Make sure that adapt() does not keep creating workers when no memory limit is set."""
+@gen_test()
+async def test_adaptive_no_memory_limit():
+    """Test that adapt() does not keep creating workers when no memory limit is set"""
     async with LocalCluster(
         n_workers=0,
         threads_per_worker=1,
@@ -435,8 +434,8 @@ async def test_adaptive_no_memory_limit(cleanup):
         )
 
 
-@pytest.mark.asyncio
-async def test_scale_needs_to_be_awaited(cleanup):
+@gen_test()
+async def test_scale_needs_to_be_awaited():
     """
     This tests that the adaptive class works fine if the scale method uses the
     `sync` method to schedule its task instead of loop.add_callback
@@ -466,7 +465,7 @@ async def test_scale_needs_to_be_awaited(cleanup):
             await async_wait_for(lambda: not cluster.workers, 10)
 
 
-@pytest.mark.asyncio
+@gen_test()
 async def test_adaptive_stopped():
     """
     We should ensure that the adapt PC is actually stopped once the cluster

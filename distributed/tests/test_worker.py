@@ -2409,11 +2409,6 @@ async def test_hold_on_to_replicas(c, s, *workers):
         await asyncio.sleep(0.01)
 
 
-@pytest.mark.flaky(
-    condition=WINDOWS and sys.version_info[:2] == (3, 8),
-    reruns=20,
-    reruns_delay=5,
-)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute(c, s, a, b):
     """Ensure that, if a worker disconnects while computing a result, the scheduler will
@@ -2468,8 +2463,11 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    while a.address not in {w.address for w in s.tasks[f2.key].who_has}:
-        await asyncio.sleep(0.001)
+    # Ensure that all in-memory tasks on A have been restored on the
+    # scheduler after reconnect
+    for ts in a.tasks.values():
+        if ts.state == "memory":
+            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
 
     # Ensure that all keys have been properly registered and will also be
     # cleaned up nicely.
@@ -2479,11 +2477,6 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@pytest.mark.flaky(
-    condition=WINDOWS and sys.version_info[:2] == (3, 8),
-    reruns=20,
-    reruns_delay=5,
-)
 @gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
@@ -2540,8 +2533,11 @@ async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, 
 
     assert "Unexpected worker completed task" in s_logs.getvalue()
 
-    while a.address not in {w.address for w in s.tasks[f2.key].who_has}:
-        await asyncio.sleep(0.001)
+    # Ensure that all in-memory tasks on A have been restored on the
+    # scheduler after reconnect
+    for ts in a.tasks.values():
+        if ts.state == "memory":
+            assert a.address in {ws.address for ws in s.tasks[ts.key].who_has}
 
     del f1, f2, f3
     while any(w.tasks for w in [a, b]):

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import asyncio
 import bisect
+import builtins
 import concurrent.futures
 import errno
 import heapq
@@ -16,7 +19,10 @@ from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import Dict, Hashable, Iterable, Optional
+from typing import TYPE_CHECKING, Dict, Hashable, Iterable, Optional
+
+if TYPE_CHECKING:
+    from .client import Client
 
 from tlz import first, keymap, merge, pluck  # noqa: F401
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -30,6 +36,7 @@ from dask.utils import (
     funcname,
     parse_bytes,
     parse_timedelta,
+    stringify,
     typename,
 )
 
@@ -744,7 +751,7 @@ class Worker(ServerNode):
             lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
         self.periodic_callbacks["keep-alive"] = pc
-
+        self._suspicious_count_limit = 10
         self._address = contact_address
 
         self.memory_monitor_interval = parse_timedelta(
@@ -2538,7 +2545,7 @@ class Worker(ServerNode):
         exc = ValueError(
             "Could not find dependent %s.  Check worker logs" % str(dep.key)
         )
-        for ts in dep.dependents:
+        for ts in list(dep.dependents):
             msg = error_message(exc)
             ts.exception = msg["exception"]
             ts.traceback = msg["traceback"]
@@ -2555,7 +2562,10 @@ class Worker(ServerNode):
                 return
 
             for dep in list(deps):
-                if dep.suspicious_count > 5:
+                if (
+                    self._suspicious_count_limit
+                    and dep.suspicious_count > self._suspicious_count_limit
+                ):
                     deps.remove(dep)
                     self.bad_dep(dep)
             if not deps:
@@ -2813,8 +2823,14 @@ class Worker(ServerNode):
             return {"status": "OK"}
 
     async def actor_execute(
-        self, comm=None, actor=None, function=None, args=(), kwargs={}
+        self,
+        comm=None,
+        actor=None,
+        function=None,
+        args=(),
+        kwargs: Optional[dict] = None,
     ):
+        kwargs = kwargs or {}
         separate_thread = kwargs.pop("separate_thread", True)
         key = actor
         actor = self.actors[key]
@@ -2849,7 +2865,7 @@ class Worker(ServerNode):
         except Exception as ex:
             return {"status": "error", "exception": to_serialize(ex)}
 
-    def meets_resource_constraints(self, key):
+    def meets_resource_constraints(self, key: str) -> bool:
         ts = self.tasks[key]
         if not ts.resource_restrictions:
             return True
@@ -3259,8 +3275,7 @@ class Worker(ServerNode):
         return prof
 
     async def get_profile_metadata(self, comm=None, start=0, stop=None):
-        if stop is None:
-            add_recent = True
+        add_recent = stop is None
         now = time() + self.scheduler_delay
         stop = stop or now
         start = start or 0
@@ -3442,14 +3457,14 @@ class Worker(ServerNode):
     #######################################
 
     @property
-    def client(self):
+    def client(self) -> Client:
         with self._lock:
             if self._client:
                 return self._client
             else:
                 return self._get_client()
 
-    def _get_client(self, timeout=None):
+    def _get_client(self, timeout=None) -> Client:
         """Get local client attached to this worker
 
         If no such client exists, create one
@@ -3531,7 +3546,7 @@ class Worker(ServerNode):
         return self.active_threads[threading.get_ident()]
 
 
-def get_worker():
+def get_worker() -> Worker:
     """Get the worker currently running this task
 
     Examples
@@ -3558,7 +3573,7 @@ def get_worker():
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=None, resolve_address=True):
+def get_client(address=None, timeout=None, resolve_address=True) -> Client:
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -3673,7 +3688,7 @@ class Reschedule(Exception):
     """
 
 
-def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
+def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT) -> Optional[int]:
     if memory_limit is None:
         return None
 
@@ -3802,7 +3817,7 @@ cache_dumps = LRU(maxsize=100)
 _cache_lock = threading.Lock()
 
 
-def dumps_function(func):
+def dumps_function(func) -> bytes:
     """Dump a function to bytes, cache functions"""
     try:
         with _cache_lock:
@@ -4023,7 +4038,7 @@ def get_msg_safe_str(msg):
     return msg
 
 
-def convert_args_to_str(args, max_len=None):
+def convert_args_to_str(args, max_len: Optional[int] = None) -> str:
     """Convert args to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
@@ -4042,7 +4057,7 @@ def convert_args_to_str(args, max_len=None):
         return "({})".format(", ".join(strs))
 
 
-def convert_kwargs_to_str(kwargs, max_len=None):
+def convert_kwargs_to_str(kwargs: dict, max_len: Optional[int] = None) -> str:
     """Convert kwargs to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
@@ -4126,3 +4141,37 @@ else:
         return nvml.one_time()
 
     DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
+
+
+def print(*args, **kwargs):
+    """Dask print function
+    This prints both wherever this function is run, and also in the user's
+    client session
+    """
+    try:
+        worker = get_worker()
+    except ValueError:
+        pass
+    else:
+        msg = {
+            "args": tuple(stringify(arg) for arg in args),
+            "kwargs": {k: stringify(v) for k, v in kwargs.items()},
+        }
+        worker.log_event("print", msg)
+
+    builtins.print(*args, **kwargs)
+
+
+def warn(*args, **kwargs):
+    """Dask warn function
+    This raises a warning both wherever this function is run, and also
+    in the user's client session
+    """
+    try:
+        worker = get_worker()
+    except ValueError:
+        pass
+    else:
+        worker.log_event("warn", {"args": args, "kwargs": kwargs})
+
+    warnings.warn(*args, **kwargs)
