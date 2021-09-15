@@ -6699,7 +6699,7 @@ class Scheduler(SchedulerState, ServerNode):
 
                 return worker_keys
 
-    def add_keys(self, comm=None, worker=None, keys=()):
+    def add_keys(self, comm=None, worker=None, keys=(), stimulus_id=None):
         """
         Learn that a worker has certain keys
 
@@ -6722,12 +6722,14 @@ class Scheduler(SchedulerState, ServerNode):
                 redundant_replicas.append(key)
 
         if redundant_replicas:
+            if not stimulus_id:
+                stimulus_id = f"redundant-replicas-{time()}"
             self.worker_send(
                 worker,
                 {
                     "op": "remove-replicas",
                     "keys": redundant_replicas,
-                    "stimulus_id": f"redundant-replicas-{time()}",
+                    "stimulus_id": stimulus_id,
                 },
             )
 

@@ -1571,7 +1571,9 @@ class Worker(ServerNode):
             self.log.append((key, "receive-from-scatter"))
 
         if report:
-            scheduler_messages.append({"op": "add-keys", "keys": list(data)})
+            scheduler_messages.append(
+                {"op": "add-keys", "keys": list(data), "stimulus_id": stimulus_id}
+            )
 
         self.transitions(recommendations, stimulus_id=stimulus_id)
         for msg in scheduler_messages:
@@ -1621,8 +1623,16 @@ class Worker(ServerNode):
         recommendations = {}
         for key in keys:
             ts = self.tasks.get(key)
-            if ts and not ts.is_protected():
+            if ts is None or ts.state != "memory":
+                continue
+            if not ts.is_protected():
+                self.log.append(("remove-replica-confirmed", ts.key, stimulus_id))
                 recommendations[ts] = "released" if ts.dependents else "forgotten"
+            else:
+                self.log.append(("remove-replica-rejected", ts.key, stimulus_id))
+                self.batched_stream.send(
+                    {"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id}
+                )
 
         self.transitions(recommendations=recommendations, stimulus_id=stimulus_id)
 
@@ -2096,14 +2106,14 @@ class Worker(ServerNode):
 
     def transition_released_memory(self, ts, value, *, stimulus_id):
         recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key]})
+        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
         return recs, smsgs
 
     def transition_flight_memory(self, ts, value, *, stimulus_id):
         self._in_flight_tasks.discard(ts)
         ts.coming_from = None
         recs, smsgs = self._put_key_in_memory(ts, value, stimulus_id=stimulus_id)
-        smsgs.append({"op": "add-keys", "keys": [ts.key]})
+        smsgs.append({"op": "add-keys", "keys": [ts.key], "stimulus_id": stimulus_id})
         return recs, smsgs
 
     def transition_released_forgotten(self, ts, *, stimulus_id):

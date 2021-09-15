@@ -2860,13 +2860,16 @@ async def test_remove_replica_simple(c, s, a, b):
         await asyncio.sleep(0.01)
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True,
+    config={"distributed.comm.recent-messages-log-length": 1_000},
+)
 async def test_remove_replica_while_computing(c, s, *workers):
     futs = c.map(inc, range(10), workers=[workers[0].address])
 
     # All interesting things will happen on that worker
     w = workers[1]
-    intermediate = c.map(slowinc, futs, delay=0.1, workers=[w.address])
+    intermediate = c.map(slowinc, futs, delay=0.05, workers=[w.address])
 
     def reduce(*args, **kwargs):
         import time
@@ -2875,24 +2878,35 @@ async def test_remove_replica_while_computing(c, s, *workers):
         return
 
     final = c.submit(reduce, intermediate, workers=[w.address], key="final")
-    while final.key not in w.tasks:
+    while not any(f.key in w.tasks for f in intermediate):
         await asyncio.sleep(0.001)
 
     while not all(fut.done() for fut in intermediate):
         # The worker should reject all of these since they are required
         _remove_replicas(s, w, *futs)
-        _remove_replicas(s, w, *intermediate)
-        await asyncio.sleep(0.001)
+        await asyncio.sleep(0.01)
 
     await wait(intermediate)
+
+    # If a request is rejected, the worker responds with an add-keys message to
+    # reenlist the key in the schedulers state system to avoid race conditions,
+    # see also https://github.com/dask/distributed/issues/5265
+    rejections = [msg[1] for msg in w.log if msg[0] == "remove-replica-rejected"]
+    assert rejections
+    for rejected_key in rejections:
+
+        def answer_sent(key):
+            for batch in w.batched_stream.recent_message_log:
+                for msg in batch:
+                    if "op" in msg and msg["op"] == "add-keys" and key in msg["keys"]:
+                        return True
+            return False
+
+        assert answer_sent(rejected_key)
 
     # Since intermediate is done, futs replicas may be removed.
     # They might be already gone due to the above remove replica calls
     _remove_replicas(s, w, *futs)
-    # the intermediate tasks should not be touched because they are still needed
-    # (the scheduler should not have made the above call but we should be safe
-    # regarless)
-    assert all(w.tasks[f.key].state == "memory" for f in intermediate)
 
     while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
         await asyncio.sleep(0.001)
