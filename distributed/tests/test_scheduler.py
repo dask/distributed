@@ -237,6 +237,47 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
     test()
 
 
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 4,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_decide_worker_common_dep_ignored(client, s, *workers):
+    roots = [
+        delayed(slowinc)(1, 0.1 / (i + 1), dask_key_name=f"root-{i}") for i in range(16)
+    ]
+    # This shared dependency will get copied to all workers, eventually making all workers valid candidates for each dep
+    everywhere = delayed(None, name="everywhere")
+    deps = [
+        delayed(lambda x, y: None)(r, everywhere, dask_key_name=f"dep-{i}")
+        for i, r in enumerate(roots)
+    ]
+
+    rs, ds = dask.persist(roots, deps)
+    await wait(ds)
+
+    keys = {
+        worker.name: dict(
+            root_keys=sorted(
+                [int(k.split("-")[1]) for k in worker.data if k.startswith("root")]
+            ),
+            dep_keys=sorted(
+                [int(k.split("-")[1]) for k in worker.data if k.startswith("dep")]
+            ),
+        )
+        for worker in workers
+    }
+
+    for k in keys.values():
+        assert k["root_keys"] == k["dep_keys"]
+
+    for worker in workers:
+        log = worker.incoming_transfer_log
+        if log:
+            assert len(log) == 1
+            assert list(log[0]["keys"]) == ["everywhere"]
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 async def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = await client.scatter([1], workers=b.address)
