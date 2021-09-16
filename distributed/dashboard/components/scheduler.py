@@ -2598,9 +2598,14 @@ class TaskGroupProgress(DashboardComponent):
 
         for k in states.keys():
             timing = states[k]
-            xp = np.array(list(pluck(0, timing))) - now
-            yp = list(pluck("processing", pluck(1, timing)))
-            y = np.interp(times, xp, yp, left=0, right=0)
+            timestamps = np.array(list(pluck(0, timing))) - now
+            completed = list(
+                map(sum, pluck(["erred", "memory", "released"], pluck(1, timing)))
+            )
+            completed = np.true_divide(
+                np.diff(completed, prepend=completed[0]), np.diff(timestamps, prepend=1)
+            )
+            y = np.interp(times, timestamps, completed, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
         return new_data
