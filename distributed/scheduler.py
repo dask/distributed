@@ -7982,7 +7982,14 @@ def decide_worker(
     if ts._actor:
         candidates = set(all_workers)
     else:
-        candidates = {wws for dts in deps for wws in dts._who_has}
+        candidates = {
+            wws
+            for dts in deps
+            for wws in dts._who_has
+            # Ignore dependencies that will need to be, or already are, copied to all workers
+            if max(len(dts._who_has), len(dts._dependents))
+            < len(valid_workers if valid_workers is not None else all_workers)
+        }
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
