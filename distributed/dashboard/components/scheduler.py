@@ -2586,26 +2586,28 @@ class TaskGroupProgress(DashboardComponent):
     def _get_timing_data(self):
         self.color = []
         new_data = {}
-        states = self.plugin.states
+        durations = self.plugin.all_durations
 
         now = time()
-        tmin = min([v[0][0] for v in states.values()]) - now if states else -self.window
+        tmin = (
+            min([v[0][0] for v in durations.values()]) - now
+            if durations
+            else -self.window
+        )
         tmin = max(-self.window, tmin)
-        tmax = max([v[-1][0] for v in states.values()]) - now if states else 0
+        tmax = max([v[-1][0] for v in durations.values()]) - now if durations else 0
         tmax = max(tmax, tmin + self.window)
         times = np.linspace(tmin, tmax, self.n_interp)
         new_data["time"] = times
 
-        for k in states.keys():
-            timing = states[k]
+        for k in durations.keys():
+            timing = durations[k]
             timestamps = np.array(list(pluck(0, timing))) - now
-            completed = list(
-                map(sum, pluck(["erred", "memory", "released"], pluck(1, timing)))
+            compute = np.array(list(pluck("compute", pluck(1, timing))))
+            occupancy = np.true_divide(
+                np.diff(compute, prepend=compute[0]), np.diff(timestamps, prepend=1)
             )
-            completed = np.true_divide(
-                np.diff(completed, prepend=completed[0]), np.diff(timestamps, prepend=1)
-            )
-            y = np.interp(times, timestamps, completed, left=0, right=0)
+            y = np.interp(times, timestamps, occupancy, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
         return new_data

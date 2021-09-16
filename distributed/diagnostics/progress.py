@@ -304,6 +304,8 @@ class GroupTiming(SchedulerPlugin):
         self.scheduler = scheduler
         # Time series of task states
         self.states: Dict[str, List[Tuple[float, Dict[str, int]]]] = dict()
+        # Time series of task durations
+        self.all_durations: Dict[str, List[Tuple[float, Dict[str, float]]]] = dict()
         # Time series of bytes stored per task group
         self.nbytes: Dict[str, List[Tuple[float, int]]] = dict()
         # We snapshot the task state after every `delta` number of
@@ -324,6 +326,7 @@ class GroupTiming(SchedulerPlugin):
         with log_errors():
             self.states[name] = []
             self.nbytes[name] = []
+            self.all_durations[name] = []
             # Snapshot states roughly after every 1% of tasks are completed.
             # This could conceivably change if new tasks are added after delta
             # is computed, so it's meant to be approximate.
@@ -338,14 +341,8 @@ class GroupTiming(SchedulerPlugin):
         with log_errors():
             if not len(self.states[name]):
                 # If the timeseries is empty, just insert the current value.
-                state = {
-                    "memory": group.states["memory"],
-                    "erred": group.states["erred"],
-                    "waiting": group.states["waiting"],
-                    "released": group.states["released"],
-                    "processing": group.states["processing"],
-                }
-                self.states[name].append((timestamp, state))
+                self.states[name].append((timestamp, group.states.copy()))
+                self.all_durations[name].append((timestamp, group.all_durations.copy()))
                 self.nbytes[name].append((timestamp, group.nbytes_total))
             else:
                 # If the timeseries exists, we check the most recent entry,
@@ -358,20 +355,16 @@ class GroupTiming(SchedulerPlugin):
                 count = states["erred"] + states["memory"] + states["released"]
 
                 if count - pcount >= self._deltas[name]:
-                    state = {
-                        "memory": group.states["memory"],
-                        "erred": group.states["erred"],
-                        "waiting": group.states["waiting"],
-                        "released": group.states["released"],
-                        "processing": group.states["processing"],
-                    }
-                    self.states[name].append((timestamp, state))
+                    self.states[name].append((timestamp, group.states.copy()))
+                    self.all_durations[name].append(
+                        (timestamp, group.all_durations.copy())
+                    )
                     self.nbytes[name].append((timestamp, group.nbytes_total))
 
     def transition(self, key, start, finish, *args, **kwargs):
-        # We mostly are interested in when tasks are "processing", so we only
-        # check if the transition involves that state.
-        if start == "processing" or finish == "processing":
+        # We mostly are interested in when tasks move from processing to memory or err,
+        # so we only check if the transition starts from that state.
+        if start == "processing":
             with log_errors():
                 name = key_split_group(key)
                 group = self.scheduler.task_groups[name]
