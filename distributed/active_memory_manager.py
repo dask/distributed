@@ -89,6 +89,8 @@ class ActiveMemoryManagerExtension:
 
     def start(self, comm=None) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
+        if self.started:
+            return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
         self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
