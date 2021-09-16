@@ -343,7 +343,7 @@ class DropEverything(ActiveMemoryManagerPolicy):
                 yield "drop", ts, {ws}
 
 
-@pytest.mark.xfail(reason="distributed#5046, distributed#5265")
+@pytest.mark.xfail(reason="distributed#5265")
 @pytest.mark.slow
 @gen_cluster(
     client=True,

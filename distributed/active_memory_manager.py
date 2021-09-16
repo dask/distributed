@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from collections.abc import Generator
 from typing import TYPE_CHECKING
@@ -10,6 +9,7 @@ from tornado.ioloop import PeriodicCallback
 import dask
 from dask.utils import parse_timedelta
 
+from .metrics import time
 from .utils import import_term
 
 if TYPE_CHECKING:
@@ -131,23 +131,36 @@ class ActiveMemoryManagerExtension:
             for ts, (pending_repl, pending_drop) in self.pending.items():
                 if not ts.who_has:
                     continue
-                who_has = [ws_snd.address for ws_snd in ts.who_has - pending_drop]
+                who_has = {ws_snd.address for ws_snd in ts.who_has - pending_drop}
                 assert who_has  # Never drop the last replica
                 for ws_rec in pending_repl:
                     assert ws_rec not in ts.who_has
-                    repl_by_worker[ws_rec.address][ts.key] = who_has
+                    repl_by_worker[ws_rec.address][ts] = who_has
                 for ws in pending_drop:
                     assert ws in ts.who_has
-                    drop_by_worker[ws.address].add(ts.key)
+                    drop_by_worker[ws.address].add(ts)
 
             # Fire-and-forget enact recommendations from policies
-            # This is temporary code, waiting for
-            # https://github.com/dask/distributed/pull/5046
-            for addr, who_has in repl_by_worker.items():
-                asyncio.create_task(self.scheduler.gather_on_worker(addr, who_has))
-            for addr, keys in drop_by_worker.items():
-                asyncio.create_task(self.scheduler.delete_worker_data(addr, keys))
-            # End temporary code
+            stimulus_id = str(time())
+            for addr, ts_to_who_has in repl_by_worker.items():
+                self.scheduler.stream_comms[addr].send(
+                    {
+                        "op": "acquire-replicas",
+                        "keys": [ts.key for ts in ts_to_who_has],
+                        "stimulus_id": "acquire-replicas-" + stimulus_id,
+                        "priorities": {ts.key: ts.priority for ts in ts_to_who_has},
+                        "who_has": {ts.key: v for ts, v in ts_to_who_has.items()},
+                    },
+                )
+
+            for addr, tss in drop_by_worker.items():
+                self.scheduler.stream_comms[addr].send(
+                    {
+                        "op": "remove-replicas",
+                        "keys": [ts.key for ts in tss],
+                        "stimulus_id": "remove-replicas-" + stimulus_id,
+                    }
+                )
 
         finally:
             del self.workers_memory
