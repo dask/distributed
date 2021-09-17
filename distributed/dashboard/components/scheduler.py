@@ -2618,28 +2618,28 @@ class TaskGroupProgress(DashboardComponent):
                 diffuse[-1] = 0
                 new_dcompute = new_dcompute + diffuse
 
-            occupancy = np.divide(new_dcompute, dt)
-            assert np.all(occupancy < 8.1)
-
-            y = np.interp(times, timestamps, occupancy, left=0, right=0)
+            y = np.interp(times, timestamps, new_dcompute, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
 
         total_dcompute = sum(list(new_data.values()))
         dt = np.diff(times, append=times[-1] + 1000)
+
+        new_total_dcompute = total_dcompute
         nthreads = 8.0 * np.ones_like(dt)
-        i = 0
         while True:
-            i += 1
-            spillage = np.zeros_like(total_dcompute)
-            loc = np.where(total_dcompute > nthreads * dt)
+            spillage = np.zeros_like(new_total_dcompute)
+            loc = np.where(new_total_dcompute > nthreads * dt)
             if not loc[0].size:
                 break
-            spillage[loc] = total_dcompute[loc] - nthreads[loc] * dt[loc]
+            spillage[loc] = new_total_dcompute[loc] - nthreads[loc] * dt[loc]
             diffuse = np.roll(spillage, -1) - spillage
             diffuse[-1] = 0
-            total_dcompute = total_dcompute + diffuse
+            for v in new_data.values():
+                v += diffuse * v / new_total_dcompute
+            new_total_dcompute = sum(list(new_data.values()))
 
+        new_data = {k: np.divide(v, dt) for k, v in new_data.items()}
         new_data["time"] = times
         return new_data
 
