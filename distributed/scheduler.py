@@ -941,7 +941,7 @@ class TaskPrefix:
     @property
     def nbytes_total(self):
         tg: TaskGroup
-        return sum(tg._nbytes_total for tg in self._groups)
+        return sum([tg._nbytes_total for tg in self._groups])
 
     def __len__(self):
         return sum(map(len, self._groups))
@@ -949,7 +949,7 @@ class TaskPrefix:
     @property
     def duration(self):
         tg: TaskGroup
-        return sum(tg._duration for tg in self._groups)
+        return sum([tg._duration for tg in self._groups])
 
     @property
     def types(self):
@@ -6514,9 +6514,9 @@ class Scheduler(SchedulerState, ServerNode):
             groups = groupby(key, parent._workers.values())
 
             limit_bytes = {
-                k: sum(ws._memory_limit for ws in v) for k, v in groups.items()
+                k: sum([ws._memory_limit for ws in v]) for k, v in groups.items()
             }
-            group_bytes = {k: sum(ws._nbytes for ws in v) for k, v in groups.items()}
+            group_bytes = {k: sum([ws._nbytes for ws in v]) for k, v in groups.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
@@ -7399,9 +7399,9 @@ class Scheduler(SchedulerState, ServerNode):
             tasks_timings=tasks_timings,
             address=self.address,
             nworkers=len(parent._workers_dv),
-            threads=sum(ws._nthreads for ws in parent._workers_dv.values()),
+            threads=sum([ws._nthreads for ws in parent._workers_dv.values()]),
             memory=format_bytes(
-                sum(ws._memory_limit for ws in parent._workers_dv.values())
+                sum([ws._memory_limit for ws in parent._workers_dv.values()])
             ),
             code=code,
             dask_version=dask.__version__,
@@ -7647,8 +7647,8 @@ class Scheduler(SchedulerState, ServerNode):
             cpu = max(1, cpu)
 
         # add more workers if more than 60% of memory is used
-        limit = sum(ws._memory_limit for ws in parent._workers_dv.values())
-        used = sum(ws._nbytes for ws in parent._workers_dv.values())
+        limit = sum([ws._memory_limit for ws in parent._workers_dv.values()])
+        used = sum([ws._nbytes for ws in parent._workers_dv.values()])
         memory = 0
         if used > 0.6 * limit and limit > 0:
             memory = 2 * len(parent._workers_dv)
@@ -8065,7 +8065,7 @@ def validate_task_state(ts: TaskState):
 
     if ts._actor:
         if ts._state == "memory":
-            assert sum(ts in ws._actors for ws in ts._who_has) == 1
+            assert sum([ts in ws._actors for ws in ts._who_has]) == 1
         if ts._state == "processing":
             assert ts in ts._processing_on.actors
 
