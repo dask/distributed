@@ -3416,13 +3416,15 @@ class SchedulerState:
         dts: TaskState
         nbytes: Py_ssize_t
         comm_bytes: Py_ssize_t = 0
+        xfers: Py_ssize_t = 0
         for dts in ts._dependencies:
             if ws not in dts._who_has:
                 nbytes = dts.get_nbytes()
                 comm_bytes += nbytes
+                xfers += 1
 
         stack_time: double = ws._occupancy / ws._nthreads
-        start_time: double = stack_time + comm_bytes / self._bandwidth
+        start_time: double = stack_time + comm_bytes / self._bandwidth + xfers * 0.01
 
         if ts._actor:
             return (len(ws._actors), start_time, ws._nbytes)
