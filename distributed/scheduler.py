@@ -3415,12 +3415,13 @@ class SchedulerState:
         """
         dts: TaskState
         nbytes: Py_ssize_t
-        comm_bytes: Py_ssize_t = 0
+        comm_bytes: double = 0
         xfers: Py_ssize_t = 0
         for dts in ts._dependencies:
             if ws not in dts._who_has:
                 nbytes = dts.get_nbytes()
-                comm_bytes += nbytes
+                # amortize transfer cost over all waiters
+                comm_bytes += nbytes / len(dts._waiters)
                 xfers += 1
 
         stack_time: double = ws._occupancy / ws._nthreads
