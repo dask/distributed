@@ -2596,20 +2596,51 @@ class TaskGroupProgress(DashboardComponent):
         )
         tmin = max(-self.window, tmin)
         tmax = max([v[-1][0] for v in durations.values()]) - now if durations else 0
-        tmax = max(tmax, tmin + self.window)
+        # tmax = max(tmax, tmin + self.window)
         times = np.linspace(tmin, tmax, self.n_interp)
-        new_data["time"] = times
 
         for k in durations.keys():
             timing = durations[k]
             timestamps = np.array(list(pluck(0, timing))) - now
             compute = np.array(list(pluck("compute", pluck(1, timing))))
-            occupancy = np.true_divide(
-                np.diff(compute, prepend=compute[0]), np.diff(timestamps, prepend=1)
-            )
+            dcompute = np.diff(compute, append=compute[-1])
+            dt = np.diff(timestamps, append=timestamps[-1] + 1000)
+            nthreads = 8.0 * np.ones_like(dt)
+
+            new_dcompute = dcompute
+            while True:
+                spillage = np.zeros_like(new_dcompute)
+                loc = np.where(new_dcompute > nthreads * dt)
+                if not loc[0].size:
+                    break
+                spillage[loc] = new_dcompute[loc] - nthreads[loc] * dt[loc]
+                diffuse = np.roll(spillage, -1) - spillage
+                diffuse[-1] = 0
+                new_dcompute = new_dcompute + diffuse
+
+            occupancy = np.divide(new_dcompute, dt)
+            assert np.all(occupancy < 8.1)
+
             y = np.interp(times, timestamps, occupancy, left=0, right=0)
             self.color.append(color_of(key_split(k)))
             new_data[k] = y
+
+        total_dcompute = sum(list(new_data.values()))
+        dt = np.diff(times, append=times[-1] + 1000)
+        nthreads = 8.0 * np.ones_like(dt)
+        i = 0
+        while True:
+            i += 1
+            spillage = np.zeros_like(total_dcompute)
+            loc = np.where(total_dcompute > nthreads * dt)
+            if not loc[0].size:
+                break
+            spillage[loc] = total_dcompute[loc] - nthreads[loc] * dt[loc]
+            diffuse = np.roll(spillage, -1) - spillage
+            diffuse[-1] = 0
+            total_dcompute = total_dcompute + diffuse
+
+        new_data["time"] = times
         return new_data
 
     @without_property_validation
