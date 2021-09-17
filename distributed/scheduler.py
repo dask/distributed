@@ -2485,12 +2485,13 @@ class SchedulerState:
             ts.state = "no-worker"
             return ws
 
-        # Group is larger than cluster with few dependencies? Minimize future data transfers.
+        # Group fills the cluster and dependencies are much smaller than cluster? Minimize future data transfers.
+        ndeps_cutoff: Py_ssize_t = min(5, len(self._workers_dv))
         if (
             valid_workers is None
-            and len(group) > self._total_nthreads * 2
-            and len(group._dependencies) < 5
-            and sum(map(len, group._dependencies)) < 5
+            and len(group) >= self._total_nthreads
+            and len(group._dependencies) < ndeps_cutoff
+            and sum(map(len, group._dependencies)) < ndeps_cutoff
         ):
             ws: WorkerState = group._last_worker
 

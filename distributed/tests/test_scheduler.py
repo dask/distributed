@@ -138,6 +138,9 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     ],
 )
 def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
+    if ndeps >= len(nthreads):
+        pytest.skip()
+
     @gen_cluster(
         client=True,
         nthreads=nthreads,
