@@ -3304,7 +3304,8 @@ class SchedulerState:
         nbytes: Py_ssize_t = 0
         for dts in deps:
             nbytes += dts._nbytes
-        return nbytes / self._bandwidth
+        # Add a fixed 10ms penalty per transfer. See distributed#5324
+        return nbytes / self._bandwidth + 0.01 * len(deps)
 
     @ccall
     def get_task_duration(self, ts: TaskState, default: double = -1) -> double:
