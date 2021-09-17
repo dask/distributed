@@ -529,26 +529,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 1 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][0] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][0] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][0] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][0] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][0] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][0] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][0]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
     # Update worker system monitors and send updated metrics to the scheduler
@@ -559,26 +559,26 @@ async def test_SystemTimeseries(c, s, a, b):
 
     assert all(len(v) == 2 for v in systs.source.data.values())
     assert systs.source.data["read_bytes"][1] == sum(
-        [ws.metrics["read_bytes"] for ws in workers]
+        ws.metrics["read_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes"][1] == sum(
-        [ws.metrics["write_bytes"] for ws in workers]
+        ws.metrics["write_bytes"] for ws in workers
     ) / len(workers)
     assert systs.source.data["cpu"][1] == sum(
-        [ws.metrics["cpu"] for ws in workers]
+        ws.metrics["cpu"] for ws in workers
     ) / len(workers)
     assert systs.source.data["memory"][1] == sum(
-        [ws.metrics["memory"] for ws in workers]
+        ws.metrics["memory"] for ws in workers
     ) / len(workers)
     assert systs.source.data["read_bytes_disk"][1] == sum(
-        [ws.metrics["read_bytes_disk"] for ws in workers]
+        ws.metrics["read_bytes_disk"] for ws in workers
     ) / len(workers)
     assert systs.source.data["write_bytes_disk"][1] == sum(
-        [ws.metrics["write_bytes_disk"] for ws in workers]
+        ws.metrics["write_bytes_disk"] for ws in workers
     ) / len(workers)
     assert (
         systs.source.data["time"][1]
-        == sum([ws.metrics["time"] for ws in workers]) / len(workers) * 1000
+        == sum(ws.metrics["time"] for ws in workers) / len(workers) * 1000
     )
 
 

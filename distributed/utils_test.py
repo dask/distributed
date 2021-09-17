@@ -763,7 +763,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
+    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
 def gen_test(timeout=_TEST_TIMEOUT):
@@ -831,7 +831,7 @@ async def start_cluster(
     ):
         await asyncio.sleep(0.01)
         if time() > start + 30:
-            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+            await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
             raise TimeoutError("Cluster creation timeout")
     return s, workers
@@ -844,7 +844,7 @@ async def end_cluster(s, workers):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
-    await asyncio.gather(*[end_worker(w) for w in workers])
+    await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
 

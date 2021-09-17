@@ -1682,14 +1682,14 @@ class Client:
 
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
-                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
+                zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
                 keys = [key for _ in range(len(batches))]
             return sum(
-                [
+                (
                     self.map(
                         func,
                         *batch,
@@ -1706,7 +1706,7 @@ class Client:
                         **kwargs,
                     )
                     for key, batch in zip(keys, batches)
-                ],
+                ),
                 [],
             )
 

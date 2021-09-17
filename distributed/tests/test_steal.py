@@ -528,7 +528,7 @@ async def assert_balanced(inp, expected, c, s, *workers):
             await asyncio.sleep(0.001)
 
         result = [
-            sorted([int(key_split(k)) for k in s.processing[w.address]], reverse=True)
+            sorted((int(key_split(k)) for k in s.processing[w.address]), reverse=True)
             for w in workers
         ]
 
@@ -661,7 +661,7 @@ async def test_steal_twice(c, s, a, b):
         await asyncio.sleep(0.01)
 
     # Army of new workers arrives to help
-    workers = await asyncio.gather(*[Worker(s.address, loop=s.loop) for _ in range(20)])
+    workers = await asyncio.gather(*(Worker(s.address, loop=s.loop) for _ in range(20)))
 
     await wait(futures)
 
@@ -678,7 +678,7 @@ async def test_steal_twice(c, s, a, b):
     assert b.in_flight_tasks == 0
 
     await c._close()
-    await asyncio.gather(*[w.close() for w in workers])
+    await asyncio.gather(*(w.close() for w in workers))
 
 
 @gen_cluster(client=True)
