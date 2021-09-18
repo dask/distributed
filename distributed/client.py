@@ -4159,7 +4159,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4228,7 +4228,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
