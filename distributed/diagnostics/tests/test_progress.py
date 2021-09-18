@@ -28,6 +28,7 @@ def h(*args):
 
 
 @nodebug
+@pytest.mark.flaky(reruns=10, reruns_delay=5)
 @gen_cluster(client=True)
 async def test_many_Progress(c, s, a, b):
     x = c.submit(f, 1)
