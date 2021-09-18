@@ -8,7 +8,7 @@ from .metrics import time
 try:
     from .diagnostics import nvml
 except Exception:
-    nvml = None
+    nvml = None  # type: ignore
 
 
 class SystemMonitor:

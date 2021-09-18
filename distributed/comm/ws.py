@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import struct
 import warnings
 import weakref
+from collections.abc import Callable
 from ssl import SSLError
-from typing import Callable
 
 from tornado import web
 from tornado.httpclient import HTTPClientError, HTTPRequest

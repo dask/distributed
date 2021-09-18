@@ -5,7 +5,6 @@ import logging
 import operator
 import re
 import sys
-from collections import defaultdict
 from itertools import product
 from textwrap import dedent
 from time import sleep
@@ -58,8 +57,6 @@ pytestmark = pytest.mark.ci1
 
 alice = "alice:1234"
 bob = "bob:1234"
-
-occupancy = defaultdict(lambda: 0)
 
 
 @gen_cluster()

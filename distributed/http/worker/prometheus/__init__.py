@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .core import PrometheusHandler
 
-routes = [("/metrics", PrometheusHandler, {})]
+routes: list[tuple] = [("/metrics", PrometheusHandler, {})]

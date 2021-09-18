@@ -13,7 +13,7 @@ from tornado import gen
 try:
     import ssl
 except ImportError:
-    ssl = None
+    ssl = None  # type: ignore
 
 from tlz import sliding_window
 from tornado import netutil

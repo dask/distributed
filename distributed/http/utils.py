@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import importlib
 import os
-from typing import List
 
 import toolz
 from tornado import web
@@ -27,7 +28,7 @@ def redirect(path):
     return Redirect
 
 
-def get_handlers(server, modules: List[str], prefix="/"):
+def get_handlers(server, modules: list[str], prefix="/"):
     prefix = prefix or ""
     prefix = "/" + prefix.strip("/")
 
@@ -37,7 +38,7 @@ def get_handlers(server, modules: List[str], prefix="/"):
     _routes = []
     for module_name in modules:
         module = importlib.import_module(module_name)
-        _routes.extend(module.routes)
+        _routes.extend(module.routes)  # type: ignore
 
     routes = []
 

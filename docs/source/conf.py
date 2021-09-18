@@ -84,7 +84,7 @@ language = None
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = []
+exclude_patterns: list[str] = []
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -215,7 +215,7 @@ htmlhelp_basename = "distributeddoc"
 
 # -- Options for LaTeX output ---------------------------------------------
 
-latex_elements = {
+latex_elements: dict[str, str] = {
     # The paper size ('letterpaper' or 'a4paper').
     #'papersize': 'letterpaper',
     # The font size ('10pt', '11pt' or '12pt').
@@ -426,7 +426,7 @@ def copy_legacy_redirects(app, docname):
                 f.write(page)
 
 
-from docutils.parsers.rst import directives
+from docutils.parsers.rst import directives  # type: ignore
 
 # -- Configuration to keep autosummary in sync with autoclass::members ----------------------------------------------
 # Fixes issues/3693

@@ -141,7 +141,7 @@ class Queue:
 
     .. warning::
 
-       This object is experimental and has known issues in Python 2
+       This object is experimental
 
     Parameters
     ----------

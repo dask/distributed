@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import importlib
@@ -24,7 +26,6 @@ from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
-from typing import Dict, List
 
 import click
 import tblib.pickling_support
@@ -1373,7 +1374,7 @@ class LRU(UserDict):
         super().__setitem__(key, value)
 
 
-def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> List[Dict]:
+def clean_dashboard_address(addrs: AnyType, default_listen_ip: str = "") -> list[dict]:
     """
     Examples
     --------

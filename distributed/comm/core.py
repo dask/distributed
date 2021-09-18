@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
@@ -6,6 +8,7 @@ import sys
 import weakref
 from abc import ABC, abstractmethod, abstractproperty
 from contextlib import suppress
+from typing import ClassVar
 
 import dask
 from dask.utils import parse_timedelta
@@ -40,7 +43,7 @@ class Comm(ABC):
     depending on the underlying transport's characteristics.
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Comm]] = weakref.WeakSet()
 
     def __init__(self):
         self._instances.add(self)
@@ -61,7 +64,7 @@ class Comm(ABC):
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
@@ -76,7 +79,7 @@ class Comm(ABC):
         Parameters
         ----------
         msg
-        on_error : Optional[str]
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """

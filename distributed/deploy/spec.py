@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import atexit
 import copy
@@ -7,6 +9,7 @@ import warnings
 import weakref
 from contextlib import suppress
 from inspect import isawaitable
+from typing import ClassVar
 
 from tornado import gen
 
@@ -232,7 +235,7 @@ class SpecCluster(Cluster):
     ["0-0", "0-1", "0-2", "1-0", "1-1"]
     """
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[SpecCluster]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -461,15 +464,14 @@ class SpecCluster(Cluster):
         for name in ["nthreads", "ncores", "threads", "cores"]:
             with suppress(KeyError):
                 return self.new_spec["options"][name]
-
-        if not self.new_spec:
-            raise ValueError("To scale by cores= you must specify cores per worker")
+        assert False, "unreachable"
 
     def _memory_per_worker(self) -> int:
         """Return the memory limit per worker for new workers"""
         if not self.new_spec:
             raise ValueError(
-                "to scale by memory= your worker definition must include a memory_limit definition"
+                "to scale by memory= your worker definition must include a "
+                "memory_limit definition"
             )
 
         for name in ["memory_limit", "memory"]:
@@ -477,7 +479,8 @@ class SpecCluster(Cluster):
                 return parse_bytes(self.new_spec["options"][name])
 
         raise ValueError(
-            "to use scale(memory=...) your worker definition must include a memory_limit definition"
+            "to use scale(memory=...) your worker definition must include a "
+            "memory_limit definition"
         )
 
     def scale(self, n=0, memory=None, cores=None):

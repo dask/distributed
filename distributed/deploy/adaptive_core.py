@@ -1,7 +1,7 @@
 import collections
 import logging
 import math
-from typing import Iterable
+from collections.abc import Iterable
 
 import tlz as toolz
 from tornado.ioloop import IOLoop, PeriodicCallback

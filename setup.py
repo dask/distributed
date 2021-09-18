@@ -11,7 +11,7 @@ import versioneer
 requires = open("requirements.txt").read().strip().split("\n")
 setup_requires = []
 install_requires = []
-extras_require = {}
+extras_require: dict = {}
 for r in requires:
     if ";" in r:
         # requirements.txt conditional dependencies need to be reformatted for wheels

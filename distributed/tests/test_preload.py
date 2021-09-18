@@ -75,7 +75,7 @@ def dask_teardown(worker):
     worker.foo = 'teardown'
 """
     with dask.config.set(
-        {"distributed.worker.preload": text, "distributed.nanny.preload": text}
+        {"distributed.worker.preload": [text], "distributed.nanny.preload": [text]}
     ):
         async with Nanny(s.address) as w:
             assert w.foo == "setup"

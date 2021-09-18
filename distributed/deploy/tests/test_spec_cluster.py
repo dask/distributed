@@ -396,6 +396,10 @@ class MultiWorker(Worker, ProcessInterface):
     def status(self):
         return self.workers[0].status
 
+    @status.setter
+    def status(self, value):
+        raise NotImplementedError()
+
     def __str__(self):
         return "<MultiWorker n=%d>" % len(self.workers)
 

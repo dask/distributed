@@ -72,7 +72,7 @@ from distributed.utils import Log, log_errors
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
 else:
-    ExportTool = None
+    ExportTool = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 

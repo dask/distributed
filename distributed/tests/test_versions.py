@@ -11,9 +11,6 @@ from distributed.versions import error_message, get_versions
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
 
-# for really old versions, the `package` key is missing - version is UNKNOWN
-key_err_version = {}
-
 # if no key is available for one package, we assume it's MISSING
 missing_version = get_versions()
 del missing_version["packages"]["distributed"]
@@ -53,7 +50,7 @@ def kwargs_not_matching(kwargs_matching, node, effect):
     affected_version = {
         "MISMATCHED": mismatched_version,
         "MISSING": missing_version,
-        "KEY_ERROR": key_err_version,
+        "KEY_ERROR": {},
         "NONE": unknown_version,
     }[effect]
     kwargs = kwargs_matching

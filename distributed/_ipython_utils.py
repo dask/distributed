@@ -6,13 +6,7 @@ after which we can import them instead of having our own definitions.
 
 import atexit
 import os
-
-try:
-    import queue
-except ImportError:
-    # Python 2
-    import Queue as queue
-
+import queue
 import sys
 from subprocess import Popen
 from threading import Event, Thread
@@ -135,7 +129,7 @@ def remote_magic(line, cell=None):
 
 
 # cache clients for re-use in remote magic
-remote_magic._clients = {}
+remote_magic._clients = {}  # type: ignore
 
 
 def register_remote_magic(magic_name="remote"):

@@ -48,7 +48,8 @@ from distributed.metrics import time
 from distributed.utils import format_dashboard_link
 from distributed.utils_test import dec, div, gen_cluster, get_cert, inc, slowinc
 
-scheduler.PROFILING = False
+# Imported from distributed.dashboard.utils
+scheduler.PROFILING = False  # type: ignore
 
 
 @gen_cluster(client=True, scheduler_kwargs={"dashboard": True})

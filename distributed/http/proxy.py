@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from tornado import web
@@ -73,7 +75,7 @@ except ImportError:
         "python -m pip install jupyter-server-proxy"
     )
 
-    class GlobalProxyHandler(web.RequestHandler):
+    class GlobalProxyHandler(web.RequestHandler):  # type: ignore
         """Minimal Proxy handler when jupyter-server-proxy is not installed"""
 
         def initialize(self, dask_server=None, extra=None):
@@ -129,4 +131,4 @@ def check_worker_dashboard_exits(scheduler, worker):
     return False
 
 
-routes = [(r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {})]
+routes: list[tuple] = [(r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler, {})]

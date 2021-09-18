@@ -1,7 +1,7 @@
 from . import config  # isort:skip; load distributed configuration first
 from . import widgets  # isort:skip; load distributed widgets second
 import dask
-from dask.config import config
+from dask.config import config  # type: ignore
 from dask.utils import import_required
 
 from ._version import get_versions

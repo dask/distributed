@@ -13,12 +13,11 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Hashable, Iterable, Iterator, Mapping, Set
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Set
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
 
 import psutil
 import sortedcontainers
@@ -6054,7 +6053,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _rebalance_find_msgs(
         self: SchedulerState,
-        keys: "Optional[Set[Hashable]]",
+        keys: "Set[Hashable] | None",
         workers: "Iterable[WorkerState]",
     ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
         """Identify workers that need to lose keys and those that can receive them,
@@ -6424,13 +6423,13 @@ class Scheduler(SchedulerState, ServerNode):
     def workers_to_close(
         self,
         comm=None,
-        memory_ratio=None,
-        n=None,
-        key=None,
-        minimum=None,
-        target=None,
-        attribute="address",
-    ):
+        memory_ratio: "Number | None" = None,
+        n: "int | None" = None,
+        key: "Callable[[WorkerState], Hashable] | None" = None,
+        minimum: "int | None" = None,
+        target: "int | None" = None,
+        attribute: str = "address",
+    ) -> "list[str]":
         """
         Find workers that we can close with low cost
 
