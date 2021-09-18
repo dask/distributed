@@ -4081,7 +4081,7 @@ class Scheduler(SchedulerState, ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            # FIXME: This does not handly nannys
+            # FIXME: This does not handle nannies
             self.worker_send(worker, {"op": "close", "report": False})
             await self.remove_worker(address=worker, safe=safe)
 
@@ -6444,9 +6444,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         Parameters
         ----------
-        memory_factor : Number
+        memory_ratio : Number
             Amount of extra space we want to have for our stored data.
-            Defaults two 2, or that we want to have twice as much memory as we
+            Defaults to 2, or that we want to have twice as much memory as we
             currently have data.
         n : int
             Number of workers to close
@@ -6454,7 +6454,7 @@ class Scheduler(SchedulerState, ServerNode):
             Minimum number of workers to keep around
         key : Callable(WorkerState)
             An optional callable mapping a WorkerState object to a group
-            affiliation.  Groups will be closed together.  This is useful when
+            affiliation. Groups will be closed together. This is useful when
             closing workers must be done collectively, such as by hostname.
         target : int
             Target number of workers to have after we close
