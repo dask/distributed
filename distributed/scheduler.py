@@ -7979,6 +7979,9 @@ def decide_worker(
     dts: TaskState
     deps: set = ts._dependencies
     candidates: set
+    n_workers: Py_ssize_t = len(
+        valid_workers if valid_workers is not None else all_workers
+    )
     assert all([dts._who_has for dts in deps])
     if ts._actor:
         candidates = set(all_workers)
@@ -7987,8 +7990,18 @@ def decide_worker(
             wws
             for dts in deps
             # Ignore dependencies that will need to be, or already are, copied to all workers
-            if max(len(dts._dependents) / len(dts._group), len(dts._who_has))
-            < len(valid_workers if valid_workers is not None else all_workers)
+            if len(dts._who_has) < n_workers
+            and not (
+                len(dts._dependents) >= n_workers
+                and len(dts._group) < n_workers // 2
+                # Really want something like:
+                # map(len, dts._group._dependents) >= nthreads and len(dts._group) < n_workers // 2
+                # Or at least
+                # len(dts._dependents) * len(dts._group) >= nthreads and len(dts._group) < n_workers // 2
+                # But `nthreads` is O(k) to calcualte if given `valid_workers`.
+                # and the `map(len, dts._group._dependents)` could be extremely expensive since we can't put
+                # much of an upper bound on it.
+            )
             for wws in dts._who_has
         }
     if valid_workers is None:
