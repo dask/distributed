@@ -18,7 +18,7 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
+from typing import Optional, ValuesView
 
 import psutil
 import sortedcontainers
@@ -2524,7 +2524,10 @@ class SchedulerState:
         if ts._dependencies or valid_workers is not None:
             ws = decide_worker(
                 ts,
-                self._workers_dv.values(),
+                dict.values(self._workers_dv),
+                dict.values(self._idle_dv),
+                # ^ NOTE: For performance, these must be actual `dict_values`, not `SortedDictValues`.
+                # In Cython, `_workers_dv` is a plain dict, but in plain Python, it's still a `SortedDict`.
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
@@ -7919,14 +7922,19 @@ def _reevaluate_occupancy_worker(state: SchedulerState, ws: WorkerState):
 @cfunc
 @exceptval(check=False)
 def decide_worker(
-    ts: TaskState, all_workers, valid_workers: set, objective
+    ts: TaskState,
+    all_workers: ValuesView,
+    idle_workers: ValuesView,
+    valid_workers: set,
+    objective,
 ) -> WorkerState:
     """
     Decide which worker should take task *ts*.
 
-    We choose the worker that has the data on which *ts* depends.
+    We consider all workers which hold dependencies of *ts*,
+    plus a sample of up to 10 random workers (with preference for idle ones).
 
-    If several workers have dependencies then we choose the less-busy worker.
+    From those, we choose the worker where the *objective* function is minimized.
 
     Optionally provide *valid_workers* of where jobs are allowed to occur
     (if all workers are allowed to take the task, pass None instead).
@@ -7936,6 +7944,8 @@ def decide_worker(
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+    # NOTE: `all_workers` and `idle_workers` must be plain `dict_values` objects,
+    # not a `SortedValuesView`, which is much slower to iterate over.
     ws: WorkerState = None
     wws: WorkerState
     dts: TaskState
@@ -7945,7 +7955,17 @@ def decide_worker(
     if ts._actor:
         candidates = set(all_workers)
     else:
+        # Select all workers holding deps of this task
         candidates = {wws for dts in deps for wws in dts._who_has}
+        # Add up to 10 random workers into `candidates`, preferring idle ones.
+        worker_pool = valid_workers if valid_workers is not None else all_workers
+        if len(candidates) < len(worker_pool):
+            sample_from = idle_workers or worker_pool
+            candidates.update(
+                random.choices(list(sample_from), k=min(10, len(sample_from)))
+                if len(sample_from) > 10
+                else sample_from
+            )
     if valid_workers is None:
         if not candidates:
             candidates = set(all_workers)
@@ -7955,7 +7975,7 @@ def decide_worker(
             candidates = valid_workers
             if not candidates:
                 if ts._loose_restrictions:
-                    ws = decide_worker(ts, all_workers, None, objective)
+                    ws = decide_worker(ts, all_workers, idle_workers, None, objective)
                 return ws
 
     ncandidates: Py_ssize_t = len(candidates)

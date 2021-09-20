@@ -103,14 +103,16 @@ async def test_recompute_released_results(c, s, a, b):
     assert result == 1
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "1Mb"})
 async def test_decide_worker_with_many_independent_leaves(c, s, a, b):
+    # Make data large to penalize scheduling dependent tasks on other workers
+    ballast = b"\0" * int(s.bandwidth)
     xs = await asyncio.gather(
-        c.scatter(list(range(0, 100, 2)), workers=a.address),
-        c.scatter(list(range(1, 100, 2)), workers=b.address),
+        c.scatter([bytes(i) + ballast for i in range(0, 100, 2)], workers=a.address),
+        c.scatter([bytes(i) + ballast for i in range(1, 100, 2)], workers=b.address),
     )
     xs = list(concat(zip(*xs)))
-    ys = [delayed(inc)(x) for x in xs]
+    ys = [delayed(lambda s: s[0])(x) for x in xs]
 
     y2s = c.persist(ys)
     await wait(y2s)
@@ -127,6 +129,27 @@ async def test_decide_worker_with_restrictions(client, s, a, b, c):
     x = client.submit(inc, 1, workers=[a.address, b.address])
     await x
     assert x.key in a.data or x.key in b.data
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1)] * 3,
+    config={"distributed.scheduler.work-stealing": False},
+)
+async def test_decide_worker_select_candidate_holding_no_deps(client, s, a, b, c):
+    await client.submit(slowinc, 10, delay=0.1)  # learn that slowinc is slow
+    root = await client.scatter(1)
+    assert sum(root.key in worker.data for worker in [a, b, c]) == 1
+
+    start = time()
+    tasks = client.map(slowinc, [root] * 6, delay=0.1, pure=False)
+    await wait(tasks)
+    elapsed = time() - start
+
+    assert elapsed <= 4
+    assert all(root.key in worker.data for worker in [a, b, c]), [
+        list(worker.data.keys()) for worker in [a, b, c]
+    ]
 
 
 @pytest.mark.parametrize("ndeps", [0, 1, 4])
