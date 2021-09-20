@@ -316,7 +316,7 @@ async def test_worker_waits_for_scheduler():
         pass
     else:
         assert False
-    assert w.status not in (Status.closed, Status.running)
+    assert w.status not in (Status.closed, Status.running, Status.paused)
     await w.close(timeout=0.1)
 
 
@@ -919,7 +919,7 @@ async def test_fail_write_to_disk(c, s, a, b):
 async def test_fail_write_many_to_disk(c, s, a):
     a.validate = False
     await asyncio.sleep(0.1)
-    assert not a.paused
+    assert a.status == Status.running
 
     class Bad:
         def __init__(self, x):
@@ -1176,7 +1176,7 @@ async def test_pause_executor(c, s, a):
         future = c.submit(f)
         futures = c.map(slowinc, range(30), delay=0.1)
 
-        while not a.paused:
+        while a.status != Status.paused:
             await asyncio.sleep(0.01)
 
         out = logger.getvalue()
@@ -1597,7 +1597,7 @@ async def test_lifetime(c, s):
     async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
         futures = c.map(slowinc, range(200), delay=0.1, worker=[b.address])
         await asyncio.sleep(1.5)
-        assert b.status != Status.running
+        assert b.status not in (Status.running, Status.paused)
         await b.finished()
         assert set(b.data) == set(a.data)  # successfully moved data over
 
@@ -2714,3 +2714,61 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     s.handle_missing_data(key="f1", errant_worker=a.address)
 
     await fut2
+
+
+@pytest.mark.slow
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    nthreads=[("", 1)],
+    config={"distributed.worker.memory.pause": 0.5},
+    worker_kwargs={"memory_limit": 2 ** 29},  # 500 MiB
+)
+async def test_worker_status_sync(c, s, a):
+    (ws,) = s.workers.values()
+
+    while ws.status != Status.running:
+        await asyncio.sleep(0.01)
+
+    def leak():
+        distributed._test_leak = "x" * 2 ** 28  # 250 MiB
+
+    def clear_leak():
+        del distributed._test_leak
+
+    await c.run(leak)
+
+    while ws.status != Status.paused:
+        await asyncio.sleep(0.01)
+
+    await c.run(clear_leak)
+
+    while ws.status != Status.running:
+        await asyncio.sleep(0.01)
+
+    await s.retire_workers()
+
+    while ws.status != Status.closed:
+        await asyncio.sleep(0.01)
+
+    events = [ev for _, ev in s.events[ws.address] if ev["action"] != "heartbeat"]
+    assert events == [
+        {"action": "add-worker"},
+        {
+            "action": "worker-status-change",
+            "prev-status": "undefined",
+            "status": "running",
+        },
+        {
+            "action": "worker-status-change",
+            "prev-status": "running",
+            "status": "paused",
+        },
+        {
+            "action": "worker-status-change",
+            "prev-status": "paused",
+            "status": "running",
+        },
+        {"action": "remove-worker", "processing-tasks": {}},
+        {"action": "retired"},
+    ]

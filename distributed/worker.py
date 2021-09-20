@@ -604,8 +604,6 @@ class Worker(ServerNode):
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
-        self.paused = False
-
         if "memory_target_fraction" in kwargs:
             self.memory_target_fraction = kwargs.pop("memory_target_fraction")
         else:
@@ -1029,7 +1027,7 @@ class Worker(ServerNode):
 
             if response["status"] == "missing":
                 for i in range(10):
-                    if self.status != Status.running:
+                    if self.status not in (Status.running, Status.paused):
                         break
                     else:
                         await asyncio.sleep(0.05)
@@ -1064,7 +1062,7 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect and self.status == Status.running:
+            if self.reconnect and self.status in (Status.running, Status.paused):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
@@ -1276,7 +1274,11 @@ class Worker(ServerNode):
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status not in (Status.running, Status.closing_gracefully):
+            if self.status not in (
+                Status.running,
+                Status.paused,
+                Status.closing_gracefully,
+            ):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = Status.closing
 
@@ -1306,7 +1308,7 @@ class Worker(ServerNode):
                 if not any(
                     w
                     for w in Worker._instances
-                    if w != self and w.status == Status.running
+                    if w != self and w.status in (Status.running, Status.paused)
                 ):
                     for c in Worker._initialized_clients:
                         # Regardless of what the client was initialized with
@@ -1431,7 +1433,7 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
-        if self.paused:
+        if self.status == Status.paused:
             max_connections = 1
             throttle_msg = " Throttling outgoing connections because worker is paused."
         else:
@@ -2054,7 +2056,11 @@ class Worker(ServerNode):
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
 
-            if report and self.batched_stream and self.status == Status.running:
+            if (
+                report
+                and self.batched_stream
+                and self.status in (Status.running, Status.paused)
+            ):
                 self.send_task_state_to_scheduler(ts)
             else:
                 raise CommClosedError
@@ -2372,7 +2378,7 @@ class Worker(ServerNode):
 
         if self.validate:
             self.validate_state()
-        if self.status != Status.running:
+        if self.status not in (Status.running, Status.paused):
             return
         with log_errors():
             response = {}
@@ -2911,7 +2917,7 @@ class Worker(ServerNode):
             raise
 
     def ensure_computing(self):
-        if self.paused:
+        if self.status == Status.paused:
             return
         try:
             while self.constrained and self.executing_count < self.nthreads:
@@ -3127,7 +3133,7 @@ class Worker(ServerNode):
             if self.memory_pause_fraction and frac > self.memory_pause_fraction:
                 # Try to free some memory while in paused state
                 self._throttled_gc.collect()
-                if not self.paused:
+                if self.status == Status.running:
                     logger.warning(
                         "Worker is at %d%% memory usage. Pausing worker.  "
                         "Process memory: %s -- Worker memory limit: %s",
@@ -3137,8 +3143,8 @@ class Worker(ServerNode):
                         if self.memory_limit is not None
                         else "None",
                     )
-                    self.paused = True
-            elif self.paused:
+                    self.status = Status.paused
+            elif self.status == Status.paused:
                 logger.warning(
                     "Worker is at %d%% memory usage. Resuming worker. "
                     "Process memory: %s -- Worker memory limit: %s",
@@ -3148,7 +3154,7 @@ class Worker(ServerNode):
                     if self.memory_limit is not None
                     else "None",
                 )
-                self.paused = False
+                self.status = Status.running
                 self.ensure_computing()
 
         await check_pause(memory)
@@ -3419,7 +3425,7 @@ class Worker(ServerNode):
             raise
 
     def validate_state(self):
-        if self.status != Status.running:
+        if self.status not in (Status.running, Status.paused):
             return
         try:
             for ts in self.tasks.values():
@@ -3581,7 +3587,11 @@ def get_worker() -> Worker:
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status == Status.running)
+            return first(
+                w
+                for w in Worker._instances
+                if w.status in (Status.running, Status.paused)
+            )
         except StopIteration:
             raise ValueError("No workers found")
 

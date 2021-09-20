@@ -54,6 +54,7 @@ class Status(Enum):
     init = "init"
     starting = "starting"
     running = "running"
+    paused = "paused"
     stopping = "stopping"
     stopped = "stopped"
     closing = "closing"
@@ -268,7 +269,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status == Status.running:
+                if self.status in (Status.running, Status.paused):
                     return self
                 if timeout:
                     try:
@@ -503,7 +504,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, CancelledError):
-                        if self.status == Status.running:
+                        if self.status in (Status.running, Status.paused):
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:

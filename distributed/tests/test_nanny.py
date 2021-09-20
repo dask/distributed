@@ -305,7 +305,7 @@ async def test_throttle_outgoing_connections(c, s, a, *workers):
         # This is is very fragile, since a refactor of memory_monitor to
         # remove _memory_monitoring will break this test.
         dask_worker._memory_monitoring = True
-        dask_worker.paused = True
+        dask_worker.status = Status.paused
         dask_worker.outgoing_current_count = 2
 
     await c.run(pause, workers=[a.address])

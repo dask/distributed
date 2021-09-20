@@ -4847,7 +4847,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ["all", address],
                 {
                     "action": "remove-worker",
-                    "worker": address,
                     "processing-tasks": dict(ws._processing),
                 },
             )
