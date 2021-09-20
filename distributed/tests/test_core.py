@@ -87,7 +87,7 @@ def test_server_status_assign_non_variant_raises():
     server = Server({})
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("ignore")
-        with pytest.raises(AssertionError):
+        with pytest.raises(KeyError):
             server.status = "I do not exists"
 
 

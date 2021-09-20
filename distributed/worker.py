@@ -852,6 +852,19 @@ class Worker(ServerNode):
     def executor(self):
         return self.executors["default"]
 
+    @ServerNode.status.setter
+    def status(self, value):
+        """Override Server.status to notify the Scheduler of status changes"""
+        ServerNode.status.__set__(self, value)
+        if (
+            self.batched_stream
+            and self.batched_stream.comm
+            and not self.batched_stream.comm.closed()
+        ):
+            self.batched_stream.send(
+                {"op": "worker-status-change", "status": self._status.name}
+            )
+
     async def get_metrics(self):
         out = dict(
             executing=self.executing_count,

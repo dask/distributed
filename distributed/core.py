@@ -49,18 +49,21 @@ class Status(Enum):
     other.
     """
 
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-    failed = "failed"
-    init = "init"
+    undefined = "undefined"
     created = "created"
-    running = "running"
+    init = "init"
     starting = "starting"
-    stopped = "stopped"
+    running = "running"
     stopping = "stopping"
-    undefined = None
-    dont_reply = "dont-reply"
+    stopped = "stopped"
+    closing = "closing"
+    closing_gracefully = "closing_gracefully"
+    closed = "closed"
+    failed = "failed"
+    dont_reply = "dont_reply"
+
+
+Status.lookup = {s.name: s for s in Status}
 
 
 class RPCClosed(IOError):
@@ -246,17 +249,16 @@ class Server:
     def status(self, new_status):
         if isinstance(new_status, Status):
             self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
+        elif isinstance(new_status, str):
             warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
+                "Since distributed 2.23 `.status` is now an Enum, please assign "
+                f"`Status.{new_status}`",
                 PendingDeprecationWarning,
                 stacklevel=1,
             )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
+            self._status = Status.lookup[new_status]
         else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+            raise TypeError(f"Expected Status or str, got {new_status}")
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -511,14 +513,7 @@ class Server:
                         else:
                             result = error_message(e, status="uncaught-error")
 
-                # result is not type stable:
-                # when LHS is not Status then RHS must not be Status or it raises.
-                # when LHS is Status then RHS must be status or it raises in tests
-                is_dont_reply = False
-                if isinstance(result, Status) and (result == Status.dont_reply):
-                    is_dont_reply = True
-
-                if reply and not is_dont_reply:
+                if reply and result != Status.dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (OSError, TypeError) as e:
