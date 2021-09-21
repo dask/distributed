@@ -3362,7 +3362,7 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.runspec is None
         assert ts.key not in self.data
-        assert self.address not in ts.who_has  #!!!!!!!!
+        assert self.address not in ts.who_has  # !!!!!!!!
         # FIXME This is currently not an invariant since upon comm failure we
         # remove the erroneous worker from all who_has and correct the state
         # upon the next ensure_communicate

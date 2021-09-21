@@ -770,7 +770,7 @@ async def test_TaskGroupGraph_arrows(c, s, a, b):
     while s.task_groups:
         await asyncio.sleep(0.01)
 
-    tgg.update()  ###for some reason after deleting the futures the tgg.node_source.data.values are not clear.
+    tgg.update()  # for some reason after deleting the futures the tgg.node_source.data.values are not clear.
     assert not any(tgg.nodes_source.data.values())
     assert not any(tgg.arrows_source.data.values())
 

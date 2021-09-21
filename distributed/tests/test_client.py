@@ -6059,10 +6059,10 @@ async def test_profile_server(c, s, a, b):
                 c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
             )
 
-            p = await c.profile(server=True)  #  All worker servers
+            p = await c.profile(server=True)  # All worker servers
             assert "slowinc" in str(p)
 
-            p = await c.profile(scheduler=True)  #  Scheduler
+            p = await c.profile(scheduler=True)  # Scheduler
             assert "slowdec" in str(p)
         except AssertionError:
             if i == 4:

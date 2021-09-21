@@ -2189,7 +2189,7 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        ####plot tg log
+        # plot tg log
         self.root.image_url(
             url="url_logo",
             x="x_logo",
