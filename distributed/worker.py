@@ -303,6 +303,12 @@ class Worker(ServerNode):
     * **in_flight_workers**: ``{worker: {task}}``
         The workers from which we are currently gathering data and the
         dependencies we expect from those connections
+    * **busy_workers**: ``{worker}``
+        The workers from which we have tried to gather data and received
+        a busy response. These will be removed from the list as they are
+        needed.
+    * **busy_workers_log**: ``{worker}``
+        For testing, log of all workers which ever reported busy.
     * **comm_bytes**: ``int``
         The total number of bytes in flight
     * **threads**: ``{key: int}``
@@ -438,6 +444,8 @@ class Worker(ServerNode):
 
         self.in_flight_tasks = 0
         self.in_flight_workers = dict()
+        self.busy_workers = set()
+        self.busy_workers_log = set()
         self.total_out_connections = dask.config.get(
             "distributed.worker.connections.outgoing"
         )
@@ -2192,11 +2200,17 @@ class Worker(ServerNode):
                         in_flight = True
                         continue
                     host = get_address_host(self.address)
-                    local = [w for w in workers if get_address_host(w) == host]
+                    workers_not_busy = [
+                        w for w in workers if w not in self.busy_workers
+                    ]
+                    local = [w for w in workers_not_busy if get_address_host(w) == host]
                     if local:
                         worker = random.choice(local)
-                    else:
+                    elif not workers_not_busy:
+                        self.busy_workers.difference_update(workers)
                         worker = random.choice(list(workers))
+                    else:
+                        worker = random.choice(list(workers_not_busy))
                     to_gather, total_nbytes = self.select_keys_for_gather(
                         worker, to_gather_ts.key
                     )
@@ -2391,6 +2405,8 @@ class Worker(ServerNode):
 
                 if response["status"] == "busy":
                     self.log.append(("busy-gather", worker, to_gather_keys))
+                    self.busy_workers.add(worker)
+                    self.busy_workers_log.add(worker)
                     for key in to_gather_keys:
                         ts = self.tasks.get(key)
                         if ts and ts.state == "flight":
