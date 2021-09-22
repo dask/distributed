@@ -3044,7 +3044,7 @@ class Worker(ServerNode):
                     str(funcname(function))[:1000],
                     convert_args_to_str(args2, max_len=1000),
                     convert_kwargs_to_str(kwargs2, max_len=1000),
-                    result["exception"].data,
+                    ts.exception_text,
                 )
                 self.transition(ts, "error")
 
