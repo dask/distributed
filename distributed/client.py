@@ -1682,14 +1682,14 @@ class Client:
 
         if batch_size and batch_size > 1 and total_length > batch_size:
             batches = list(
-                zip(*[partition_all(batch_size, iterable) for iterable in iterables])
+                zip(*(partition_all(batch_size, iterable) for iterable in iterables))
             )
             if isinstance(key, list):
                 keys = [list(element) for element in partition_all(batch_size, key)]
             else:
                 keys = [key for _ in range(len(batches))]
             return sum(
-                [
+                (
                     self.map(
                         func,
                         *batch,
@@ -1706,7 +1706,7 @@ class Client:
                         **kwargs,
                     )
                     for key, batch in zip(keys, batches)
-                ],
+                ),
                 [],
             )
 
@@ -4159,7 +4159,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4228,7 +4228,7 @@ class Client:
         ...         pass
         ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
-        ...     def release_key(self, key: str, state: str, cause: Optional[str], reason: None, report: bool):
+        ...     def release_key(self, key: str, state: str, cause: str | None, reason: None, report: bool):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from tornado.ioloop import PeriodicCallback
 
@@ -46,10 +46,10 @@ class ActiveMemoryManagerExtension:
         scheduler: SchedulerState,
         # The following parameters are exposed so that one may create, run, and throw
         # away on the fly a specialized manager, separate from the main one.
-        policies: Optional[set[ActiveMemoryManagerPolicy]] = None,
+        policies: set[ActiveMemoryManagerPolicy] | None = None,
         register: bool = True,
-        start: Optional[bool] = None,
-        interval: Optional[float] = None,
+        start: bool | None = None,
+        interval: float | None = None,
     ):
         self.scheduler = scheduler
 
@@ -148,9 +148,9 @@ class ActiveMemoryManagerExtension:
         """Sequentially run ActiveMemoryManagerPolicy.run() for all registered policies,
         obtain replicate/drop suggestions, and use them to populate self.pending.
         """
-        candidates: Optional[set[WorkerState]]
+        candidates: set[WorkerState] | None
         cmd: str
-        ws: Optional[WorkerState]
+        ws: WorkerState | None
         ts: TaskState
         nreplicas: int
 
@@ -185,9 +185,9 @@ class ActiveMemoryManagerExtension:
     def _find_recipient(
         self,
         ts: TaskState,
-        candidates: Optional[set[WorkerState]],
+        candidates: set[WorkerState] | None,
         pending_repl: set[WorkerState],
-    ) -> Optional[WorkerState]:
+    ) -> WorkerState | None:
         """Choose a worker to acquire a new replica of an in-memory task among a set of
         candidates. If candidates is None, default to all workers in the cluster that do
         not hold a replica yet. The worker with the lowest memory usage (downstream of
@@ -206,9 +206,9 @@ class ActiveMemoryManagerExtension:
     def _find_dropper(
         self,
         ts: TaskState,
-        candidates: Optional[set[WorkerState]],
+        candidates: set[WorkerState] | None,
         pending_drop: set[WorkerState],
-    ) -> Optional[WorkerState]:
+    ) -> WorkerState | None:
         """Choose a worker to drop its replica of an in-memory task among a set of
         candidates. If candidates is None, default to all workers in the cluster that
         hold a replica. The worker with the highest memory usage (downstream of pending
@@ -238,8 +238,8 @@ class ActiveMemoryManagerPolicy:
     def run(
         self,
     ) -> Generator[
-        tuple[str, TaskState, Optional[set[WorkerState]]],
-        Optional[WorkerState],
+        tuple[str, TaskState, set[WorkerState] | None],
+        WorkerState | None,
         None,
     ]:
         """This method is invoked by the ActiveMemoryManager every few seconds, or

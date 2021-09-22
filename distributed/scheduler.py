@@ -18,7 +18,6 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
-from typing import Optional
 
 import psutil
 import sortedcontainers
@@ -6080,7 +6079,7 @@ class Scheduler(SchedulerState, ServerNode):
 
     def _rebalance_find_msgs(
         self: SchedulerState,
-        keys: "Optional[Set[Hashable]]",
+        keys: "Set[Hashable] | None",
         workers: "Iterable[WorkerState]",
     ) -> "list[tuple[WorkerState, WorkerState, TaskState]]":
         """Identify workers that need to lose keys and those that can receive them,

@@ -14,12 +14,12 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import MutableMapping
+from collections.abc import Hashable, Iterable, MutableMapping
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING, Dict, Hashable, Iterable, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .client import Client
@@ -652,7 +652,7 @@ class Worker(ServerNode):
         self.reconnect = reconnect
 
         # Common executors always available
-        self.executors: Dict[str, concurrent.futures.Executor] = {
+        self.executors: dict[str, concurrent.futures.Executor] = {
             "offload": utils._offload_executor,
             "actor": ThreadPoolExecutor(1, thread_name_prefix="Dask-Actor-Threads"),
         }
@@ -970,10 +970,10 @@ class Worker(ServerNode):
             raise ValueError(f"Unexpected response from register: {response!r}")
         else:
             await asyncio.gather(
-                *[
+                *(
                     self.plugin_add(name=name, plugin=plugin)
                     for name, plugin in response["worker-plugins"].items()
-                ]
+                )
             )
 
             logger.info("        Registered to: %26s", self.scheduler.address)
@@ -1235,7 +1235,7 @@ class Worker(ServerNode):
         setproctitle("dask-worker [%s]" % self.address)
 
         await asyncio.gather(
-            *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
+            *(self.plugin_add(plugin=plugin) for plugin in self._pending_plugins)
         )
         self._pending_plugins = ()
 
@@ -1282,7 +1282,7 @@ class Worker(ServerNode):
                 if hasattr(plugin, "teardown")
             ]
 
-            await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+            await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -2692,8 +2692,8 @@ class Worker(ServerNode):
     def release_key(
         self,
         key: Hashable,
-        cause: Optional[TaskState] = None,
-        reason: Optional[str] = None,
+        cause: TaskState | None = None,
+        reason: str | None = None,
         report: bool = True,
     ):
         try:
@@ -2828,7 +2828,7 @@ class Worker(ServerNode):
         actor=None,
         function=None,
         args=(),
-        kwargs: Optional[dict] = None,
+        kwargs: dict | None = None,
     ):
         kwargs = kwargs or {}
         separate_thread = kwargs.pop("separate_thread", True)
@@ -3362,7 +3362,7 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.runspec is None
         assert ts.key not in self.data
-        assert self.address not in ts.who_has  #!!!!!!!!
+        assert self.address not in ts.who_has  # !!!!!!!!
         # FIXME This is currently not an invariant since upon comm failure we
         # remove the erroneous worker from all who_has and correct the state
         # upon the next ensure_communicate
@@ -3688,7 +3688,7 @@ class Reschedule(Exception):
     """
 
 
-def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT) -> Optional[int]:
+def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT) -> int | None:
     if memory_limit is None:
         return None
 
@@ -4038,7 +4038,7 @@ def get_msg_safe_str(msg):
     return msg
 
 
-def convert_args_to_str(args, max_len: Optional[int] = None) -> str:
+def convert_args_to_str(args, max_len: int | None = None) -> str:
     """Convert args to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
@@ -4057,7 +4057,7 @@ def convert_args_to_str(args, max_len: Optional[int] = None) -> str:
         return "({})".format(", ".join(strs))
 
 
-def convert_kwargs_to_str(kwargs: dict, max_len: Optional[int] = None) -> str:
+def convert_kwargs_to_str(kwargs: dict, max_len: int | None = None) -> str:
     """Convert kwargs to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """

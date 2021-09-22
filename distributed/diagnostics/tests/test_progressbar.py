@@ -48,7 +48,7 @@ async def test_TextProgressBar_empty(s, a, b, capsys):
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
     # trailing newline so grab next to last line for final state of bar
-    bar, percent, time = [i.strip() for i in out.split("\r")[-2].split("|")]
+    bar, percent, time = (i.strip() for i in out.split("\r")[-2].split("|"))
     assert bar == "[" + "#" * width + "]"
     assert percent == "100% Completed"
 

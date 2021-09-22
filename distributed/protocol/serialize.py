@@ -357,7 +357,7 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header : dict
     frames : list of bytes
-    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+    deserializers : dict[str, tuple[Callable, Callable, bool]] | None
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
 
