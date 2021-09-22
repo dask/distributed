@@ -52,23 +52,20 @@ class ActiveMemoryManagerExtension:
         interval: float | None = None,
     ):
         self.scheduler = scheduler
+        self.policies = set()
 
         if policies is None:
+            # Initialize policies from config
             policies = set()
             for kwargs in dask.config.get(
                 "distributed.scheduler.active-memory-manager.policies"
             ):
                 kwargs = kwargs.copy()
                 cls = import_term(kwargs.pop("class"))
-                if not issubclass(cls, ActiveMemoryManagerPolicy):
-                    raise TypeError(
-                        f"{cls}: Expected ActiveMemoryManagerPolicy; got {type(cls)}"
-                    )
                 policies.add(cls(**kwargs))
 
         for policy in policies:
-            policy.manager = self
-        self.policies = policies
+            self.add_policy(policy)
 
         if register:
             scheduler.extensions["amm"] = self
@@ -92,15 +89,27 @@ class ActiveMemoryManagerExtension:
 
     def start(self, comm=None) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
+        if self.started:
+            return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
-        self.scheduler.periodic_callbacks["amm"] = pc
+        self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
 
     def stop(self, comm=None) -> None:
         """Stop periodic execution"""
-        pc = self.scheduler.periodic_callbacks.pop("amm", None)
+        pc = self.scheduler.periodic_callbacks.pop(f"amm-{id(self)}", None)
         if pc:
             pc.stop()
+
+    @property
+    def started(self) -> bool:
+        return f"amm-{id(self)}" in self.scheduler.periodic_callbacks
+
+    def add_policy(self, policy: ActiveMemoryManagerPolicy) -> None:
+        if not isinstance(policy, ActiveMemoryManagerPolicy):
+            raise TypeError(f"Expected ActiveMemoryManagerPolicy; got {policy!r}")
+        self.policies.add(policy)
+        policy.manager = self
 
     def run_once(self, comm=None) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
