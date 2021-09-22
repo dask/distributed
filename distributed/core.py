@@ -1198,7 +1198,7 @@ def error_message(e, status="error"):
     }
 
 
-def clean_exception(exception, traceback, **kwargs):
+def clean_exception(exception, traceback=None, **kwargs):
     """Reraise exception and traceback. Deserialize if necessary
 
     See Also
