@@ -6247,6 +6247,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
+@pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
     pytest.importorskip("bokeh")
@@ -6282,13 +6283,13 @@ async def test_performance_report(c, s, a, b):
     assert "distributed.scheduler - INFO - Clear task state" in data
     assert dask.__version__ in data
 
-    # Stacklevel two captures code two frames back -- which in this case
+    # stacklevel=2 captures code two frames back -- which in this case
     # is the testing function
     data = await f(stacklevel=2)
     assert "async def test_performance_report(c, s, a, b):" in data
     assert "Dask Performance Report" in data
 
-    # Stacklevel zero or lower is overridden to stacklevel=1 so we don't see
+    # stacklevel=0 or lower is overridden to stacklevel=1 so we don't see
     # distributed internals
     data = await f(stacklevel=0)
     assert "Also, we want this comment to appear" in data
