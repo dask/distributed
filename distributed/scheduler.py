@@ -5346,7 +5346,11 @@ class Scheduler(SchedulerState, ServerNode):
             return
         ws: WorkerState = parent._workers_dv.get(worker)
         if ws is not None and ts._processing_on == ws:
-            parent._transitions({key: "released"}, {}, {})
+            client_msgs = {}
+            worker_msgs = {}
+            # Note: The msgs dicts are filled inplace
+            parent._transitions({key: "released"}, client_msgs, worker_msgs)
+            self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
