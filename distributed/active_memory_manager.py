@@ -52,23 +52,20 @@ class ActiveMemoryManagerExtension:
         interval: Optional[float] = None,
     ):
         self.scheduler = scheduler
+        self.policies = set()
 
         if policies is None:
+            # Initialize policies from config
             policies = set()
             for kwargs in dask.config.get(
                 "distributed.scheduler.active-memory-manager.policies"
             ):
                 kwargs = kwargs.copy()
                 cls = import_term(kwargs.pop("class"))
-                if not issubclass(cls, ActiveMemoryManagerPolicy):
-                    raise TypeError(
-                        f"{cls}: Expected ActiveMemoryManagerPolicy; got {type(cls)}"
-                    )
                 policies.add(cls(**kwargs))
 
         for policy in policies:
-            policy.manager = self
-        self.policies = policies
+            self.add_policy(policy)
 
         if register:
             scheduler.extensions["amm"] = self
@@ -92,15 +89,27 @@ class ActiveMemoryManagerExtension:
 
     def start(self, comm=None) -> None:
         """Start executing every ``self.interval`` seconds until scheduler shutdown"""
+        if self.started:
+            return
         pc = PeriodicCallback(self.run_once, self.interval * 1000.0)
-        self.scheduler.periodic_callbacks["amm"] = pc
+        self.scheduler.periodic_callbacks[f"amm-{id(self)}"] = pc
         pc.start()
 
     def stop(self, comm=None) -> None:
         """Stop periodic execution"""
-        pc = self.scheduler.periodic_callbacks.pop("amm", None)
+        pc = self.scheduler.periodic_callbacks.pop(f"amm-{id(self)}", None)
         if pc:
             pc.stop()
+
+    @property
+    def started(self) -> bool:
+        return f"amm-{id(self)}" in self.scheduler.periodic_callbacks
+
+    def add_policy(self, policy: ActiveMemoryManagerPolicy) -> None:
+        if not isinstance(policy, ActiveMemoryManagerPolicy):
+            raise TypeError(f"Expected ActiveMemoryManagerPolicy; got {policy!r}")
+        self.policies.add(policy)
+        policy.manager = self
 
     def run_once(self, comm=None) -> None:
         """Run all policies once and asynchronously (fire and forget) enact their
@@ -189,9 +198,14 @@ class ActiveMemoryManagerExtension:
         pending_repl: set[WorkerState],
     ) -> Optional[WorkerState]:
         """Choose a worker to acquire a new replica of an in-memory task among a set of
-        candidates. If candidates is None, default to all workers in the cluster that do
-        not hold a replica yet. The worker with the lowest memory usage (downstream of
-        pending replications and drops) will be returned.
+        candidates. If candidates is None, default to all workers in the cluster.
+        Regardless, workers that either already hold a replica or are scheduled to
+        receive one at the end of this AMM iteration are not considered.
+
+        Returns
+        -------
+        The worker with the lowest memory usage (downstream of pending replications and
+        drops), or None if no eligible candidates are available.
         """
         if ts.state != "memory":
             return None
@@ -210,9 +224,15 @@ class ActiveMemoryManagerExtension:
         pending_drop: set[WorkerState],
     ) -> Optional[WorkerState]:
         """Choose a worker to drop its replica of an in-memory task among a set of
-        candidates. If candidates is None, default to all workers in the cluster that
-        hold a replica. The worker with the highest memory usage (downstream of pending
-        replications and drops) will be returned.
+        candidates. If candidates is None, default to all workers in the cluster.
+        Regardless, workers that either do not hold a replica or are already scheduled
+        to drop theirs at the end of this AMM iteration are not considered.
+        This method also ensures that a key will not lose its last replica.
+
+        Returns
+        -------
+        The worker with the highest memory usage (downstream of pending replications and
+        drops), or None if no eligible candidates are available.
         """
         if len(ts.who_has) - len(pending_drop) < 2:
             return None
@@ -283,13 +303,7 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     """
 
     def run(self):
-        # TODO this is O(n) to the total number of in-memory tasks on the cluster; it
-        #      could be made faster by automatically attaching it to a TaskState when it
-        #      goes above one replica and detaching it when it drops below two.
-        for ts in self.manager.scheduler.tasks.values():
-            if len(ts.who_has) < 2:
-                continue
-
+        for ts in self.manager.scheduler.replicated_tasks:
             desired_replicas = 1  # TODO have a marker on TaskState
 
             # If a dependent task has not been assigned to a worker yet, err on the side
