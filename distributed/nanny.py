@@ -592,7 +592,7 @@ class Nanny(ServerNode):
             if hasattr(plugin, "teardown")
         ]
 
-        await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
         try:

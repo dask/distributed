@@ -193,7 +193,7 @@ def test_decide_worker_coschedule_order_neighbors(ndeps, nthreads):
         secondary_worker_key_fractions = []
         for i, keys in enumerate(x.__dask_keys__()):
             # Iterate along rows of the array.
-            keys = set(stringify(k) for k in keys)
+            keys = {stringify(k) for k in keys}
 
             # No more than 2 workers should have any keys
             assert sum(any(k in w.data for k in keys) for w in workers) <= 2
@@ -922,7 +922,7 @@ async def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = await asyncio.gather(*[Nanny(s.address, loop=s.loop) for _ in range(N)])
+    nannies = await asyncio.gather(*(Nanny(s.address, loop=s.loop) for _ in range(N)))
 
     while len(s.nthreads) < N:
         await asyncio.sleep(0.1)
@@ -952,7 +952,7 @@ async def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    await asyncio.gather(*[n.close() for n in nannies])
+    await asyncio.gather(*(n.close() for n in nannies))
     await c.close()
 
     assert not s.rpc.open
@@ -1993,14 +1993,7 @@ async def test_task_groups(c, s, a, b):
     assert tg.nbytes_total == tp.nbytes_total
     # It should map down to individual tasks
     assert tg.nbytes_total == sum(
-        [ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg]
-    )
-    in_memory_ts = sum(
-        [
-            ts.get_nbytes()
-            for ts in s.tasks.values()
-            if ts.group is tg and ts.state == "memory"
-        ]
+        ts.get_nbytes() for ts in s.tasks.values() if ts.group is tg
     )
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -3178,7 +3171,7 @@ async def test_worker_heartbeat_after_cancel(c, s, *workers):
     await c.cancel(futs)
 
     while any(w.tasks for w in workers):
-        await asyncio.gather(*[w.heartbeat() for w in workers])
+        await asyncio.gather(*(w.heartbeat() for w in workers))
 
 
 @gen_cluster(client=True, nthreads=[("", 1)])

@@ -970,10 +970,10 @@ class Worker(ServerNode):
             raise ValueError(f"Unexpected response from register: {response!r}")
         else:
             await asyncio.gather(
-                *[
+                *(
                     self.plugin_add(name=name, plugin=plugin)
                     for name, plugin in response["worker-plugins"].items()
-                ]
+                )
             )
 
             logger.info("        Registered to: %26s", self.scheduler.address)
@@ -1235,7 +1235,7 @@ class Worker(ServerNode):
         setproctitle("dask-worker [%s]" % self.address)
 
         await asyncio.gather(
-            *[self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
+            *(self.plugin_add(plugin=plugin) for plugin in self._pending_plugins)
         )
         self._pending_plugins = ()
 
@@ -1282,7 +1282,7 @@ class Worker(ServerNode):
                 if hasattr(plugin, "teardown")
             ]
 
-            await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+            await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -1429,7 +1429,8 @@ class Worker(ServerNode):
             and self.outgoing_current_count >= max_connections
         ):
             logger.debug(
-                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
+                "Worker %s has too many open connections to respond to data request "
+                "from %s (%d/%d).%s",
                 self.address,
                 who,
                 self.outgoing_current_count,
@@ -3108,7 +3109,7 @@ class Worker(ServerNode):
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
-        async def check_pause(memory):
+        def check_pause(memory):
             frac = memory / self.memory_limit
             # Pause worker threads if above 80% memory use
             if self.memory_pause_fraction and frac > self.memory_pause_fraction:
@@ -3138,7 +3139,7 @@ class Worker(ServerNode):
                 self.paused = False
                 self.ensure_computing()
 
-        await check_pause(memory)
+        check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             logger.debug(
@@ -3179,10 +3180,10 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
-            await check_pause(memory)
+            check_pause(memory)
             if count:
                 logger.debug(
-                    "Moved %d pieces of data data and %s to disk",
+                    "Moved %d tasks worth %s to disk",
                     count,
                     format_bytes(total),
                 )
@@ -3362,7 +3363,7 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.runspec is None
         assert ts.key not in self.data
-        assert self.address not in ts.who_has  #!!!!!!!!
+        assert self.address not in ts.who_has  # !!!!!!!!
         # FIXME This is currently not an invariant since upon comm failure we
         # remove the erroneous worker from all who_has and correct the state
         # upon the next ensure_communicate

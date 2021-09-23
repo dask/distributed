@@ -303,7 +303,13 @@ class ReduceReplicas(ActiveMemoryManagerPolicy):
     """
 
     def run(self):
-        for ts in self.manager.scheduler.replicated_tasks:
+        # TODO this is O(n) to the total number of in-memory tasks on the cluster; it
+        #      could be made faster by automatically attaching it to a TaskState when it
+        #      goes above one replica and detaching it when it drops below two.
+        for ts in self.manager.scheduler.tasks.values():
+            if len(ts.who_has) < 2:
+                continue
+
             desired_replicas = 1  # TODO have a marker on TaskState
 
             # If a dependent task has not been assigned to a worker yet, err on the side
