@@ -10,10 +10,11 @@ except ImportError:
 nvmlInitialized = False
 nvmlLibraryNotFound = False
 nvmlOwnerPID = None
+nvmlNotSupported = None
 
 
 def init_once():
-    global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID
+    global nvmlInitialized, nvmlLibraryNotFound, nvmlOwnerPID, nvmlNotSupported
 
     if dask.config.get("distributed.diagnostics.nvml") is False:
         nvmlInitialized = False
@@ -26,6 +27,7 @@ def init_once():
     nvmlOwnerPID = os.getpid()
     try:
         pynvml.nvmlInit()
+        nvmlNotSupported = _pynvml_not_supported()
     except (
         pynvml.NVMLError_LibraryNotFound,
         pynvml.NVMLError_DriverNotLoaded,
@@ -63,6 +65,34 @@ def _pynvml_handles():
     return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def _pynvml_not_supported():
+    h = _pynvml_handles()
+
+    try:
+        util = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+    except pynvml.NVMLError_NotSupported:
+        util = None
+    try:
+        mem = pynvml.nvmlDeviceGetMemoryInfo(h).used
+    except pynvml.NVMLError_NotSupported:
+        mem = None
+    try:
+        total = pynvml.nvmlDeviceGetMemoryInfo(h).total
+    except pynvml.NVMLError_NotSupported:
+        total = None
+    try:
+        name = pynvml.nvmlDeviceGetName(h).decode()
+    except pynvml.NVMLError_NotSupported:
+        name = None
+
+    return {
+        "util": util is None,
+        "mem": mem is None,
+        "total": total is None,
+        "name": name is None,
+    }
+
+
 def has_cuda_context():
     """Check whether the current process already has a CUDA context created.
 
@@ -83,31 +113,23 @@ def has_cuda_context():
 
 def real_time():
     h = _pynvml_handles()
-    try:
-        util = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
-    except pynvml.NVMLError_NotSupported:
-        util = None
-    try:
-        mem = pynvml.nvmlDeviceGetMemoryInfo(h).used
-    except pynvml.NVMLError_NotSupported:
-        mem = None
     return {
-        "utilization": util,
-        "memory-used": mem,
+        "utilization": None
+        if nvmlNotSupported["util"]
+        else pynvml.nvmlDeviceGetUtilizationRates(h).gpu,
+        "memory-used": None
+        if nvmlNotSupported["mem"]
+        else pynvml.nvmlDeviceGetMemoryInfo(h).used,
     }
 
 
 def one_time():
     h = _pynvml_handles()
-    try:
-        total = pynvml.nvmlDeviceGetMemoryInfo(h).total
-    except pynvml.NVMLError_NotSupported:
-        total = None
-    try:
-        name = pynvml.nvmlDeviceGetName(h).decode()
-    except pynvml.NVMLError_NotSupported:
-        name = None
     return {
-        "memory-total": total,
-        "name": name,
+        "memory-total": None
+        if nvmlNotSupported["util"]
+        else pynvml.nvmlDeviceGetMemoryInfo(h).total,
+        "name": None
+        if nvmlNotSupported["util"]
+        else pynvml.nvmlDeviceGetName(h).decode(),
     }
