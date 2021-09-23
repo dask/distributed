@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import itertools
 
 import dask
@@ -6,7 +8,7 @@ from ..utils import get_ip_interface
 from . import registry
 
 
-def parse_address(addr, strict=False):
+def parse_address(addr: str, strict: bool = False) -> tuple[str, str]:
     """
     Split address into its scheme and scheme-dependent location string.
 
@@ -145,7 +147,7 @@ def get_address_host(addr):
     return backend.get_address_host(loc)
 
 
-def get_local_address_for(addr):
+def get_local_address_for(addr: str) -> str:
     """
     Get a local listening address suitable for reaching *addr*.
 

@@ -153,7 +153,13 @@ class InProc(Comm):
     _initialized = False
 
     def __init__(
-        self, local_addr, peer_addr, read_q, write_q, write_loop, deserialize=True
+        self,
+        local_addr: str,
+        peer_addr: str,
+        read_q,
+        write_q,
+        write_loop,
+        deserialize=True,
     ):
         super().__init__()
         self._local_addr = local_addr
@@ -176,11 +182,11 @@ class InProc(Comm):
         return finalize
 
     @property
-    def local_address(self):
+    def local_address(self) -> str:
         return self._local_addr
 
     @property
-    def peer_address(self):
+    def peer_address(self) -> str:
         return self._peer_addr
 
     async def read(self, deserializers="ignored"):

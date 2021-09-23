@@ -13,7 +13,15 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Set
+from collections.abc import (
+    Callable,
+    Collection,
+    Hashable,
+    Iterable,
+    Iterator,
+    Mapping,
+    Set,
+)
 from contextlib import suppress
 from datetime import timedelta
 from functools import partial
@@ -152,7 +160,6 @@ if sys.version_info < (3, 8):
         import pickle
 else:
     import pickle
-
 
 logger = logging.getLogger(__name__)
 
@@ -585,7 +592,7 @@ class WorkerState:
         return self._actors
 
     @property
-    def address(self):
+    def address(self) -> str:
         return self._address
 
     @property
@@ -5928,7 +5935,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         return keys_failed
 
-    async def delete_worker_data(self, worker_address: str, keys: "list[str]") -> None:
+    async def delete_worker_data(
+        self, worker_address: str, keys: "Collection[str]"
+    ) -> None:
         """Delete data from a worker and update the corresponding worker/task states
 
         Parameters

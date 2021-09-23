@@ -171,7 +171,7 @@ you need to test the command line interface.
 
 Linting
 -------
-distributed uses several code linters (flake8, black, isort, pyupgrade), which are
+distributed uses several code linters (flake8, black, isort, pyupgrade, mypy), which are
 enforced by CI. Developers should run them locally before they submit a PR, through the
 single command ``pre-commit run --all-files``. This makes sure that linter versions and
 options are aligned for all developers.

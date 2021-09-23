@@ -7,14 +7,19 @@ import os
 import shutil
 import sys
 import urllib.request
+from collections.abc import Iterable
 from importlib import import_module
 from types import ModuleType
+from typing import TYPE_CHECKING, cast
 
 import click
 
 from dask.utils import tmpfile
 
 from .utils import import_file
+
+if TYPE_CHECKING:
+    from .core import Server
 
 logger = logging.getLogger(__name__)
 
@@ -150,10 +155,18 @@ class Preload:
         Path of a directory where files should be copied
     """
 
-    def __init__(self, dask_server, name: str, argv: list[str], file_dir: str | None):
+    dask_server: Server
+    name: str
+    argv: list[str]
+    file_dir: str | None
+    module: ModuleType
+
+    def __init__(
+        self, dask_server: Server, name: str, argv: Iterable[str], file_dir: str | None
+    ):
         self.dask_server = dask_server
         self.name = name
-        self.argv = argv
+        self.argv = list(argv)
         self.file_dir = file_dir
 
         if is_webaddress(name):
@@ -168,7 +181,7 @@ class Preload:
         if dask_setup:
             if isinstance(dask_setup, click.Command):
                 context = dask_setup.make_context(
-                    "dask_setup", list(self.argv), allow_extra_args=False
+                    "dask_setup", self.argv, allow_extra_args=False
                 )
                 result = dask_setup.callback(
                     self.dask_server, *context.args, **context.params
@@ -201,9 +214,9 @@ def process_preloads(
     if isinstance(preload, str):
         preload = [preload]
     if preload_argv and isinstance(preload_argv[0], str):
-        preload_argv = [preload_argv] * len(preload)
+        preload_argv = [cast(list[str], preload_argv)] * len(preload)
     elif not preload_argv:
-        preload_argv = [[]] * len(preload)
+        preload_argv = [cast(list[str], [])] * len(preload)
     if len(preload) != len(preload_argv):
         raise ValueError(
             "preload and preload_argv have mismatched lenghts "

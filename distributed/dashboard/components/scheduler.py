@@ -51,7 +51,7 @@ from dask.utils import format_bytes, format_time, key_split, parse_timedelta
 try:
     import numpy as np
 except ImportError:
-    np = False
+    np = None  # type: ignore
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (

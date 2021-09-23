@@ -43,8 +43,8 @@ async def test_gather_from_workers_permissive(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass

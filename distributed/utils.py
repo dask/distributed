@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import pkgutil
 import re
+import resource
 import shutil
 import socket
 import sys
@@ -26,15 +27,10 @@ from hashlib import md5
 from importlib.util import cache_from_source
 from time import sleep
 from typing import Any as AnyType
+from typing import ClassVar
 
 import click
 import tblib.pickling_support
-
-try:
-    import resource
-except ImportError:
-    resource = None
-
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -45,7 +41,7 @@ from dask.utils import parse_timedelta as _parse_timedelta
 from dask.widgets import get_template
 
 try:
-    from tornado.ioloop import PollIOLoop
+    from tornado.ioloop import PollIOLoop  # type: ignore
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
@@ -115,15 +111,8 @@ def has_arg(func, argname):
 
 
 def get_fileno_limit():
-    """
-    Get the maximum number of open files per process.
-    """
-    if resource is not None:
-        return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-    else:
-        # Default ceiling for Windows when using the CRT, though it
-        # is settable using _setmaxstdio().
-        return 512
+    """Get the maximum number of open files per process"""
+    return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
 
 
 @toolz.memoize
@@ -347,7 +336,9 @@ class LoopRunner:
     """
 
     # All loops currently associated to loop runners
-    _all_loops = weakref.WeakKeyDictionary()
+    _all_loops: ClassVar[
+        weakref.WeakKeyDictionary[IOLoop, tuple[int, LoopRunner | None]]
+    ] = weakref.WeakKeyDictionary()
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
@@ -1001,7 +992,7 @@ def json_load_robust(fn, load=json.load):
 class DequeHandler(logging.Handler):
     """A logging.Handler that records records into a deque"""
 
-    _instances = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[DequeHandler]] = weakref.WeakSet()
 
     def __init__(self, *args, n=10000, **kwargs):
         self.deque = deque(maxlen=n)
@@ -1046,6 +1037,28 @@ if "notebook" in sys.modules:
         traitlets.config.Application.instance(), NotebookApp
     )
 
+# TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+# once tornado > 6.0.3 is available.
+
+if WINDOWS:
+    # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+    # fallback to the pre-3.8 default of Selector
+    # https://github.com/tornadoweb/tornado/issues/2608
+    BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
+else:
+    BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+
+
+class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
+    def get_event_loop(self):
+        try:
+            return super().get_event_loop()
+        except (RuntimeError, AssertionError):
+            loop = self.new_event_loop()
+            self.set_event_loop(loop)
+            return loop
+
+
 if not is_server_extension:
     is_kernel_and_no_running_loop = False
 
@@ -1056,26 +1069,6 @@ if not is_server_extension:
             is_kernel_and_no_running_loop = True
 
     if not is_kernel_and_no_running_loop:
-
-        # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
-        # once tornado > 6.0.3 is available.
-        if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
-            # fallback to the pre-3.8 default of Selector
-            # https://github.com/tornadoweb/tornado/issues/2608
-            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
-        else:
-            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
-
-        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
-            def get_event_loop(self):
-                try:
-                    return super().get_event_loop()
-                except (RuntimeError, AssertionError):
-                    loop = self.new_event_loop()
-                    self.set_event_loop(loop)
-                    return loop
-
         asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 

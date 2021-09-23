@@ -3,10 +3,14 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
+from __future__ import annotations
+
 import logging
 import random
+from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
+from typing import TYPE_CHECKING
 
 from tlz import identity
 
@@ -23,7 +27,13 @@ except ImportError:
 
 from ..utils import ensure_bytes
 
-compressions = {None: {"compress": identity, "decompress": identity}}
+if TYPE_CHECKING:
+    from typing_extensions import Literal
+
+compressions: dict[
+    str | None | Literal[False],
+    dict[Literal["compress", "decompress"], Callable[[bytes], bytes]],
+] = {None: {"compress": identity, "decompress": identity}}
 
 compressions[False] = compressions[None]  # alias
 

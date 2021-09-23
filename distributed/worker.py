@@ -14,12 +14,12 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict, deque, namedtuple
-from collections.abc import Hashable, Iterable, MutableMapping
+from collections.abc import Callable, Hashable, Iterable, MutableMapping
 from contextlib import suppress
 from datetime import timedelta
 from inspect import isawaitable
 from pickle import PicklingError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from .client import Client
@@ -99,11 +99,11 @@ PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running")
 READY = ("ready", "constrained")
 
 
-DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
+DEFAULT_EXTENSIONS: list[type] = [PubSubWorkerExtension]
 
-DEFAULT_METRICS = {}
+DEFAULT_METRICS: dict[str, Callable[[Worker], Any]] = {}
 
-DEFAULT_STARTUP_INFORMATION = {}
+DEFAULT_STARTUP_INFORMATION: dict[str, Callable[[Worker], Any]] = {}
 
 DEFAULT_DATA_SIZE = parse_bytes(
     dask.config.get("distributed.scheduler.default-data-size")
@@ -378,8 +378,8 @@ class Worker(ServerNode):
     distributed.nanny.Nanny
     """
 
-    _instances = weakref.WeakSet()
-    _initialized_clients = weakref.WeakSet()
+    _instances: ClassVar[weakref.WeakSet[Worker]] = weakref.WeakSet()
+    _initialized_clients: ClassVar[weakref.WeakSet[Client]] = weakref.WeakSet()
 
     def __init__(
         self,
@@ -2746,6 +2746,7 @@ class Worker(ServerNode):
             if report:
                 # Inform the scheduler of keys which will have gone missing
                 # We are releasing them before they have completed
+                msg: dict
                 if ts.state in PROCESSING:
                     # This path is only hit with work stealing
                     msg = {"op": "release", "key": key, "cause": cause}

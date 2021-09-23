@@ -51,7 +51,7 @@ if cython_arg:
         ),
     ]
     for e in cyext_modules:
-        e.cython_directives = {
+        e.cython_directives = {  # type: ignore
             "annotation_typing": True,
             "binding": False,
             "embedsignature": True,

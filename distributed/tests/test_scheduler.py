@@ -2089,8 +2089,8 @@ async def test_task_group_on_fire_and_forget(c, s, a, b):
 
 
 class BrokenComm(Comm):
-    peer_address = None
-    local_address = None
+    peer_address = ""
+    local_address = ""
 
     def close(self):
         pass
