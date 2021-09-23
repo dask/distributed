@@ -1175,7 +1175,7 @@ def error_message(e, status="error"):
         e_serialized = protocol.pickle.dumps(e)
         protocol.pickle.loads(e_serialized)
     except Exception:
-        e_serialized = Exception(repr(e))
+        e_serialized = protocol.pickle.dumps(Exception(repr(e)))
     e_serialized = protocol.to_serialize(e_serialized)
 
     try:
