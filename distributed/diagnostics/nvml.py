@@ -83,15 +83,31 @@ def has_cuda_context():
 
 def real_time():
     h = _pynvml_handles()
+    try:
+        util = pynvml.nvmlDeviceGetUtilizationRates(h).gpu
+    except pynvml.NVMLError_NotSupported:
+        util = None
+    try:
+        mem = pynvml.nvmlDeviceGetMemoryInfo(h).used
+    except pynvml.NVMLError_NotSupported:
+        mem = None
     return {
-        "utilization": pynvml.nvmlDeviceGetUtilizationRates(h).gpu,
-        "memory-used": pynvml.nvmlDeviceGetMemoryInfo(h).used,
+        "utilization": util,
+        "memory-used": mem,
     }
 
 
 def one_time():
     h = _pynvml_handles()
+    try:
+        total = pynvml.nvmlDeviceGetMemoryInfo(h).total
+    except pynvml.NVMLError_NotSupported:
+        total = None
+    try:
+        name = pynvml.nvmlDeviceGetName(h).decode()
+    except pynvml.NVMLError_NotSupported:
+        name = None
     return {
-        "memory-total": pynvml.nvmlDeviceGetMemoryInfo(h).total,
-        "name": pynvml.nvmlDeviceGetName(h).decode(),
+        "memory-total": total,
+        "name": name,
     }
