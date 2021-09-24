@@ -532,16 +532,17 @@ class WorkerState:
 
     def __init__(
         self,
-        address: str = None,
-        pid: Py_ssize_t = 0,
-        name: object = None,
+        *,
+        address: str,
+        pid: Py_ssize_t,
+        name: object,
         nthreads: Py_ssize_t = 0,
-        memory_limit: Py_ssize_t = 0,
-        local_directory: str = None,
-        services: dict = None,
-        versions: dict = None,
-        nanny: str = None,
-        extra: dict = None,
+        memory_limit: Py_ssize_t,
+        local_directory: str,
+        nanny: str,
+        services: "dict | None" = None,
+        versions: "dict | None" = None,
+        extra: "dict | None" = None,
     ):
         self._address = address
         self._pid = pid
@@ -1013,7 +1014,7 @@ class TaskGroup:
     """
 
     _name: str
-    _prefix: TaskPrefix
+    _prefix: "TaskPrefix | None"
     _states: dict
     _dependencies: set
     _nbytes_total: Py_ssize_t
@@ -1022,7 +1023,7 @@ class TaskGroup:
     _start: double
     _stop: double
     _all_durations: object
-    _last_worker: WorkerState
+    _last_worker: "WorkerState | None"
     _last_worker_tasks_left: Py_ssize_t
 
     def __init__(self, name: str):
@@ -1041,19 +1042,19 @@ class TaskGroup:
         self._last_worker_tasks_left = 0
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._name
 
     @property
-    def prefix(self):
+    def prefix(self) -> "TaskPrefix | None":
         return self._prefix
 
     @property
-    def states(self):
+    def states(self) -> dict:
         return self._states
 
     @property
-    def dependencies(self):
+    def dependencies(self) -> set:
         return self._dependencies
 
     @property
@@ -1061,11 +1062,11 @@ class TaskGroup:
         return self._nbytes_total
 
     @property
-    def duration(self):
+    def duration(self) -> double:
         return self._duration
 
     @property
-    def types(self):
+    def types(self) -> set:
         return self._types
 
     @property
@@ -1073,26 +1074,25 @@ class TaskGroup:
         return self._all_durations
 
     @property
-    def start(self):
+    def start(self) -> double:
         return self._start
 
     @property
-    def stop(self):
+    def stop(self) -> double:
         return self._stop
 
     @property
-    def last_worker(self):
+    def last_worker(self) -> "WorkerState | None":
         return self._last_worker
 
     @property
-    def last_worker_tasks_left(self):
+    def last_worker_tasks_left(self) -> int:
         return self._last_worker_tasks_left
 
     @ccall
-    def add(self, o):
-        ts: TaskState = o
-        self._states[ts._state] += 1
-        ts._group = self
+    def add(self, other: "TaskState"):
+        self._states[other._state] += 1
+        other._group = self
 
     def __repr__(self):
         return (
@@ -1360,19 +1360,19 @@ class TaskState:
     _hash: Py_hash_t
     _prefix: TaskPrefix
     _run_spec: object
-    _priority: tuple
-    _state: str
-    _dependencies: set
-    _dependents: set
+    _priority: "tuple | None"
+    _state: "str | None"
+    _dependencies: "set[TaskState]"
+    _dependents: "set[TaskState]"
     _has_lost_dependencies: bint
-    _waiting_on: set
-    _waiters: set
-    _who_wants: set
-    _who_has: set
-    _processing_on: WorkerState
+    _waiting_on: "set[TaskState]"
+    _waiters: "set[TaskState]"
+    _who_wants: "set[ClientState]"
+    _who_has: "set[WorkerState]"
+    _processing_on: "WorkerState | None"
     _retries: Py_ssize_t
     _nbytes: Py_ssize_t
-    _type: str
+    _type: "str | None"
     _exception: object
     _exception_text: str
     _traceback: object
@@ -1380,14 +1380,14 @@ class TaskState:
     _exception_blame: object
     _erred_on: set
     _suspicious: Py_ssize_t
-    _host_restrictions: set
-    _worker_restrictions: set
-    _resource_restrictions: dict
+    _host_restrictions: "set[str] | None"
+    _worker_restrictions: "set[str] | None"
+    _resource_restrictions: "dict | None"
     _loose_restrictions: bint
     _metadata: dict
     _annotations: dict
     _actor: bint
-    _group: TaskGroup
+    _group: "TaskGroup | None"
     _group_key: str
 
     __slots__ = (
@@ -1448,9 +1448,13 @@ class TaskState:
         self._hash = hash(key)
         self._run_spec = run_spec
         self._state = None
-        self._exception = self._traceback = self._exception_blame = None
-        self._exception_text = self._traceback_text = ""
-        self._suspicious = self._retries = 0
+        self._exception = None
+        self._exception_blame = None
+        self._traceback = None
+        self._exception_text = ""
+        self._traceback_text = ""
+        self._suspicious = 0
+        self._retries = 0
         self._nbytes = -1
         self._priority = None
         self._who_wants = set()
@@ -1498,25 +1502,27 @@ class TaskState:
         return self._run_spec
 
     @property
-    def priority(self):
+    def priority(self) -> "tuple | None":
         return self._priority
 
     @property
-    def state(self) -> str:
+    def state(self) -> "str | None":
         return self._state
 
     @state.setter
-    def state(self, value: str):
-        self._group._states[self._state] -= 1
-        self._group._states[value] += 1
+    def state(self, value: str) -> None:
+        assert self._group is not None
+        tg: TaskGroup = self._group
+        tg._states[self._state] -= 1
+        tg._states[value] += 1
         self._state = value
 
     @property
-    def dependencies(self):
+    def dependencies(self) -> "set[TaskState]":
         return self._dependencies
 
     @property
-    def dependents(self):
+    def dependents(self) -> "set[TaskState]":
         return self._dependents
 
     @property
@@ -1524,27 +1530,27 @@ class TaskState:
         return self._has_lost_dependencies
 
     @property
-    def waiting_on(self):
+    def waiting_on(self) -> "set[TaskState]":
         return self._waiting_on
 
     @property
-    def waiters(self):
+    def waiters(self) -> "set[TaskState]":
         return self._waiters
 
     @property
-    def who_wants(self):
+    def who_wants(self) -> "set[ClientState]":
         return self._who_wants
 
     @property
-    def who_has(self):
+    def who_has(self) -> "set[WorkerState]":
         return self._who_has
 
     @property
-    def processing_on(self):
+    def processing_on(self) -> "WorkerState | None":
         return self._processing_on
 
     @processing_on.setter
-    def processing_on(self, v: WorkerState):
+    def processing_on(self, v: WorkerState) -> None:
         self._processing_on = v
 
     @property
@@ -1560,7 +1566,7 @@ class TaskState:
         self._nbytes = v
 
     @property
-    def type(self):
+    def type(self) -> "str | None":
         return self._type
 
     @property
@@ -1588,15 +1594,15 @@ class TaskState:
         return self._suspicious
 
     @property
-    def host_restrictions(self):
+    def host_restrictions(self) -> "set[str] | None":
         return self._host_restrictions
 
     @property
-    def worker_restrictions(self):
+    def worker_restrictions(self) -> "set[str] | None":
         return self._worker_restrictions
 
     @property
-    def resource_restrictions(self):
+    def resource_restrictions(self) -> "dict | None":
         return self._resource_restrictions
 
     @property
@@ -1616,11 +1622,11 @@ class TaskState:
         return self._actor
 
     @property
-    def group(self):
+    def group(self) -> "TaskGroup | None":
         return self._group
 
     @property
-    def group_key(self):
+    def group_key(self) -> str:
         return self._group_key
 
     @property
@@ -1635,7 +1641,9 @@ class TaskState:
     def add_dependency(self, other: "TaskState"):
         """Add another task as a dependency of this task"""
         self._dependencies.add(other)
-        self._group._dependencies.add(other._group)
+        assert self._group is not None
+        tg: TaskGroup = self._group
+        tg._dependencies.add(other._group)
         other._dependents.add(self)
 
     @ccall
@@ -1646,11 +1654,13 @@ class TaskState:
 
     @ccall
     def set_nbytes(self, nbytes: Py_ssize_t):
+        assert self._group is not None
+        tg: TaskGroup = self._group
         diff: Py_ssize_t = nbytes
         old_nbytes: Py_ssize_t = self._nbytes
         if old_nbytes >= 0:
             diff -= old_nbytes
-        self._group._nbytes_total += diff
+        tg._nbytes_total += diff
         ws: WorkerState
         for ws in self._who_has:
             ws._nbytes += diff
@@ -2119,9 +2129,8 @@ class SchedulerState:
             self._task_prefixes[prefix_key] = tp = TaskPrefix(prefix_key)
         ts._prefix = tp
 
-        tg: TaskGroup
         group_key = ts._group_key
-        tg = self._task_groups.get(group_key)
+        tg: TaskGroup = self._task_groups.get(group_key)
         if tg is None:
             self._task_groups[group_key] = tg = TaskGroup(group_key)
             if computation:
@@ -2261,6 +2270,7 @@ class SchedulerState:
                 if ts._state == "forgotten":
                     del parent._tasks[ts._key]
 
+            assert ts._group is not None
             tg: TaskGroup = ts._group
             if ts._state == "forgotten" and tg._name in parent._task_groups:
                 # Remove TaskGroup if all tasks are in the forgotten state
@@ -2462,7 +2472,7 @@ class SchedulerState:
 
     @ccall
     @exceptval(check=False)
-    def decide_worker(self, ts: TaskState) -> WorkerState:
+    def decide_worker(self, ts: TaskState) -> WorkerState:  # -> WorkerState | None
         """
         Decide on a worker for task *ts*. Return a WorkerState.
 
@@ -2476,10 +2486,11 @@ class SchedulerState:
         in a round-robin fashion.
         """
         if not self._workers_dv:
-            return None
+            return None  # type: ignore
 
-        ws: WorkerState = None
-        group: TaskGroup = ts._group
+        ws: WorkerState = None  # type: ignore
+        assert ts._group is not None
+        tg: TaskGroup = ts._group
         valid_workers: set = self.valid_workers(ts)
 
         if (
@@ -2489,34 +2500,34 @@ class SchedulerState:
         ):
             self._unrunnable.add(ts)
             ts.state = "no-worker"
-            return ws
+            return None  # type: ignore
 
         # Group is larger than cluster with few dependencies? Minimize future data transfers.
         if (
             valid_workers is None
-            and len(group) > self._total_nthreads * 2
-            and len(group._dependencies) < 5
-            and sum(map(len, group._dependencies)) < 5
+            and len(tg) > self._total_nthreads * 2
+            and len(tg._dependencies) < 5
+            and sum(map(len, tg._dependencies)) < 5
         ):
-            ws: WorkerState = group._last_worker
+            ws = tg._last_worker
 
             if not (
-                ws and group._last_worker_tasks_left and ws._address in self._workers_dv
+                ws and tg._last_worker_tasks_left and ws._address in self._workers_dv
             ):
                 # Last-used worker is full or unknown; pick a new worker for the next few tasks
                 ws = min(
                     (self._idle_dv or self._workers_dv).values(),
                     key=partial(self.worker_objective, ts),
                 )
-                group._last_worker_tasks_left = math.floor(
-                    (len(group) / self._total_nthreads) * ws._nthreads
+                tg._last_worker_tasks_left = math.floor(
+                    (len(tg) / self._total_nthreads) * ws._nthreads
                 )
 
             # Record `last_worker`, or clear it on the final task
-            group._last_worker = (
-                ws if group.states["released"] + group.states["waiting"] > 1 else None
+            tg._last_worker = (
+                ws if tg.states["released"] + tg.states["waiting"] > 1 else None
             )
-            group._last_worker_tasks_left -= 1
+            tg._last_worker_tasks_left -= 1
             return ws
 
         if ts._dependencies or valid_workers is not None:
@@ -2681,6 +2692,9 @@ class SchedulerState:
         worker_msgs: dict = {}
         try:
             ts: TaskState = self._tasks[key]
+            assert ts._group is not None
+            tg: TaskGroup = ts._group
+
             assert worker
             assert isinstance(worker, str)
 
@@ -2700,12 +2714,13 @@ class SchedulerState:
 
             if ws != ts._processing_on:  # someone else has this task
                 logger.info(
-                    "Unexpected worker completed task, likely due to"
-                    " work stealing.  Expected: %s, Got: %s, Key: %s",
+                    "Unexpected worker completed task, likely due to "
+                    "work stealing. Expected: %s, Got: %s, Key: %s",
                     ts._processing_on,
                     ws,
                     key,
                 )
+                assert ts._processing_on
                 worker_msgs[ts._processing_on.address] = [
                     {
                         "op": "cancel-compute",
@@ -2731,7 +2746,7 @@ class SchedulerState:
                     # record timings of all actions -- a cheaper way of
                     # getting timing info compared with get_task_stream()
                     ts._prefix._all_durations[action] += stop - start
-                    ts._group._all_durations[action] += stop - start
+                    tg._all_durations[action] += stop - start
 
             #############################
             # Update Timing Information #
@@ -2747,10 +2762,10 @@ class SchedulerState:
                     avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
                 ts._prefix._duration_average = avg_duration
-                ts._group._duration += new_duration
-                ts._group._start = ts._group._start or compute_start
-                if ts._group._stop < compute_stop:
-                    ts._group._stop = compute_stop
+                tg._duration += new_duration
+                tg._start = tg._start or compute_start
+                if tg._stop < compute_stop:
+                    tg._stop = compute_stop
 
                 s: set = self._unknown_durations.pop(ts._prefix._name, None)
                 tts: TaskState
@@ -6743,8 +6758,9 @@ class Scheduler(SchedulerState, ServerNode):
     def update_data(
         self,
         comm=None,
-        who_has=None,
-        nbytes: dict = None,
+        *,
+        who_has: dict,
+        nbytes: dict,
         client=None,
         serializers=None,
     ):
@@ -7782,7 +7798,9 @@ def _add_to_memory(
 
     ts.state = "memory"
     ts._type = typename
-    ts._group._types.add(typename)
+    assert ts._group is not None
+    tg: TaskGroup = ts._group
+    tg._types.add(typename)
 
     cs = state._clients["fire-and-forget"]
     if ts in cs._wants_what:
@@ -8112,6 +8130,7 @@ def validate_task_state(ts: TaskState):
         if ts._state == "memory":
             assert sum([ts in ws._actors for ws in ts._who_has]) == 1
         if ts._state == "processing":
+            assert ts._processing_on is not None
             assert ts in ts._processing_on.actors
 
 
