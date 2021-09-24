@@ -1886,6 +1886,7 @@ class SchedulerState:
     _workers: "SortedDict[str, WorkerState]"
     _workers_dv: "dict[str, WorkerState]"
     _transition_counter: Py_ssize_t
+    _plugins: "dict[str, SchedulerPlugin]"
 
     # Variables from dask.config, cached by __init__ for performance
     UNKNOWN_TASK_DURATION: double
@@ -1916,7 +1917,7 @@ class SchedulerState:
         self._extensions = {}
         self._host_info = host_info
         self._idle = SortedDict()
-        self._idle_dv = cast("dict[str, WorkerState]", self._idle)
+        self._idle_dv = self._idle
         self._n_tasks = 0
         self._resources = resources
         self._saturated = set()
@@ -1950,7 +1951,8 @@ class SchedulerState:
         self._unrunnable = unrunnable
         self._validate = validate
         self._workers = workers
-        self._workers_dv = cast("dict[str, WorkerState]", self._workers)
+        self._workers_dv = self._workers
+        self._plugins = {}
 
         # Variables from dask.config, cached by __init__ for performance
         self.UNKNOWN_TASK_DURATION = parse_timedelta(
@@ -2068,6 +2070,10 @@ class SchedulerState:
     @property
     def workers(self):
         return self._workers
+
+    @property
+    def plugins(self) -> "dict[str, SchedulerPlugin]":
+        return self._plugins
 
     @property
     def memory(self) -> MemoryState:
@@ -2280,7 +2286,6 @@ class SchedulerState:
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
-        parent: SchedulerState = cast(SchedulerState, self)
         keys: set = set()
         recommendations = recommendations.copy()
         msgs: list
@@ -2310,7 +2315,7 @@ class SchedulerState:
                 else:
                     worker_msgs[w] = new_msgs
 
-        if parent._validate:
+        if self._validate:
             for key in keys:
                 self.validate_key(key)
 
@@ -3525,7 +3530,6 @@ class Scheduler(SchedulerState, ServerNode):
         http_prefix="/",
         preload=None,
         preload_argv=(),
-        plugins=(),
         **kwargs,
     ):
         self._setup_logging(logger)
@@ -3700,7 +3704,6 @@ class Scheduler(SchedulerState, ServerNode):
             aliases,
         ]
 
-        self.plugins = {} if not plugins else {_get_plugin_name(p): p for p in plugins}
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -5462,7 +5465,14 @@ class Scheduler(SchedulerState, ServerNode):
                 worker_comm.abort()
                 await self.remove_worker(address=worker)
 
-    def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
+    def add_plugin(
+        self,
+        plugin: "SchedulerPlugin | type[SchedulerPlugin]",
+        *,
+        idempotent: bool = False,
+        name: "str | None" = None,
+        **kwargs,
+    ):
         """Add external plugin to scheduler.
 
         See https://distributed.readthedocs.io/en/latest/plugins.html
@@ -5554,7 +5564,7 @@ class Scheduler(SchedulerState, ServerNode):
             if inspect.isawaitable(result):
                 await result
 
-        self.add_plugin(plugin=plugin, name=name)
+        self.add_plugin(plugin, name=name)
 
     def worker_send(self, worker, msg):
         """Send message to worker

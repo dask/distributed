@@ -1243,7 +1243,7 @@ class AggregateAction(DashboardComponent):
             self.scheduler = scheduler
 
             if TaskStreamPlugin.name not in self.scheduler.plugins:
-                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
+                self.scheduler.add_plugin(TaskStreamPlugin)
 
             action_data = {
                 "times": [0.2, 0.1],
