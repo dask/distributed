@@ -2182,9 +2182,8 @@ class SchedulerState:
             start_finish = (start, finish)
             func = self._transitions_table.get(start_finish)
             if func is not None:
-                a: tuple = func(key, *args, **kwargs)
+                recommendations, client_msgs, worker_msgs = func(key, *args, **kwargs)
                 self._transition_counter += 1
-                recommendations, client_msgs, worker_msgs = a
             elif "released" not in start_finish:
                 assert not args and not kwargs, (args, kwargs, start_finish)
                 a_recs: dict
@@ -2694,7 +2693,7 @@ class SchedulerState:
                 assert not ts._exception_blame
                 assert ts._state == "processing"
 
-            ws = self._workers_dv.get(worker)
+            ws = self._workers_dv.get(worker)  # type: ignore
             if ws is None:
                 recommendations[key] = "released"
                 return recommendations, client_msgs, worker_msgs
@@ -3051,7 +3050,6 @@ class SchedulerState:
         worker: str = None,
         **kwargs,
     ):
-        ws: WorkerState
         try:
             ts: TaskState = self._tasks[key]
             dts: TaskState
@@ -3067,7 +3065,8 @@ class SchedulerState:
                 assert not ts._waiting_on
 
             if ts._actor:
-                ws = ts._processing_on
+                assert ts._processing_on
+                ws: WorkerState = ts._processing_on
                 ws._actors.remove(ts)
 
             w = _remove_from_processing(self, ts)
@@ -6063,10 +6062,10 @@ class Scheduler(SchedulerState, ServerNode):
 
         with log_errors():
             if workers is not None:
-                workers = [parent._workers_dv[w] for w in workers]
+                wss = [parent._workers_dv[w] for w in workers]
             else:
-                workers = parent._workers_dv.values()
-            if not workers:
+                wss = parent._workers_dv.values()
+            if not wss:
                 return {"status": "OK"}
 
             if keys is not None:
@@ -6082,7 +6081,7 @@ class Scheduler(SchedulerState, ServerNode):
                 if missing_data:
                     return {"status": "partial-fail", "keys": missing_data}
 
-            msgs = self._rebalance_find_msgs(keys, workers)
+            msgs = self._rebalance_find_msgs(keys, wss)
             if not msgs:
                 return {"status": "OK"}
 
@@ -6306,7 +6305,9 @@ class Scheduler(SchedulerState, ServerNode):
         rec_ws: WorkerState
         ts: TaskState
 
-        to_recipients = defaultdict(lambda: defaultdict(list))
+        to_recipients: "defaultdict[str, defaultdict[str, list[str]]]" = defaultdict(
+            lambda: defaultdict(list)
+        )
         for snd_ws, rec_ws, ts in msgs:
             to_recipients[rec_ws.address][ts._key].append(snd_ws.address)
         failed_keys_by_recipient = dict(
