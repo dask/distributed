@@ -26,9 +26,10 @@ from contextlib import suppress
 from datetime import timedelta
 from functools import partial
 from numbers import Number
+from typing import ClassVar
 
 import psutil
-import sortedcontainers
+from sortedcontainers import SortedDict, SortedSet
 from tlz import (
     compose,
     first,
@@ -160,6 +161,7 @@ if sys.version_info < (3, 8):
         import pickle
 else:
     import pickle
+
 
 logger = logging.getLogger(__name__)
 
@@ -795,7 +797,7 @@ class Computation:
     def __init__(self):
         self._start = time()
         self._groups = set()
-        self._code = sortedcontainers.SortedSet()
+        self._code = SortedSet()
         self._id = uuid.uuid4()
 
     @property
@@ -1862,12 +1864,12 @@ class SchedulerState:
 
     _aliases: dict
     _bandwidth: double
-    _clients: dict
+    _clients: "dict[str, ClientState]"
     _computations: object
     _extensions: dict
     _host_info: dict
-    _idle: object
-    _idle_dv: dict
+    _idle: "SortedDict[str, WorkerState]"
+    _idle_dv: "dict[str, WorkerState]"
     _n_tasks: Py_ssize_t
     _resources: dict
     _saturated: set
@@ -1881,8 +1883,8 @@ class SchedulerState:
     _unknown_durations: dict
     _unrunnable: set
     _validate: bint
-    _workers: object
-    _workers_dv: dict
+    _workers: "SortedDict[str, WorkerState]"
+    _workers_dv: "dict[str, WorkerState]"
     _transition_counter: Py_ssize_t
 
     # Variables from dask.config, cached by __init__ for performance
@@ -1895,51 +1897,36 @@ class SchedulerState:
 
     def __init__(
         self,
-        aliases: dict = None,
-        clients: dict = None,
-        workers=None,
-        host_info=None,
-        resources=None,
-        tasks: dict = None,
-        unrunnable: set = None,
-        validate: bint = False,
-        **kwargs,
+        aliases: dict,
+        clients: "dict[str, ClientState]",
+        workers: "SortedDict[str, WorkerState]",
+        host_info: dict,
+        resources: dict,
+        tasks: dict,
+        unrunnable: set,
+        validate: bint,
+        **kwargs,  # Passed verbatim to Server.__init__()
     ):
-        if aliases is not None:
-            self._aliases = aliases
-        else:
-            self._aliases = dict()
+        self._aliases = aliases
         self._bandwidth = parse_bytes(
             dask.config.get("distributed.scheduler.bandwidth")
         )
-        if clients is not None:
-            self._clients = clients
-        else:
-            self._clients = dict()
+        self._clients = clients
         self._clients["fire-and-forget"] = ClientState("fire-and-forget")
-        self._extensions = dict()
-        if host_info is not None:
-            self._host_info = host_info
-        else:
-            self._host_info = dict()
-        self._idle = sortedcontainers.SortedDict()
-        self._idle_dv: dict = cast(dict, self._idle)
+        self._extensions = {}
+        self._host_info = host_info
+        self._idle = SortedDict()
+        self._idle_dv = cast("dict[str, WorkerState]", self._idle)
         self._n_tasks = 0
-        if resources is not None:
-            self._resources = resources
-        else:
-            self._resources = dict()
+        self._resources = resources
         self._saturated = set()
-        if tasks is not None:
-            self._tasks = tasks
-        else:
-            self._tasks = dict()
+        self._tasks = tasks
         self._computations = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
-        self._task_groups = dict()
-        self._task_prefixes = dict()
-        self._task_metadata = dict()
+        self._task_groups = {}
+        self._task_prefixes = {}
+        self._task_metadata = {}
         self._total_nthreads = 0
         self._total_occupancy = 0
         self._transitions_table = {
@@ -1959,17 +1946,11 @@ class SchedulerState:
             ("memory", "released"): self.transition_memory_released,
             ("released", "erred"): self.transition_released_erred,
         }
-        self._unknown_durations = dict()
-        if unrunnable is not None:
-            self._unrunnable = unrunnable
-        else:
-            self._unrunnable = set()
+        self._unknown_durations = {}
+        self._unrunnable = unrunnable
         self._validate = validate
-        if workers is not None:
-            self._workers = workers
-        else:
-            self._workers = sortedcontainers.SortedDict()
-        self._workers_dv: dict = cast(dict, self._workers)
+        self._workers = workers
+        self._workers_dv = cast("dict[str, WorkerState]", self._workers)
 
         # Variables from dask.config, cached by __init__ for performance
         self.UNKNOWN_TASK_DURATION = parse_timedelta(
@@ -1993,6 +1974,7 @@ class SchedulerState:
         )
         self._transition_counter = 0
 
+        # Call Server.__init__()
         super().__init__(**kwargs)
 
     @property
@@ -3378,7 +3360,7 @@ class SchedulerState:
             for resource, required in ts._resource_restrictions.items():
                 dr: dict = self._resources.get(resource)
                 if dr is None:
-                    self._resources[resource] = dr = dict()
+                    self._resources[resource] = dr = {}
 
                 sw: set = set()
                 for w, supplied in dr.items():
@@ -3518,7 +3500,7 @@ class Scheduler(SchedulerState, ServerNode):
     """
 
     default_port = 8786
-    _instances = weakref.WeakSet()
+    _instances: "ClassVar[weakref.WeakSet[Scheduler]]" = weakref.WeakSet()
 
     def __init__(
         self,
@@ -3623,13 +3605,13 @@ class Scheduler(SchedulerState, ServerNode):
 
         # Communication state
         self.loop = loop or IOLoop.current()
-        self.client_comms = dict()
-        self.stream_comms = dict()
+        self.client_comms = {}
+        self.stream_comms = {}
         self._worker_coroutines = []
         self._ipython_kernel = None
 
         # Task state
-        tasks = dict()
+        tasks = {}
         for old_attr, new_attr, wrap in [
             ("priority", "priority", None),
             ("dependencies", "dependencies", _legacy_task_key_set),
@@ -3674,12 +3656,12 @@ class Scheduler(SchedulerState, ServerNode):
         self._last_time = 0
         unrunnable = set()
 
-        self.datasets = dict()
+        self.datasets = {}
 
         # Prefix-keyed containers
 
         # Client state
-        clients = dict()
+        clients = {}
         for old_attr, new_attr, wrap in [
             ("wants_what", "wants_what", _legacy_task_key_set)
         ]:
@@ -3689,7 +3671,7 @@ class Scheduler(SchedulerState, ServerNode):
             setattr(self, old_attr, _StateLegacyMapping(clients, func))
 
         # Worker state
-        workers = sortedcontainers.SortedDict()
+        workers = SortedDict()
         for old_attr, new_attr, wrap in [
             ("nthreads", "nthreads", None),
             ("worker_bytes", "nbytes", None),
@@ -3705,9 +3687,9 @@ class Scheduler(SchedulerState, ServerNode):
                 func = compose(wrap, func)
             setattr(self, old_attr, _StateLegacyMapping(workers, func))
 
-        host_info = dict()
-        resources = dict()
-        aliases = dict()
+        host_info = {}
+        resources = {}
+        aliases = {}
 
         self._task_state_collections = [unrunnable]
 
@@ -3732,8 +3714,8 @@ class Scheduler(SchedulerState, ServerNode):
         )
         self.event_counts = defaultdict(int)
         self.event_subscriber = defaultdict(set)
-        self.worker_plugins = dict()
-        self.nanny_plugins = dict()
+        self.worker_plugins = {}
+        self.nanny_plugins = {}
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -4236,7 +4218,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             dh: dict = parent._host_info.get(host)
             if dh is None:
-                parent._host_info[host] = dh = dict()
+                parent._host_info[host] = dh = {}
 
             dh_addresses: set = dh.get("addresses")
             if dh_addresses is None:
@@ -4282,7 +4264,7 @@ class Scheduler(SchedulerState, ServerNode):
             worker_msgs: dict = {}
             if nbytes:
                 assert isinstance(nbytes, dict)
-                already_released_keys = list()
+                already_released_keys = []
                 for key in nbytes:
                     ts: TaskState = parent._tasks.get(key)
                     if ts is not None and ts.state != "released":
@@ -4305,7 +4287,7 @@ class Scheduler(SchedulerState, ServerNode):
                         already_released_keys.append(key)
                 if already_released_keys:
                     if address not in worker_msgs:
-                        worker_msgs[address] = list()
+                        worker_msgs[address] = []
                     worker_msgs[address].append(
                         {
                             "op": "free-keys",
@@ -4891,7 +4873,7 @@ class Scheduler(SchedulerState, ServerNode):
 
             dh: dict = parent._host_info.get(host)
             if dh is None:
-                parent._host_info[host] = dh = dict()
+                parent._host_info[host] = dh = {}
 
             dh_addresses: set = dh["addresses"]
             dh_addresses.remove(address)
@@ -7011,7 +6993,7 @@ class Scheduler(SchedulerState, ServerNode):
             metadata = parent._task_metadata
             for key in keys[:-1]:
                 if key not in metadata or not isinstance(metadata[key], (dict, list)):
-                    metadata[key] = dict()
+                    metadata[key] = {}
                 metadata = metadata[key]
             metadata[keys[-1]] = value
         except Exception:
@@ -7197,7 +7179,7 @@ class Scheduler(SchedulerState, ServerNode):
             ws._used_resources[resource] = 0
             dr: dict = parent._resources.get(resource, None)
             if dr is None:
-                parent._resources[resource] = dr = dict()
+                parent._resources[resource] = dr = {}
             dr[worker] = quantity
         return "OK"
 
@@ -7207,7 +7189,7 @@ class Scheduler(SchedulerState, ServerNode):
         for resource, quantity in ws._resources.items():
             dr: dict = parent._resources.get(resource, None)
             if dr is None:
-                parent._resources[resource] = dr = dict()
+                parent._resources[resource] = dr = {}
             del dr[worker]
 
     def coerce_address(self, addr, resolve=True):
