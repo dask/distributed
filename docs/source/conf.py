@@ -1,3 +1,4 @@
+from __future__ import annotations
 #
 # Dask.distributed documentation build configuration file, created by
 # sphinx-quickstart on Tue Oct  6 14:42:44 2015.

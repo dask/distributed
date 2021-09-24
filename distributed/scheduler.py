@@ -5555,7 +5555,7 @@ class Scheduler(SchedulerState, ServerNode):
         if hasattr(plugin, "start"):
             result = plugin.start(self)
             if inspect.isawaitable(result):
-                result = await result
+                await result
 
         self.add_plugin(plugin=plugin, name=name)
 

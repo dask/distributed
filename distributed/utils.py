@@ -10,7 +10,6 @@ import multiprocessing
 import os
 import pkgutil
 import re
-import resource
 import shutil
 import socket
 import sys
@@ -31,6 +30,12 @@ from typing import ClassVar
 
 import click
 import tblib.pickling_support
+
+try:
+    import resource
+except ImportError:
+    resource = None  # type: ignore
+
 import tlz as toolz
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -111,8 +116,15 @@ def has_arg(func, argname):
 
 
 def get_fileno_limit():
-    """Get the maximum number of open files per process"""
-    return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    """
+    Get the maximum number of open files per process.
+    """
+    if resource is not None:
+        return resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    else:
+        # Default ceiling for Windows when using the CRT, though it
+        # is settable using _setmaxstdio().
+        return 512
 
 
 @toolz.memoize
@@ -1037,28 +1049,6 @@ if "notebook" in sys.modules:
         traitlets.config.Application.instance(), NotebookApp
     )
 
-# TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
-# once tornado > 6.0.3 is available.
-
-if WINDOWS:
-    # WindowsProactorEventLoopPolicy is not compatible with tornado 6
-    # fallback to the pre-3.8 default of Selector
-    # https://github.com/tornadoweb/tornado/issues/2608
-    BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
-else:
-    BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
-
-
-class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
-    def get_event_loop(self):
-        try:
-            return super().get_event_loop()
-        except (RuntimeError, AssertionError):
-            loop = self.new_event_loop()
-            self.set_event_loop(loop)
-            return loop
-
-
 if not is_server_extension:
     is_kernel_and_no_running_loop = False
 
@@ -1069,6 +1059,26 @@ if not is_server_extension:
             is_kernel_and_no_running_loop = True
 
     if not is_kernel_and_no_running_loop:
+
+        # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+        # once tornado > 6.0.3 is available.
+        if WINDOWS:
+            # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+            # fallback to the pre-3.8 default of Selector
+            # https://github.com/tornadoweb/tornado/issues/2608
+            BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy  # type: ignore
+        else:
+            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+
+        class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):  # type: ignore
+            def get_event_loop(self):
+                try:
+                    return super().get_event_loop()
+                except (RuntimeError, AssertionError):
+                    loop = self.new_event_loop()
+                    self.set_event_loop(loop)
+                    return loop
+
         asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
