@@ -112,6 +112,37 @@ DEFAULT_DATA_SIZE = parse_bytes(
 SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
+class TaskPrefix:
+    def __init__(self, key):
+        self.key = key
+        self.bytes_consumed = 0
+        self.bytes_produced = 0
+        self.n_processed = 0
+
+    def __repr__(self):
+        return (
+            f"<TaskPrefix: {self.key} -- {self.n_processed} tasks converted"
+            f" {format_bytes(self.bytes_consumed)} into"
+            f" {format_bytes(self.bytes_produced)}"
+        )
+
+    @property
+    def memory_producing(self):
+        return (
+            self.n_processed
+            and self.bytes_produced / self.n_processed > 1_000_000
+            and self.bytes_produced > 5 * self.bytes_consumed
+        )
+
+    @property
+    def memory_consuming(self):
+        return (
+            self.n_processed
+            and self.bytes_consumed / self.n_processed > 1_000_000
+            and self.bytes_consumed > 5 * self.bytes_produced
+        )
+
+
 class TaskState:
     """Holds volatile state relating to an individual Dask task
 
@@ -195,6 +226,7 @@ class TaskState:
         self.nbytes = None
         self.annotations = None
         self.scheduler_holds_ref = False
+        self.prefix = None
 
     def __repr__(self):
         return f"<Task {self.key!r} {self.state}>"
@@ -428,6 +460,7 @@ class Worker(ServerNode):
         **kwargs,
     ):
         self.tasks = dict()
+        self.prefixes = dict()
         self.waiting_for_data_count = 0
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
@@ -901,6 +934,19 @@ class Worker(ServerNode):
             "ncores": self.nthreads,  # backwards compatibility
             "memory_limit": self.memory_limit,
         }
+
+    def get_prefix(self, key: str) -> TaskPrefix:
+        prefix = key_split(key)
+        try:
+            return self.prefixes[prefix]
+        except KeyError:
+            tp = TaskPrefix(prefix)
+            self.prefixes[prefix] = tp
+            return tp
+
+    @property
+    def rss_memory(self):
+        return self.monitor.memory[-1]
 
     #####################
     # External Services #
@@ -1648,8 +1694,18 @@ class Worker(ServerNode):
             # This will require a chained recommendation transition system like
             # the scheduler
 
+            tp = self.get_prefix(ts.key)
+
             if priority is not None:
-                priority = tuple(priority) + (self.generation,)
+                user, scheduler_generation, graph = priority
+                if tp.memory_consuming:
+                    memory = -1
+                elif tp.memory_producing:
+                    memory = 1
+                else:
+                    memory = 0
+                priority = (user, scheduler_generation, memory, graph, self.generation)
+
                 self.generation -= 1
 
             if actor:
@@ -1738,6 +1794,8 @@ class Worker(ServerNode):
 
                 pdb.set_trace()
             raise
+
+        self.ensure_computing()
 
     def transition(self, ts, finish, **kwargs):
         if ts is None:
@@ -2041,6 +2099,13 @@ class Worker(ServerNode):
                     out = "error"
                     for d in ts.dependents:
                         d.waiting_for_data.add(ts.key)
+
+            if ts.nbytes is not None:
+                tp = self.get_prefix(ts.key)
+                tp.n_processed += 1
+                tp.bytes_produced += ts.nbytes
+                for dep in ts.dependencies:
+                    tp.bytes_consumed += dep.nbytes
 
             if report and self.batched_stream and self.status == Status.running:
                 self.send_task_state_to_scheduler(ts)
@@ -2899,8 +2964,17 @@ class Worker(ServerNode):
             raise
 
     def ensure_computing(self):
-        if self.paused:
+        if not self.ready and not self.constrained:
             return
+
+        if self.paused:
+            priority, key = heapq.heappop(self.ready)
+            heapq.heappush(self.ready, (priority, key))
+            if priority[2] >= 0:
+                return
+            else:
+                self.paused = False  # memory releasing tasks at the front, unpause
+
         try:
             while self.constrained and self.executing_count < self.nthreads:
                 key = self.constrained[0]
@@ -2913,9 +2987,12 @@ class Worker(ServerNode):
                     self.transition(ts, "executing")
                 else:
                     break
-            while self.ready and self.executing_count < self.nthreads:
+            while (
+                self.ready and self.executing_count < self.nthreads and not self.paused
+            ):
                 priority, key = heapq.heappop(self.ready)
                 ts = self.tasks.get(key)
+
                 if ts is None:
                     # It is possible for tasks to be released while still remaining on `ready`
                     # The scheduler might have re-routed to a new worker and told this worker
@@ -2923,8 +3000,43 @@ class Worker(ServerNode):
                     continue
                 elif ts.key in self.data:
                     self.transition(ts, "memory")
-                elif ts.state in READY:
+                    continue
+
+                tp = self.get_prefix(key)
+                if self.validate:
+                    assert ts.state == "ready"
+
+                # Need to reevaluate priorities in ready stack, things have changed
+                if tp.memory_producing and priority[2] < 1:
+                    logger.info("Reevaluating priorities in ready heap")
+                    heapq.heappush(self.ready, (priority, key))  # put it back on
+                    ready = []
+                    while self.ready:
+                        (u, sg, m, g, wg), key = self.ready.pop()
+                        tp = self.get_prefix(key)
+                        m = (
+                            1
+                            if tp.memory_producing
+                            else -1
+                            if tp.memory_consuming
+                            else 0
+                        )
+                        heapq.heappush(ready, ((u, sg, m, g, wg), key))
+                    self.ready[:] = ready
+                    continue
+
+                if (
+                    tp.memory_producing
+                    and self.memory_limit
+                    and self.rss_memory > 0.5 * self.memory_limit
+                ):
+                    self.paused = True
+                    heapq.heappush(self.ready, (priority, key))  # put it back on
+                    continue
+
+                if ts.state in READY:
                     self.transition(ts, "executing")
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

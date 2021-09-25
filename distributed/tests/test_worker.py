@@ -19,6 +19,7 @@ from tlz import first, pluck, sliding_window
 
 import dask
 from dask import delayed
+from dask.sizeof import sizeof
 from dask.system import CPU_COUNT
 
 import distributed
@@ -2714,3 +2715,62 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     s.handle_missing_data(key="f1", errant_worker=a.address)
 
     await fut2
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_TaskPrefix(c, s, w):
+    x = c.submit(inc, 0)
+    y = c.submit(dec, x)
+    z = c.submit(dec, y)
+
+    await z
+
+    assert w.prefixes["inc"].bytes_consumed == 0
+    assert w.prefixes["inc"].bytes_produced == sizeof(1)
+
+    assert w.prefixes["dec"].bytes_consumed == sizeof(1) + sizeof(0)
+    assert w.prefixes["dec"].bytes_produced == sizeof(0) + sizeof(-1)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)])
+async def test_memory_prioritization(c, s, w):
+    np = pytest.importorskip("numpy")
+    # learn memory use
+    x = c.submit(np.arange, 1000000)
+    y = c.submit(np.sum, x)
+    await y
+    del x, y
+
+    arrays = c.map(np.arange, range(1_000_000, 1_000_010))
+    sums = c.map(np.sum, arrays)
+    await wait(sums)
+
+    assert min(w.tasks[future.key].priority for future in arrays) > max(
+        w.tasks[future.key].priority for future in sums
+    )
+
+
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)],
+    client=True,
+    worker_kwargs={
+        "memory_spill_fraction": False,  # don't spill
+        "memory_target_fraction": False,
+        "memory_pause_fraction": False,
+    },
+)
+async def test_pause_memory_producing_computations(c, s, a):
+    memory = psutil.Process().memory_info().rss
+    a.memory_limit = memory + 400_000_000
+    np = pytest.importorskip("numpy")
+
+    def f(_):
+        x = np.ones(int(300_000_000), dtype="u1")
+        assert not any(k.startswith("f") for k in get_worker().data)
+        get_worker().monitor.update()
+        return x
+
+    data = c.map(f, range(10))
+    results = c.map(np.sum, data)
+    del data
+    await c.gather(results)
