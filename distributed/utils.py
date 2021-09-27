@@ -1415,6 +1415,7 @@ _deprecations = {
     "parse_bytes": "dask.utils.parse_bytes",
     "parse_timedelta": "dask.utils.parse_timedelta",
     "typename": "dask.utils.typename",
+    "tmpfile": "dask.utils.tmpfile",
 }
 
 
