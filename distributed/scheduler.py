@@ -3758,7 +3758,6 @@ class Scheduler(SchedulerState, ServerNode):
         worker_handlers = {
             "task-finished": self.handle_task_finished,
             "task-erred": self.handle_task_erred,
-            "release": self.handle_release_data,
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
             "missing-data": self.handle_missing_data,
@@ -5341,19 +5340,6 @@ class Scheduler(SchedulerState, ServerNode):
         parent._transitions(recommendations, client_msgs, worker_msgs)
 
         self.send_all(client_msgs, worker_msgs)
-
-    def handle_release_data(self, key=None, worker=None, **kwargs):
-        parent: SchedulerState = cast(SchedulerState, self)
-        ts: TaskState = parent._tasks.get(key)
-        if ts is None or ts._state == "memory":
-            return
-        ws: WorkerState = parent._workers_dv.get(worker)
-        if ws is not None and ts._processing_on == ws:
-            client_msgs = {}
-            worker_msgs = {}
-            # Note: The msgs dicts are filled inplace
-            parent._transitions({key: "released"}, client_msgs, worker_msgs)
-            self.send_all(client_msgs, worker_msgs)
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
