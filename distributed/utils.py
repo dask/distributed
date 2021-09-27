@@ -1303,7 +1303,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         return out
 
     return sum(
-        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+        (["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()), []
     )
 
 

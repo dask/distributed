@@ -7,7 +7,6 @@ import threading
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from contextlib import suppress
 from numbers import Number
 from operator import add
 from time import sleep
@@ -1795,8 +1794,8 @@ async def test_story_with_deps(c, s, a, b):
     Assert that the structure of the story does not change unintentionally and
     expected subfields are actually filled
     """
-    futures = c.map(inc, range(10), workers=[a.address])
-    res = c.submit(sum, futures, workers=[b.address])
+    dep = c.submit(inc, 1, workers=[a.address])
+    res = c.submit(inc, dep, workers=[b.address])
     await res
     key = res.key
 
@@ -1804,32 +1803,71 @@ async def test_story_with_deps(c, s, a, b):
     assert story == []
     story = b.story(key)
 
+    pruned_story = []
+    stimulus_ids = set()
+    # Story now includes randomized stimulus_ids and timestamps.
+    for msg in story:
+        assert isinstance(msg, tuple), msg
+        assert isinstance(msg[-1], float), msg
+        assert msg[-1] > time() - 60, msg
+        pruned_msg = list(msg)
+        stimulus_ids.add(msg[-2])
+        pruned_story.append(tuple(pruned_msg[:-2]))
+
+    assert len(stimulus_ids) == 3
+    stimulus_id = pruned_story[0][-1]
+    assert isinstance(stimulus_id, str)
+    assert stimulus_id.startswith("compute-task")
+    # This is a simple transition log
     expected_story = [
-        (key, "new"),
-        (key, "new", "waiting"),
-        # First log is what needs to be fetched in total as determined in
-        # ensure_communicating
+        (key, "compute-task"),
+        (key, "released", "waiting", {}),
+        (key, "waiting", "ready", {}),
+        (key, "ready", "executing", {}),
+        (key, "put-in-memory"),
+        (key, "executing", "memory", {}),
+    ]
+    assert pruned_story == expected_story
+
+    dep_story = dep.key
+
+    story = b.story(dep_story)
+    pruned_story = []
+    stimulus_ids = set()
+    for msg in story:
+        assert isinstance(msg, tuple), msg
+        assert isinstance(msg[-1], float), msg
+        assert msg[-1] > time() - 60, msg
+        pruned_msg = list(msg)
+        stimulus_ids.add(msg[-2])
+        pruned_story.append(tuple(pruned_msg[:-2]))
+
+    assert len(stimulus_ids) == 3
+    stimulus_id = pruned_story[0][-1]
+    assert isinstance(stimulus_id, str)
+    expected_story = [
+        (dep_story, "register-replica", "released"),
+        (dep_story, "released", "fetch", {}),
         (
             "gather-dependencies",
-            key,
-            {fut.key for fut in futures},
+            a.address,
+            {dep.key},
         ),
-        # Second log may just be a subset of the above, see also
-        # Worker.select_keys_for_gather
-        # This case, it's all because Worker.target_message_size is sufficiently
-        # large
+        (dep_story, "fetch", "flight", {}),
         (
             "request-dep",
-            key,
             a.address,
-            {fut.key for fut in futures},
+            {dep.key},
         ),
-        (key, "waiting", "ready"),
-        (key, "ready", "executing"),
-        (key, "executing", "memory"),
-        (key, "put-in-memory"),
+        (
+            "receive-dep",
+            a.address,
+            {dep.key},
+        ),
+        (dep_story, "put-in-memory"),
+        (dep_story, "flight", "memory", {res.key: "ready"}),
     ]
-    assert story == expected_story
+    assert pruned_story == expected_story
 
 
 @gen_cluster(client=True)
@@ -2152,6 +2190,8 @@ async def test_worker_state_error_release_error_last(c, s, a, b):
         await asyncio.sleep(0.01)
 
     expected_states = {
+        f.key: "released",
+        g.key: "released",
         res.key: "error",
     }
 
@@ -2344,6 +2384,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     assert_task_states_on_worker(expected_states_A, a)
 
     expected_states_B = {
+        f.key: "released",
         g.key: "memory",
         h.key: "memory",
         res.key: "error",
@@ -2354,6 +2395,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     g.release()
 
     expected_states_A = {
+        g.key: "released",
         h.key: "memory",
     }
     await asyncio.sleep(0.05)
@@ -2361,6 +2403,7 @@ async def test_worker_state_error_long_chain(c, s, a, b):
 
     # B must not forget a task since all have a still valid dependent
     expected_states_B = {
+        f.key: "released",
         h.key: "memory",
         res.key: "error",
     }
@@ -2371,6 +2414,8 @@ async def test_worker_state_error_long_chain(c, s, a, b):
     expected_states_A = {}
     assert_task_states_on_worker(expected_states_A, a)
     expected_states_B = {
+        f.key: "released",
+        h.key: "released",
         res.key: "error",
     }
 
@@ -2405,7 +2450,7 @@ async def test_hold_on_to_replicas(c, s, *workers):
         assert s.tasks[f2.key].state == "released"
         await asyncio.sleep(0.01)
 
-    while len(workers[2].tasks) > 1:
+    while len(workers[2].data) > 1:
         await asyncio.sleep(0.01)
 
 
@@ -2610,7 +2655,7 @@ async def test_steal_during_task_deserialization(c, s, a, b, monkeypatch):
             await asyncio.sleep(0)
 
         ts = s.tasks[fut.key]
-        a.steal_request(fut.key)
+        a.handle_steal_request(fut.key)
         stealing_ext.scheduler.send_task_to_worker(b.address, ts)
 
         fut2 = c.submit(inc, fut, workers=[a.address])
@@ -2664,33 +2709,14 @@ async def test_gather_dep_exception_one_task(c, s, a, b):
     b.tasks[fut3.key].state = "fetch"
     event.set()
 
-    with captured_logger("distributed.worker", level=logging.DEBUG) as worker_logs:
+    assert await res1 == 5
+    assert await res2 == 5
 
-        # FIXME: We currently have no reliable, safe way to release the task and
-        # its dependent without race conditions
+    del res1, res2, fut, fut2
+    fut3.release()
 
-        # Unfortunately res1 is deadlocking. IRL this is not always a problem
-        # since a commonly reported transition is Fetch->Memory, i.e. the task
-        # exists already in memory for whatever reason but a gather_dep was
-        # still runnign, e.g. the task was rescheduled on that worker and it was
-        # computed faster than fetched.
-
-        with suppress(TimeoutError):
-            await asyncio.wait_for(res1, 0.1)
-
-        assert await res2 == 5
-
-        del res1, res2, fut, fut2
-        fut3.release()
-
-        while a.tasks and b.tasks:
-            await asyncio.sleep(0.1)
-
-    expected_msg = (
-        "Exception occured while handling `gather_dep` response for <Task 'f3' fetch>"
-    )
-    assert expected_msg in worker_logs.getvalue()
-    assert any("except-gather-dep-result" in msg for msg in b.story(fut3.key))
+    while a.tasks and b.tasks:
+        await asyncio.sleep(0.1)
 
 
 @gen_cluster(client=True)
@@ -2714,3 +2740,207 @@ async def test_gather_dep_exception_one_task_2(c, s, a, b):
     s.handle_missing_data(key="f1", errant_worker=a.address)
 
     await fut2
+
+
+def _acquire_replicas(scheduler, worker, *futures):
+    keys = [f.key for f in futures]
+
+    scheduler.stream_comms[worker.address].send(
+        {
+            "op": "acquire-replicas",
+            "keys": keys,
+            "stimulus_id": f"acquire-replicas-{time()}",
+            "priorities": {key: scheduler.tasks[key].priority for key in keys},
+            "who_has": {
+                key: {w.address for w in scheduler.tasks[key].who_has} for key in keys
+            },
+        },
+    )
+
+
+def _remove_replicas(scheduler, worker, *futures):
+    keys = [f.key for f in futures]
+
+    scheduler.stream_comms[worker.address].send(
+        {
+            "op": "remove-replicas",
+            "keys": keys,
+            "stimulus_id": f"remove-replicas-{time()}",
+        }
+    )
+
+
+@gen_cluster(client=True)
+async def test_acquire_replicas(c, s, a, b):
+    fut = c.submit(inc, 1, workers=[a.address])
+    await fut
+
+    _acquire_replicas(s, b, fut)
+
+    while len(s.who_has[fut.key]) != 2:
+        await asyncio.sleep(0.005)
+
+    for w in (a, b):
+        assert w.data[fut.key] == 2
+        assert w.tasks[fut.key].state == "memory"
+
+    fut.release()
+
+    while b.tasks or a.tasks:
+        await asyncio.sleep(0.005)
+
+
+@gen_cluster(client=True)
+async def test_acquire_replicas_same_channel(c, s, a, b):
+    fut = c.submit(inc, 1, workers=[a.address], key="f-replica")
+    futB = c.submit(inc, 2, workers=[a.address], key="f-B")
+    futC = c.submit(inc, futB, workers=[b.address], key="f-C")
+    await fut
+
+    _acquire_replicas(s, b, fut)
+
+    await futC
+    while fut.key not in b.tasks:
+        await asyncio.sleep(0.005)
+    assert len(s.who_has[fut.key]) == 2
+
+    # Ensure that both the replica and an ordinary dependency pass through the
+    # same communication channel
+
+    for f in [fut, futB]:
+        assert any("request-dep" in msg for msg in b.story(f.key))
+        assert any("gather-dependencies" in msg for msg in b.story(f.key))
+        assert any(f.key in msg["keys"] for msg in b.incoming_transfer_log)
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
+async def test_acquire_replicas_many(c, s, *workers):
+    futs = c.map(inc, range(10), workers=[workers[0].address])
+    res = c.submit(sum, futs, workers=[workers[1].address])
+    final = c.submit(slowinc, res, delay=0.5, workers=[workers[1].address])
+
+    await wait(futs)
+
+    _acquire_replicas(s, workers[2], *futs)
+
+    # Worker 2 should normally not even be involved if there was no replication
+    while not all(
+        f.key in workers[2].tasks and workers[2].tasks[f.key].state == "memory"
+        for f in futs
+    ):
+        await asyncio.sleep(0.01)
+
+    assert all(ts.state == "memory" for ts in workers[2].tasks.values())
+
+    assert await final == sum(map(inc, range(10))) + 1
+    # All workers have a replica
+    assert all(len(s.tasks[f.key].who_has) == 3 for f in futs)
+    del futs, res, final
+
+    while any(w.tasks for w in workers):
+        await asyncio.sleep(0.001)
+
+
+@gen_cluster(client=True)
+async def test_remove_replica_simple(c, s, a, b):
+    futs = c.map(inc, range(10), workers=[a.address])
+    await wait(futs)
+    _acquire_replicas(s, b, *futs)
+
+    while not all(len(s.tasks[f.key].who_has) == 2 for f in futs):
+        await asyncio.sleep(0.01)
+
+    _remove_replicas(s, b, *futs)
+
+    while b.tasks:
+        await asyncio.sleep(0.01)
+
+    # might take a moment for the reply to reach the scheduler
+    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
+        await asyncio.sleep(0.01)
+
+
+@gen_cluster(client=True)
+async def test_remove_replica_while_computing(c, s, *workers):
+    futs = c.map(inc, range(10), workers=[workers[0].address])
+
+    # All interesting things will happen on that worker
+    w = workers[1]
+    intermediate = c.map(slowinc, futs, delay=0.1, workers=[w.address])
+
+    def reduce(*args, **kwargs):
+        import time
+
+        time.sleep(0.5)
+        return
+
+    final = c.submit(reduce, intermediate, workers=[w.address], key="final")
+    while final.key not in w.tasks:
+        await asyncio.sleep(0.001)
+
+    while not all(fut.done() for fut in intermediate):
+        # The worker should reject all of these since they are required
+        _remove_replicas(s, w, *futs)
+        _remove_replicas(s, w, *intermediate)
+        await asyncio.sleep(0.001)
+
+    await wait(intermediate)
+
+    # Since intermediate is done, futs replicas may be removed.
+    # They might be already gone due to the above remove replica calls
+    _remove_replicas(s, w, *futs)
+    # the intermediate tasks should not be touched because they are still needed
+    # (the scheduler should not have made the above call but we should be safe
+    # regarless)
+    assert all(w.tasks[f.key].state == "memory" for f in intermediate)
+
+    while any(w.tasks[f.key].state != "released" for f in futs if f.key in w.tasks):
+        await asyncio.sleep(0.001)
+
+    # The scheduler actually gets notified about the removed replica
+    while not all(len(s.tasks[f.key].who_has) == 1 for f in futs):
+        await asyncio.sleep(0.001)
+
+    await final
+    del final, intermediate, futs
+
+    while any(w.tasks for w in workers):
+        await asyncio.sleep(0.001)
+
+
+@gen_cluster(client=True, nthreads=[("", 1)] * 3)
+async def test_who_has_consistent_remove_replica(c, s, *workers):
+    a = workers[0]
+    other_workers = {w for w in workers if w != a}
+    f1 = c.submit(inc, 1, key="f1", workers=[w.address for w in other_workers])
+    await wait(f1)
+    for w in other_workers:
+        _acquire_replicas(s, w, f1)
+
+    while not len(s.tasks[f1.key].who_has) == len(other_workers):
+        await asyncio.sleep(0)
+
+    f2 = c.submit(inc, f1, workers=[a.address])
+
+    # Wait just until the moment the worker received the task and scheduled the
+    # task to be fetched, then remove the replica from the worker this one is
+    # trying to get the data from. Ensure this is handled gracefully and no
+    # suspicious counters are raised since this is expected behaviour when
+    # removing replicas
+
+    while f1.key not in a.tasks or a.tasks[f1.key].state != "flight":
+        await asyncio.sleep(0)
+
+    coming_from = None
+    for w in other_workers:
+        coming_from = w
+        if w.address == a.tasks[f1.key].coming_from:
+            break
+
+    coming_from.handle_remove_replicas([f1.key], "test")
+
+    await f2
+
+    assert ("missing-dep", f1.key) in a.story(f1.key)
+    assert a.tasks[f1.key].suspicious_count == 0
+    assert s.tasks[f1.key].suspicious == 0

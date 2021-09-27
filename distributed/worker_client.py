@@ -3,6 +3,8 @@ from contextlib import contextmanager
 
 import dask
 
+from distributed.metrics import time
+
 from .threadpoolexecutor import rejoin, secede
 from .worker import get_client, get_worker, thread_state
 
@@ -50,9 +52,14 @@ def worker_client(timeout=None, separate_thread=True):
     worker = get_worker()
     client = get_client(timeout=timeout)
     if separate_thread:
+        duration = time() - thread_state.start_time
         secede()  # have this thread secede from the thread pool
         worker.loop.add_callback(
-            worker.transition, worker.tasks[thread_state.key], "long-running"
+            worker.transition,
+            worker.tasks[thread_state.key],
+            "long-running",
+            stimulus_id=f"worker-client-secede-{time()}",
+            compute_duration=duration,
         )
 
     yield client
