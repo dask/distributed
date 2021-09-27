@@ -248,18 +248,9 @@ class Server:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str):
-            warnings.warn(
-                "Since distributed 2.23 `.status` is now an Enum, please assign "
-                f"`Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            self._status = Status.lookup[new_status]
-        else:
-            raise TypeError(f"Expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     async def finished(self):
         """Wait until the server has finished"""

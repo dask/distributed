@@ -3,7 +3,6 @@ import atexit
 import copy
 import logging
 import math
-import warnings
 import weakref
 from contextlib import suppress
 from inspect import isawaitable
@@ -39,18 +38,9 @@ class ProcessInterface:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str):
-            warnings.warn(
-                "Since distributed 2.19 `.status` is now an Enum, please assign "
-                f"`Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            self._status = Status.lookup[new_status]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     def __init__(self, scheduler=None, name=None):
         self.address = getattr(self, "address", None)
