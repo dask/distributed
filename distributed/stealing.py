@@ -230,7 +230,15 @@ class WorkStealing(SchedulerPlugin):
                 return
 
             # Victim had already started execution, reverse stealing
-            if state in ("memory", "executing", "long-running", None):
+            if state in (
+                "memory",
+                "executing",
+                "long-running",
+                "released",
+                "cancelled",
+                "resumed",
+                None,
+            ):
                 self.log(("already-computing", key, victim.address, thief.address))
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
