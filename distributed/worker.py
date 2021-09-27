@@ -3406,7 +3406,6 @@ class Worker(ServerNode):
     def validate_task_fetch(self, ts):
         assert ts.key not in self.data
         assert self.address not in ts.who_has
-        assert ts.dependents
 
         for w in ts.who_has:
             assert ts.key in self.has_what[w]
