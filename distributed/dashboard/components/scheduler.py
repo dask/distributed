@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from numbers import Number
 
+import numpy as np
 from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
@@ -47,11 +48,6 @@ from tornado import escape
 import dask
 from dask import config
 from dask.utils import format_bytes, format_time, key_split, parse_timedelta
-
-try:
-    import numpy as np
-except ImportError:
-    np = None  # type: ignore
 
 from distributed.dashboard.components import add_periodic_callback
 from distributed.dashboard.components.shared import (
