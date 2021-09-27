@@ -17,6 +17,7 @@ from tlz import first, valmap
 from tornado.ioloop import IOLoop
 
 import dask
+from dask.utils import tmpfile
 
 from distributed import Nanny, Scheduler, Worker, rpc, wait, worker
 from distributed.compatibility import LINUX, WINDOWS
@@ -24,7 +25,7 @@ from distributed.core import CommClosedError, Status
 from distributed.diagnostics import SchedulerPlugin
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import TimeoutError, parse_ports, tmpfile
+from distributed.utils import TimeoutError, parse_ports
 from distributed.utils_test import captured_logger, gen_cluster, gen_test, inc
 
 pytestmark = pytest.mark.ci1

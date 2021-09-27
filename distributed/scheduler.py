@@ -36,7 +36,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 
 import dask
 from dask.highlevelgraph import HighLevelGraph
-from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta
+from dask.utils import format_bytes, format_time, parse_bytes, parse_timedelta, tmpfile
 from dask.widgets import get_template
 
 from . import preloading, profile
@@ -76,7 +76,6 @@ from .utils import (
     key_split_group,
     log_errors,
     no_default,
-    tmpfile,
     validate_key,
 )
 from .utils_comm import gather_from_workers, retry_operation, scatter_to_workers

@@ -11,12 +11,14 @@ from time import sleep
 
 import requests
 
+from dask.utils import tmpfile
+
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler
 from distributed.compatibility import LINUX
 from distributed.deploy.utils import nprocesses_nthreads
 from distributed.metrics import time
-from distributed.utils import parse_ports, sync, tmpfile
+from distributed.utils import parse_ports, sync
 from distributed.utils_test import (
     gen_cluster,
     popen,

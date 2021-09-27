@@ -19,6 +19,7 @@ from tlz import first, pluck, sliding_window
 import dask
 from dask import delayed
 from dask.system import CPU_COUNT
+from dask.utils import tmpfile
 
 import distributed
 from distributed import (
@@ -38,7 +39,7 @@ from distributed.diagnostics import nvml
 from distributed.diagnostics.plugin import PipInstall
 from distributed.metrics import time
 from distributed.scheduler import Scheduler
-from distributed.utils import TimeoutError, tmpfile
+from distributed.utils import TimeoutError
 from distributed.utils_test import (
     TaskStateMetadataPlugin,
     _LockedCommPool,
