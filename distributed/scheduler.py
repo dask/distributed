@@ -5433,6 +5433,21 @@ class Scheduler(SchedulerState, ServerNode):
         ws._processing[ts] = 0
         self.check_idle_saturated(ws)
 
+    def handle_worker_status_change(self, status: str, worker: str):
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if not ws:
+            return
+        self.log_event(
+            ws._address,
+            {
+                "action": "worker-status-change",
+                "prev-status": ws._status.name,
+                "status": status,
+            },
+        )
+        ws._status = Status.lookup[status]
+
     async def handle_worker(self, comm=None, worker=None):
         """
         Listen to responses from a single worker
@@ -5453,21 +5468,6 @@ class Scheduler(SchedulerState, ServerNode):
             if worker in self.stream_comms:
                 worker_comm.abort()
                 await self.remove_worker(address=worker)
-
-    def handle_worker_status_change(self, status=None, worker=None):
-        parent: SchedulerState = cast(SchedulerState, self)
-        ws: WorkerState = parent._workers_dv.get(worker)
-        if not ws:
-            return
-        self.log_event(
-            ws._address,
-            {
-                "action": "worker-status-change",
-                "prev-status": ws._status.name,
-                "status": status,
-            },
-        )
-        ws._status = Status.lookup[status]
 
     def add_plugin(self, plugin=None, idempotent=False, name=None, **kwargs):
         """Add external plugin to scheduler.
