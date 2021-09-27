@@ -2585,7 +2585,7 @@ class Worker(ServerNode):
                         ("busy-gather", worker, to_gather_keys, stimulus_id, time())
                     )
 
-                recommendations = {}
+                recommendations: dict[TaskState, str | tuple] = {}
                 deps_to_iter = self.in_flight_workers.pop(worker)
 
                 for d in deps_to_iter:

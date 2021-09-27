@@ -43,8 +43,8 @@ if cython_arg:
     except ImportError:
         setup_requires.append("cython")
 
-    _, _, params = cython_arg.partition("=")
-    params = params.split(",")
+    _, _, params_str = cython_arg.partition("=")
+    params = params_str.split(",")
     profile = "profile" in params
     if "annotate" in params:
         import Cython.Compiler.Options
