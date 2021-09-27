@@ -1117,7 +1117,7 @@ class ConnectionPool:
                 comms.update(d.popitem()[1])
 
             await asyncio.gather(
-                *[comm.close() for comm in comms], return_exceptions=True
+                *(comm.close() for comm in comms), return_exceptions=True
             )
 
             for _ in comms:

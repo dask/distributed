@@ -61,7 +61,7 @@ class Comm(ABC):
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
@@ -76,7 +76,7 @@ class Comm(ABC):
         Parameters
         ----------
         msg
-        on_error : Optional[str]
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """

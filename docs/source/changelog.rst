@@ -1,6 +1,32 @@
 Changelog
 =========
 
+2021.09.1
+---------
+
+Released on September 21, 2021
+
+- Revert AMM ``ReduceReplicas`` and parallel AMMs updates (:pr:`5335`) `James Bourbeau`_
+- Run multiple AMMs in parallel (:pr:`5315`) `crusaderky`_
+- AMM ``ReduceReplicas`` to iterate only on replicated tasks (:pr:`5297`) `crusaderky`_
+- Add type annotations to various functions within ``distributed.worker`` (:pr:`5290`) `Tom Forbes`_
+- Mark ``test_ucx_config_w_env_var`` flaky on UCX < 1.11 (:pr:`5262`) `Peter Andreas Entschev`_
+- Warn if CUDA context is created on incorrect device in UCX (:pr:`5308`) `Peter Andreas Entschev`_
+- Remove redundant timeouts from ``test_client`` (:pr:`5314`) `crusaderky`_
+- Allow ``Client`` to subscribe to events // Remote printing and warning (:pr:`5217`) `Florian Jetter`_
+- Test pickle protocols 4 & 5 (:pr:`5313`) `jakirkham`_
+- Fix-up ``test_pickle_empty`` (:pr:`5303`) `jakirkham`_
+- Increase timeout for ``test_worker_reconnects_mid_compute_multiple_states_on_scheduler`` (:pr:`5304`) `Florian Jetter`_
+- Add synced dict between cluster and scheduler to store cluster info (:pr:`5033`) `Jacob Tomlinson`_
+- Update ``test_sub_submit_priority`` (:pr:`5301`) `James Bourbeau`_
+- Revert "Add test setup fixture (:pr:`5242`)" (:pr:`5300`) `James Bourbeau`_
+- Fix flaky ``test_worker_reconnects_mid_compute`` (:pr:`5299`) `Florian Jetter`_
+- Use ``gen_test`` in ``test_adaptive`` (:pr:`5298`) `crusaderky`_
+- Increase ``worker.suspicious_counter`` threshold (:pr:`5228`) `Florian Jetter`_
+- Active Memory Manager framework + discard excess replicas (:pr:`5111`) `crusaderky`_
+- Add test setup fixture (:pr:`5242`) `James Bourbeau`_
+
+
 2021.09.0
 ---------
 
@@ -2636,3 +2662,4 @@ significantly without many new features.
 .. _`Bryan Van de Ven`: https://github.com/bryevdv
 .. _`David Chudzicki`: https://github.com/dchudz
 .. _`Walt Woods`: https://github.com/wwoods
+.. _`Tom Forbes`: https://github.com/orf

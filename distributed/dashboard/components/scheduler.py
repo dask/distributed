@@ -708,7 +708,7 @@ class BandwidthWorkers(DashboardComponent):
                     return str(ws.name)
                 return address
 
-            x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
+            x, y, value = zip(*((name(a), name(b), c) for (a, b), c in bw.items()))
 
             self.color_map.high = max(value)
 
@@ -2189,7 +2189,7 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        ####plot tg log
+        # plot tg log
         self.root.image_url(
             url="url_logo",
             x="x_logo",

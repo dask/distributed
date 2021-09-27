@@ -576,12 +576,12 @@ async def test_connection_pool():
 
     # Reuse connections
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[:5]])
-    await asyncio.gather(*[rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc("127.0.0.1:%d" % s.port).ping() for s in servers[:5]))
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[:5])
     )
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
@@ -590,14 +590,14 @@ async def test_connection_pool():
 
     # Clear out connections to make room for more
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[5:]]
+        *(rpc(ip="127.0.0.1", port=s.port).ping() for s in servers[5:])
     )
     assert rpc.active == 0
     assert rpc.open == 5
 
     s = servers[0]
     await asyncio.gather(
-        *[rpc(ip="127.0.0.1", port=s.port).ping(delay=0.1) for i in range(3)]
+        *(rpc(ip="127.0.0.1", port=s.port).ping(delay=0.1) for i in range(3))
     )
     assert len(rpc.available["tcp://127.0.0.1:%d" % s.port]) == 3
 
@@ -680,7 +680,7 @@ async def test_connection_pool_respects_limit():
 
     pool = await ConnectionPool(limit=limit)
 
-    await asyncio.gather(*[do_ping(pool, s.port) for s in servers])
+    await asyncio.gather(*(do_ping(pool, s.port) for s in servers))
 
 
 @pytest.mark.asyncio
@@ -702,9 +702,9 @@ async def test_connection_pool_tls():
 
     rpc = await ConnectionPool(limit=5, connection_args=connection_args)
 
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[:5]])
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers[::2]])
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[:5]))
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers[::2]))
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers))
     assert rpc.active == 0
 
     await rpc.close()
@@ -722,8 +722,8 @@ async def test_connection_pool_remove():
 
     rpc = await ConnectionPool(limit=10)
     serv = servers.pop()
-    await asyncio.gather(*[rpc(s.address).ping() for s in servers])
-    await asyncio.gather(*[rpc(serv.address).ping() for i in range(3)])
+    await asyncio.gather(*(rpc(s.address).ping() for s in servers))
+    await asyncio.gather(*(rpc(serv.address).ping() for i in range(3)))
     await rpc.connect(serv.address)
     assert sum(map(len, rpc.available.values())) == 6
     assert sum(map(len, rpc.occupied.values())) == 1

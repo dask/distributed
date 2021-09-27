@@ -1412,7 +1412,7 @@ async def test_scatter_direct_broadcast(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
 async def test_scatter_direct_balanced(c, s, *workers):
     futures = await c.scatter([1, 2, 3], direct=True)
-    assert sorted([len(w.data) for w in workers]) == [0, 1, 1, 1]
+    assert sorted(len(w.data) for w in workers) == [0, 1, 1, 1]
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -2067,7 +2067,7 @@ async def test_forget_complex(e, s, A, B):
 @gen_cluster(client=True)
 async def test_forget_in_flight(e, s, A, B):
     delayed2 = partial(delayed, pure=True)
-    a, b, c, d = [delayed2(slowinc)(i) for i in range(4)]
+    a, b, c, d = (delayed2(slowinc)(i) for i in range(4))
     ab = delayed2(slowadd)(a, b, dask_key_name="ab")
     cd = delayed2(slowadd)(c, d, dask_key_name="cd")
     ac = delayed2(slowadd)(a, c, dask_key_name="ac")
@@ -2932,7 +2932,7 @@ def test_rebalance_sync():
     # can't use the 'c' fixture because we need workers to run in a separate process
     with Client(n_workers=2, memory_limit="1 GiB", dashboard_address=":0") as c:
         s = c.cluster.scheduler
-        a, b = [ws.address for ws in s.workers.values()]
+        a, b = (ws.address for ws in s.workers.values())
         futures = c.map(lambda _: "x" * (2 ** 29 // 10), range(10), workers=[a])
         wait(futures)
         # Wait for heartbeat
@@ -5098,15 +5098,16 @@ async def test_secede_balances(c, s, a, b):
         total = client.submit(sum, futures).result()
         return total
 
-    futures = c.map(f, range(100))
+    futures = c.map(f, range(10), workers=[a.address])
 
     results = await c.gather(futures)
+    # We dispatch 10 tasks and every task generates 11 more tasks
+    # 10 * 11 + 10
+    assert a.executed_count + b.executed_count == 120
+    assert a.executed_count >= 10
+    assert b.executed_count > 0
 
-    assert a.executed_count + b.executed_count == 1100
-    assert a.executed_count > 200
-    assert b.executed_count > 200
-
-    assert results == [sum(map(inc, range(10)))] * 100
+    assert results == [sum(map(inc, range(10)))] * 10
 
 
 @gen_cluster(client=True)
@@ -5207,7 +5208,7 @@ async def test_bytes_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_unicode_ascii_keys(c, s, a, b):
-    uni_type = type("")
+    uni_type = str
     key = "inc-123"
     future = c.submit(inc, 1, key=key)
     result = await future
@@ -5219,7 +5220,7 @@ async def test_unicode_ascii_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_unicode_keys(c, s, a, b):
-    uni_type = type("")
+    uni_type = str
     key = "inc-123\u03bc"
     future = c.submit(inc, 1, key=key)
     result = await future
@@ -5799,7 +5800,7 @@ async def test_tuple_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 async def test_multiple_scatter(c, s, a, b):
-    futures = await asyncio.gather(*[c.scatter(1, direct=True) for _ in range(5)])
+    futures = await asyncio.gather(*(c.scatter(1, direct=True) for _ in range(5)))
 
     x = await futures[0]
     x = await futures[0]
@@ -6059,10 +6060,10 @@ async def test_profile_server(c, s, a, b):
                 c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
             )
 
-            p = await c.profile(server=True)  #  All worker servers
+            p = await c.profile(server=True)  # All worker servers
             assert "slowinc" in str(p)
 
-            p = await c.profile(scheduler=True)  #  Scheduler
+            p = await c.profile(scheduler=True)  # Scheduler
             assert "slowdec" in str(p)
         except AssertionError:
             if i == 4:
@@ -6247,6 +6248,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
     assert b.foo == "bar"
 
 
+@pytest.mark.skipif(WINDOWS, reason="frequently kills off the whole test suite")
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 2)] * 2)
 async def test_performance_report(c, s, a, b):
     pytest.importorskip("bokeh")
@@ -6282,13 +6284,13 @@ async def test_performance_report(c, s, a, b):
     assert "distributed.scheduler - INFO - Clear task state" in data
     assert dask.__version__ in data
 
-    # Stacklevel two captures code two frames back -- which in this case
+    # stacklevel=2 captures code two frames back -- which in this case
     # is the testing function
     data = await f(stacklevel=2)
     assert "async def test_performance_report(c, s, a, b):" in data
     assert "Dask Performance Report" in data
 
-    # Stacklevel zero or lower is overridden to stacklevel=1 so we don't see
+    # stacklevel=0 or lower is overridden to stacklevel=1 so we don't see
     # distributed internals
     data = await f(stacklevel=0)
     assert "Also, we want this comment to appear" in data
