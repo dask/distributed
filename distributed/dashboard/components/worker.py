@@ -452,10 +452,10 @@ class Counters(DashboardComponent):
             self.root = column(figures, sizing_mode=sizing_mode)
         else:
             self.root = column(
-                *[
+                *(
                     row(*pair, sizing_mode=sizing_mode)
                     for pair in partition_all(2, figures)
-                ],
+                ),
                 sizing_mode=sizing_mode,
             )
 

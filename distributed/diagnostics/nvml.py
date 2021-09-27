@@ -63,6 +63,24 @@ def _pynvml_handles():
     return pynvml.nvmlDeviceGetHandleByIndex(gpu_idx)
 
 
+def has_cuda_context():
+    """Check whether the current process already has a CUDA context created.
+
+    Returns
+    -------
+    ``False`` if current process has no CUDA context created, otherwise returns the
+    index of the device for which there's a CUDA context.
+    """
+    init_once()
+    for index in range(device_get_count()):
+        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+        running_processes = pynvml.nvmlDeviceGetComputeRunningProcesses_v2(handle)
+        for proc in running_processes:
+            if os.getpid() == proc.pid:
+                return index
+    return False
+
+
 def real_time():
     h = _pynvml_handles()
     return {

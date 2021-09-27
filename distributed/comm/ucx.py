@@ -6,12 +6,15 @@ See :ref:`communications` for more.
 .. _UCX: https://github.com/openucx/ucx
 """
 import logging
+import os
 import struct
+import warnings
 import weakref
 
 import dask
 from dask.utils import parse_bytes
 
+from ..diagnostics.nvml import has_cuda_context
 from ..utils import ensure_ip, get_ip, get_ipv6, log_errors, nbytes
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, CommClosedError, Connector, Listener
@@ -30,6 +33,8 @@ host_array = None
 device_array = None
 ucx_create_endpoint = None
 ucx_create_listener = None
+pre_existing_cuda_context = False
+cuda_context_created = False
 
 
 def synchronize_stream(stream=0):
@@ -42,7 +47,10 @@ def synchronize_stream(stream=0):
 
 
 def init_once():
-    global ucp, host_array, device_array, ucx_create_endpoint, ucx_create_listener
+    global ucp, host_array, device_array
+    global ucx_create_endpoint, ucx_create_listener
+    global pre_existing_cuda_context, cuda_context_created
+
     if ucp is not None:
         return
 
@@ -60,7 +68,34 @@ def init_once():
                 "CUDA support with UCX requires Numba for context management"
             )
 
+        cuda_visible_device = int(
+            os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0]
+        )
+        pre_existing_cuda_context = has_cuda_context()
+        if pre_existing_cuda_context is not False:
+            warnings.warn(
+                f"A CUDA context for device {pre_existing_cuda_context} already exists on process "
+                f"ID {os.getpid()}. This is often the result of a CUDA-enabled library calling a "
+                "CUDA runtime function before Dask-CUDA can spawn worker processes. Please make "
+                "sure any such function calls don't happen at import time or in the global scope "
+                "of a program."
+            )
+
         numba.cuda.current_context()
+
+        cuda_context_created = has_cuda_context()
+        if (
+            cuda_context_created is not False
+            and cuda_context_created != cuda_visible_device
+        ):
+            warnings.warn(
+                f"Worker with process ID {os.getpid()} should have a CUDA context assigned to "
+                f"device {cuda_visible_device}, but instead the CUDA context is on device "
+                "{cuda_context_created}. This is often the result of a CUDA-enabled library "
+                "calling a CUDA runtime function before Dask-CUDA can spawn worker processes. "
+                "Please make sure any such function calls don't happen at import time or in "
+                "the global scope of a program."
+            )
 
     import ucp as _ucp
 

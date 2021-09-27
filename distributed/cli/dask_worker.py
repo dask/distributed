@@ -430,7 +430,7 @@ def main(
     async def close_all():
         # Unregister all workers from scheduler
         if nanny:
-            await asyncio.gather(*[n.close(timeout=2) for n in nannies])
+            await asyncio.gather(*(n.close(timeout=2) for n in nannies))
 
     signal_fired = False
 
@@ -443,7 +443,7 @@ def main(
 
     async def run():
         await asyncio.gather(*nannies)
-        await asyncio.gather(*[n.finished() for n in nannies])
+        await asyncio.gather(*(n.finished() for n in nannies))
 
     install_signal_handlers(loop, cleanup=on_signal)
 

@@ -203,11 +203,11 @@ def test_logging_extended():
             "loggers": {
                 "distributed.foo": {
                     "level": "INFO",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
                 "distributed.foo.bar": {
                     "level": "ERROR",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
             },
             "root": {"level": "WARNING", "handlers": ["console"]},

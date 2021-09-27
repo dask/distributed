@@ -592,7 +592,7 @@ class Nanny(ServerNode):
             if hasattr(plugin, "teardown")
         ]
 
-        await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
 
         self.stop()
         try:
@@ -606,6 +606,15 @@ class Nanny(ServerNode):
         if comm:
             await comm.write("OK")
         await super().close()
+
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
 
 
 class WorkerProcess:

@@ -2522,7 +2522,7 @@ async def test_worker_reconnects_mid_compute(c, s, a, b):
         await asyncio.sleep(0.001)
 
 
-@gen_cluster(client=True, timeout=5)
+@gen_cluster(client=True)
 async def test_worker_reconnects_mid_compute_multiple_states_on_scheduler(c, s, a, b):
     """
     Ensure that a reconnecting worker does not break the scheduler regardless of
@@ -2808,9 +2808,9 @@ async def test_acquire_replicas_same_channel(c, s, a, b):
     # same communication channel
 
     for f in [fut, futB]:
-        assert any(("request-dep" in msg for msg in b.story(f.key)))
-        assert any(("gather-dependencies" in msg for msg in b.story(f.key)))
-        assert any((f.key in msg["keys"] for msg in b.incoming_transfer_log))
+        assert any("request-dep" in msg for msg in b.story(f.key))
+        assert any("gather-dependencies" in msg for msg in b.story(f.key))
+        assert any(f.key in msg["keys"] for msg in b.incoming_transfer_log)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
