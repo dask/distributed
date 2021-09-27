@@ -5,7 +5,6 @@ import sys
 import threading
 import traceback
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from contextlib import suppress

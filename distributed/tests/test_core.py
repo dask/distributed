@@ -2,7 +2,6 @@ import asyncio
 import os
 import socket
 import threading
-import warnings
 import weakref
 
 import pytest
