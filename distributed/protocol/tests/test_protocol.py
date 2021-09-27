@@ -22,13 +22,14 @@ def test_compression_1():
     assert {"x": x.tobytes()} == y
 
 
-def test_compression_2():
+def test_compression_small():
     pytest.importorskip("lz4")
     np = pytest.importorskip("numpy")
     x = np.random.random(10000)
     msg = dumps(to_serialize(x.tobytes()))
-    compression = msgpack.loads(msg[1]).get("compression")
-    assert all(c is None for c in compression)
+    assert not any(b"compression" in frame for frame in msg)
+    assert not any(b"blosc" in frame for frame in msg)
+    assert not any(b"lz4" in frame for frame in msg)
 
 
 def test_compression_without_deserialization():
@@ -36,7 +37,7 @@ def test_compression_without_deserialization():
     np = pytest.importorskip("numpy")
     x = np.ones(1000000)
 
-    frames = dumps({"x": Serialize(x)})
+    frames = dumps({"x": to_serialize(x)})
     assert all(len(frame) < 1000000 for frame in frames)
 
     msg = loads(frames, deserialize=False)

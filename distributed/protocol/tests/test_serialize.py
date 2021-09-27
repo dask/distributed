@@ -451,12 +451,11 @@ async def test_frame_split():
 
     size = dask.utils.parse_bytes("3MiB")
     split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
-    print(split_frames)
-    assert len(split_frames) == 3 + 2  # Three splits and two headers
+    assert len(split_frames) == 3 + 3  # Three splits and three headers
 
     size = dask.utils.parse_bytes("5MiB")
     split_frames = await to_frames({"x": to_serialize(data)}, frame_split_size=size)
-    assert len(split_frames) == 2 + 2  # Two splits and two headers
+    assert len(split_frames) == 2 + 3  # Two splits and three headers
 
 
 @pytest.mark.parametrize(

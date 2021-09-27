@@ -189,6 +189,8 @@ def maybe_compress(
         return None, payload
     if len(payload) > 2 ** 31:  # Too large, compression libraries often fail
         return None, payload
+    if not isinstance(payload, (bytes, bytearray, memoryview)):  # Example: cuda objects
+        return None, payload
 
     min_size = int(min_size)
     sample_size = int(sample_size)

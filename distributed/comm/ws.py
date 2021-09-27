@@ -120,6 +120,10 @@ class WSHandlerComm(Comm):
             },
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
+        assert all(len(frame) <= BIG_BYTES_SHARD_SIZE for frame in frames), list(
+            map(len, frames)
+        )
+
         n = struct.pack("Q", len(frames))
         try:
             await self.handler.write_message(n, binary=True)
@@ -218,6 +222,10 @@ class WS(Comm):
             },
             frame_split_size=BIG_BYTES_SHARD_SIZE,
         )
+        assert all(len(frame) <= BIG_BYTES_SHARD_SIZE for frame in frames), list(
+            map(len, frames)
+        )
+
         n = struct.pack("Q", len(frames))
         try:
             await self.sock.write_message(n, binary=True)

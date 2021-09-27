@@ -5,7 +5,6 @@ import pytest
 np = pytest.importorskip("numpy")
 
 from distributed.protocol import (
-    decompress,
     deserialize,
     dumps,
     loads,
@@ -28,8 +27,6 @@ def test_serialize():
     assert header["type"]
     assert len(frames) == 1
 
-    if "compression" in header:
-        frames = decompress(header, frames)
     result = deserialize(header, frames)
     assert (result == x).all()
 
@@ -78,8 +75,6 @@ def test_serialize():
 )
 def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
-    if "compression" in header:
-        frames = decompress(header, frames)
     for frame in frames:
         assert isinstance(frame, (bytes, memoryview))
     if x.dtype.char == "O" and any(isinstance(e, np.ndarray) for e in x.flat):
@@ -169,8 +164,6 @@ def test_memmap():
         x[:] = 5
 
         header, frames = serialize(x)
-        if "compression" in header:
-            frames = decompress(header, frames)
         y = deserialize(header, frames)
 
         np.testing.assert_equal(x, y)
@@ -220,13 +213,13 @@ def test_compress_numpy():
     frames = dumps({"x": to_serialize(x)})
     assert sum(map(nbytes, frames)) < x.nbytes
 
-    header = msgpack.loads(frames[1], raw=False, use_list=False, strict_map_key=False)
+    header = msgpack.loads(frames[0], raw=False, use_list=False, strict_map_key=False)
     try:
         import blosc  # noqa: F401
     except ImportError:
         pass
     else:
-        assert all(c == "blosc" for c in header["compression"])
+        assert any(c == "blosc" for c in header["compressions"])
 
 
 def test_compress_memoryview():
