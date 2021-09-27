@@ -23,6 +23,12 @@ for r in requires:
     else:
         install_requires.append(r)
 
+# To enable Cython, add to pip install one of the following:
+# --install-option="--with-cython"
+# --install-option="--with-cython=annotate"
+# --install-option="--with-cython=profile"
+# --install-option="--with-cython=annotate,profile"
+
 cython_arg = None
 for i in range(len(sys.argv)):
     if sys.argv[i].startswith("--with-cython"):
@@ -37,18 +43,16 @@ if cython_arg:
     except ImportError:
         setup_requires.append("cython")
 
-    profile = False
-    try:
-        _, param = cython_arg.split("=")
-        profile = param == "profile"
-    except ValueError:
-        pass
+    _, _, params = cython_arg.partition("=")
+    params = params.split(",")
+    profile = "profile" in params
+    if "annotate" in params:
+        import Cython.Compiler.Options
+
+        Cython.Compiler.Options.annotate = True
 
     cyext_modules = [
-        Extension(
-            "distributed.scheduler",
-            sources=["distributed/scheduler.py"],
-        ),
+        Extension("distributed.scheduler", sources=["distributed/scheduler.py"]),
     ]
     for e in cyext_modules:
         e.cython_directives = {  # type: ignore

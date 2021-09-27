@@ -3001,7 +3001,11 @@ class SchedulerState:
             w: str = _remove_from_processing(self, ts)
             if w:
                 worker_msgs[w] = [
-                    {"op": "free-keys", "keys": [key], "reason": "Processing->Released"}
+                    {
+                        "op": "free-keys",
+                        "keys": [key],
+                        "reason": f"processing-released-{time()}",
+                    }
                 ]
 
             ts.state = "released"
@@ -5367,7 +5371,7 @@ class Scheduler(SchedulerState, ServerNode):
         self.log.append(("missing", key, errant_worker))
 
         ts: TaskState = parent._tasks.get(key)
-        if ts is None or not ts._who_has:
+        if ts is None:
             return
         ws: WorkerState = parent._workers_dv.get(errant_worker)
         if ws is not None and ws in ts._who_has:
@@ -5380,17 +5384,14 @@ class Scheduler(SchedulerState, ServerNode):
             else:
                 self.transitions({key: "forgotten"})
 
-    def release_worker_data(self, comm=None, keys=None, worker=None):
+    def release_worker_data(self, comm=None, key=None, worker=None):
         parent: SchedulerState = cast(SchedulerState, self)
         ws: WorkerState = parent._workers_dv.get(worker)
-        if not ws:
+        ts: TaskState = parent._tasks.get(key)
+        if not ws or not ts:
             return
-        tasks: set = {parent._tasks[k] for k in keys if k in parent._tasks}
-        removed_tasks: set = tasks.intersection(ws._has_what)
-
-        ts: TaskState
         recommendations: dict = {}
-        for ts in removed_tasks:
+        if ts in ws._has_what:
             del ws._has_what[ts]
             ws._nbytes -= ts.get_nbytes()
             wh: set = ts._who_has
@@ -6709,7 +6710,7 @@ class Scheduler(SchedulerState, ServerNode):
         if worker not in parent._workers_dv:
             return "not found"
         ws: WorkerState = parent._workers_dv[worker]
-        superfluous_data = []
+        redundant_replicas = []
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
@@ -6718,14 +6719,15 @@ class Scheduler(SchedulerState, ServerNode):
                     ws._has_what[ts] = None
                     ts._who_has.add(ws)
             else:
-                superfluous_data.append(key)
-        if superfluous_data:
+                redundant_replicas.append(key)
+
+        if redundant_replicas:
             self.worker_send(
                 worker,
                 {
-                    "op": "superfluous-data",
-                    "keys": superfluous_data,
-                    "reason": f"Add keys which are not in-memory {superfluous_data}",
+                    "op": "remove-replicas",
+                    "keys": redundant_replicas,
+                    "stimulus_id": f"redundant-replicas-{time()}",
                 },
             )
 
@@ -7867,6 +7869,8 @@ def _task_to_msg(state: SchedulerState, ts: TaskState, duration: double = -1) ->
         "key": ts._key,
         "priority": ts._priority,
         "duration": duration,
+        "stimulus_id": f"compute-task-{time()}",
+        "who_has": {},
     }
     if ts._resource_restrictions:
         msg["resource_restrictions"] = ts._resource_restrictions

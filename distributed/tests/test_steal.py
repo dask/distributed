@@ -689,14 +689,17 @@ async def test_dont_steal_already_released(c, s, a, b):
         await asyncio.sleep(0.05)
 
     del future
-    await asyncio.sleep(0.05)
-    # In case the system is slow (e.g. network) ensure that nothing bad happens
-    # if the key was already released
-    assert key not in a.tasks
-    a.steal_request(key)
-    assert a.batched_stream.buffer == [
-        {"op": "steal-response", "key": key, "state": None}
-    ]
+
+    while key in a.tasks and a.tasks[key].state != "released":
+        await asyncio.sleep(0.05)
+
+    a.handle_steal_request(key)
+    assert len(a.batched_stream.buffer) == 1
+    msg = a.batched_stream.buffer[0]
+    assert msg["op"] == "steal-response"
+    assert msg["key"] == key
+    assert msg["state"] in [None, "released"]
+
     with captured_logger(
         logging.getLogger("distributed.stealing"), level=logging.DEBUG
     ) as stealing_logs:
