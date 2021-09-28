@@ -66,7 +66,7 @@ class Status(Enum):
     dont_reply = "dont_reply"
 
 
-Status.lookup = {s.name: s for s in Status}
+Status.lookup = {s.name: s for s in Status}  # type: ignore
 
 
 class RPCClosed(IOError):

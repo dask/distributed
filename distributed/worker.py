@@ -902,7 +902,7 @@ class Worker(ServerNode):
     def executor(self):
         return self.executors["default"]
 
-    @ServerNode.status.setter
+    @ServerNode.status.setter  # type: ignore
     def status(self, value):
         """Override Server.status to notify the Scheduler of status changes"""
         ServerNode.status.__set__(self, value)
