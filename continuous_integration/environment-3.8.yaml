@@ -39,5 +39,5 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://github.com/dask/dask
+      - git+https://github.com/jrbourbeau/dask.git@dask-tmpfile
       - keras
