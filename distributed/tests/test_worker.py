@@ -2766,7 +2766,7 @@ def _remove_replicas(scheduler, worker, *futures):
         if ws in ts.who_has:
             ts.who_has.remove(ws)
             ws._nbytes -= ts.get_nbytes()
-            del scheduler.workers[ws.address]._has_what[ts]
+            del ws._has_what[ts]
     scheduler.stream_comms[ws.address].send(
         {
             "op": "remove-replicas",
