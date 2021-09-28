@@ -319,7 +319,8 @@ def test_preload_config(loop):
     # Ensure dask-scheduler pulls the preload from the Dask config if
     # not specified via a command line option
     with tmpfile() as fn:
-        env = {"DASK_DISTRIBUTED__SCHEDULER__PRELOAD": PRELOAD_TEXT}
+        env = os.environ.copy()
+        env["DASK_DISTRIBUTED__SCHEDULER__PRELOAD"] = PRELOAD_TEXT
         with popen(["dask-scheduler", "--scheduler-file", fn], env=env):
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert (
