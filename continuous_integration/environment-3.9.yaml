@@ -46,7 +46,7 @@ dependencies:
   - zict  # overridden by git tip below
   - zstandard
   - pip:
-      - git+https://github.com/jrbourbeau/dask.git@dask-tmpfile
+      - git+https://github.com/jrbourbeau/dask.git@tmpfile-oserror
       - git+https://github.com/dask/s3fs
       - git+https://github.com/dask/zict
       # FIXME https://github.com/dask/distributed/issues/5345

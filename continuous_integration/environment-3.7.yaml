@@ -41,6 +41,6 @@ dependencies:
   - zict
   - zstandard
   - pip:
-      - git+https://github.com/jrbourbeau/dask.git@dask-tmpfile
+      - git+https://github.com/jrbourbeau/dask.git@tmpfile-oserror
       - git+https://github.com/jcrist/crick  # Only tested here
       - keras
