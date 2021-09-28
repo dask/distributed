@@ -8,8 +8,9 @@ import msgpack
 
 import dask
 from dask.base import normalize_token
+from dask.utils import typename
 
-from ..utils import ensure_bytes, has_keyword, typename
+from ..utils import ensure_bytes, has_keyword
 from . import pickle
 from .compression import decompress, maybe_compress
 from .utils import frame_split_size, msgpack_opts, pack_frames_prelude, unpack_frames
@@ -356,7 +357,7 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header : dict
     frames : list of bytes
-    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+    deserializers : dict[str, tuple[Callable, Callable, bool]] | None
         An optional dict mapping a name to a (de)serializer.
         See `dask_serialize` and `dask_deserialize` for more.
 
@@ -406,7 +407,9 @@ def deserialize(header, frames, deserializers=None):
     return loads(header, frames)
 
 
-def serialize_and_split(x, serializers=None, on_error="message", context=None):
+def serialize_and_split(
+    x, serializers=None, on_error="message", context=None, size=None
+):
     """Serialize and split compressable frames
 
     This function is a drop-in replacement of `serialize()` that calls `serialize()`
@@ -428,7 +431,7 @@ def serialize_and_split(x, serializers=None, on_error="message", context=None):
         frames, header.get("compression") or [None] * len(frames)
     ):
         if compression is None:  # default behavior
-            sub_frames = frame_split_size(frame)
+            sub_frames = frame_split_size(frame, n=size)
             num_sub_frames.append(len(sub_frames))
             offsets.append(len(out_frames))
             out_frames.extend(sub_frames)

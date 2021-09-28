@@ -242,6 +242,31 @@ properties:
               A list of trusted root modules the schedular is allowed to import (incl. submodules). For security reasons, the
               scheduler does not import arbitrary Python modules.
 
+          active-memory-manager:
+            type: object
+            required: [start, interval, policies]
+            additionalProperties: false
+            properties:
+              start:
+                type: boolean
+                description: set to true to auto-start the AMM on Scheduler init;
+                  false to manually start it with client.scheduler.amm_start()
+              interval:
+                type: string
+                description:
+                  Time expression, e.g. "2s". Run the AMM cycle every <interval>.
+              policies:
+                type: array
+                items:
+                  type: object
+                  required: [class]
+                  properties:
+                    class:
+                      type: string
+                      description: fully qualified name of an ActiveMemoryManagerPolicy
+                        subclass
+                  additionalProperties:
+                    description: keyword arguments to the policy constructor, if any
 
       worker:
         type: object
@@ -510,6 +535,11 @@ properties:
 
               See https://docs.dask.org/en/latest/setup/custom-startup.html for more information
 
+          environ:
+            type: object
+            description: |
+              Environment variables to set on all worker processes started by nannies
+
       client:
         type: object
         description: |
@@ -759,6 +789,67 @@ properties:
                       Alternatively, the key can be appended to the cert file
                       above, and this field left blank
 
+          ucx:
+            type: object
+            description: |
+              UCX provides access to other transport methods including NVLink and InfiniBand.
+            properties:
+              cuda_copy:
+                type: boolean
+                description: |
+                  Set environment variables to enable CUDA support over UCX. This may be used even if
+                  InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
+              tcp:
+                type: boolean
+                description: |
+                  Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
+                  are not supported or disabled.
+              nvlink:
+                type: boolean
+                description: |
+                  Set environment variables to enable UCX over NVLink, implies ``distributed.comm.ucx.tcp=True``.
+              infiniband:
+                type: boolean
+                description: |
+                  Set environment variables to enable UCX over InfiniBand, implies ``distributed.comm.ucx.tcp=True``.
+              rdmacm:
+                type: boolean
+                description: |
+                  Set environment variables to enable UCX RDMA connection manager support,
+                  requires ``distributed.comm.ucx.infiniband=True``.
+              net-devices:
+                type: [string, 'null']
+                description: |
+                  Interface(s) used by workers for UCX communication. Can be a string (like
+                  ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
+                  (requires ``distributed.comm.ucx.infiniband=True``) to pick the optimal interface per-worker based on
+                  the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
+                  all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
+                  and compiled with hwloc support. Unexpected errors can occur when using
+                  ``"auto"`` if any interfaces are disconnected or improperly configured.
+              reuse-endpoints:
+                type: [boolean, 'null']
+                description: |
+                  Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
+                  UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
+                  introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
+                  can cause establishing endpoints to be very slow, this is particularly noticeable in
+                  clusters of more than a few dozen workers.
+
+          websockets:
+            type: object
+            properties:
+              shard:
+                type:
+                - string
+                description: |
+                  The maximum size of a websocket frame to send through a comm.
+
+                  This is somewhat duplicative of distributed.comm.shard, but websockets
+                  often have much smaller maximum message sizes than othe protocols, so
+                  this attribute is used to set a smaller default shard size and to
+                  allow separate control of websocket message sharding.
+
       diagnostics:
         type: object
         properties:
@@ -769,6 +860,20 @@ properties:
               not a problem and will be automatically disabled if no GPUs are found in the
               system, but in certain cases it may be desirable to completely disable NVML
               diagnostics.
+          computations:
+            type: object
+            properties:
+              max-history:
+                type: integer
+                minimum: 0
+                description: |
+                  The maximum number of Computations to remember.
+              ignore-modules:
+                type: array
+                description: |
+                  A list of modules which are ignored when trying to collect the
+                  code context when submitting a computation. Accepts regular
+                  expressions.
 
       dashboard:
         type: object
@@ -867,58 +972,12 @@ properties:
                 type: string
                 description: Polling time to query cpu/memory statistics default 500ms
 
-  rmm:
-    type: object
-    description: |
-      Configuration options for the RAPIDS Memory Manager.
-    properties:
-      pool-size:
-        type: [integer, 'null']
+      rmm:
+        type: object
         description: |
-          The size of the memory pool in bytes.
-  ucx:
-    type: object
-    description: |
-      UCX provides access to other transport methods including NVLink and InfiniBand.
-    properties:
-      cuda_copy:
-        type: boolean
-        description: |
-          Set environment variables to enable CUDA support over UCX. This may be used even if
-          InfiniBand and NVLink are not supported or disabled, then transferring data over TCP.
-      tcp:
-        type: boolean
-        description: |
-          Set environment variables to enable TCP over UCX, even if InfiniBand and NVLink
-          are not supported or disabled.
-      nvlink:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX over NVLink, implies ``ucx.tcp=True``.
-      infiniband:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX over InfiniBand, implies ``ucx.tcp=True``.
-      rdmacm:
-        type: boolean
-        description: |
-          Set environment variables to enable UCX RDMA connection manager support,
-          requires ``ucx.infiniband=True``.
-      net-devices:
-        type: [string, 'null']
-        description: |
-          Interface(s) used by workers for UCX communication. Can be a string (like
-          ``"eth0"`` for NVLink or ``"mlx5_0:1"``/``"ib0"`` for InfiniBand), ``"auto"``
-          (requires ``ucx.infiniband=True``) to pick the optimal interface per-worker based on
-          the system's topology, or ``None`` to stay with the default value of ``"all"`` (use
-          all available interfaces). Setting to ``"auto"`` requires UCX-Py to be installed
-          and compiled with hwloc support. Unexpected errors can occur when using
-          ``"auto"`` if any interfaces are disconnected or improperly configured.
-      reuse-endpoints:
-        type: [boolean, 'null']
-        description: |
-          Enable UCX-Py reuse endpoints mechanism if ``True`` or if it's not specified and
-          UCX < 1.11 is installed, otherwise disable reuse endpoints. This was primarily
-          introduced to resolve an issue with CUDA IPC that has been fixed in UCX 1.10, but
-          can cause establishing endpoints to be very slow, this is particularly noticeable in
-          clusters of more than a few dozen workers.
+          Configuration options for the RAPIDS Memory Manager.
+        properties:
+          pool-size:
+            type: [integer, 'null']
+            description: |
+              The size of the memory pool in bytes.

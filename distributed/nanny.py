@@ -8,6 +8,7 @@ import uuid
 import warnings
 import weakref
 from contextlib import suppress
+from inspect import isawaitable
 from multiprocessing.queues import Empty
 from time import sleep as sync_sleep
 
@@ -22,15 +23,18 @@ from dask.utils import parse_timedelta
 from . import preloading
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
-from .core import CommClosedError, RPCClosed, Status, coerce_to_address
+from .core import CommClosedError, RPCClosed, Status, coerce_to_address, error_message
+from .diagnostics.plugin import _get_plugin_name
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
+from .protocol import pickle
 from .security import Security
 from .utils import (
     TimeoutError,
     get_ip,
     json_load_robust,
+    log_errors,
     mp_context,
     parse_ports,
     silence_logging,
@@ -46,9 +50,23 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary. It is necessary if you want to use the
     ``Client.restart`` method, or to restart the worker automatically if
-    it gets to the terminate fractiom of its memory limit.
+    it gets to the terminate fraction of its memory limit.
 
-    The parameters for the Nanny are mostly the same as those for the Worker.
+    The parameters for the Nanny are mostly the same as those for the Worker
+    with exceptions listed below.
+
+    Parameters
+    ----------
+    env: dict, optional
+        Environment variables set at time of Nanny initialization will be
+        ensured to be set in the Worker process as well. This argument allows to
+        overwrite or otherwise set environment variables for the Worker. It is
+        also possible to set environment variables using the option
+        `distributed.nanny.environ`. Precedence as follows
+
+            1. Nanny arguments
+            2. Existing environment variables
+            3. Dask configuration
 
     See Also
     --------
@@ -104,6 +122,37 @@ class Nanny(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
 
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            self._original_local_dir = local_directory
+            local_directory = os.path.join(local_directory, "dask-worker-space")
+        else:
+            self._original_local_dir = local_directory
+
+        self.local_directory = local_directory
+        if not os.path.exists(self.local_directory):
+            os.makedirs(self.local_directory, exist_ok=True)
+
+        self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
+        self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
+
+        if preload_nanny is None:
+            preload_nanny = dask.config.get("distributed.nanny.preload")
+        if preload_nanny_argv is None:
+            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
+
+        self.preloads = preloading.process_preloads(
+            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
+        )
+
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
             self.scheduler_addr = cfg["address"]
@@ -130,20 +179,19 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
 
-        self.preload = preload
-        if self.preload is None:
-            self.preload = dask.config.get("distributed.worker.preload")
-        self.preload_argv = preload_argv
-        if self.preload_argv is None:
-            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-
-        if preload_nanny is None:
-            preload_nanny = dask.config.get("distributed.nanny.preload")
-        if preload_nanny_argv is None:
-            preload_nanny_argv = dask.config.get("distributed.nanny.preload-argv")
-
         self.Worker = Worker if worker_class is None else worker_class
-        self.env = env or {}
+        config_environ = dask.config.get("distributed.nanny.environ", {})
+        if not isinstance(config_environ, dict):
+            raise TypeError(
+                f"distributed.nanny.environ configuration must be of type dict. Instead got {type(config_environ)}"
+            )
+        self.env = config_environ.copy()
+        for k in self.env:
+            if k in os.environ:
+                self.env[k] = os.environ[k]
+        if env:
+            self.env.update(env)
+        self.env = {k: str(v) for k, v in self.env.items()}
         self.config = config or dask.config.config
         worker_kwargs.update(
             {
@@ -158,25 +206,6 @@ class Nanny(ServerNode):
         self.contact_address = contact_address
         self.memory_terminate_fraction = dask.config.get(
             "distributed.worker.memory.terminate"
-        )
-
-        if local_dir is not None:
-            warnings.warn("The local_dir keyword has moved to local_directory")
-            local_directory = local_dir
-
-        if local_directory is None:
-            local_directory = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_directory):
-                os.makedirs(local_directory)
-            self._original_local_dir = local_directory
-            local_directory = os.path.join(local_directory, "dask-worker-space")
-        else:
-            self._original_local_dir = local_directory
-
-        self.local_directory = local_directory
-
-        self.preloads = preloading.process_preloads(
-            self, preload_nanny, preload_nanny_argv, file_dir=self.local_directory
         )
 
         self.services = services
@@ -199,7 +228,11 @@ class Nanny(ServerNode):
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,
+            "plugin_add": self.plugin_add,
+            "plugin_remove": self.plugin_remove,
         }
+
+        self.plugins = {}
 
         super().__init__(
             handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
@@ -294,6 +327,10 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.start()
 
+        msg = await self.scheduler.register_nanny()
+        for name, plugin in msg["nanny-plugins"].items():
+            await self.plugin_add(plugin=plugin, name=name)
+
         logger.info("        Start Nanny at: %r", self.address)
         response = await self.instantiate()
         if response == Status.running:
@@ -384,7 +421,48 @@ class Nanny(ServerNode):
                 raise
         return result
 
-    async def restart(self, comm=None, timeout=2, executor_wait=True):
+    async def plugin_add(self, comm=None, plugin=None, name=None):
+        with log_errors(pdb=False):
+            if isinstance(plugin, bytes):
+                plugin = pickle.loads(plugin)
+
+            if name is None:
+                name = _get_plugin_name(plugin)
+
+            assert name
+
+            self.plugins[name] = plugin
+
+            logger.info("Starting Nanny plugin %s" % name)
+            if hasattr(plugin, "setup"):
+                try:
+                    result = plugin.setup(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+            if getattr(plugin, "restart", False):
+                await self.restart()
+
+            return {"status": "OK"}
+
+    async def plugin_remove(self, comm=None, name=None):
+        with log_errors(pdb=False):
+            logger.info(f"Removing Nanny plugin {name}")
+            try:
+                plugin = self.plugins.pop(name)
+                if hasattr(plugin, "teardown"):
+                    result = plugin.teardown(nanny=self)
+                    if isawaitable(result):
+                        result = await result
+            except Exception as e:
+                msg = error_message(e)
+                return msg
+
+            return {"status": "OK"}
+
+    async def restart(self, comm=None, timeout=30, executor_wait=True):
         async def _():
             if self.process is not None:
                 await self.kill()
@@ -393,7 +471,9 @@ class Nanny(ServerNode):
         try:
             await asyncio.wait_for(_(), timeout)
         except TimeoutError:
-            logger.error("Restart timed out, returning before finished")
+            logger.error(
+                f"Restart timed out after {timeout}s; returning before finished"
+            )
             return "timed out"
         else:
             return "OK"
@@ -506,6 +586,14 @@ class Nanny(ServerNode):
         for preload in self.preloads:
             await preload.teardown()
 
+        teardowns = [
+            plugin.teardown(self)
+            for plugin in self.plugins.values()
+            if hasattr(plugin, "teardown")
+        ]
+
+        await asyncio.gather(*(td for td in teardowns if isawaitable(td)))
+
         self.stop()
         try:
             if self.process is not None:
@@ -517,7 +605,16 @@ class Nanny(ServerNode):
         self.status = Status.closed
         if comm:
             await comm.write("OK")
-        await ServerNode.close(self)
+        await super().close()
+
+    async def _log_event(self, topic, msg):
+        await self.scheduler.log_event(
+            topic=topic,
+            msg=msg,
+        )
+
+    def log_event(self, topic, msg):
+        self.loop.add_callback(self._log_event, topic, msg)
 
 
 class WorkerProcess:

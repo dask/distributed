@@ -53,41 +53,41 @@ class Comm(ABC):
     # XXX add set_close_callback()?
 
     @abstractmethod
-    def read(self, deserializers=None):
+    async def read(self, deserializers=None):
         """
         Read and return a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
-        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        deserializers : dict[str, tuple[Callable, Callable, bool]] | None
             An optional dict appropriate for distributed.protocol.deserialize.
             See :ref:`serialization` for more.
         """
 
     @abstractmethod
-    def write(self, msg, serializers=None, on_error=None):
+    async def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
-        This method is a coroutine.
+        This method returns a coroutine.
 
         Parameters
         ----------
         msg
-        on_error : Optional[str]
+        on_error : str | None
             The behavior when serialization fails. See
             ``distributed.protocol.core.dumps`` for valid values.
         """
 
     @abstractmethod
-    def close(self):
+    async def close(self):
         """
         Close the communication cleanly.  This will attempt to flush
         outgoing buffers before actually closing the underlying transport.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
 
     @abstractmethod
@@ -155,16 +155,13 @@ class Comm(ABC):
         return out
 
     def __repr__(self):
-        clsname = self.__class__.__name__
-        if self.closed():
-            return f"<closed {clsname}>"
-        else:
-            return "<{} {} local={} remote={}>".format(
-                clsname,
-                self.name or "",
-                self.local_address,
-                self.peer_address,
-            )
+        return "<{}{} {} local={} remote={}>".format(
+            self.__class__.__name__,
+            " (closed)" if self.closed() else "",
+            self.name or "",
+            self.local_address,
+            self.peer_address,
+        )
 
 
 class Listener(ABC):
@@ -227,7 +224,7 @@ class Listener(ABC):
         except Exception as e:
             with suppress(Exception):
                 await comm.close()
-            raise CommClosedError() from e
+            raise CommClosedError(f"Comm {comm!r} closed.") from e
 
         comm.remote_info = handshake
         comm.remote_info["address"] = comm._peer_addr
@@ -241,10 +238,10 @@ class Listener(ABC):
 
 class Connector(ABC):
     @abstractmethod
-    def connect(self, address, deserialize=True):
+    async def connect(self, address, deserialize=True):
         """
         Connect to the given address and return a Comm object.
-        This function is a coroutine.   It may raise EnvironmentError
+        This function returns a coroutine. It may raise EnvironmentError
         if the other endpoint is unreachable or unavailable.  It
         may raise ValueError if the address is malformed.
         """

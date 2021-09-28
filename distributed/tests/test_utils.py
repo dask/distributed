@@ -4,7 +4,6 @@ import io
 import os
 import queue
 import socket
-import sys
 import traceback
 from time import sleep
 
@@ -14,6 +13,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.compatibility import MACOS, WINDOWS
 from distributed.metrics import time
 from distributed.utils import (
     LRU,
@@ -31,6 +31,7 @@ from distributed.utils import (
     get_traceback,
     is_kernel,
     is_valid_xml,
+    iscoroutinefunction,
     nbytes,
     offload,
     open_port,
@@ -43,7 +44,15 @@ from distributed.utils import (
     truncate_exception,
     warn_on_duration,
 )
-from distributed.utils_test import captured_logger, div, gen_test, has_ipv6, inc, throws
+from distributed.utils_test import (
+    _UnhashableCallable,
+    captured_logger,
+    div,
+    gen_test,
+    has_ipv6,
+    inc,
+    throws,
+)
 
 
 def test_All(loop):
@@ -142,23 +151,12 @@ def test_ensure_ip():
         assert ensure_ip("::1") == "::1"
 
 
+@pytest.mark.skipif(WINDOWS, reason="TODO")
 def test_get_ip_interface():
-    if sys.platform == "darwin":
-        assert get_ip_interface("lo0") == "127.0.0.1"
-    elif sys.platform.startswith("linux"):
-        assert get_ip_interface("lo") == "127.0.0.1"
-    else:
-        pytest.skip(f"test needs to be enhanced for platform {sys.platform!r}")
-
-    non_existent_interface = "__non-existent-interface"
-    expected_error_message = f"{non_existent_interface!r}.+network interface.+"
-
-    if sys.platform == "darwin":
-        expected_error_message += "'lo0'"
-    elif sys.platform.startswith("linux"):
-        expected_error_message += "'lo'"
-    with pytest.raises(ValueError, match=expected_error_message):
-        get_ip_interface(non_existent_interface)
+    iface = "lo0" if MACOS else "lo"
+    assert get_ip_interface(iface) == "127.0.0.1"
+    with pytest.raises(ValueError, match=f"'__notexist'.+network interface.+'{iface}'"):
+        get_ip_interface("__notexist")
 
 
 def test_truncate_exception():
@@ -620,3 +618,14 @@ def test_parse_timedelta_deprecated():
     with pytest.warns(FutureWarning, match="parse_timedelta is deprecated"):
         from distributed.utils import parse_timedelta
     assert parse_timedelta is dask.utils.parse_timedelta
+
+
+def test_typename_deprecated():
+    with pytest.warns(FutureWarning, match="typename is deprecated"):
+        from distributed.utils import typename
+    assert typename is dask.utils.typename
+
+
+def test_iscoroutinefunction_unhashable_input():
+    # Ensure iscoroutinefunction can handle unhashable callables
+    assert not iscoroutinefunction(_UnhashableCallable())

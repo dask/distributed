@@ -1,5 +1,6 @@
 import math
 
+from bokeh.core.properties import without_property_validation
 from bokeh.models import (
     BasicTicker,
     ColumnDataSource,
@@ -15,7 +16,7 @@ from dask.utils import format_bytes
 
 from distributed.dashboard.components import DashboardComponent, add_periodic_callback
 from distributed.dashboard.components.scheduler import BOKEH_THEME, TICKS_1024, env
-from distributed.dashboard.utils import update, without_property_validation
+from distributed.dashboard.utils import update
 from distributed.diagnostics import nvml
 from distributed.utils import log_errors
 
@@ -94,7 +95,6 @@ class GPUCurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 

@@ -5,6 +5,7 @@ import os
 from collections import defaultdict
 from numbers import Number
 
+from bokeh.core.properties import without_property_validation
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -59,13 +60,7 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     SystemMonitor,
 )
-from distributed.dashboard.utils import (
-    BOKEH_VERSION,
-    PROFILING,
-    transpose,
-    update,
-    without_property_validation,
-)
+from distributed.dashboard.utils import BOKEH_VERSION, PROFILING, transpose, update
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.task_stream import TaskStreamPlugin
@@ -89,9 +84,11 @@ env = Environment(
     )
 )
 
-BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
+BOKEH_THEME = Theme(
+    filename=os.path.join(os.path.dirname(__file__), "..", "theme.yaml")
+)
 TICKS_1024 = {"base": 1024, "mantissas": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]}
-XLABEL_ORIENTATION = -math.pi / 12  # slanted downwards 15 degrees
+XLABEL_ORIENTATION = -math.pi / 9  # slanted downwards 20 degrees
 
 
 logos_dict = {
@@ -122,12 +119,14 @@ class Occupancy(DashboardComponent):
             self.root = figure(
                 title="Occupancy",
                 tools="",
+                toolbar_location="above",
                 id="bk-occupancy-plot",
                 x_axis_type="datetime",
+                min_border_bottom=50,
                 **kwargs,
             )
             rect = self.root.rect(
-                source=self.source, x="x", width="ms", y="y", height=1, color="color"
+                source=self.source, x="x", width="ms", y="y", height=0.9, color="color"
             )
             rect.nonselection_glyph = None
 
@@ -147,7 +146,7 @@ class Occupancy(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
 
             y = list(range(len(workers)))
             occupancy = [ws.occupancy for ws in workers]
@@ -197,7 +196,7 @@ class ProcessingHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Tasks Processing (Histogram)",
+                title="Tasks Processing (count)",
                 id="bk-nprocessing-histogram-plot",
                 name="processing",
                 y_axis_label="frequency",
@@ -208,7 +207,6 @@ class ProcessingHistogram(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             self.root.quad(
@@ -232,10 +230,9 @@ def _memory_color(current: int, limit: int) -> str:
     """Dynamic color used by WorkersMemory and ClusterMemory"""
     if limit and current > limit:
         return "red"
-    elif limit and current > limit / 2:
+    if limit and current > limit / 2:
         return "orange"
-    else:
-        return "blue"
+    return "blue"
 
 
 class ClusterMemory(DashboardComponent):
@@ -265,6 +262,7 @@ class ClusterMemory(DashboardComponent):
                 id="bk-cluster-memory-plot",
                 width=int(width / 2),
                 name="cluster_memory",
+                min_border_bottom=50,
                 **kwargs,
             )
             rect = self.root.rect(
@@ -272,7 +270,7 @@ class ClusterMemory(DashboardComponent):
                 x="x",
                 y="y",
                 width="width",
-                height=1,
+                height=0.9,
                 color="color",
                 alpha="alpha",
             )
@@ -282,10 +280,10 @@ class ClusterMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.x_range = Range1d(start=0)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
@@ -342,7 +340,7 @@ class ClusterMemory(DashboardComponent):
             }
 
             x_end = max(limit, meminfo.process + meminfo.managed_spilled)
-            self.root.x_range = DataRange1d(start=0, end=x_end, range_padding=0)
+            self.root.x_range.end = x_end
 
             title = f"Bytes stored: {format_bytes(meminfo.process)}"
             if meminfo.managed_spilled:
@@ -381,6 +379,7 @@ class WorkersMemory(DashboardComponent):
                 id="bk-workers-memory-plot",
                 width=int(width / 2),
                 name="workers_memory",
+                min_border_bottom=50,
                 **kwargs,
             )
             rect = self.root.rect(
@@ -388,7 +387,7 @@ class WorkersMemory(DashboardComponent):
                 x="x",
                 y="y",
                 width="width",
-                height=1,
+                height=0.9,
                 color="color",
                 fill_alpha="alpha",
                 line_width=0,
@@ -399,13 +398,13 @@ class WorkersMemory(DashboardComponent):
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = XLABEL_ORIENTATION
             self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.x_range = Range1d(start=0)
             self.root.yaxis.visible = False
             self.root.ygrid.visible = False
 
             tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
             self.root.add_tools(tap)
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
             self.root.yaxis.visible = False
 
@@ -506,7 +505,7 @@ class WorkersMemory(DashboardComponent):
                 k: [vi for vi, w in zip(v, width) if w] for k, v in result.items()
             }
 
-            self.root.x_range = DataRange1d(start=0, end=max_limit, range_padding=0)
+            self.root.x_range.end = max_limit
             update(self.source, result)
 
 
@@ -524,7 +523,7 @@ class WorkersMemoryHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes stored per worker (Histogram)",
+                title="Bytes stored per worker",
                 name="workers_memory",
                 id="bk-workers-memory-histogram-plot",
                 y_axis_label="frequency",
@@ -539,7 +538,6 @@ class WorkersMemoryHistogram(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             self.root.quad(
@@ -592,7 +590,7 @@ class BandwidthTypes(DashboardComponent):
                 x="bandwidth-half",
                 y="type",
                 width="bandwidth",
-                height=1,
+                height=0.9,
                 color="blue",
             )
             self.root.x_range.start = 0
@@ -603,7 +601,6 @@ class BandwidthTypes(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -620,7 +617,7 @@ class BandwidthTypes(DashboardComponent):
                 "bandwidth": list(bw.values()),
                 "bandwidth-half": [b / 2 for b in bw.values()],
                 "type": list(bw.keys()),
-                "bandwidth_text": list(map(format_bytes, bw.values())),
+                "bandwidth_text": [format_bytes(x) for x in bw.values()],
             }
             self.root.title.text = "Bandwidth: " + format_bytes(
                 self.scheduler.bandwidth
@@ -682,7 +679,6 @@ class BandwidthWorkers(DashboardComponent):
             color_bar.ticker = AdaptiveTicker(**TICKS_1024)
             self.root.add_layout(color_bar, "right")
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -710,10 +706,9 @@ class BandwidthWorkers(DashboardComponent):
                     return address
                 if ws.name is not None:
                     return str(ws.name)
-                else:
-                    return address
+                return address
 
-            x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
+            x, y, value = zip(*((name(a), name(b), c) for (a, b), c in bw.items()))
 
             self.color_map.high = max(value)
 
@@ -733,6 +728,348 @@ class BandwidthWorkers(DashboardComponent):
             update(self.source, result)
 
 
+class WorkerNetworkBandwidth(DashboardComponent):
+    """Worker network bandwidth chart
+
+    Plots horizontal bars with the read_bytes and write_bytes worker state
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "y_read": [],
+                    "y_write": [],
+                    "x_read": [],
+                    "x_write": [],
+                    "x_read_disk": [],
+                    "x_write_disk": [],
+                }
+            )
+
+            self.bandwidth = figure(
+                title="Worker Network Bandwidth",
+                tools="",
+                id="bk-worker-net-bandwidth",
+                name="worker_network_bandwidth",
+                **kwargs,
+            )
+
+            # read_bytes
+            self.bandwidth.hbar(
+                y="y_read",
+                right="x_read",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="red",
+                legend_label="read",
+                source=self.source,
+            )
+
+            # write_bytes
+            self.bandwidth.hbar(
+                y="y_write",
+                right="x_write",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="blue",
+                legend_label="write",
+                source=self.source,
+            )
+
+            self.bandwidth.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.bandwidth.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.bandwidth.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.bandwidth.xaxis.minor_tick_line_alpha = 0
+            self.bandwidth.x_range = Range1d(start=0)
+            self.bandwidth.yaxis.visible = False
+            self.bandwidth.ygrid.visible = False
+            self.bandwidth.toolbar_location = None
+
+            self.disk = figure(
+                title="Workers Disk",
+                tools="",
+                id="bk-workers-disk",
+                name="worker_disk",
+                **kwargs,
+            )
+
+            # read_bytes_disk
+            self.disk.hbar(
+                y="y_read",
+                right="x_read_disk",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="red",
+                legend_label="read",
+                source=self.source,
+            )
+
+            # write_bytes_disk
+            self.disk.hbar(
+                y="y_write",
+                right="x_write_disk",
+                line_color=None,
+                left=0,
+                height=0.5,
+                fill_color="blue",
+                legend_label="write",
+                source=self.source,
+            )
+
+            self.disk.axis[0].ticker = BasicTicker(**TICKS_1024)
+            self.disk.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.disk.xaxis.major_label_orientation = XLABEL_ORIENTATION
+            self.disk.xaxis.minor_tick_line_alpha = 0
+            self.disk.x_range = Range1d(start=0)
+            self.disk.yaxis.visible = False
+            self.disk.ygrid.visible = False
+            self.disk.toolbar_location = None
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            workers = self.scheduler.workers.values()
+
+            h = 0.1
+            y_read = [i + 0.75 + i * h for i in range(len(workers))]
+            y_write = [i + 0.25 + i * h for i in range(len(workers))]
+
+            x_read = []
+            x_write = []
+            x_read_disk = []
+            x_write_disk = []
+
+            for ws in workers:
+                x_read.append(ws.metrics["read_bytes"])
+                x_write.append(ws.metrics["write_bytes"])
+                x_read_disk.append(ws.metrics["read_bytes_disk"])
+                x_write_disk.append(ws.metrics["write_bytes_disk"])
+
+            if self.scheduler.workers:
+                self.bandwidth.x_range.end = max(
+                    max(x_read),
+                    max(x_write),
+                    100_000_000,
+                    0.95 * self.bandwidth.x_range.end,
+                )
+
+                self.disk.x_range.end = max(
+                    max(x_read_disk),
+                    max(x_write_disk),
+                    100_000_000,
+                    0.95 * self.disk.x_range.end,
+                )
+            else:
+                self.bandwidth.x_range.end = 100_000_000
+                self.disk.x_range.end = 100_000_000
+
+            result = {
+                "y_read": y_read,
+                "y_write": y_write,
+                "x_read": x_read,
+                "x_write": x_write,
+                "x_read_disk": x_read_disk,
+                "x_write_disk": x_write_disk,
+            }
+
+            update(self.source, result)
+
+
+class SystemTimeseries(DashboardComponent):
+    """Timeseries for worker network bandwidth, cpu, memory and disk.
+
+    bandwidth: plots the average of read_bytes and write_bytes for the workers
+    as a function of time.
+    cpu: plots the average of cpu for the workers as a function of time.
+    memory: plots the average of memory for the workers as a function of time.
+    disk: plots the average of read_bytes_disk and write_bytes_disk for the workers
+    as a function of time.
+
+    The metrics plotted come from the aggregation of
+    from ws.metrics["val"] for ws in scheduler.workers.values() divided by nuber of workers.
+    """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "time": [],
+                    "read_bytes": [],
+                    "write_bytes": [],
+                    "cpu": [],
+                    "memory": [],
+                    "read_bytes_disk": [],
+                    "write_bytes_disk": [],
+                }
+            )
+
+            update(self.source, self.get_data())
+
+            x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
+            tools = "reset, xpan, xwheel_zoom"
+
+            self.bandwidth = figure(
+                title="Workers Network Bandwidth",
+                x_axis_type="datetime",
+                tools=tools,
+                x_range=x_range,
+                id="bk-worker-network-bandwidth-ts",
+                name="worker_network_bandwidth-timeseries",
+                **kwargs,
+            )
+
+            self.bandwidth.line(
+                source=self.source,
+                x="time",
+                y="read_bytes",
+                color="red",
+                legend_label="read (mean)",
+            )
+            self.bandwidth.line(
+                source=self.source,
+                x="time",
+                y="write_bytes",
+                color="blue",
+                legend_label="write (mean)",
+            )
+
+            self.bandwidth.legend.location = "top_left"
+            self.bandwidth.yaxis.axis_label = "bytes / second"
+            self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.bandwidth.y_range.start = 0
+            self.bandwidth.yaxis.minor_tick_line_alpha = 0
+            self.bandwidth.xgrid.visible = False
+
+            self.cpu = figure(
+                title="Workers CPU",
+                x_axis_type="datetime",
+                tools=tools,
+                x_range=x_range,
+                id="bk-worker-cpu-ts",
+                name="worker_cpu-timeseries",
+                **kwargs,
+            )
+
+            self.cpu.line(
+                source=self.source,
+                x="time",
+                y="cpu",
+            )
+            self.cpu.yaxis.axis_label = "Utilization"
+            self.cpu.y_range.start = 0
+            self.cpu.yaxis.minor_tick_line_alpha = 0
+            self.cpu.xgrid.visible = False
+
+            self.memory = figure(
+                title="Workers Memory",
+                x_axis_type="datetime",
+                tools=tools,
+                x_range=x_range,
+                id="bk-worker-memory-ts",
+                name="worker_memory-timeseries",
+                **kwargs,
+            )
+
+            self.memory.line(
+                source=self.source,
+                x="time",
+                y="memory",
+            )
+            self.memory.yaxis.axis_label = "Bytes"
+            self.memory.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.memory.y_range.start = 0
+            self.memory.yaxis.minor_tick_line_alpha = 0
+            self.memory.xgrid.visible = False
+
+            self.disk = figure(
+                title="Workers Disk",
+                x_axis_type="datetime",
+                tools=tools,
+                x_range=x_range,
+                id="bk-worker-disk-ts",
+                name="worker_disk-timeseries",
+                **kwargs,
+            )
+
+            self.disk.line(
+                source=self.source,
+                x="time",
+                y="read_bytes_disk",
+                color="red",
+                legend_label="read (mean)",
+            )
+            self.disk.line(
+                source=self.source,
+                x="time",
+                y="write_bytes_disk",
+                color="blue",
+                legend_label="write (mean)",
+            )
+
+            self.disk.legend.location = "top_left"
+            self.disk.yaxis.axis_label = "bytes / second"
+            self.disk.yaxis[0].formatter = NumeralTickFormatter(format="0.0b")
+            self.disk.y_range.start = 0
+            self.disk.yaxis.minor_tick_line_alpha = 0
+            self.disk.xgrid.visible = False
+
+    def get_data(self):
+        workers = self.scheduler.workers.values()
+
+        read_bytes = 0
+        write_bytes = 0
+        cpu = 0
+        memory = 0
+        read_bytes_disk = 0
+        write_bytes_disk = 0
+        time = 0
+        for ws in workers:
+            read_bytes += ws.metrics["read_bytes"]
+            write_bytes += ws.metrics["write_bytes"]
+            cpu += ws.metrics["cpu"]
+            memory += ws.metrics["memory"]
+            read_bytes_disk += ws.metrics["read_bytes_disk"]
+            write_bytes_disk += ws.metrics["write_bytes_disk"]
+            time += ws.metrics["time"]
+
+        result = {
+            # use `or` to avoid ZeroDivision when no workers
+            "time": [time / (len(workers) or 1) * 1000],
+            "read_bytes": [read_bytes / (len(workers) or 1)],
+            "write_bytes": [write_bytes / (len(workers) or 1)],
+            "cpu": [cpu / (len(workers) or 1)],
+            "memory": [memory / (len(workers) or 1)],
+            "read_bytes_disk": [read_bytes_disk / (len(workers) or 1)],
+            "write_bytes_disk": [write_bytes_disk / (len(workers) or 1)],
+        }
+        return result
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            self.source.stream(self.get_data(), 1000)
+
+            if self.scheduler.workers:
+                y_end_cpu = sum(
+                    ws.nthreads or 1 for ws in self.scheduler.workers.values()
+                ) / len(self.scheduler.workers.values())
+                y_end_mem = sum(
+                    ws.memory_limit for ws in self.scheduler.workers.values()
+                ) / len(self.scheduler.workers.values())
+            else:
+                y_end_cpu = 1
+                y_end_mem = 100_000_000
+
+            self.cpu.y_range.end = y_end_cpu * 100
+            self.memory.y_range.end = y_end_mem
+
+
 class ComputePerKey(DashboardComponent):
     """Bar chart showing time spend in action by key prefix"""
 
@@ -741,11 +1078,10 @@ class ComputePerKey(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(
+                    plugin=TaskStreamPlugin,
+                )
 
             compute_data = {
                 "times": [0.2, 0.1],
@@ -775,8 +1111,6 @@ class ComputePerKey(DashboardComponent):
             )
 
             fig.y_range.start = 0
-            fig.min_border_right = 20
-            fig.min_border_bottom = 60
             fig.yaxis.axis_label = "Time (s)"
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0")
             fig.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
@@ -786,7 +1120,6 @@ class ComputePerKey(DashboardComponent):
             fig.xaxis.minor_tick_line_alpha = 0
             fig.xgrid.visible = False
 
-            fig.toolbar.logo = None
             fig.toolbar_location = None
 
             hover = HoverTool()
@@ -909,11 +1242,8 @@ class AggregateAction(DashboardComponent):
             self.last = 0
             self.scheduler = scheduler
 
-            es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-            if not es:
-                self.plugin = TaskStreamPlugin(self.scheduler)
-            else:
-                self.plugin = es[0]
+            if TaskStreamPlugin.name not in self.scheduler.plugins:
+                self.scheduler.add_plugin(plugin=TaskStreamPlugin)
 
             action_data = {
                 "times": [0.2, 0.1],
@@ -942,8 +1272,6 @@ class AggregateAction(DashboardComponent):
             )
 
             self.root.y_range.start = 0
-            self.root.min_border_right = 20
-            self.root.min_border_bottom = 60
             self.root.yaxis[0].formatter = NumeralTickFormatter(format="0")
             self.root.yaxis.axis_label = "Time (s)"
             self.root.yaxis.ticker = AdaptiveTicker(**TICKS_1024)
@@ -954,7 +1282,6 @@ class AggregateAction(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.xgrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -1038,7 +1365,6 @@ class MemoryByKey(DashboardComponent):
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
 
-            self.root.toolbar.logo = None
             self.root.toolbar_location = None
 
             hover = HoverTool()
@@ -1103,6 +1429,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-nprocessing-plot",
                 name="processing",
                 width=int(width / 2),
+                min_border_bottom=50,
                 **kwargs,
             )
             rect = processing.rect(
@@ -1110,7 +1437,7 @@ class CurrentLoad(DashboardComponent):
                 x="nprocessing-half",
                 y="y",
                 width="nprocessing",
-                height=1,
+                height=0.9,
                 color="nprocessing-color",
             )
             processing.x_range.start = 0
@@ -1123,6 +1450,7 @@ class CurrentLoad(DashboardComponent):
                 width=int(width / 2),
                 name="cpu_hist",
                 x_range=(0, 100),
+                min_border_bottom=50,
                 **kwargs,
             )
             rect = cpu.rect(
@@ -1130,7 +1458,7 @@ class CurrentLoad(DashboardComponent):
                 x="cpu-half",
                 y="y",
                 width="cpu",
-                height=1,
+                height=0.9,
                 color="blue",
             )
             rect.nonselection_glyph = None
@@ -1145,7 +1473,6 @@ class CurrentLoad(DashboardComponent):
                 )
                 fig.add_tools(tap)
 
-                fig.toolbar.logo = None
                 fig.toolbar_location = None
                 fig.yaxis.visible = False
 
@@ -1165,7 +1492,7 @@ class CurrentLoad(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
-            workers = list(self.scheduler.workers.values())
+            workers = self.scheduler.workers.values()
             now = time()
             if not any(ws.processing for ws in workers) and now < self.last + 1:
                 return
@@ -1440,11 +1767,13 @@ class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
-        es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
-        if not es:
-            self.plugin = TaskStreamPlugin(self.scheduler)
-        else:
-            self.plugin = es[0]
+
+        if TaskStreamPlugin.name not in self.scheduler.plugins:
+            self.scheduler.add_plugin(
+                plugin=TaskStreamPlugin,
+            )
+        self.plugin = self.scheduler.plugins[TaskStreamPlugin.name]
+
         self.index = max(0, self.plugin.index - n_rectangles)
         self.workers = dict()
         self.n_rectangles = n_rectangles
@@ -1550,8 +1879,9 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         y_range=y_range,
         toolbar_location="above",
         x_axis_type="datetime",
-        min_border_right=35,
+        y_axis_location=None,
         tools="",
+        min_border_bottom=50,
         **kwargs,
     )
 
@@ -1613,6 +1943,7 @@ class TaskGraph(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
+        scheduler.add_plugin(self.layout)
         self.invisible_count = 0  # number of invisible nodes
 
         self.node_source = ColumnDataSource(
@@ -1783,7 +2114,7 @@ class TaskGraph(DashboardComponent):
             self.edge_source.patch({"visible": updates})
 
     def __del__(self):
-        self.scheduler.remove_plugin(self.layout)
+        self.scheduler.remove_plugin(name=self.layout.name)
 
 
 class TaskGroupGraph(DashboardComponent):
@@ -1858,7 +2189,7 @@ class TaskGroupGraph(DashboardComponent):
             source=self.nodes_source,
         )
 
-        ####plot tg log
+        # plot tg log
         self.root.image_url(
             url="url_logo",
             x="x_logo",
@@ -2024,8 +2355,7 @@ class TaskGroupGraph(DashboardComponent):
 
         if self.scheduler.transition_counter == self.old_counter:
             return
-        else:
-            self.old_counter = self.scheduler.transition_counter
+        self.old_counter = self.scheduler.transition_counter
 
         if not self.scheduler.task_groups:
             self.subtitle.text = "Scheduler is empty."
@@ -2257,6 +2587,7 @@ class TaskProgress(DashboardComponent):
             y_range=y_range,
             toolbar_location=None,
             tools="",
+            min_border_bottom=50,
             **kwargs,
         )
         self.root.line(  # just to define early ranges
@@ -2553,6 +2884,7 @@ class WorkerTable(DashboardComponent):
             height=60,
             width=width,
             tools="",
+            min_border_right=0,
             **kwargs,
         )
         mem_plot.circle(
@@ -2582,6 +2914,7 @@ class WorkerTable(DashboardComponent):
             height=60,
             width=width,
             tools="",
+            min_border_right=0,
             **kwargs,
         )
         cpu_plot.circle(
@@ -2681,7 +3014,19 @@ class SchedulerLogs:
             "\n".join(line for level, line in scheduler.get_logs())
         )._repr_html_()
 
-        self.root = Div(text=logs)
+        self.root = Div(
+            text=logs,
+            style={
+                "width": "100%",
+                "height": "100%",
+                "max-width": "1920px",
+                "max-height": "1080px",
+                "padding": "12px",
+                "border": "1px solid lightgray",
+                "box-shadow": "inset 1px 0 8px 0 lightgray",
+                "overflow": "auto",
+            },
+        )
 
 
 def systemmonitor_doc(scheduler, extra, doc):
@@ -2798,7 +3143,7 @@ def status_doc(scheduler, extra, doc):
         add_periodic_callback(doc, cluster_memory, 100)
         doc.add_root(cluster_memory.root)
 
-        if len(scheduler.workers) < 50:
+        if len(scheduler.workers) <= 100:
             workers_memory = WorkersMemory(scheduler, sizing_mode="stretch_both")
             processing = CurrentLoad(scheduler, sizing_mode="stretch_both")
 
@@ -2871,7 +3216,7 @@ def individual_doc(cls, interval, scheduler, extra, doc, fig_attr="root", **kwar
 
 def individual_profile_doc(scheduler, extra, doc):
     with log_errors():
-        prof = ProfileTimePlot(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME
@@ -2879,7 +3224,7 @@ def individual_profile_doc(scheduler, extra, doc):
 
 def individual_profile_server_doc(scheduler, extra, doc):
     with log_errors():
-        prof = ProfileServer(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
         doc.theme = BOKEH_THEME

@@ -2,6 +2,8 @@ import os
 
 import pytest
 
+pytestmark = pytest.mark.gpu
+
 pynvml = pytest.importorskip("pynvml")
 
 import dask

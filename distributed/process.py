@@ -249,7 +249,7 @@ class AsyncProcess:
         """
         Start the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -260,7 +260,7 @@ class AsyncProcess:
         """
         Terminate the child process.
 
-        This method is a coroutine.
+        This method returns a future.
         """
         self._check_closed()
         fut = Future()
@@ -271,7 +271,7 @@ class AsyncProcess:
         """
         Wait for the child process to exit.
 
-        This method is a coroutine.
+        This method returns a coroutine.
         """
         self._check_closed()
         assert self._state.pid is not None, "can only join a started process"

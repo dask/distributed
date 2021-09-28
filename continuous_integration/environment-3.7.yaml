@@ -15,12 +15,14 @@ dependencies:
   - h5py
   - ipykernel
   - ipywidgets
+  - jinja2
   - joblib
   - jupyter_client
   - msgpack-python
   - netcdf4
   - paramiko
   - pickle5  # Backport from Python 3.8
+  - pre-commit
   - prometheus_client
   - psutil
   - pytest

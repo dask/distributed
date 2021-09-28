@@ -76,10 +76,8 @@ def register_worker_magic(connection_info, magic_name="worker"):
     which run the given cell in a remote kernel.
     """
     ip = get_ipython()
-    info = dict(connection_info)  # copy
-    key = info.pop("key")
-    kc = BlockingKernelClient(**connection_info)
-    kc.session.key = key
+    kc = BlockingKernelClient()
+    kc.load_connection_info(connection_info)
     kc.start_channels()
 
     def remote(line, cell=None):
@@ -122,13 +120,12 @@ def remote_magic(line, cell=None):
 
     # turn info dict to hashable str for use as lookup key in _clients cache
     key = ",".join(map(str, sorted(connection_info.items())))
-    session_key = connection_info.pop("key")
 
     if key in remote_magic._clients:
         kc = remote_magic._clients[key]
     else:
-        kc = BlockingKernelClient(**connection_info)
-        kc.session.key = session_key
+        kc = BlockingKernelClient()
+        kc.load_connection_info(connection_info)
         kc.start_channels()
         kc.wait_for_ready(timeout=10)
         remote_magic._clients[key] = kc

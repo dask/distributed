@@ -204,7 +204,7 @@ class EventstreamHandler(WebSocketHandler):
             self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
-        self.server.remove_plugin(self.plugin)
+        self.server.remove_plugin(name=self.plugin.name)
 
 
 routes = [

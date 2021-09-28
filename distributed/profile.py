@@ -139,7 +139,10 @@ def merge(*args):
         for child in arg["children"]:
             children[child].append(arg["children"][child])
 
-    children = {k: merge(*v) for k, v in children.items()}
+    try:
+        children = {k: merge(*v) for k, v in children.items()}
+    except RecursionError:
+        children = {}
     count = sum(arg["count"] for arg in args)
     return {
         "description": args[0]["description"],

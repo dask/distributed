@@ -18,6 +18,7 @@ required_packages = [
 
 optional_packages = [
     ("numpy", lambda p: p.__version__),
+    ("pandas", lambda p: p.__version__),
     ("lz4", lambda p: p.__version__),
     ("blosc", lambda p: p.__version__),
 ]

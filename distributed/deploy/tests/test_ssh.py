@@ -32,7 +32,7 @@ async def test_basic():
         ["127.0.0.1"] * 3,
         connect_options=dict(known_hosts=None),
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == 2
@@ -56,7 +56,7 @@ async def test_keywords():
             "memory_limit": "2 GiB",
             "death_timeout": "5s",
         },
-        scheduler_options={"idle_timeout": "10s", "port": 0},
+        scheduler_options={"idle_timeout": "10s"},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert (
@@ -109,7 +109,7 @@ async def test_config_inherited_by_subprocess(loop):
             ["127.0.0.1"] * 2,
             connect_options=dict(known_hosts=None),
             asynchronous=True,
-            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
         ) as cluster:
             async with Client(cluster, asynchronous=True) as client:
@@ -130,7 +130,7 @@ async def test_unimplemented_options():
                 "death_timeout": "5s",
                 "unimplemented_option": 2,
             },
-            scheduler_kwargs={"idle_timeout": "5s", "port": 0},
+            scheduler_kwargs={"idle_timeout": "5s"},
         ) as cluster:
             assert cluster
 
@@ -141,7 +141,7 @@ async def test_list_of_connect_options():
         ["127.0.0.1"] * 3,
         connect_options=[dict(known_hosts=None)] * 3,
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == 2
@@ -160,7 +160,7 @@ async def test_list_of_connect_options_raises():
             ["127.0.0.1"] * 3,
             connect_options=[dict(known_hosts=None)] * 4,  # Mismatch in length 4 != 3
             asynchronous=True,
-            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
         ) as _:
             pass
@@ -172,7 +172,7 @@ async def test_remote_python():
         ["127.0.0.1"] * 3,
         connect_options=[dict(known_hosts=None)] * 3,
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
         remote_python=sys.executable,
     ) as cluster:
@@ -185,7 +185,7 @@ async def test_remote_python_as_dict():
         ["127.0.0.1"] * 3,
         connect_options=[dict(known_hosts=None)] * 3,
         asynchronous=True,
-        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        scheduler_options={"idle_timeout": "5s"},
         worker_options={"death_timeout": "5s"},
         remote_python=[sys.executable] * 3,
     ) as cluster:
@@ -199,7 +199,7 @@ async def test_list_of_remote_python_raises():
             ["127.0.0.1"] * 3,
             connect_options=[dict(known_hosts=None)] * 3,
             asynchronous=True,
-            scheduler_options={"port": 0, "idle_timeout": "5s"},
+            scheduler_options={"idle_timeout": "5s"},
             worker_options={"death_timeout": "5s"},
             remote_python=[sys.executable] * 4,  # Mismatch in length 4 != 3
         ) as _:

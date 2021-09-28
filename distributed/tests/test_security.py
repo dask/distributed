@@ -110,12 +110,17 @@ def test_kwargs():
     assert sec.extra_conn_args == {"headers": {"Auth": "Token abc"}}
 
 
-def test_repr():
+def test_repr_temp_keys():
+    sec = Security.temporary()
+    representation = repr(sec)
+    assert "Temporary (In-memory)" in representation
+
+
+def test_repr_local_keys():
     sec = Security(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
-    assert (
-        repr(sec)
-        == "Security(require_encryption=True, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
-    )
+    representation = repr(sec)
+    assert "ca.pem" in representation
+    assert "scert.pem" in representation
 
 
 def test_tls_config_for_role():

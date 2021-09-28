@@ -98,8 +98,8 @@ class BatchedSend:
                 else:
                     self.recent_message_log.append("large-message")
                 self.byte_count += nbytes
-            except CommClosedError as e:
-                logger.info("Batched Comm Closed: %s", e)
+            except CommClosedError:
+                logger.info("Batched Comm Closed %r", self.comm, exc_info=True)
                 break
             except Exception:
                 # We cannot safely retry self.comm.write, as we have no idea
@@ -133,7 +133,7 @@ class BatchedSend:
         This completes quickly and synchronously
         """
         if self.comm is not None and self.comm.closed():
-            raise CommClosedError()
+            raise CommClosedError(f"Comm {self.comm!r} already closed.")
 
         self.message_count += len(msgs)
         self.buffer.extend(msgs)

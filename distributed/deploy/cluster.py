@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 import logging
 import threading
@@ -9,7 +10,8 @@ from inspect import isawaitable
 from tornado.ioloop import PeriodicCallback
 
 import dask.config
-from dask.utils import _deprecated, format_bytes, parse_timedelta
+from dask.utils import _deprecated, format_bytes, parse_timedelta, typename
+from dask.widgets import get_template
 
 from ..core import Status
 from ..objects import SchedulerInfo
@@ -43,9 +45,8 @@ class Cluster:
     """
 
     _supports_scaling = True
-    name = None
 
-    def __init__(self, asynchronous, quiet=False, name=None):
+    def __init__(self, asynchronous, quiet=False, name=None, scheduler_sync_interval=1):
         self.scheduler_info = {"workers": {}}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
@@ -55,12 +56,23 @@ class Cluster:
         self.quiet = quiet
         self.scheduler_comm = None
         self._adaptive = None
+        self._sync_interval = parse_timedelta(
+            scheduler_sync_interval, default="seconds"
+        )
 
-        if name is not None:
-            self.name = name
-        elif self.name is None:
-            self.name = str(uuid.uuid4())[:8]
+        if name is None:
+            name = str(uuid.uuid4())[:8]
+
+        self._cluster_info = {"name": name, "type": typename(type(self))}
         self.status = Status.created
+
+    @property
+    def name(self):
+        return self._cluster_info["name"]
+
+    @name.setter
+    def name(self, name):
+        self._cluster_info["name"] = name
 
     async def _start(self):
         comm = await self.scheduler_comm.live_comm()
@@ -70,7 +82,24 @@ class Cluster:
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
+
+        info = await self.scheduler_comm.get_metadata(
+            keys=["cluster-manager-info"], default={}
+        )
+        self._cluster_info.update(info)
+
+        self.periodic_callbacks["sync-cluster-info"] = PeriodicCallback(
+            self._sync_cluster_info, self._sync_interval * 1000
+        )
+        for pc in self.periodic_callbacks.values():
+            pc.start()
         self.status = Status.running
+
+    async def _sync_cluster_info(self):
+        await self.scheduler_comm.set_metadata(
+            keys=["cluster-manager-info"],
+            value=copy.copy(self._cluster_info),
+        )
 
     async def _close(self):
         if self.status == Status.closed:
@@ -84,11 +113,11 @@ class Cluster:
         if self._watch_worker_status_task:
             await self._watch_worker_status_task
 
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
         if self.scheduler_comm:
             await self.scheduler_comm.close_rpc()
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
 
         self.status = Status.closed
 
@@ -364,54 +393,19 @@ class Cluster:
 
     def _repr_html_(self, cluster_status=None):
 
-        if not cluster_status:
-            cluster_status = ""
-
-        cluster_status += f"""
-            <tr>
-                <td style="text-align: left;">
-                    <strong>Dashboard:</strong> <a href="{self.dashboard_link}">{self.dashboard_link}</a>
-                </td>
-                <td style="text-align: left;"><strong>Workers:</strong> {len(self.scheduler_info["workers"])}</td>
-            </tr>
-            <tr>
-                <td style="text-align: left;">
-                    <strong>Total threads:</strong>
-                    {sum([w["nthreads"] for w in self.scheduler_info["workers"].values()])}
-                </td>
-                <td style="text-align: left;">
-                    <strong>Total memory:</strong>
-                    {format_bytes(sum([w["memory_limit"] for w in self.scheduler_info["workers"].values()]))}
-                </td>
-            </tr>
-        """
         try:
             scheduler_info_repr = self.scheduler_info._repr_html_()
         except AttributeError:
             scheduler_info_repr = "Scheduler not started yet."
 
-        return f"""
-            <div class="jp-RenderedHTMLCommon jp-RenderedHTML jp-mod-trusted jp-OutputArea-output">
-                <div style="
-                    width: 24px;
-                    height: 24px;
-                    background-color: #e1e1e1;
-                    border: 3px solid #9D9D9D;
-                    border-radius: 5px;
-                    position: absolute;"> </div>
-                <div style="margin-left: 48px;">
-                    <h3 style="margin-bottom: 0px; margin-top: 0px;">{type(self).__name__}</h3>
-                    <p style="color: #9D9D9D; margin-bottom: 0px;">{self.name}</p>
-                    <table style="width: 100%; text-align: left;">
-                    {cluster_status}
-                    </table>
-                    <details>
-                    <summary style="margin-bottom: 20px;"><h3 style="display: inline;">Scheduler Info</h3></summary>
-                    {scheduler_info_repr}
-                    </details>
-                </div>
-            </div>
-        """
+        return get_template("cluster.html.j2").render(
+            type=type(self).__name__,
+            name=self.name,
+            workers=self.scheduler_info["workers"],
+            dashboard_link=self.dashboard_link,
+            scheduler_info_repr=scheduler_info_repr,
+            cluster_status=cluster_status,
+        )
 
     def _ipython_display_(self, **kwargs):
         widget = self._widget()

@@ -46,7 +46,7 @@ class WorkStealing(SchedulerPlugin):
         pc = PeriodicCallback(callback=self.balance, callback_time=callback_time * 1000)
         self._pc = pc
         self.scheduler.periodic_callbacks["stealing"] = pc
-        self.scheduler.plugins.append(self)
+        self.scheduler.add_plugin(self)
         self.scheduler.extensions["stealing"] = self
         self.scheduler.events["stealing"] = deque(maxlen=100000)
         self.count = 0
@@ -177,7 +177,7 @@ class WorkStealing(SchedulerPlugin):
             self.in_flight_occupancy[victim] -= victim_duration
             self.in_flight_occupancy[thief] += thief_duration
         except CommClosedError:
-            logger.info("Worker comm closed while stealing: %s", victim)
+            logger.info("Worker comm %r closed while stealing: %r", victim, ts)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -230,7 +230,15 @@ class WorkStealing(SchedulerPlugin):
                 return
 
             # Victim had already started execution, reverse stealing
-            if state in ("memory", "executing", "long-running", None):
+            if state in (
+                "memory",
+                "executing",
+                "long-running",
+                "released",
+                "cancelled",
+                "resumed",
+                None,
+            ):
                 self.log(("already-computing", key, victim.address, thief.address))
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
@@ -256,7 +264,7 @@ class WorkStealing(SchedulerPlugin):
                     await self.scheduler.remove_worker(thief.address)
                 self.log(("confirm", key, victim.address, thief.address))
             else:
-                raise ValueError("Unexpected task state: %s" % state)
+                raise ValueError(f"Unexpected task state: {state}")
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

@@ -1,3 +1,4 @@
+import ctypes
 import errno
 import functools
 import logging
@@ -5,7 +6,7 @@ import socket
 import struct
 import sys
 import weakref
-from ssl import SSLError
+from ssl import SSLCertVerificationError, SSLError
 
 from tornado import gen
 
@@ -14,6 +15,7 @@ try:
 except ImportError:
     ssl = None
 
+from tlz import sliding_window
 from tornado import netutil
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
@@ -34,6 +36,7 @@ from .utils import ensure_concrete_host, from_frames, get_tcp_server_address, to
 logger = logging.getLogger(__name__)
 
 
+C_INT_MAX = 256 ** ctypes.sizeof(ctypes.c_int) // 2 - 1
 MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
@@ -142,9 +145,11 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
 
+    max_shard_size = dask.utils.parse_bytes(dask.config.get("distributed.comm.shard"))
+
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
         self._closed = False
-        Comm.__init__(self)
+        super().__init__()
         self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.stream = stream
@@ -193,9 +198,15 @@ class TCP(Comm):
             frames_nbytes = await stream.read_bytes(fmt_size)
             (frames_nbytes,) = struct.unpack(fmt, frames_nbytes)
 
-            frames = bytearray(frames_nbytes)
-            n = await stream.read_into(frames)
-            assert n == frames_nbytes, (n, frames_nbytes)
+            frames = memoryview(bytearray(frames_nbytes))
+            # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+            for i, j in sliding_window(
+                2, range(0, frames_nbytes + C_INT_MAX, C_INT_MAX)
+            ):
+                chunk = frames[i:j]
+                chunk_nbytes = len(chunk)
+                n = await stream.read_into(chunk)
+                assert n == chunk_nbytes, (n, chunk_nbytes)
         except StreamClosedError as e:
             self.stream = None
             self._closed = True
@@ -239,6 +250,7 @@ class TCP(Comm):
                 "recipient": self.remote_info,
                 **self.handshake_options,
             },
+            frame_split_size=self.max_shard_size,
         )
         frames_nbytes = [nbytes(f) for f in frames]
         frames_nbytes_total = sum(frames_nbytes)
@@ -326,6 +338,9 @@ class TLS(TCP):
     A TLS-specific version of TCP.
     """
 
+    # Workaround for OpenSSL 1.0.2 (can drop with OpenSSL 1.1.1)
+    max_shard_size = min(C_INT_MAX, TCP.max_shard_size)
+
     def _read_extra(self):
         TCP._read_extra(self)
         sock = self.stream.socket
@@ -386,6 +401,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
+        except SSLCertVerificationError as err:
+            raise FatalCommClosedError(
+                "TLS certificate does not match. Check your security settings. "
+                "More info at https://distributed.dask.org/en/latest/tls.html"
+            ) from err
         except SSLError as err:
             raise FatalCommClosedError() from err
 
@@ -423,11 +443,13 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         comm_handler,
         deserialize=True,
         allow_offload=True,
+        default_host=None,
         default_port=0,
         **connection_args,
     ):
         self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
+        self.default_host = default_host
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.allow_offload = allow_offload
@@ -484,7 +506,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         try:
             await self.on_connection(comm)
         except CommClosedError:
-            logger.info("Connection closed before handshake completed")
+            logger.info("Connection from %s closed before handshake completed", address)
             return
 
         await self.comm_handler(comm)
@@ -513,7 +535,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         The contact address as a string.
         """
         host, port = self.get_host_port()
-        host = ensure_concrete_host(host)
+        host = ensure_concrete_host(host, default_host=self.default_host)
         return self.prefix + unparse_host_port(host, port)
 
 

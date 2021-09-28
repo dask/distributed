@@ -39,12 +39,14 @@ from tornado.ioloop import IOLoop
 
 import dask
 
+from distributed.comm.tcp import TCP
+
 from . import system
 from .client import Client, _global_clients, default_client
 from .comm import Comm
 from .compatibility import WINDOWS
 from .config import initialize_logging
-from .core import CommClosedError, Status, connect, rpc
+from .core import CommClosedError, ConnectionPool, Status, connect, rpc
 from .deploy import SpecCluster
 from .diagnostics.plugin import WorkerPlugin
 from .metrics import time
@@ -330,6 +332,13 @@ def slowidentity(*args, **kwargs):
         return args[0]
     else:
         return args
+
+
+class _UnhashableCallable:
+    __hash__ = None
+
+    def __call__(self, x):
+        return x + 1
 
 
 def run_for(duration, timer=time):
@@ -754,7 +763,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
+    await asyncio.gather(*(disconnect(addr, timeout, rpc_kwargs) for addr in addresses))
 
 
 def gen_test(timeout=_TEST_TIMEOUT):
@@ -764,6 +773,10 @@ def gen_test(timeout=_TEST_TIMEOUT):
     async def test_foo():
         await ...  # use tornado coroutines
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
 
     def _(func):
         def test_func():
@@ -809,8 +822,6 @@ async def start_cluster(
         )
         for i, ncore in enumerate(nthreads)
     ]
-    # for w in workers:
-    #     w.rpc = workers[0].rpc
 
     await asyncio.gather(*workers)
 
@@ -819,10 +830,10 @@ async def start_cluster(
         comm.comm is None for comm in s.stream_comms.values()
     ):
         await asyncio.sleep(0.01)
-        if time() - start > 5:
-            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+        if time() > start + 30:
+            await asyncio.gather(*(w.close(timeout=1) for w in workers))
             await s.close(fast=True)
-            raise Exception("Cluster creation timeout")
+            raise TimeoutError("Cluster creation timeout")
     return s, workers
 
 
@@ -833,7 +844,7 @@ async def end_cluster(s, workers):
         with suppress(TimeoutError, CommClosedError, EnvironmentError):
             await w.close(report=False)
 
-    await asyncio.gather(*[end_worker(w) for w in workers])
+    await asyncio.gather(*(end_worker(w) for w in workers))
     await s.close()  # wait until scheduler stops completely
     s.stop()
 
@@ -875,18 +886,26 @@ def gen_cluster(
         start
         end
     """
+    assert timeout, (
+        "timeout should always be set and it should be smaller than the global one from"
+        "pytest-timeout"
+    )
     if ncores is not None:
         warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
+    scheduler_kwargs = merge(
+        {"dashboard": False, "dashboard_address": ":0"}, scheduler_kwargs
+    )
     worker_kwargs = merge(
-        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 10}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 15}, worker_kwargs
     )
 
     def _(func):
         if not iscoroutinefunction(func):
             func = gen.coroutine(func)
 
+        @functools.wraps(func)
         def test_func(*outer_args, **kwargs):
             result = None
             workers = []
@@ -930,8 +949,7 @@ def gen_cluster(
                             args = [c] + args
                         try:
                             future = func(*args, *outer_args, **kwargs)
-                            if timeout:
-                                future = asyncio.wait_for(future, timeout)
+                            future = asyncio.wait_for(future, timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()
@@ -1024,7 +1042,7 @@ def terminate_process(proc):
         else:
             proc.send_signal(signal.SIGINT)
         try:
-            proc.wait(10)
+            proc.wait(30)
         finally:
             # Make sure we don't leave the process lingering around
             with suppress(OSError):
@@ -1525,7 +1543,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == Status.running:
+            if w.status in (Status.running, Status.paused):
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
@@ -1600,3 +1618,77 @@ class TaskStateMetadataPlugin(WorkerPlugin):
             ts.metadata["start_time"] = time()
         elif start == "executing" and finish == "memory":
             ts.metadata["stop_time"] = time()
+
+
+class LockedComm(TCP):
+    def __init__(self, comm, read_event, read_queue, write_event, write_queue):
+        self.write_event = write_event
+        self.write_queue = write_queue
+        self.read_event = read_event
+        self.read_queue = read_queue
+        self.comm = comm
+        assert isinstance(comm, TCP)
+
+    def __getattr__(self, name):
+        return getattr(self.comm, name)
+
+    async def write(self, msg, serializers=None, on_error="message"):
+        if self.write_queue:
+            await self.write_queue.put((self.comm.peer_address, msg))
+        if self.write_event:
+            await self.write_event.wait()
+        return await self.comm.write(msg, serializers=serializers, on_error=on_error)
+
+    async def read(self, deserializers=None):
+        msg = await self.comm.read(deserializers=deserializers)
+        if self.read_queue:
+            await self.read_queue.put((self.comm.peer_address, msg))
+        if self.read_event:
+            await self.read_event.wait()
+        return msg
+
+
+class _LockedCommPool(ConnectionPool):
+    """A ConnectionPool wrapper to intercept network traffic between servers
+
+    This wrapper can be attached to a running server to intercept outgoing read or write requests in test environments.
+
+    Examples
+    --------
+    >>> w = await Worker(...)
+    >>> read_event = asyncio.Event()
+    >>> read_queue = asyncio.Queue()
+    >>> w.rpc = _LockedCommPool(
+            w.rpc,
+            read_event=read_event,
+            read_queue=read_queue,
+        )
+    # It might be necessary to remove all existing comms
+    # if the wrapped pool has been used before
+    >>> w.remove(remote_address)
+
+    >>> async def ping_pong():
+            return await w.rpc(remote_address).ping()
+    >>> with pytest.raises(asyncio.TimeoutError):
+    >>>     await asyncio.wait_for(ping_pong(), 0.01)
+    >>> read_event.set()
+    >>> await ping_pong()
+    """
+
+    def __init__(
+        self, pool, read_event=None, read_queue=None, write_event=None, write_queue=None
+    ):
+        self.write_event = write_event
+        self.write_queue = write_queue
+        self.read_event = read_event
+        self.read_queue = read_queue
+        self.pool = pool
+
+    def __getattr__(self, name):
+        return getattr(self.pool, name)
+
+    async def connect(self, *args, **kwargs):
+        comm = await self.pool.connect(*args, **kwargs)
+        return LockedComm(
+            comm, self.read_event, self.read_queue, self.write_event, self.write_queue
+        )

@@ -203,11 +203,11 @@ def test_logging_extended():
             "loggers": {
                 "distributed.foo": {
                     "level": "INFO",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
                 "distributed.foo.bar": {
                     "level": "ERROR",
-                    #'handlers': ['console'],
+                    # 'handlers': ['console'],
                 },
             },
             "root": {"level": "WARNING", "handlers": ["console"]},
@@ -331,7 +331,7 @@ def test_schema_is_complete():
     with open(schema_fn) as f:
         schema = yaml.safe_load(f)
 
-    skip = {"default-task-durations", "bokeh-application"}
+    skip = {"default-task-durations", "bokeh-application", "environ"}
 
     def test_matches(c, s):
         if set(c) != set(s["properties"]):
