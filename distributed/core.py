@@ -5,7 +5,6 @@ import sys
 import threading
 import traceback
 import uuid
-import warnings
 import weakref
 from collections import defaultdict
 from contextlib import suppress
@@ -49,18 +48,22 @@ class Status(Enum):
     other.
     """
 
-    closed = "closed"
-    closing = "closing"
-    closing_gracefully = "closing-gracefully"
-    failed = "failed"
-    init = "init"
+    undefined = "undefined"
     created = "created"
-    running = "running"
+    init = "init"
     starting = "starting"
-    stopped = "stopped"
+    running = "running"
+    paused = "paused"
     stopping = "stopping"
-    undefined = None
-    dont_reply = "dont-reply"
+    stopped = "stopped"
+    closing = "closing"
+    closing_gracefully = "closing_gracefully"
+    closed = "closed"
+    failed = "failed"
+    dont_reply = "dont_reply"
+
+
+Status.lookup = {s.name: s for s in Status}
 
 
 class RPCClosed(IOError):
@@ -244,19 +247,9 @@ class Server:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            warnings.warn(
-                f"Since distributed 2.23 `.status` is now an Enum, please assign `Status.{new_status}`",
-                PendingDeprecationWarning,
-                stacklevel=1,
-            )
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     async def finished(self):
         """Wait until the server has finished"""
@@ -266,7 +259,7 @@ class Server:
         async def _():
             timeout = getattr(self, "death_timeout", 0)
             async with self._startup_lock:
-                if self.status == Status.running:
+                if self.status in (Status.running, Status.paused):
                     return self
                 if timeout:
                     try:
@@ -501,7 +494,7 @@ class Server:
                             self._ongoing_coroutines.add(result)
                             result = await result
                     except (CommClosedError, CancelledError):
-                        if self.status == Status.running:
+                        if self.status in (Status.running, Status.paused):
                             logger.info("Lost connection to %r", address, exc_info=True)
                         break
                     except Exception as e:
@@ -511,14 +504,7 @@ class Server:
                         else:
                             result = error_message(e, status="uncaught-error")
 
-                # result is not type stable:
-                # when LHS is not Status then RHS must not be Status or it raises.
-                # when LHS is Status then RHS must be status or it raises in tests
-                is_dont_reply = False
-                if isinstance(result, Status) and (result == Status.dont_reply):
-                    is_dont_reply = True
-
-                if reply and not is_dont_reply:
+                if reply and result != Status.dont_reply:
                     try:
                         await comm.write(result, serializers=serializers)
                     except (OSError, TypeError) as e:

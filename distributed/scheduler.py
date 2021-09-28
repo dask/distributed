@@ -442,9 +442,9 @@ class WorkerState:
        processing on this worker.  This is the sum of all the costs in
        this worker's :attr:`processing` dictionary.
 
-    .. attribute:: status: str
+    .. attribute:: status: Status
 
-       The current status of the worker, either ``'running'`` or ``'closed'``
+       Read-only worker status, synced one way from the remote Worker object
 
     .. attribute:: nanny: str
 
@@ -547,7 +547,7 @@ class WorkerState:
         self._nanny = nanny
 
         self._hash = hash(address)
-        self._status = Status.running
+        self._status = Status.undefined
         self._nbytes = 0
         self._occupancy = 0
         self._memory_unmanaged_old = 0
@@ -685,14 +685,9 @@ class WorkerState:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     @property
     def time_delay(self):
@@ -3727,6 +3722,7 @@ class Scheduler(SchedulerState, ServerNode):
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
+            "worker-status-change": self.handle_worker_status_change,
         }
 
         client_handlers = {
@@ -3973,7 +3969,7 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.cleanup
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
+        if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
         self.status = Status.closing
@@ -4812,7 +4808,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ["all", address],
                 {
                     "action": "remove-worker",
-                    "worker": address,
                     "processing-tasks": dict(ws._processing),
                 },
             )
@@ -5370,6 +5365,21 @@ class Scheduler(SchedulerState, ServerNode):
         parent._total_occupancy -= occ
         ws._processing[ts] = 0
         self.check_idle_saturated(ws)
+
+    def handle_worker_status_change(self, status: str, worker: str):
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if not ws:
+            return
+        self.log_event(
+            ws._address,
+            {
+                "action": "worker-status-change",
+                "prev-status": ws._status.name,
+                "status": status,
+            },
+        )
+        ws._status = Status.lookup[status]
 
     async def handle_worker(self, comm=None, worker=None):
         """
