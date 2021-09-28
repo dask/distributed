@@ -1853,6 +1853,7 @@ class SchedulerState:
     _task_groups: dict
     _task_prefixes: dict
     _task_metadata: dict
+    _replicated_tasks: set
     _total_nthreads: Py_ssize_t
     _total_occupancy: double
     _transitions_table: dict
@@ -1912,6 +1913,9 @@ class SchedulerState:
             self._tasks = tasks
         else:
             self._tasks = dict()
+        self._replicated_tasks = {
+            ts for ts in self._tasks.values() if len(ts._who_has) > 1
+        }
         self._computations = deque(
             maxlen=dask.config.get("distributed.diagnostics.computations.max-history")
         )
@@ -2028,6 +2032,10 @@ class SchedulerState:
     @property
     def task_metadata(self):
         return self._task_metadata
+
+    @property
+    def replicated_tasks(self):
+        return self._replicated_tasks
 
     @property
     def total_nthreads(self):
@@ -2814,18 +2822,14 @@ class SchedulerState:
                     dts._waiting_on.add(ts)
 
             # XXX factor this out?
-            ts_nbytes: Py_ssize_t = ts.get_nbytes()
             worker_msg = {
                 "op": "free-keys",
                 "keys": [key],
                 "reason": f"Memory->Released {key}",
             }
             for ws in ts._who_has:
-                del ws._has_what[ts]
-                ws._nbytes -= ts_nbytes
                 worker_msgs[ws._address] = [worker_msg]
-
-            ts._who_has.clear()
+            self.remove_all_replicas(ts)
 
             ts.state = "released"
 
@@ -3422,6 +3426,40 @@ class SchedulerState:
             return (len(ws._actors), start_time, ws._nbytes)
         else:
             return (start_time, ws._nbytes)
+
+    @ccall
+    def add_replica(self, ts: TaskState, ws: WorkerState):
+        """Note that a worker holds a replica of a task with state='memory'"""
+        if self._validate:
+            assert ws not in ts._who_has
+            assert ts not in ws._has_what
+
+        ws._nbytes += ts.get_nbytes()
+        ws._has_what[ts] = None
+        ts._who_has.add(ws)
+        if len(ts._who_has) == 2:
+            self._replicated_tasks.add(ts)
+
+    @ccall
+    def remove_replica(self, ts: TaskState, ws: WorkerState):
+        """Note that a worker no longer holds a replica of a task"""
+        ws._nbytes -= ts.get_nbytes()
+        del ws._has_what[ts]
+        ts._who_has.remove(ws)
+        if len(ts._who_has) == 1:
+            self._replicated_tasks.remove(ts)
+
+    @ccall
+    def remove_all_replicas(self, ts: TaskState):
+        """Remove all replicas of a task from all workers"""
+        ws: WorkerState
+        nbytes: Py_ssize_t = ts.get_nbytes()
+        for ws in ts._who_has:
+            ws._nbytes -= nbytes
+            del ws._has_what[ts]
+        if len(ts._who_has) > 1:
+            self._replicated_tasks.remove(ts)
+        ts._who_has.clear()
 
 
 class Scheduler(SchedulerState, ServerNode):
@@ -4864,14 +4902,13 @@ class Scheduler(SchedulerState, ServerNode):
                             self.allowed_failures,
                         )
 
-            for ts in ws._has_what:
-                ts._who_has.remove(ws)
+            for ts in list(ws._has_what):
+                parent.remove_replica(ts, ws)
                 if not ts._who_has:
                     if ts._run_spec:
                         recommendations[ts._key] = "released"
                     else:  # pure data
                         recommendations[ts._key] = "forgotten"
-            ws._has_what.clear()
 
             self.transitions(recommendations)
 
@@ -5021,6 +5058,7 @@ class Scheduler(SchedulerState, ServerNode):
         ts: TaskState = parent._tasks[key]
         dts: TaskState
         assert ts._who_has
+        assert bool(ts in parent._replicated_tasks) == (len(ts._who_has) > 1)
         assert not ts._processing_on
         assert not ts._waiting_on
         assert ts not in parent._unrunnable
@@ -5091,7 +5129,12 @@ class Scheduler(SchedulerState, ServerNode):
         for k, ts in parent._tasks.items():
             assert isinstance(ts, TaskState), (type(ts), ts)
             assert ts._key == k
+            assert bool(ts in parent._replicated_tasks) == (len(ts._who_has) > 1)
             self.validate_key(k, ts)
+
+        for ts in parent._replicated_tasks:
+            assert ts._state == "memory"
+            assert ts._key in parent._tasks
 
         c: str
         cs: ClientState
@@ -5303,9 +5346,7 @@ class Scheduler(SchedulerState, ServerNode):
             return
         ws: WorkerState = parent._workers_dv.get(errant_worker)
         if ws is not None and ws in ts._who_has:
-            ts._who_has.remove(ws)
-            del ws._has_what[ts]
-            ws._nbytes -= ts.get_nbytes()
+            parent.remove_replica(ts, ws)
         if not ts._who_has:
             if ts._run_spec:
                 self.transitions({key: "released"})
@@ -5319,12 +5360,9 @@ class Scheduler(SchedulerState, ServerNode):
         if not ws or not ts:
             return
         recommendations: dict = {}
-        if ts in ws._has_what:
-            del ws._has_what[ts]
-            ws._nbytes -= ts.get_nbytes()
-            wh: set = ts._who_has
-            wh.remove(ws)
-            if not wh:
+        if ws in ts._who_has:
+            parent.remove_replica(ts, ws)
+            if not ts._who_has:
                 recommendations[ts._key] = "released"
         if recommendations:
             self.transitions(recommendations)
@@ -5659,14 +5697,11 @@ class Scheduler(SchedulerState, ServerNode):
                     )
                     if not workers or ts is None:
                         continue
-                    ts_nbytes: Py_ssize_t = ts.get_nbytes()
                     recommendations: dict = {key: "released"}
                     for worker in workers:
                         ws = parent._workers_dv.get(worker)
-                        if ws is not None and ts in ws._has_what:
-                            del ws._has_what[ts]
-                            ts._who_has.remove(ws)
-                            ws._nbytes -= ts_nbytes
+                        if ws is not None and ws in ts._who_has:
+                            parent.remove_replica(ts, ws)
                             parent._transitions(
                                 recommendations, client_msgs, worker_msgs
                             )
@@ -5865,10 +5900,8 @@ class Scheduler(SchedulerState, ServerNode):
             if ts is None or ts._state != "memory":
                 logger.warning(f"Key lost during replication: {key}")
                 continue
-            if ts not in ws._has_what:
-                ws._nbytes += ts.get_nbytes()
-                ws._has_what[ts] = None
-                ts._who_has.add(ws)
+            if ws not in ts._who_has:
+                parent.add_replica(ts, ws)
 
         return keys_failed
 
@@ -5905,11 +5938,9 @@ class Scheduler(SchedulerState, ServerNode):
 
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
-            if ts is not None and ts in ws._has_what:
+            if ts is not None and ws in ts._who_has:
                 assert ts._state == "memory"
-                del ws._has_what[ts]
-                ts._who_has.remove(ws)
-                ws._nbytes -= ts.get_nbytes()
+                parent.remove_replica(ts, ws)
                 if not ts._who_has:
                     # Last copy deleted
                     self.transitions({key: "released"})
@@ -6657,10 +6688,8 @@ class Scheduler(SchedulerState, ServerNode):
         for key in keys:
             ts: TaskState = parent._tasks.get(key)
             if ts is not None and ts._state == "memory":
-                if ts not in ws._has_what:
-                    ws._nbytes += ts.get_nbytes()
-                    ws._has_what[ts] = None
-                    ts._who_has.add(ws)
+                if ws not in ts._who_has:
+                    parent.add_replica(ts, ws)
             else:
                 redundant_replicas.append(key)
 
@@ -6703,17 +6732,14 @@ class Scheduler(SchedulerState, ServerNode):
                 if ts is None:
                     ts: TaskState = parent.new_task(key, None, "memory")
                 ts.state = "memory"
-                ts_nbytes: Py_ssize_t = nbytes.get(key, -1)
+                ts_nbytes = nbytes.get(key, -1)
                 if ts_nbytes >= 0:
                     ts.set_nbytes(ts_nbytes)
-                else:
-                    ts_nbytes = ts.get_nbytes()
+
                 for w in workers:
                     ws: WorkerState = parent._workers_dv[w]
-                    if ts not in ws._has_what:
-                        ws._nbytes += ts_nbytes
-                        ws._has_what[ts] = None
-                        ts._who_has.add(ws)
+                    if ws not in ts._who_has:
+                        parent.add_replica(ts, ws)
                 self.report(
                     {"op": "key-in-memory", "key": key, "workers": list(workers)}
                 )
@@ -7680,9 +7706,7 @@ def _add_to_memory(
     if state._validate:
         assert ts not in ws._has_what
 
-    ts._who_has.add(ws)
-    ws._has_what[ts] = None
-    ws._nbytes += ts.get_nbytes()
+    state.add_replica(ts, ws)
 
     deps: list = list(ts._dependents)
     if len(deps) > 1:
@@ -7758,12 +7782,8 @@ def _propagate_forgotten(
     ts._dependencies.clear()
     ts._waiting_on.clear()
 
-    ts_nbytes: Py_ssize_t = ts.get_nbytes()
-
     ws: WorkerState
     for ws in ts._who_has:
-        del ws._has_what[ts]
-        ws._nbytes -= ts_nbytes
         w: str = ws._address
         if w in state._workers_dv:  # in case worker has died
             worker_msgs[w] = [
@@ -7773,7 +7793,7 @@ def _propagate_forgotten(
                     "reason": f"propagate-forgotten {ts.key}",
                 }
             ]
-    ts._who_has.clear()
+    state.remove_all_replicas(ts)
 
 
 @cfunc
