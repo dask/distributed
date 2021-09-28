@@ -442,9 +442,9 @@ class WorkerState:
        processing on this worker.  This is the sum of all the costs in
        this worker's :attr:`processing` dictionary.
 
-    .. attribute:: status: str
+    .. attribute:: status: Status
 
-       The current status of the worker, either ``'running'`` or ``'closed'``
+       Read-only worker status, synced one way from the remote Worker object
 
     .. attribute:: nanny: str
 
@@ -547,7 +547,7 @@ class WorkerState:
         self._nanny = nanny
 
         self._hash = hash(address)
-        self._status = Status.running
+        self._status = Status.undefined
         self._nbytes = 0
         self._occupancy = 0
         self._memory_unmanaged_old = 0
@@ -685,14 +685,9 @@ class WorkerState:
 
     @status.setter
     def status(self, new_status):
-        if isinstance(new_status, Status):
-            self._status = new_status
-        elif isinstance(new_status, str) or new_status is None:
-            corresponding_enum_variants = [s for s in Status if s.value == new_status]
-            assert len(corresponding_enum_variants) == 1
-            self._status = corresponding_enum_variants[0]
-        else:
-            raise TypeError(f"expected Status or str, got {new_status}")
+        if not isinstance(new_status, Status):
+            raise TypeError(f"Expected Status; got {new_status!r}")
+        self._status = new_status
 
     @property
     def time_delay(self):
@@ -3720,7 +3715,6 @@ class Scheduler(SchedulerState, ServerNode):
         worker_handlers = {
             "task-finished": self.handle_task_finished,
             "task-erred": self.handle_task_erred,
-            "release": self.handle_release_data,
             "release-worker-data": self.release_worker_data,
             "add-keys": self.add_keys,
             "missing-data": self.handle_missing_data,
@@ -3728,6 +3722,7 @@ class Scheduler(SchedulerState, ServerNode):
             "reschedule": self.reschedule,
             "keep-alive": lambda *args, **kwargs: None,
             "log-event": self.log_worker_event,
+            "worker-status-change": self.handle_worker_status_change,
         }
 
         client_handlers = {
@@ -3974,7 +3969,7 @@ class Scheduler(SchedulerState, ServerNode):
         Scheduler.cleanup
         """
         parent: SchedulerState = cast(SchedulerState, self)
-        if self.status in (Status.closing, Status.closed, Status.closing_gracefully):
+        if self.status in (Status.closing, Status.closed):
             await self.finished()
             return
         self.status = Status.closing
@@ -4739,70 +4734,23 @@ class Scheduler(SchedulerState, ServerNode):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("Stimulus task erred %s, %s", key, worker)
 
-        recommendations: dict = {}
-        client_msgs: dict = {}
-        worker_msgs: dict = {}
-
         ts: TaskState = parent._tasks.get(key)
-        if ts is None:
-            return recommendations, client_msgs, worker_msgs
+        if ts is None or ts._state != "processing":
+            return {}, {}, {}
 
-        if ts._state == "processing":
-            retries: Py_ssize_t = ts._retries
-            r: tuple
-            if retries > 0:
-                ts._retries = retries - 1
-                r = parent._transition(key, "waiting")
-            else:
-                r = parent._transition(
-                    key,
-                    "erred",
-                    cause=key,
-                    exception=exception,
-                    traceback=traceback,
-                    worker=worker,
-                    **kwargs,
-                )
-            recommendations, client_msgs, worker_msgs = r
-
-        return recommendations, client_msgs, worker_msgs
-
-    def stimulus_missing_data(
-        self, cause=None, key=None, worker=None, ensure=True, **kwargs
-    ):
-        """Mark that certain keys have gone missing.  Recover."""
-        parent: SchedulerState = cast(SchedulerState, self)
-        with log_errors():
-            logger.debug("Stimulus missing data %s, %s", key, worker)
-
-            recommendations: dict = {}
-            client_msgs: dict = {}
-            worker_msgs: dict = {}
-
-            ts: TaskState = parent._tasks.get(key)
-            if ts is None or ts._state == "memory":
-                return recommendations, client_msgs, worker_msgs
-            cts: TaskState = parent._tasks.get(cause)
-
-            if cts is not None and cts._state == "memory":  # couldn't find this
-                ws: WorkerState
-                cts_nbytes: Py_ssize_t = cts.get_nbytes()
-                for ws in cts._who_has:  # TODO: this behavior is extreme
-                    del ws._has_what[ts]
-                    ws._nbytes -= cts_nbytes
-                cts._who_has.clear()
-                recommendations[cause] = "released"
-
-            if key:
-                recommendations[key] = "released"
-
-            parent._transitions(recommendations, client_msgs, worker_msgs)
-            recommendations = {}
-
-            if parent._validate:
-                assert cause not in self.who_has
-
-            return recommendations, client_msgs, worker_msgs
+        if ts._retries > 0:
+            ts._retries -= 1
+            return parent._transition(key, "waiting")
+        else:
+            return parent._transition(
+                key,
+                "erred",
+                cause=key,
+                exception=exception,
+                traceback=traceback,
+                worker=worker,
+                **kwargs,
+            )
 
     def stimulus_retry(self, comm=None, keys=None, client=None):
         parent: SchedulerState = cast(SchedulerState, self)
@@ -4860,7 +4808,6 @@ class Scheduler(SchedulerState, ServerNode):
                 ["all", address],
                 {
                     "action": "remove-worker",
-                    "worker": address,
                     "processing-tasks": dict(ws._processing),
                 },
             )
@@ -5346,25 +5293,6 @@ class Scheduler(SchedulerState, ServerNode):
 
         self.send_all(client_msgs, worker_msgs)
 
-    def handle_release_data(self, key=None, worker=None, client=None, **msg):
-        parent: SchedulerState = cast(SchedulerState, self)
-        ts: TaskState = parent._tasks.get(key)
-        if ts is None:
-            return
-        ws: WorkerState = parent._workers_dv.get(worker)
-        if ws is None or ts._processing_on != ws:
-            return
-
-        recommendations: dict
-        client_msgs: dict
-        worker_msgs: dict
-
-        r: tuple = self.stimulus_missing_data(key=key, ensure=False, **msg)
-        recommendations, client_msgs, worker_msgs = r
-        parent._transitions(recommendations, client_msgs, worker_msgs)
-
-        self.send_all(client_msgs, worker_msgs)
-
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         parent: SchedulerState = cast(SchedulerState, self)
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
@@ -5437,6 +5365,21 @@ class Scheduler(SchedulerState, ServerNode):
         parent._total_occupancy -= occ
         ws._processing[ts] = 0
         self.check_idle_saturated(ws)
+
+    def handle_worker_status_change(self, status: str, worker: str):
+        parent: SchedulerState = cast(SchedulerState, self)
+        ws: WorkerState = parent._workers_dv.get(worker)
+        if not ws:
+            return
+        self.log_event(
+            ws._address,
+            {
+                "action": "worker-status-change",
+                "prev-status": ws._status.name,
+                "status": status,
+            },
+        )
+        ws._status = Status.lookup[status]
 
     async def handle_worker(self, comm=None, worker=None):
         """

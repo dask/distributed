@@ -1547,7 +1547,7 @@ def check_instances():
     for w in Worker._instances:
         with suppress(RuntimeError):  # closed IOLoop
             w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == Status.running:
+            if w.status in (Status.running, Status.paused):
                 w.loop.add_callback(w.close)
     Worker._instances.clear()
 
